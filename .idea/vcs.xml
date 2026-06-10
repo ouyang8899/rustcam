@@ -2,7 +2,7 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/GB28181-Simulation-Tool" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/GB28181_ServerPlatform" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/local_tool/GB28181-Simulation-Tool" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/local_tool/GB28181_ServerPlatform" vcs="Git" />
   </component>
 </project>
