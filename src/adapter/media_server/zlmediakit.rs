@@ -1,0 +1,294 @@
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use crate::adapter::media_server::{MediaServerAdapter, Protocol, RecordingInfo, RecordingFile, RtpTransport, ServerStatus, StreamInfo};
+use crate::adapter::media_server::client::MediaServerClient;
+use crate::config::MediaServerConfig;
+
+pub struct ZlMediaKitAdapter {
+    config: MediaServerConfig,
+    client: MediaServerClient,
+}
+
+impl ZlMediaKitAdapter {
+    pub fn new(config: MediaServerConfig) -> Self {
+        let client = MediaServerClient::new(&config.url, &config.api_key);
+        Self { config, client }
+    }
+
+    fn base_host(&self) -> String {
+        self.config.url.trim_start_matches("http://").trim_start_matches("https://").to_string()
+    }
+
+    fn build_urls(&self, stream_key: &str) -> (String, String, String, String) {
+        let base = self.base_host();
+        let rtsp = format!("rtsp://{}/{}", base, stream_key);
+        let rtmp = format!("rtmp://{}/live/{}", base, stream_key);
+        let hls = format!("http://{}/live/{}.m3u8", base, stream_key);
+        let webrtc = format!("http://{}/webrtc/play/{}", base, stream_key);
+        (rtsp, rtmp, hls, webrtc)
+    }
+}
+
+#[async_trait]
+impl MediaServerAdapter for ZlMediaKitAdapter {
+    fn name(&self) -> &str { &self.config.name }
+    fn tag(&self) -> &str { &self.config.server_tag }
+    fn server_type(&self) -> &str { "zlmediakit" }
+
+    async fn is_online(&self) -> bool {
+        self.client.get::<serde_json::Value>("/index/api/getServerInfo").await.is_ok()
+    }
+
+    async fn get_status(&self) -> anyhow::Result<ServerStatus> {
+        #[derive(Deserialize)]
+        struct ApiResp { code: i32, data: Option<serde_json::Value> }
+        let resp: ApiResp = self.client.get("/index/api/getServerInfo").await?;
+        let data = resp.data.unwrap_or_default();
+
+        Ok(ServerStatus {
+            name: self.config.name.clone(),
+            server_type: "zlmediakit".to_string(),
+            online: true,
+            session_count: data.get("totalTcp").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            cpu_usage: data.get("cpu").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            memory_usage: data.get("mem").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            bandwidth_in: 0, bandwidth_out: 0, last_heartbeat: None,
+        })
+    }
+
+    async fn add_stream_proxy(&self, stream_key: &str, rtsp_url: &str) -> anyhow::Result<StreamInfo> {
+        #[derive(Serialize)]
+        struct AddProxyReq {
+            vhost: String, app: String, stream: String, url: String, rtp_type: u32, timeout_ms: u32,
+        }
+        let parts: Vec<&str> = stream_key.splitn(2, '/').collect();
+        let app = parts.first().unwrap_or(&"live").to_string();
+        let stream = parts.get(1).unwrap_or(&"").to_string();
+
+        let req = AddProxyReq {
+            vhost: "__defaultVhost__".to_string(), app, stream, url: rtsp_url.to_string(),
+            rtp_type: 0, timeout_ms: 10000,
+        };
+
+        let _: serde_json::Value = self.client.post("/index/api/addStreamProxy", &req).await?;
+
+        let (rtsp, rtmp, hls, webrtc) = self.build_urls(stream_key);
+        Ok(StreamInfo {
+            stream_key: stream_key.to_string(),
+            play_url: format!("http://{}/{}", self.base_host(), stream_key),
+            rtsp_url: rtsp, rtmp_url: rtmp, hls_url: hls, webrtc_url: webrtc,
+            flv_url: None, web_flv_url: None,
+            media_server_id: self.config.name.clone(),
+            media_server_name: self.config.name.clone(),
+        })
+    }
+
+    async fn remove_stream_proxy(&self, stream_key: &str) -> anyhow::Result<()> {
+        let parts: Vec<&str> = stream_key.splitn(2, '/').collect();
+        let app = parts.first().unwrap_or(&"live");
+        let stream = parts.get(1).unwrap_or(&"");
+
+        #[derive(Serialize)]
+        struct CloseReq { schema: String, app: String, stream: String, force: bool }
+        let req = CloseReq { schema: "rtsp".to_string(), app: app.to_string(), stream: stream.to_string(), force: true };
+        let _: serde_json::Value = self.client.post("/index/api/closeStreams", &req).await?;
+        Ok(())
+    }
+
+    async fn get_play_url(&self, stream_key: &str, protocol: Protocol) -> anyhow::Result<String> {
+        let base = self.base_host();
+        match protocol {
+            Protocol::Rtsp => Ok(format!("rtsp://{}/{}", base, stream_key)),
+            Protocol::Rtmp => Ok(format!("rtmp://{}/live/{}", base, stream_key)),
+            Protocol::Hls => Ok(format!("http://{}/live/{}.m3u8", base, stream_key)),
+            Protocol::WebRTC => Ok(format!("http://{}/webrtc/play/{}", base, stream_key)),
+            Protocol::Flv => Ok(format!("http://{}/live/{}.flv", base, stream_key)),
+            Protocol::WsFlv => Ok(format!("ws://{}/live/{}.flv", base, stream_key)),
+        }
+    }
+
+    async fn get_session_count(&self) -> anyhow::Result<u32> {
+        #[derive(Deserialize)]
+        struct Resp { code: i32, data: Option<Vec<serde_json::Value>> }
+        let resp: Resp = self.client.get("/index/api/getAllSession").await?;
+        Ok(resp.data.map(|v| v.len() as u32).unwrap_or(0))
+    }
+
+    async fn get_sessions(&self) -> anyhow::Result<Vec<serde_json::Value>> {
+        #[derive(Deserialize)]
+        struct Resp { code: i32, data: Option<Vec<serde_json::Value>> }
+        let resp: Resp = self.client.get("/index/api/getAllSession").await?;
+        Ok(resp.data.unwrap_or_default())
+    }
+
+    async fn ptz_control(&self, _stream_key: &str, _command: &str, _channel: u8) -> anyhow::Result<()> { Ok(()) }
+    async fn start_recording(&self, stream_key: &str, format: &str, output_path: Option<&str>) -> anyhow::Result<RecordingInfo> {
+        let parts: Vec<&str> = stream_key.splitn(2, '/').collect();
+        let app = parts.first().unwrap_or(&"live");
+        let stream = parts.get(1).unwrap_or(&"");
+        let record_type = match format.to_lowercase().as_str() {
+            "hls" => "HLS",
+            "flv" => "FLV",
+            "ts" => "TS",
+            _ => "MP4",
+        };
+
+        #[derive(Deserialize)]
+        struct ApiResp { code: i32, msg: Option<String> }
+
+        #[derive(Serialize)]
+        struct Req<'a> {
+            vhost: &'a str,
+            app: &'a str,
+            stream: &'a str,
+            record_type: &'a str,
+        }
+        let req = Req {
+            vhost: "__defaultVhost__",
+            app: app,
+            stream: stream,
+            record_type,
+        };
+        let resp: ApiResp = self.client.post("/index/api/startRecord", &req).await?;
+        if resp.code != 0 {
+            return Err(anyhow::anyhow!("ZLMediaKit startRecord failed: {}", resp.msg.unwrap_or_default()));
+        }
+
+        tracing::info!(
+            "[ZlMediaKit] Recording started: app={}, stream={}, format={}",
+            app, stream, record_type
+        );
+
+        Ok(RecordingInfo {
+            stream_key: stream_key.to_string(),
+            output_path: output_path.unwrap_or("").to_string(),
+            started_at: chrono::Utc::now().timestamp(),
+        })
+    }
+
+    async fn stop_recording(&self, stream_key: &str, format: &str) -> anyhow::Result<()> {
+        let parts: Vec<&str> = stream_key.splitn(2, '/').collect();
+        let app = parts.first().unwrap_or(&"live");
+        let stream = parts.get(1).unwrap_or(&"");
+        let record_type = match format.to_lowercase().as_str() {
+            "hls" => "HLS",
+            "flv" => "FLV",
+            "ts" => "TS",
+            _ => "MP4",
+        };
+
+        #[derive(Deserialize)]
+        struct ApiResp { code: i32, msg: Option<String> }
+        #[derive(Serialize)]
+        struct Req<'a> {
+            vhost: &'a str,
+            app: &'a str,
+            stream: &'a str,
+            record_type: &'a str,
+        }
+        let req = Req {
+            vhost: "__defaultVhost__",
+            app: app,
+            stream: stream,
+            record_type,
+        };
+        let resp: ApiResp = self.client.post("/index/api/stopRecord", &req).await?;
+        if resp.code != 0 {
+            return Err(anyhow::anyhow!("ZLMediaKit stopRecord failed: {}", resp.msg.unwrap_or_default()));
+        }
+
+        tracing::info!(
+            "[ZlMediaKit] Recording stopped: app={}, stream={}, format={}",
+            app, stream, record_type
+        );
+
+        Ok(())
+    }
+    async fn is_recording(&self, _stream_key: &str, _format: &str) -> anyhow::Result<bool> { Ok(false) }
+    async fn list_recordings(&self, stream_key: &str) -> anyhow::Result<Vec<RecordingFile>> {
+        let parts: Vec<&str> = stream_key.splitn(2, '/').collect();
+        let app = parts.first().unwrap_or(&"recording");
+        let stream = parts.get(1).unwrap_or(&"");
+
+        #[derive(Deserialize)]
+        struct Resp {
+            code: i32,
+            data: Option<Vec<FileEntry>>,
+        }
+        #[derive(Deserialize)]
+        struct FileEntry {
+            start_time: Option<f64>,
+            file_path: Option<String>,
+            file_size: Option<u64>,
+            time_len: Option<f64>,
+        }
+
+        let app_str = app.to_string();
+        let stream_str = stream.to_string();
+        let zero = "0".to_string();
+        let max_time = "9999999999".to_string();
+        let params: Vec<(&str, &String)> = vec![
+            ("app", &app_str),
+            ("stream", &stream_str),
+            ("start_time", &zero),
+            ("end_time", &max_time),
+        ];
+        let resp: Resp = self.client.get_with_params("/index/api/getRecordFileList", &params).await?;
+        if resp.code != 0 {
+            return Ok(vec![]);
+        }
+        let files = resp.data.unwrap_or_default();
+        Ok(files
+            .into_iter()
+            .filter_map(|f| {
+                let path = f.file_path?;
+                let filename = std::path::Path::new(&path)
+                    .file_name()?
+                    .to_str()?
+                    .to_string();
+                Some(RecordingFile {
+                    filename,
+                    path,
+                    size: f.file_size.unwrap_or(0),
+                    duration_secs: f.time_len.unwrap_or(0.0) as u64,
+                    created_at: f.start_time.unwrap_or(0.0) as i64,
+                    stream_key: Some(stream_key.to_string()),
+                    media_server_name: Some(self.config.name.clone()),
+                })
+            })
+            .collect())
+    }
+
+    async fn open_rtp_server(&self, stream_id: &str, port: u16, transport: RtpTransport) -> anyhow::Result<(u16, String)> {
+        let enable_tcp = match transport { RtpTransport::Udp => 0, _ => 1 };
+        let tcp_mode = match transport { RtpTransport::TcpPassive => 1, _ => 0 };
+
+        #[derive(Deserialize)]
+        struct Resp { code: i32, port: Option<u16> }
+        let params = [
+            ("port", &port.to_string()),
+            ("enable_tcp", &enable_tcp.to_string()),
+            ("tcp_mode", &tcp_mode.to_string()),
+            ("stream_id", &stream_id.to_string()),
+        ];
+        let resp: Resp = self.client.get_with_params("/index/api/openRtpServer", &params).await?;
+        Ok((resp.port.unwrap_or(port), self.base_host()))
+    }
+
+    async fn close_rtp_server(&self, stream_id: &str) -> anyhow::Result<()> {
+        let params = [("stream_id", &stream_id.to_string())];
+        let _: serde_json::Value = self.client.get_with_params("/index/api/closeRtpServer", &params).await?;
+        Ok(())
+    }
+
+    async fn get_media_info(&self, stream_key: &str) -> anyhow::Result<Option<serde_json::Value>> {
+        let parts: Vec<&str> = stream_key.splitn(2, '/').collect();
+        let app = parts.first().unwrap_or(&"live");
+        let stream = parts.get(1).unwrap_or(&"");
+        let params = [("app", &(*app).to_string()), ("stream", &(*stream).to_string())];
+        #[derive(Deserialize)]
+        struct Resp { code: i32, tracks: Option<Vec<serde_json::Value>> }
+        let resp: Resp = self.client.get_with_params("/index/api/getMediaInfo", &params).await?;
+        Ok(resp.tracks.map(|t| serde_json::json!({ "tracks": t })))
+    }
+}
