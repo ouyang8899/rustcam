@@ -21,7 +21,6 @@
 | 协议 | RTSP、GB28181、ONVIF、WebSocket |
 | 认证 | JWT + Casbin |
 | 存储 | Redis (缓存) + PostgreSQL (持久化) |
-| 架构 | 领域驱动设计 (DDD) |
 
 ### 前端 (Vue)
 
@@ -41,7 +40,7 @@ RUSTCAM/
 │   ├── api/               # HTTP API
 │   ├── application/       # 应用服务
 │   ├── auth/              # 认证授权
-│   ├── domain/            # 领域模型
+│   ├── domain/            # 数据模型
 │   ├── infrastructure/    # 基础设施
 │   ├── protocol/          # 协议实现
 │   └── transport/         # 网络传输
