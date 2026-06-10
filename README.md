@@ -1,57 +1,62 @@
 # RUSTCAM
 
-RUSTCAM 是一个基于 Rust 后端和 Vue 前端打造的现代化视频监控网关与信令控制平台，支持多协议设备接入、实时视频播放录像回放、云台控制等功能。
-
-## 技术架构
-
-### 后端 (Rust)
-
-基于 Rust 语言开发的高性能流媒体服务网关，专注于效率与安全：
-
-- **多协议支持**: RTSP、GB28181、ONVIF、WebSocket
-- **设备管理**: 设备发现、注册、状态监控
-- **流媒体服务**: 支持 ZLMediKit、SRS、Xiu 等主流流媒体服务器适配
-- **云台控制**: PTZ 协议支持与精准控制
-- **用户认证**: JWT 认证 + Casbin 权限管理
-- **数据存储**: Redis 缓存 + PostgreSQL 持久化
-
-### 前端 (Vue)
-
-现代化响应式 Web 管理界面：
-
-- **框架**: Vue 3 + Element Plus
-- **状态管理**: Pinia
-- **图表可视化**: ECharts + Vue-ECharts
-- **视频播放**: flv.js、hls.js、video.js 多格式支持
-- **路由管理**: Vue Router
+现代化视频监控网关与信令控制平台，基于 Rust 后端 + Vue 前端构建，支持多协议设备接入、实时视频播放、录像回放、云台控制等功能。
 
 ## 功能特性
 
-- 视频实时播放与多画面布局
-- 设备录像管理与回放
-- 云台 PTZ 控制
-- 设备分组与区域管理
-- 用户权限控制
-- 流媒体服务集群
+| 类别 | 功能 |
+|------|------|
+| 视频服务 | 实时播放、多画面布局、录像回放 |
+| 设备管理 | 设备发现、注册、状态监控、分组管理 |
+| 云台控制 | PTZ 协议支持、预置位管理 |
+| 流媒体 | 集群部署、多服务器适配 (ZLMediKit/SRS/Xiu) |
+| 用户权限 | JWT 认证、RBAC 权限控制 |
+
+## 技术栈
+
+### 后端 (Rust)
+
+| 层级 | 技术 |
+|------|------|
+| 协议 | RTSP、GB28181、ONVIF、WebSocket |
+| 认证 | JWT + Casbin |
+| 存储 | Redis (缓存) + PostgreSQL (持久化) |
+| 架构 | 领域驱动设计 (DDD) |
+
+### 前端 (Vue)
+
+| 类别 | 技术 |
+|------|------|
+| 框架 | Vue 3 + Element Plus |
+| 状态 | Pinia |
+| 图表 | ECharts + Vue-ECharts |
+| 视频 | flv.js、hls.js、video.js |
+| 构建 | Vite |
 
 ## 项目结构
 
 ```
 RUSTCAM/
-├── src/                    # Rust 后端源码
-│   ├── api/               # HTTP API 接口
-│   ├── application/       # 应用服务层
+├── src/                    # Rust 后端
+│   ├── api/               # HTTP API
+│   ├── application/       # 应用服务
 │   ├── auth/              # 认证授权
 │   ├── domain/            # 领域模型
-│   ├── infrastructure/    # 基础设施层
-│   ├── protocol/          # 协议实现 (RTSP/GB28181/ONVIF)
-│   └── transport/         # 网络传输层
+│   ├── infrastructure/    # 基础设施
+│   ├── protocol/          # 协议实现
+│   └── transport/         # 网络传输
 ├── frontend/              # Vue 前端
-│   └── src/               # 前端源码
+│   └── src/
 ├── sql/                   # 数据库脚本
 └── tests/                 # 测试用例
 ```
 
+## 截图预览
+
+| 登录 | 仪表盘 | 设备分组 | 摄像头墙 |
+|:----:|:------:|:--------:|:--------:|
+| ![登录](./screenshot/1.login.png) | ![仪表盘](./screenshot/2.dashboard.png) | ![设备分组](./screenshot/3.device-group.png) | ![摄像头墙](./screenshot/4.cam-wall.png) |
+
 ## License
 
-本项目采用 MIT 协议开源，详见 [LICENSE](./LICENSE) 文件。
+MIT License - 详见 [LICENSE](./LICENSE)
