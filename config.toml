@@ -23,6 +23,18 @@ api_key = "0123456789abcdef"
 server_type = "zlmediakit"
 weight = 100
 enabled = true
+server_tag = "default"
+[media_servers.servers.protocol_ports]
+rtsp = 445
+rtmp = 1935
+hls = 8083
+http = 8080
+https = 8443
+webrtc = 8000
+rtp_tcp = 6000
+http_flv = 8088
+ws_flv = 8089
+
 
 [cluster]
 strategy = "round_robin"

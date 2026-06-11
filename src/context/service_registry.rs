@@ -75,6 +75,7 @@ impl ServiceRegistry {
         // 媒体服务器管理服务
         let media_server_service = Arc::new(MediaServerService::new(
             infra.db.clone(),
+            cluster.clone(),
             infra.config().media_servers.servers.clone(),
         ));
 
@@ -195,11 +196,12 @@ impl ServiceRegistry {
     async fn start_health_monitor(&self) {
         let monitor = crate::infrastructure::health_monitor::HealthMonitor::new(
             self.infra.redis.clone(),
+            self.media.cluster.clone(),
+            self.media_server_service.clone(),
             self.infra.config().cluster.health_check_interval_secs,
         );
-        let server_tags = self.media.cluster.get_all_server_tags();
         let monitor = std::sync::Arc::new(monitor);
-        monitor.start(server_tags).await;
+        monitor.start().await;
     }
 
     async fn start_ws_service(&self) {
@@ -233,7 +235,7 @@ impl ServiceRegistry {
         let mut online_count = 0usize;
 
         for server in &servers {
-            let status = self.media.cluster.get_server_status(&server.name).await;
+            let status = self.media.cluster.get_server_status(&server.server_tag).await;
             let online = status.as_ref().map(|s| s.online).unwrap_or(false);
             let sessions = status.as_ref().map(|s| s.session_count).unwrap_or(0);
 

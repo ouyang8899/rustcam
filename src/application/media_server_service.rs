@@ -1,8 +1,10 @@
 use std::sync::Arc;
 use dashmap::DashMap;
+use crate::adapter::media_server::MediaServerAdapter;
 use crate::config::MediaServerConfig;
 use crate::domain::server::{Server, ServerProtocolPorts, ServerType};
 use crate::infrastructure::DbRepository;
+use crate::infrastructure::cluster::ClusterManager;
 
 /// 托管的媒体服务器
 #[derive(Debug, Clone)]
@@ -103,6 +105,8 @@ pub struct MediaServerService {
     servers: Arc<DashMap<String, ManagedServer>>,
     /// 数据库仓库
     repo: Arc<DbRepository>,
+    /// 集群管理器（自动注册/注销在线服务器）
+    cluster: Arc<ClusterManager>,
 }
 
 impl MediaServerService {
@@ -110,8 +114,9 @@ impl MediaServerService {
     ///
     /// # 参数
     /// * `repo` - 数据库仓库
+    /// * `cluster` - 集群管理器
     /// * `config_servers` - 配置文件中的服务器列表
-    pub fn new(repo: Arc<DbRepository>, config_servers: Vec<MediaServerConfig>) -> Self {
+    pub fn new(repo: Arc<DbRepository>, cluster: Arc<ClusterManager>, config_servers: Vec<MediaServerConfig>) -> Self {
         let servers = Arc::new(DashMap::new());
 
         // 从数据库加载已有服务器
@@ -188,7 +193,7 @@ impl MediaServerService {
             servers.len()
         );
 
-        Self { servers, repo }
+        Self { servers, repo, cluster }
     }
 
     /// 获取所有服务器列表
@@ -260,6 +265,13 @@ impl MediaServerService {
         }
 
         self.servers.insert(ms.server_tag.clone(), ms.clone());
+        
+        // 注册到集群（新增服务器默认为在线）
+        if ms.enabled {
+            self.cluster.register_server(ms.to_config());
+            tracing::info!("[MediaServerService] Server {} registered to cluster", ms.server_tag);
+        }
+        
         ms
     }
 
@@ -321,6 +333,10 @@ impl MediaServerService {
     /// 是否成功删除
     pub async fn delete(&self, tag: &str) -> bool {
         if let Some((_, ms)) = self.servers.remove(tag) {
+            // 从集群注销
+            self.cluster.unregister_server(tag);
+            tracing::info!("[MediaServerService] Server {} unregistered from cluster", tag);
+            
             if let Err(e) = self.repo.delete_server(ms.id).await {
                 tracing::warn!(
                     "[MediaServerService] Failed to delete server from DB: {}",
