@@ -66,8 +66,20 @@ impl ClusterManager {
     }
 
     pub async fn get_server_status(&self, tag: &str) -> Option<ServerStatus> {
-        let adapter = self.servers.get(tag)?.value().clone();
-        adapter.get_status().await.ok()
+        let adapter = match self.servers.get(tag) {
+            Some(a) => a.value().clone(),
+            None => {
+                tracing::warn!("[ClusterManager] get_server_status: tag '{}' not found in cluster", tag);
+                return None;
+            }
+        };
+        match adapter.get_status().await {
+            Ok(status) => Some(status),
+            Err(e) => {
+                tracing::warn!("[ClusterManager] get_server_status: tag '{}' get_status failed: {}", tag, e);
+                None
+            }
+        }
     }
 
     pub async fn select_any_server(&self) -> Option<Arc<dyn MediaServerAdapter>> {

@@ -234,10 +234,14 @@ impl ServiceRegistry {
         let mut total_sessions = 0u32;
         let mut online_count = 0usize;
 
+        tracing::debug!("[Dashboard] Fetching status for {} servers", servers.len());
         for server in &servers {
             let status = self.media.cluster.get_server_status(&server.server_tag).await;
             let online = status.as_ref().map(|s| s.online).unwrap_or(false);
             let sessions = status.as_ref().map(|s| s.session_count).unwrap_or(0);
+
+            tracing::debug!("[Dashboard] Server tag='{}', name='{}', online={}", 
+                server.server_tag, server.name, online);
 
             if online { online_count += 1; }
             total_sessions += sessions;
@@ -245,6 +249,7 @@ impl ServiceRegistry {
             server_statuses.push(serde_json::json!({
                 "id": server.id,
                 "name": server.name,
+                "server_tag": server.server_tag,
                 "server_type": server.server_type,
                 "online": online,
                 "enabled": server.enabled,
