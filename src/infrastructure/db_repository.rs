@@ -140,6 +140,24 @@ impl DbRepository {
     }
 
     pub async fn create_device(&self, device: &Device) -> Result<i64> {
+        // 从 extended 中提取协议特有字段
+        let rtsp_url = device.extended.as_ref()
+            .and_then(|e| e.get("rtsp_full_url"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let gb_username = device.extended.as_ref()
+            .and_then(|e| e.get("gb_username"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let gb_password = device.extended.as_ref()
+            .and_then(|e| e.get("gb_password"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let ssrc = device.extended.as_ref()
+            .and_then(|e| e.get("ssrc"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+
         let result = device_insert(
             self.rb.acquire().await?.rb_ref(),
             Some(&device.name),
@@ -147,7 +165,7 @@ impl DbRepository {
             Some(&status_to_str(&device.status)),
             Some(&device.host),
             Some(device.port as i32),
-            device.stream_key.as_deref(),
+            rtsp_url.as_deref(),
             device.device_tag.as_deref(),
             device.parent_device_tag.as_deref(),
             Some(device.is_public),
@@ -157,14 +175,14 @@ impl DbRepository {
             device.device_password.as_deref(),
             device.playback_username.as_deref(),
             device.playback_password.as_deref(),
-            device.media_server_name.as_deref(),
+            device.media_server_tag.as_deref(),
             serde_json::to_value(&device.push_urls).ok(),
             serde_json::to_value(&device.pull_urls).ok(),
             device.region_code.as_deref(),
             Some(RbatisDateTime::from_timestamp_millis(chrono::Utc::now().timestamp_millis())),
-            device.ssrc.as_deref(),
-            None::<&str>,
-            None::<&str>,
+            ssrc.as_deref(),
+            gb_username.as_deref(),
+            gb_password.as_deref(),
             device.extended.clone(),
             device.group_id,
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
@@ -258,9 +276,27 @@ impl DbRepository {
     }
 
     pub async fn update_device(&self, device: &Device) -> Result<()> {
-        let extended_json = serde_json::to_value(device.extended_json()).ok();
+        let extended_json = device.extended.clone();
         let push_urls_json = serde_json::to_value(&device.push_urls).ok();
         let pull_urls_json = serde_json::to_value(&device.pull_urls).ok();
+
+        // 从 extended 中提取协议特有字段
+        let rtsp_url = extended_json.as_ref()
+            .and_then(|e| e.get("rtsp_full_url"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let gb_username = extended_json.as_ref()
+            .and_then(|e| e.get("gb_username"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let gb_password = extended_json.as_ref()
+            .and_then(|e| e.get("gb_password"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let ssrc = extended_json.as_ref()
+            .and_then(|e| e.get("ssrc"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         device_update(
             self.rb.acquire().await?.rb_ref(),
@@ -270,7 +306,7 @@ impl DbRepository {
             Some(&status_to_str(&device.status)),
             Some(&device.host),
             Some(device.port as i32),
-            device.stream_key.as_deref(),
+            rtsp_url.as_deref(),
             device.device_tag.as_deref(),
             device.parent_device_tag.as_deref(),
             Some(device.is_public),
@@ -279,14 +315,14 @@ impl DbRepository {
             device.device_password.as_deref(),
             device.playback_username.as_deref(),
             device.playback_password.as_deref(),
-            device.media_server_name.as_deref(),
+            device.media_server_tag.as_deref(),
             push_urls_json,
             pull_urls_json,
             device.region_code.as_deref(),
             Some(RbatisDateTime::from_timestamp_millis(chrono::Utc::now().timestamp_millis())),
-            device.ssrc.as_deref(),
-            None::<&str>,
-            None::<&str>,
+            ssrc.as_deref(),
+            gb_username.as_deref(),
+            gb_password.as_deref(),
             extended_json,
             device.group_id,
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
@@ -597,8 +633,9 @@ impl DbRepository {
         let id = stream_insert(
             self.rb.acquire().await?.rb_ref(),
             stream.device_id,
-            Some(stream.media_server_id.clone()),
+            Some(stream.media_server_tag.clone()),
             &stream.stream_key,
+            &stream.app,
             Some(&stream.token),
             &stream.state.to_string(),
             Some(stream.auto_recover),
@@ -647,7 +684,7 @@ impl DbRepository {
         stream_update(
             self.rb.acquire().await?.rb_ref(),
             Some(stream.device_id),
-            Some(stream.media_server_id.clone()),
+            Some(stream.media_server_tag.clone()),
             Some(&stream.stream_key),
             Some(&stream.state.to_string()),
             Some(stream.auto_recover),

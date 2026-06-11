@@ -19,12 +19,12 @@ impl ZlMediaKitAdapter {
         self.config.url.trim_start_matches("http://").trim_start_matches("https://").to_string()
     }
 
-    fn build_urls(&self, stream_key: &str) -> (String, String, String, String) {
+    fn build_urls(&self, stream_key: &str, app: &str) -> (String, String, String, String) {
         let base = self.base_host();
-        let rtsp = format!("rtsp://{}/{}", base, stream_key);
-        let rtmp = format!("rtmp://{}/live/{}", base, stream_key);
-        let hls = format!("http://{}/live/{}.m3u8", base, stream_key);
-        let webrtc = format!("http://{}/webrtc/play/{}", base, stream_key);
+        let rtsp = format!("rtsp://{}/{}/{}", base, app, stream_key);
+        let rtmp = format!("rtmp://{}/{}/{}", base, app, stream_key);
+        let hls = format!("http://{}/{}/{}.m3u8", base, app, stream_key);
+        let webrtc = format!("http://{}/webrtc/play/{}/{}", base, app, stream_key);
         (rtsp, rtmp, hls, webrtc)
     }
 }
@@ -57,23 +57,24 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         })
     }
 
-    async fn add_stream_proxy(&self, stream_key: &str, rtsp_url: &str) -> anyhow::Result<StreamInfo> {
+    async fn add_stream_proxy(&self, stream_key: &str, app: &str, rtsp_url: &str) -> anyhow::Result<StreamInfo> {
         #[derive(Serialize)]
         struct AddProxyReq {
             vhost: String, app: String, stream: String, url: String, rtp_type: u32, timeout_ms: u32,
         }
-        let parts: Vec<&str> = stream_key.splitn(2, '/').collect();
-        let app = parts.first().unwrap_or(&"live").to_string();
-        let stream = parts.get(1).unwrap_or(&"").to_string();
 
         let req = AddProxyReq {
-            vhost: "__defaultVhost__".to_string(), app, stream, url: rtsp_url.to_string(),
-            rtp_type: 0, timeout_ms: 10000,
+            vhost: "__defaultVhost__".to_string(),
+            app: app.to_string(),
+            stream: stream_key.to_string(),
+            url: rtsp_url.to_string(),
+            rtp_type: 0,
+            timeout_ms: 10000,
         };
 
         let _: serde_json::Value = self.client.post("/index/api/addStreamProxy", &req).await?;
 
-        let (rtsp, rtmp, hls, webrtc) = self.build_urls(stream_key);
+        let (rtsp, rtmp, hls, webrtc) = self.build_urls(stream_key, app);
         Ok(StreamInfo {
             stream_key: stream_key.to_string(),
             play_url: format!("http://{}/{}", self.base_host(), stream_key),
@@ -84,27 +85,29 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         })
     }
 
-    async fn remove_stream_proxy(&self, stream_key: &str) -> anyhow::Result<()> {
-        let parts: Vec<&str> = stream_key.splitn(2, '/').collect();
-        let app = parts.first().unwrap_or(&"live");
-        let stream = parts.get(1).unwrap_or(&"");
-
+    async fn remove_stream_proxy(&self, stream_key: &str, app: &str) -> anyhow::Result<()> {
         #[derive(Serialize)]
-        struct CloseReq { schema: String, app: String, stream: String, force: bool }
-        let req = CloseReq { schema: "rtsp".to_string(), app: app.to_string(), stream: stream.to_string(), force: true };
+        struct CloseReq { schema: String, vhost: String, app: String, stream: String, force: bool }
+        let req = CloseReq {
+            schema: "rtsp".to_string(),
+            vhost: "__defaultVhost__".to_string(),
+            app: app.to_string(),
+            stream: stream_key.to_string(),
+            force: true
+        };
         let _: serde_json::Value = self.client.post("/index/api/closeStreams", &req).await?;
         Ok(())
     }
 
-    async fn get_play_url(&self, stream_key: &str, protocol: Protocol) -> anyhow::Result<String> {
+    async fn get_play_url(&self, stream_key: &str, app: &str, protocol: Protocol) -> anyhow::Result<String> {
         let base = self.base_host();
         match protocol {
-            Protocol::Rtsp => Ok(format!("rtsp://{}/{}", base, stream_key)),
-            Protocol::Rtmp => Ok(format!("rtmp://{}/live/{}", base, stream_key)),
-            Protocol::Hls => Ok(format!("http://{}/live/{}.m3u8", base, stream_key)),
-            Protocol::WebRTC => Ok(format!("http://{}/webrtc/play/{}", base, stream_key)),
-            Protocol::Flv => Ok(format!("http://{}/live/{}.flv", base, stream_key)),
-            Protocol::WsFlv => Ok(format!("ws://{}/live/{}.flv", base, stream_key)),
+            Protocol::Rtsp => Ok(format!("rtsp://{}/{}/{}", base, app, stream_key)),
+            Protocol::Rtmp => Ok(format!("rtmp://{}/{}/{}", base, app, stream_key)),
+            Protocol::Hls => Ok(format!("http://{}/{}/{}.m3u8", base, app, stream_key)),
+            Protocol::WebRTC => Ok(format!("http://{}/webrtc/play/{}/{}", base, app, stream_key)),
+            Protocol::Flv => Ok(format!("http://{}/{}/{}.flv", base, app, stream_key)),
+            Protocol::WsFlv => Ok(format!("ws://{}/{}/{}.flv", base, app, stream_key)),
         }
     }
 
@@ -122,16 +125,24 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         Ok(resp.data.unwrap_or_default())
     }
 
+    async fn is_stream_online(&self, stream_key: &str, app: &str) -> anyhow::Result<bool> {
+        let params = [
+            ("app", &app.to_string()),
+            ("stream", &stream_key.to_string()),
+        ];
+
+        #[derive(Deserialize)]
+        struct Resp { code: i32, data: Option<Vec<serde_json::Value>> }
+        let resp: Resp = self.client.get_with_params("/index/api/getMediaList", &params).await?;
+
+        Ok(resp.code == 0 && resp.data.as_ref().map(|d| !d.is_empty()).unwrap_or(false))
+    }
+
     async fn ptz_control(&self, _stream_key: &str, _command: &str, _channel: u8) -> anyhow::Result<()> { Ok(()) }
-    async fn start_recording(&self, stream_key: &str, format: &str, output_path: Option<&str>) -> anyhow::Result<RecordingInfo> {
-        let parts: Vec<&str> = stream_key.splitn(2, '/').collect();
-        let app = parts.first().unwrap_or(&"live");
-        let stream = parts.get(1).unwrap_or(&"");
+    async fn start_recording(&self, stream_key: &str, app: &str, format: &str, output_path: Option<&str>) -> anyhow::Result<RecordingInfo> {
         let record_type = match format.to_lowercase().as_str() {
-            "hls" => "HLS",
-            "flv" => "FLV",
-            "ts" => "TS",
-            _ => "MP4",
+            "hls" | "flv" | "ts" => 0,
+            _ => 1, // MP4
         };
 
         #[derive(Deserialize)]
@@ -142,13 +153,13 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
             vhost: &'a str,
             app: &'a str,
             stream: &'a str,
-            record_type: &'a str,
+            r#type: u8,
         }
         let req = Req {
             vhost: "__defaultVhost__",
-            app: app,
-            stream: stream,
-            record_type,
+            app,
+            stream: stream_key,
+            r#type: record_type,
         };
         let resp: ApiResp = self.client.post("/index/api/startRecord", &req).await?;
         if resp.code != 0 {
@@ -157,7 +168,7 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
 
         tracing::info!(
             "[ZlMediaKit] Recording started: app={}, stream={}, format={}",
-            app, stream, record_type
+            app, stream_key, format
         );
 
         Ok(RecordingInfo {
@@ -167,15 +178,10 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         })
     }
 
-    async fn stop_recording(&self, stream_key: &str, format: &str) -> anyhow::Result<()> {
-        let parts: Vec<&str> = stream_key.splitn(2, '/').collect();
-        let app = parts.first().unwrap_or(&"live");
-        let stream = parts.get(1).unwrap_or(&"");
+    async fn stop_recording(&self, stream_key: &str, app: &str, format: &str) -> anyhow::Result<()> {
         let record_type = match format.to_lowercase().as_str() {
-            "hls" => "HLS",
-            "flv" => "FLV",
-            "ts" => "TS",
-            _ => "MP4",
+            "hls" | "flv" | "ts" => 0,
+            _ => 1, // MP4
         };
 
         #[derive(Deserialize)]
@@ -185,13 +191,13 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
             vhost: &'a str,
             app: &'a str,
             stream: &'a str,
-            record_type: &'a str,
+            r#type: u8,
         }
         let req = Req {
             vhost: "__defaultVhost__",
-            app: app,
-            stream: stream,
-            record_type,
+            app,
+            stream: stream_key,
+            r#type: record_type,
         };
         let resp: ApiResp = self.client.post("/index/api/stopRecord", &req).await?;
         if resp.code != 0 {
@@ -200,17 +206,13 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
 
         tracing::info!(
             "[ZlMediaKit] Recording stopped: app={}, stream={}, format={}",
-            app, stream, record_type
+            app, stream_key, format
         );
 
         Ok(())
     }
     async fn is_recording(&self, _stream_key: &str, _format: &str) -> anyhow::Result<bool> { Ok(false) }
-    async fn list_recordings(&self, stream_key: &str) -> anyhow::Result<Vec<RecordingFile>> {
-        let parts: Vec<&str> = stream_key.splitn(2, '/').collect();
-        let app = parts.first().unwrap_or(&"recording");
-        let stream = parts.get(1).unwrap_or(&"");
-
+    async fn list_recordings(&self, stream_key: &str, app: &str) -> anyhow::Result<Vec<RecordingFile>> {
         #[derive(Deserialize)]
         struct Resp {
             code: i32,
@@ -224,11 +226,13 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
             time_len: Option<f64>,
         }
 
-        let app_str = app.to_string();
-        let stream_str = stream.to_string();
         let zero = "0".to_string();
         let max_time = "9999999999".to_string();
+        let app_str = app.to_string();
+        let stream_str = stream_key.to_string();
+        let vhost = "__defaultVhost__".to_string();
         let params: Vec<(&str, &String)> = vec![
+            ("vhost", &vhost),
             ("app", &app_str),
             ("stream", &stream_str),
             ("start_time", &zero),
@@ -282,11 +286,17 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         Ok(())
     }
 
-    async fn get_media_info(&self, stream_key: &str) -> anyhow::Result<Option<serde_json::Value>> {
-        let parts: Vec<&str> = stream_key.splitn(2, '/').collect();
-        let app = parts.first().unwrap_or(&"live");
-        let stream = parts.get(1).unwrap_or(&"");
-        let params = [("app", &(*app).to_string()), ("stream", &(*stream).to_string())];
+    async fn get_media_info(&self, stream_key: &str, app: &str) -> anyhow::Result<Option<serde_json::Value>> {
+        let vhost = "__defaultVhost__".to_string();
+        let schema = "rtsp".to_string();
+        let app_str = app.to_string();
+        let stream_str = stream_key.to_string();
+        let params: Vec<(&str, &String)> = vec![
+            ("vhost", &vhost),
+            ("app", &app_str),
+            ("stream", &stream_str),
+            ("schema", &schema),
+        ];
         #[derive(Deserialize)]
         struct Resp { code: i32, tracks: Option<Vec<serde_json::Value>> }
         let resp: Resp = self.client.get_with_params("/index/api/getMediaInfo", &params).await?;

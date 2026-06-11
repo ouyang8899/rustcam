@@ -527,10 +527,15 @@ impl HookService {
             tracing::info!("[Hook] on_publish: updated push stream {} (device_id={})", stream_id, s.device_id);
         } else {
             let token = uuid::Uuid::new_v4().to_string();
+            let app = device_id
+                .and_then(|id| self.repo.devices_cache().get(&id))
+                .map(|d| d.app.clone().unwrap_or_else(|| "live".to_string()))
+                .unwrap_or_else(|| "live".to_string());
             let mut stream = crate::domain::Stream::new(
                 device_id.unwrap_or(0),
                 media_server_id.to_string(),
                 stream_id.to_string(),
+                app,
                 token,
             );
             stream.start();

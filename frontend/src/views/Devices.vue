@@ -495,7 +495,9 @@ const route = useRoute()
 const deviceStreamMap = computed(() => {
   const m = new Map()
   for (const s of streamStore.streams) {
-    if (s.device_id) m.set(s.device_id, s)
+    if (s.device_id && (s.state === 'Active' || s.state === 'Starting' || s.state === 'Recovering')) {
+      m.set(s.device_id, s)
+    }
   }
   return m
 })
@@ -707,6 +709,7 @@ const defaultForm = () => ({
   device_tag: '', group_id: null, is_public: false,
   rtsp_mode: 'pull', app: 'live', rtsp_full_url: '',
   rtmp_mode: 'push',
+  extended: {},
 })
 
 const form = ref(defaultForm())
@@ -744,7 +747,7 @@ onMounted(async () => {
   tableLoading.value = true
   regionLoading.value = true
   groupLoading.value = true
-  await Promise.all([fetchDevices(), mediaServerStore.fetchServers(), fetchRegionTree(), fetchGroupTree(), streamStore.fetchStreams()])
+  await Promise.all([fetchDevices(), mediaServerStore.fetchServers(), fetchRegionTree(), fetchGroupTree()])
   servers.value = mediaServerStore.servers
   regionTree.value = regionStore.regionTree.map(p => ({ ...p, expanded: false }))
   groupStore.groupTree.forEach(g => g.expanded = false)
@@ -995,6 +998,7 @@ function openAddModal() {
 
 function openEditModal(device) {
   isEdit.value = true; editingId.value = device.id
+  const ext = device.extended || {}
   form.value = {
     name: device.name || '', protocol: device.protocol || 'Gb28181', host: device.host || '',
     port: device.port || 554, device_username: device.device_username || '', device_password: device.device_password || '',
@@ -1004,10 +1008,11 @@ function openEditModal(device) {
     push_urls: device.push_urls ? device.push_urls.map(u => ({ ...u })) : [],
     playback_username: device.playback_username || '', playback_password: device.playback_password || '',
     device_tag: '', group_id: device.group_id || null, is_public: device.is_public || false,
-    rtsp_mode: device.rtsp_mode || 'pull',
+    rtsp_mode: ext.rtsp_mode || device.rtsp_mode || 'pull',
     app: device.app || 'live',
-    rtsp_full_url: device.rtsp_full_url || '',
-    rtmp_mode: device.rtmp_mode || 'push',
+    rtsp_full_url: ext.rtsp_full_url || device.rtsp_full_url || '',
+    rtmp_mode: ext.rtmp_mode || device.rtmp_mode || 'push',
+    extended: ext,
   }
   if (device.protocol === 'Gb28181' && device.device_tag) {
     const regionCode = device.region_code || ''
@@ -1062,10 +1067,13 @@ async function submitDevice() {
     push_urls: form.value.push_urls.filter(u => u.url).length > 0 ? form.value.push_urls : undefined,
     playback_username: form.value.playback_username || null, playback_password: form.value.playback_password || null,
     device_tag: finalDeviceTag, region_code: form.value.protocol === 'Gb28181' ? sipIdPrefix.value || null : null, group_id: form.value.group_id || null, is_public: form.value.is_public,
-    rtsp_mode: form.value.protocol === 'Rtsp' ? form.value.rtsp_mode : undefined,
     app: form.value.app || null,
-    rtsp_full_url: form.value.protocol === 'Rtsp' && form.value.rtsp_mode === 'pull' ? form.value.rtsp_full_url || null : null,
-    rtmp_mode: form.value.protocol === 'Rtmp' ? form.value.rtmp_mode : undefined,
+    extended: {
+      ...(form.value.extended || {}),
+      rtsp_mode: form.value.protocol === 'Rtsp' ? form.value.rtsp_mode : undefined,
+      rtsp_full_url: form.value.protocol === 'Rtsp' && form.value.rtsp_mode === 'pull' ? form.value.rtsp_full_url || null : null,
+      rtmp_mode: form.value.protocol === 'Rtmp' ? form.value.rtmp_mode : undefined,
+    },
   }
   if (isEdit.value) {
     await deviceStore.updateDevice(editingId.value, payload)

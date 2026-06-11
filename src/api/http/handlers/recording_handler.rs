@@ -74,7 +74,7 @@ pub async fn create_recording_handler(
         .ok_or_else(|| AppError::NotFound(format!("Device {} not found", req.device_id)))?;
 
     let stream_id = format!("recording/{}", device.id);
-    let media_server = device.media_server_name.clone().unwrap_or_else(|| "auto".to_string());
+    let media_server = device.media_server_tag.clone().unwrap_or_else(|| "auto".to_string());
 
     let recording = registry.recording_service.create_recording(
         recording_req, stream_id, media_server,

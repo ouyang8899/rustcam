@@ -109,7 +109,19 @@ pub async fn get_stream_play_links_handler(
     let device = registry.device_service.get_device(stream.device_id).await?
         .ok_or_else(|| AppError::NotFound(format!("Device {} not found", stream.device_id)))?;
     let play_links = registry.play_service.build_play_links_with_server(
-        &device, &stream.token, &stream.stream_key, Some(&stream.media_server_id),
+        &device, &stream.token, &stream.stream_key, Some(&stream.media_server_tag),
     );
     Ok(Json(ApiResponse::success(play_links)))
+}
+
+/// GET /api/v1/streams/:id/online
+pub async fn is_stream_online_handler(
+    State(state): State<Arc<FullState>>,
+    Path(id): Path<i64>,
+) -> Result<Json<ApiResponse<bool>>, AppError> {
+    let stream = state.app.registry.stream_service.get_stream(id).await?
+        .ok_or_else(|| AppError::NotFound(format!("Stream {} not found", id)))?;
+    let online = state.app.registry.media.cluster
+        .is_stream_online(&stream.stream_key, &stream.app, &stream.media_server_tag).await;
+    Ok(Json(ApiResponse::success(online)))
 }

@@ -55,7 +55,7 @@
                   <el-descriptions :column="2" border size="small">
                     <template v-if="isRtspPull">
                       <el-descriptions-item label="RTSP 全链接">
-                        <el-text truncated style="font-family: monospace; font-size: 12px">{{ device.rtsp_full_url || '-' }}</el-text>
+                        <el-text truncated style="font-family: monospace; font-size: 12px">{{ device.extended?.rtsp_full_url || device.rtsp_full_url || '-' }}</el-text>
                       </el-descriptions-item>
                       <el-descriptions-item label="认证用户">{{ device.device_username || '-' }}</el-descriptions-item>
                     </template>
@@ -98,7 +98,7 @@
                       </el-descriptions-item>
                     </template>
                     <template v-if="isGb28181">
-                      <el-descriptions-item label="SIP ID">{{ device.gb_id || device.device_tag || '-' }}</el-descriptions-item>
+                      <el-descriptions-item label="SIP ID">{{ device.extended?.gb_id || device.gb_id || device.device_tag || '-' }}</el-descriptions-item>
                       <el-descriptions-item label="所属地区">{{ device.region_code || '-' }}</el-descriptions-item>
                     </template>
                   </el-descriptions>
@@ -353,6 +353,7 @@ import { useStreamStore } from '../stores/streamStore'
 import { useMediaServerStore } from '../stores/mediaServerStore'
 import { useToast } from '../composables/useToast'
 import { request } from '../utils/request'
+import * as streamsApi from '../api/streams'
 
 const route = useRoute()
 const deviceStore = useDeviceStore()
@@ -387,8 +388,8 @@ const servers = ref([])
 
 const proto = computed(() => (device.value?.protocol || '').toLowerCase())
 const isPtzDevice = computed(() => proto.value === 'onvif' || proto.value === 'gb28181')
-const isRtspPull = computed(() => proto.value === 'rtsp' && (device.value?.rtsp_mode || 'pull') === 'pull')
-const isRtspPush = computed(() => proto.value === 'rtsp' && device.value?.rtsp_mode === 'push')
+const isRtspPull = computed(() => proto.value === 'rtsp' && ((device.value?.extended?.rtsp_mode || device.value?.rtsp_mode) || 'pull') === 'pull')
+const isRtspPush = computed(() => proto.value === 'rtsp' && ((device.value?.extended?.rtsp_mode || device.value?.rtsp_mode) || 'pull') === 'push')
 const isRtmpPush = computed(() => proto.value === 'rtmp')
 const isOnvif = computed(() => proto.value === 'onvif')
 const isGb28181 = computed(() => proto.value === 'gb28181')
@@ -418,7 +419,7 @@ const rtmpPushUrl = computed(() => {
 const defaultPullUrl = computed(() => {
   if (!device.value) return ''
   if (device.value.pull_urls?.length) return device.value.pull_urls[0].url
-  if (isRtspPull.value && device.value.rtsp_full_url) return device.value.rtsp_full_url
+  if (isRtspPull.value && (device.value.extended?.rtsp_full_url || device.value.rtsp_full_url)) return device.value.extended?.rtsp_full_url || device.value.rtsp_full_url
   if (device.value.host) return `rtsp://${device.value.host}:${device.value.port || 554}/stream`
   return ''
 })
@@ -494,7 +495,17 @@ async function checkActiveStream() {
   await streamStore.fetchStreams()
   if (device.value) {
     const found = streamStore.streams.find(s => s.device_id === device.value.id)
-    if (found) activeStream.value = found
+    if (found) {
+      try {
+        const online = await streamsApi.isStreamOnline(found.id)
+        activeStream.value = online ? found : null
+      } catch (e) {
+        console.error('Failed to check stream online status:', e)
+        activeStream.value = found
+      }
+    } else {
+      activeStream.value = null
+    }
   }
 }
 

@@ -70,6 +70,7 @@ fn protected_routes(state: Arc<FullState>) -> Router {
         .route("/api/v1/streams/{id}", delete(stream_handler::stop_stream_handler))
         .route("/api/v1/streams/{id}/play", get(stream_handler::get_stream_play_url))
         .route("/api/v1/streams/{id}/play-links", get(stream_handler::get_stream_play_links_handler))
+        .route("/api/v1/streams/{id}/online", get(stream_handler::is_stream_online_handler))
 
         // 服务器管理
         .route("/api/v1/servers", get(server_handler::list_servers_handler))

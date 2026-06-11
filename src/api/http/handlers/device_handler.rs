@@ -285,10 +285,7 @@ pub async fn start_device_handler(
             let raw_url = match device.select_source() {
                 Some((_, url)) => url,
                 None => {
-                    return Ok(Json(ApiResponse::success(StartDeviceResult {
-                        success: true,
-                        message: "设备已在推流中，无需后台拉流".to_string(),
-                    })));
+                    return Err(AppError::BadRequest("设备未配置推流或拉流地址".to_string()));
                 }
             };
 
@@ -304,10 +301,7 @@ pub async fn start_device_handler(
             })))
         }
         Protocol::Rtmp => {
-            return Ok(Json(ApiResponse::success(StartDeviceResult {
-                success: true,
-                message: "设备已在推流中，无需后台拉流".to_string(),
-            })));
+            return Err(AppError::BadRequest("RTMP 设备需要主动推流到媒体服务器，请确认设备已配置推流".to_string()));
         }
         Protocol::Hls | Protocol::WebRTC => {
             let url = device.select_source().map(|(_, url)| url)

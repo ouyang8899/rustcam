@@ -59,8 +59,9 @@ impl StreamState {
 pub struct Stream {
     pub id: i64,
     pub device_id: i64,
-    pub media_server_id: String,
+    pub media_server_tag: String,
     pub stream_key: String,
+    pub app: String,
     pub token: String,
     pub state: StreamState,
     /// 是否启用自动恢复（设备离线后重新上线时自动重启流）
@@ -79,12 +80,19 @@ pub struct Stream {
 }
 
 impl Stream {
-    pub fn new(device_id: i64, media_server_id: String, stream_key: String, token: String) -> Self {
+    pub fn new(
+        device_id: i64,
+        media_server_tag: String,
+        stream_key: String,
+        app: String,
+        token: String,
+    ) -> Self {
         Self {
             id: 0,
             device_id,
-            media_server_id,
+            media_server_tag,
             stream_key,
+            app,
             token,
             state: StreamState::Starting,
             auto_recover: true,

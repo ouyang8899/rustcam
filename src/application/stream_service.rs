@@ -37,15 +37,19 @@ impl StreamService {
             .select_any_server()
             .await
             .ok_or_else(|| AppError::MediaServerError("No available media server".to_string()))?;
-        let server_name = server.name().to_string();
+        let server_tag = server.tag().to_string();
+
+        let device = self.infra.db.devices_cache().get(&device_id)
+            .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_id)))?;
+        let app = device.app.clone().unwrap_or_else(|| "live".to_string());
 
         let stream_key = format!("{}_{}", device_id, Uuid::new_v4());
         let token = Uuid::new_v4().to_string();
 
-        let stream = Stream::new(device_id, server_name.clone(), stream_key.clone(), token);
+        let stream = Stream::new(device_id, server_tag.clone(), stream_key.clone(), app.clone(), token);
         self.infra.db.create_stream(&stream).await?;
 
-        let stream_info = server.add_stream_proxy(&stream_key, rtsp_url).await
+        let stream_info = server.add_stream_proxy(&stream_key, &app, rtsp_url).await
             .map_err(|e| {
                 tracing::error!("[StreamService] add_stream_proxy failed for {}: {}", stream_key, e);
                 AppError::MediaServerError(format!("Media server error: {}", e))
@@ -66,7 +70,7 @@ impl StreamService {
             tracing::warn!("[StreamService] Stream {} not found in cache after creation", stream_key);
         }
 
-        self.start_recording_for_device(device_id, &stream_key, &server_name).await;
+        self.start_recording_for_device(device_id, &stream_key, &server_tag).await;
         self.infra.redis.set_stream_info(&stream_key, &stream_info).await?;
         Ok(stream_info)
     }
@@ -81,7 +85,11 @@ impl StreamService {
     ) -> Result<StreamInfo> {
         self.stop_streams_by_device(device_id).await?;
 
-        let server_name = if let Some(name) = media_server_name {
+        let device = self.infra.db.devices_cache().get(&device_id)
+            .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_id)))?;
+        let app = device.app.clone().unwrap_or_else(|| "live".to_string());
+
+        let server_tag = if let Some(name) = media_server_name {
             if self.media.cluster.get_server(name).is_some() {
                 name.to_string()
             } else {
@@ -100,10 +108,10 @@ impl StreamService {
         };
 
         let token = Uuid::new_v4().to_string();
-        let stream = Stream::new(device_id, server_name.clone(), stream_key.to_string(), token.clone());
+        let stream = Stream::new(device_id, server_tag.clone(), stream_key.to_string(), app, token.clone());
         self.infra.db.create_stream(&stream).await?;
 
-        self.start_recording_for_device(device_id, stream_key, &server_name).await;
+        self.start_recording_for_device(device_id, stream_key, &server_tag).await;
 
         let device = match self.infra.db.devices_cache().get(&device_id) {
             Some(d) => d.clone(),
@@ -112,7 +120,7 @@ impl StreamService {
             }
         };
         let play_links = self.media.play_service.build_play_links_with_server(
-            &device, &token, stream_key, Some(&server_name),
+            &device, &token, stream_key, Some(&server_tag),
         );
 
         let stream_info = StreamInfo {
@@ -124,8 +132,8 @@ impl StreamService {
             webrtc_url: play_links.webrtc.clone().unwrap_or_default(),
             flv_url: play_links.flv.clone(),
             web_flv_url: play_links.web_flv.clone(),
-            media_server_id: server_name.clone(),
-            media_server_name: server_name,
+            media_server_id: server_tag.clone(),
+            media_server_name: server_tag.clone(),
         };
 
         self.infra.redis.set_stream_info(stream_key, &stream_info).await?;
@@ -134,11 +142,11 @@ impl StreamService {
 
     /// 停止流：通知媒体服务器关闭 proxy、清理所有观看 Session、更新状态
     pub async fn stop_stream(&self, stream_key: &str) -> Result<()> {
-        let (stream, server_name) = {
+        let (stream, server_tag) = {
             let cache = self.infra.db.streams_cache();
             let entry = cache.iter().find(|s| s.stream_key == stream_key).map(|s| s.clone());
             match entry {
-                Some(s) => (s.clone(), s.media_server_id.clone()),
+                Some(s) => (s.clone(), s.media_server_tag.clone()),
                 None => {
                     tracing::debug!("[StreamService] stop_stream: stream {} not in cache", stream_key);
                     return Ok(());
@@ -146,15 +154,15 @@ impl StreamService {
             }
         };
 
-        if let Some(server) = self.media.cluster.get_server(&server_name) {
-            if let Err(e) = server.remove_stream_proxy(stream_key).await {
-                tracing::warn!("[StreamService] Failed to remove proxy on {}: {}", server_name, e);
+        if let Some(server) = self.media.cluster.get_server(&server_tag) {
+            if let Err(e) = server.remove_stream_proxy(stream_key, &stream.app).await {
+                tracing::warn!("[StreamService] Failed to remove proxy on {}: {}", server_tag, e);
             }
             if let Err(e) = server.close_rtp_server(stream_key).await {
                 tracing::debug!("[StreamService] close_rtp_server (optional): {}", e);
             }
         } else {
-            tracing::warn!("[StreamService] Server {} not found for stream {}", server_name, stream_key);
+            tracing::warn!("[StreamService] Server {} not found for stream {}", server_tag, stream_key);
         }
 
         if let Err(e) = self.recording_service.stop_recording_by_stream_key(stream_key).await {
@@ -323,25 +331,25 @@ impl StreamService {
             .select_any_server()
             .await
             .ok_or_else(|| AppError::MediaServerError("No available media server".to_string()))?;
-        let server_name = server.name().to_string();
+        let server_tag = server.tag().to_string();
 
-        if let Some(old_server) = self.media.cluster.get_server(&stream.media_server_id) {
-            let _ = old_server.remove_stream_proxy(stream_key).await;
+        if let Some(old_server) = self.media.cluster.get_server(&stream.media_server_tag) {
+            let _ = old_server.remove_stream_proxy(stream_key, &stream.app).await;
             let _ = old_server.close_rtp_server(stream_key).await;
         }
 
-        let stream_info = server.add_stream_proxy(stream_key, rtsp_url).await
+        let stream_info = server.add_stream_proxy(stream_key, &stream.app, rtsp_url).await
             .map_err(|e| AppError::MediaServerError(format!("Media server error: {}", e)))?;
 
         let mut updated_stream = stream.clone();
-        updated_stream.media_server_id = server_name;
+        updated_stream.media_server_tag = server_tag;
         updated_stream.start();
         self.infra.db.update_stream(&updated_stream).await?;
 
-        self.start_recording_for_device(stream.device_id, stream_key, &updated_stream.media_server_id).await;
+        self.start_recording_for_device(stream.device_id, stream_key, &updated_stream.media_server_tag).await;
         self.infra.redis.set_stream_info(stream_key, &stream_info).await?;
 
-        tracing::info!("[StreamService] Stream {} restarted on {}", stream_key, updated_stream.media_server_id);
+        tracing::info!("[StreamService] Stream {} restarted on {}", stream_key, updated_stream.media_server_tag);
         Ok(stream_info)
     }
 
@@ -361,7 +369,7 @@ impl StreamService {
             None => return Err(AppError::NotFound(format!("Stream {} not in cache", stream_key))),
         };
 
-        let server_name = if let Some(name) = media_server_name {
+        let server_tag = if let Some(name) = media_server_name {
             if self.media.cluster.get_server(name).is_some() {
                 name.to_string()
             } else {
@@ -375,8 +383,8 @@ impl StreamService {
                 .unwrap_or_else(|| "zlmediakit-1".to_string())
         };
 
-        if let Some(old_server) = self.media.cluster.get_server(&stream.media_server_id) {
-            let _ = old_server.remove_stream_proxy(stream_key).await;
+        if let Some(old_server) = self.media.cluster.get_server(&stream.media_server_tag) {
+            let _ = old_server.remove_stream_proxy(stream_key, &stream.app).await;
             let _ = old_server.close_rtp_server(stream_key).await;
         }
 
@@ -388,7 +396,7 @@ impl StreamService {
         };
         let token = Uuid::new_v4().to_string();
         let play_links = self.media.play_service.build_play_links_with_server(
-            &device, &token, stream_key, Some(&server_name),
+            &device, &token, stream_key, Some(&server_tag),
         );
 
         let stream_info = StreamInfo {
@@ -400,19 +408,19 @@ impl StreamService {
             webrtc_url: play_links.webrtc.clone().unwrap_or_default(),
             flv_url: play_links.flv.clone(),
             web_flv_url: play_links.web_flv.clone(),
-            media_server_id: server_name.clone(),
-            media_server_name: server_name.clone(),
+            media_server_id: server_tag.clone(),
+            media_server_name: server_tag.clone(),
         };
 
         let mut updated_stream = stream.clone();
-        updated_stream.media_server_id = server_name;
+        updated_stream.media_server_tag = server_tag;
         updated_stream.start();
         self.infra.db.update_stream(&updated_stream).await?;
 
-        self.start_recording_for_device(stream.device_id, stream_key, &updated_stream.media_server_id).await;
+        self.start_recording_for_device(stream.device_id, stream_key, &updated_stream.media_server_tag).await;
         self.infra.redis.set_stream_info(stream_key, &stream_info).await?;
 
-        tracing::info!("[StreamService] GB28181 stream {} restarted on {}", stream_key, updated_stream.media_server_id);
+        tracing::info!("[StreamService] GB28181 stream {} restarted on {}", stream_key, updated_stream.media_server_tag);
         Ok(stream_info)
     }
 

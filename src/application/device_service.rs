@@ -668,13 +668,16 @@ impl DeviceService {
         device.pull_urls = req.pull_urls.clone().unwrap_or_default();
         device.playback_username = req.playback_username.clone();
         device.playback_password = req.playback_password.clone();
-        device.media_server_name = req.media_server_name.clone();
+        device.media_server_tag = req.media_server_tag.clone();
         device.stream_key = Some(stream_key);
         device.app = req.app.clone();
         device.device_tag = req.device_tag.clone();
-        device.ssrc = req.ssrc.clone();
         device.region_code = req.region_code.clone();
         device.is_public = req.is_public.unwrap_or(false);
+
+        // 处理 extended 字段
+        let mut extended = req.extended.clone().unwrap_or(serde_json::Value::Object(Default::default()));
+        device.extended = Some(extended);
 
         self.infra.db.create_device(&device).await?;
         tracing::info!("[DeviceService] Created device: id={}, name={}", device.id, device.name);
@@ -702,15 +705,27 @@ impl DeviceService {
         if let Some(v) = req.pull_urls { device.pull_urls = v; }
         if let Some(v) = req.playback_username { device.playback_username = Some(v); }
         if let Some(v) = req.playback_password { device.playback_password = Some(v); }
-        if let Some(v) = req.media_server_name { device.media_server_name = Some(v); }
+        if let Some(v) = req.media_server_tag { device.media_server_tag = Some(v); }
         if let Some(v) = req.stream_key { device.stream_key = Some(v); }
         if let Some(v) = req.app { device.app = Some(v); }
         if let Some(v) = req.device_tag { device.device_tag = Some(v); }
         if let Some(v) = req.parent_device_tag { device.parent_device_tag = Some(v); }
-        if let Some(v) = req.ssrc { device.ssrc = Some(v); }
         if let Some(v) = req.region_code { device.region_code = Some(v); }
         if let Some(v) = req.group_id { device.group_id = Some(v); }
         if let Some(v) = req.is_public { device.is_public = v; }
+
+        // 处理 extended 字段 - 合并请求中的 extended
+        if let Some(req_extended) = req.extended {
+            let mut existing = device.extended.clone().unwrap_or(serde_json::Value::Object(Default::default()));
+            if let Some(existing_obj) = existing.as_object_mut() {
+                if let Some(req_obj) = req_extended.as_object() {
+                    for (k, v) in req_obj {
+                        existing_obj.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+            device.extended = Some(existing);
+        }
 
         self.infra.db.update_device(&device).await?;
         Ok(device)

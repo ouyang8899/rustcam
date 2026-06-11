@@ -163,7 +163,7 @@ impl RtspServerAdapter {
             Some(name.to_string())
         } else {
             self.deps.device_lookup.find_by_stream_key(stream_key).await
-                .and_then(|d| d.media_server_name.clone())
+                .and_then(|d| d.media_server_tag.clone())
         };
 
         if let Some(ref name) = preferred {

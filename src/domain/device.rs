@@ -138,14 +138,12 @@ pub struct Device {
     pub playback_username: Option<String>,
     pub playback_password: Option<String>,
 
-    pub media_server_name: Option<String>,
+    pub media_server_tag: Option<String>,
     pub stream_key: Option<String>,
     pub app: Option<String>,
 
     pub device_tag: Option<String>,
     pub parent_device_tag: Option<String>,
-
-    pub ssrc: Option<String>,
 
     pub region_code: Option<String>,
 
@@ -174,12 +172,11 @@ impl Device {
             pull_urls: Vec::new(),
             playback_username: None,
             playback_password: None,
-            media_server_name: None,
+            media_server_tag: None,
             stream_key: None,
             app: None,
             device_tag: None,
             parent_device_tag: None,
-            ssrc: None,
             region_code: None,
             group_id: None,
             extended: None,
@@ -209,6 +206,14 @@ impl Device {
                     .iter()
                     .min_by_key(|p| p.priority)
                     .map(|p| (p.protocol, p.url.clone()))
+            })
+            .or_else(|| {
+                self.extended
+                    .as_ref()
+                    .and_then(|e| e.get("rtsp_full_url"))
+                    .and_then(|v| v.as_str())
+                    .filter(|url| !url.is_empty())
+                    .map(|url| (StreamProtocol::Rtsp, url.to_string()))
             })
     }
 
@@ -249,14 +254,14 @@ pub struct CreateDeviceRequest {
     pub pull_urls: Option<Vec<PullUrl>>,
     pub playback_username: Option<String>,
     pub playback_password: Option<String>,
-    pub media_server_name: Option<String>,
+    pub media_server_tag: Option<String>,
     pub stream_key: Option<String>,
     pub app: Option<String>,
     pub device_tag: Option<String>,
     pub parent_device_tag: Option<String>,
-    pub ssrc: Option<String>,
     pub region_code: Option<String>,
     pub is_public: Option<bool>,
+    pub extended: Option<serde_json::Value>,
 }
 
 impl Default for CreateDeviceRequest {
@@ -272,14 +277,14 @@ impl Default for CreateDeviceRequest {
             pull_urls: None,
             playback_username: None,
             playback_password: None,
-            media_server_name: None,
+            media_server_tag: None,
             stream_key: None,
             app: None,
             device_tag: None,
             parent_device_tag: None,
-            ssrc: None,
             region_code: None,
             is_public: Some(false),
+            extended: None,
         }
     }
 }
@@ -296,15 +301,15 @@ pub struct UpdateDeviceRequest {
     pub pull_urls: Option<Vec<PullUrl>>,
     pub playback_username: Option<String>,
     pub playback_password: Option<String>,
-    pub media_server_name: Option<String>,
+    pub media_server_tag: Option<String>,
     pub stream_key: Option<String>,
     pub app: Option<String>,
     pub device_tag: Option<String>,
     pub parent_device_tag: Option<String>,
-    pub ssrc: Option<String>,
     pub region_code: Option<String>,
     pub group_id: Option<i64>,
     pub is_public: Option<bool>,
+    pub extended: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

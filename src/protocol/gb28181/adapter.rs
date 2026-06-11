@@ -1103,7 +1103,7 @@ impl SignalAdapter for Gb28181Adapter {
         let stream_key = device.stream_key.clone()
             .filter(|sk| !sk.is_empty())
             .unwrap_or_else(|| format!("gb_{}", device_tag));
-        let (rtp_port, server_ip, media_server_name) = self.alloc_rtp_port(&stream_key, device.media_server_name.as_deref()).await?;
+        let (rtp_port, server_ip, media_server_name) = self.alloc_rtp_port(&stream_key, device.media_server_tag.as_deref()).await?;
 
         let sn = self.seq.fetch_add(1, Ordering::SeqCst);
         let ssrc = format!("{:08x}", rand::random::<u32>());

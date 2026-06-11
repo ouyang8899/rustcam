@@ -69,8 +69,13 @@ impl RecordingService {
 
         let format_str = Self::format_to_str(recording.format.clone());
 
+        let app = self.repo.streams_cache().iter()
+            .find(|s| s.stream_key == recording.stream_key)
+            .map(|s| s.app.clone())
+            .unwrap_or_else(|| "live".to_string());
+
         let rec_info = if let Some(adapter) = self.cluster.get_server(&recording.media_server_name) {
-            match adapter.start_recording(&recording.stream_key, format_str, recording.output_path.as_deref()).await {
+            match adapter.start_recording(&recording.stream_key, &app, format_str, recording.output_path.as_deref()).await {
                 Ok(info) => {
                     tracing::info!(
                         "[RecordingService] Media server started recording: {} -> {}",
@@ -119,8 +124,13 @@ impl RecordingService {
 
         let format_str = Self::format_to_str(recording.format.clone());
 
+        let app = self.repo.streams_cache().iter()
+            .find(|s| s.stream_key == recording.stream_key)
+            .map(|s| s.app.clone())
+            .unwrap_or_else(|| "live".to_string());
+
         if let Some(adapter) = self.cluster.get_server(&recording.media_server_name) {
-            if let Err(e) = adapter.stop_recording(&recording.stream_key, format_str).await {
+            if let Err(e) = adapter.stop_recording(&recording.stream_key, &app, format_str).await {
                 tracing::warn!("[RecordingService] Failed to stop recording on media server: {}", e);
             }
         }
@@ -245,8 +255,13 @@ impl RecordingService {
         let recording = self.recordings.get(&id)
             .ok_or_else(|| AppError::NotFound(format!("Recording {} not found", id)))?;
 
+        let app = self.repo.streams_cache().iter()
+            .find(|s| s.stream_key == recording.stream_key)
+            .map(|s| s.app.clone())
+            .unwrap_or_else(|| "live".to_string());
+
         if let Some(adapter) = self.cluster.get_server(&recording.media_server_name) {
-            match adapter.list_recordings(&recording.stream_key).await {
+            match adapter.list_recordings(&recording.stream_key, &app).await {
                 Ok(files) => return Ok(files),
                 Err(e) => tracing::warn!("[RecordingService] Failed to list recordings: {}", e),
             }

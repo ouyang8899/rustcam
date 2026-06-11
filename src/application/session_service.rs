@@ -120,8 +120,9 @@ impl SessionService {
         let server = self.media.cluster.select_server().await
             .ok_or_else(|| AppError::MediaServerError("No available media server".to_string()))?;
 
-        let stream_id = format!("live/{}_{}", session.device_id, id);
-        let stream_info = server.add_stream_proxy(&stream_id, rtsp_url).await?;
+        let app = "live".to_string();
+        let stream_id = format!("{}_{}", session.device_id, id);
+        let stream_info = server.add_stream_proxy(&stream_id, &app, rtsp_url).await?;
 
         self.infra.redis.set_stream_info(&stream_id, &stream_info).await?;
 
@@ -139,7 +140,7 @@ impl SessionService {
         if let (Some(server_id), stream_id) = (&session.media_server_id, &session.stream_id) {
             if !stream_id.is_empty() {
                 if let Some(server) = self.media.cluster.get_all_servers().iter().find(|s| s.name() == server_id) {
-                    if let Err(e) = server.remove_stream_proxy(stream_id).await {
+                    if let Err(e) = server.remove_stream_proxy(stream_id, "live").await {
                         tracing::warn!("[SessionService] Failed to remove stream: {}", e);
                     }
                 }
@@ -189,7 +190,7 @@ impl SessionService {
                 if let (Some(server_id), Some(stream_id)) = (&session.media_server_id, Some(&session.stream_id)) {
                     if !stream_id.is_empty() {
                         if let Some(server) = cluster.get_all_servers().iter().find(|s| s.name() == server_id) {
-                            let _ = server.remove_stream_proxy(stream_id).await;
+                            let _ = server.remove_stream_proxy(stream_id, "live").await;
                         }
                         let _ = redis.delete_stream_info(stream_id).await;
                     }

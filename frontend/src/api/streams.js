@@ -20,6 +20,11 @@ export async function getStreamPlayLinks(id) {
   return res.data.data
 }
 
+export async function isStreamOnline(id) {
+  const res = await request.get(`/streams/${id}/online`)
+  return res.data.data
+}
+
 export async function startStream(data) {
   const res = await request.post('/streams', data)
   return res.data.data

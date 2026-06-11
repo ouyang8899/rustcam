@@ -94,7 +94,7 @@ impl PlayService {
         token: &str,
         stream_id: &str,
     ) -> PlayLinks {
-        self.build_play_links_with_server(device, token, stream_id, device.media_server_name.as_deref())
+        self.build_play_links_with_server(device, token, stream_id, device.media_server_tag.as_deref())
     }
 
     /// 构建播放链接，指定媒体服务器
@@ -107,7 +107,7 @@ impl PlayService {
     ) -> PlayLinks {
         let expires_at = chrono::Utc::now().timestamp() + self.token_ttl_secs;
 
-        let server_name = media_server_name.or(device.media_server_name.as_deref()).unwrap_or("default");
+        let server_name = media_server_name.or(device.media_server_tag.as_deref()).unwrap_or("default");
         let ports = self.media_server_service
             .get(server_name)
             .or_else(|| self.media_server_service.get_enabled_servers().first().cloned())

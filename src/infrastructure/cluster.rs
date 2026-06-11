@@ -82,6 +82,16 @@ impl ClusterManager {
         }
     }
 
+    pub async fn is_stream_online(&self, stream_key: &str, app: &str, server_tag: &str) -> bool {
+        if let Some(adapter) = self.servers.get(server_tag) {
+            match adapter.value().is_stream_online(stream_key, app).await {
+                Ok(online) => return online,
+                Err(e) => tracing::warn!("[ClusterManager] is_stream_online failed for {}: {}", stream_key, e),
+            }
+        }
+        false
+    }
+
     pub async fn select_any_server(&self) -> Option<Arc<dyn MediaServerAdapter>> {
         let candidates: Vec<_> = self.servers.iter()
             .filter(|entry| self.enabled.get(entry.key()).map(|e| *e.value()).unwrap_or(false))

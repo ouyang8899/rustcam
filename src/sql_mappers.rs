@@ -24,7 +24,7 @@ pub struct DeviceRow {
     pub device_password: Option<String>,
     pub playback_username: Option<String>,
     pub playback_password: Option<String>,
-    pub media_server_name: Option<String>,
+    pub media_server_tag: Option<String>,
     pub app: Option<String>,
     pub push_urls: Option<serde_json::Value>,
     pub pull_urls: Option<serde_json::Value>,
@@ -58,8 +58,24 @@ impl TryFrom<DeviceRow> for Device {
             _ => DeviceStatus::Offline,
         };
 
-        let ext = row.extended.clone().unwrap_or(serde_json::Value::Object(Default::default()));
+        let mut ext = row.extended.clone().unwrap_or(serde_json::Value::Object(Default::default()));
         let ext_obj = ext.as_object().cloned().unwrap_or_default();
+
+        // 合并协议特有字段到 extended（保证数据不丢失）
+        if let Some(obj) = ext.as_object_mut() {
+            if row.rtsp_url.is_some() {
+                obj.insert("rtsp_url".to_string(), serde_json::json!(row.rtsp_url));
+            }
+            if row.gb_username.is_some() {
+                obj.insert("gb_username".to_string(), serde_json::json!(row.gb_username));
+            }
+            if row.gb_password.is_some() {
+                obj.insert("gb_password".to_string(), serde_json::json!(row.gb_password));
+            }
+            if row.ssrc.is_some() && !obj.contains_key("ssrc") {
+                obj.insert("ssrc".to_string(), serde_json::json!(row.ssrc));
+            }
+        }
 
         let get_str = |key: &str| ext_obj.get(key).and_then(|v| v.as_str().map(String::from));
         let get_push_urls = || -> Vec<PushUrl> {
@@ -99,12 +115,11 @@ impl TryFrom<DeviceRow> for Device {
             pull_urls: get_pull_urls(),
             playback_username: row.playback_username.or_else(|| get_str("playback_username")),
             playback_password: row.playback_password.or_else(|| get_str("playback_password")),
-            media_server_name: row.media_server_name.or_else(|| get_str("media_server_name")),
+            media_server_tag: row.media_server_tag.or_else(|| get_str("media_server_tag")),
             stream_key: get_str("stream_key"),
             app: row.app.or_else(|| get_str("app")),
             device_tag: row.device_tag,
             parent_device_tag: row.parent_device_tag,
-            ssrc: row.ssrc.or_else(|| get_str("ssrc")),
             region_code: row.region_code.or_else(|| get_str("region_code")),
             group_id: row.group_id,
             extended: ext.into(),
@@ -655,8 +670,9 @@ pub async fn recording_delete_by_id(
 pub struct StreamRow {
     pub id: i64,
     pub device_id: i64,
-    pub media_server_id: Option<String>,
+    pub media_server_tag: Option<String>,
     pub stream_key: String,
+    pub app: String,
     pub token: Option<String>,
     pub state: String,
     pub auto_recover: Option<bool>,
@@ -693,8 +709,9 @@ impl TryFrom<StreamRow> for Stream {
         Ok(Stream {
             id: row.id,
             device_id: row.device_id,
-            media_server_id: row.media_server_id.unwrap_or_default(),
+            media_server_tag: row.media_server_tag.unwrap_or_default(),
             stream_key: row.stream_key,
+            app: row.app,
             token: row.token.unwrap_or_default(),
             state,
             auto_recover: row.auto_recover.unwrap_or(true),
@@ -715,8 +732,9 @@ impl Stream {
         StreamRow {
             id: self.id,
             device_id: self.device_id,
-            media_server_id: Some(self.media_server_id.clone()),
+            media_server_tag: Some(self.media_server_tag.clone()),
             stream_key: self.stream_key.clone(),
+            app: self.app.clone(),
             token: Some(self.token.clone()),
             state: self.state.to_string(),
             auto_recover: Some(self.auto_recover),
@@ -732,14 +750,14 @@ impl Stream {
     }
 }
 
-#[sql("SELECT id, device_id, media_server_id, stream_key, token, state, auto_recover, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams ORDER BY created_at DESC")]
+#[sql("SELECT id, device_id, media_server_tag, stream_key, app, token, state, auto_recover, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams ORDER BY created_at DESC")]
 pub async fn stream_select_all(
     rb: &dyn rbatis::Executor,
 ) -> rbatis::Result<Vec<StreamRow>> {
     impled!()
 }
 
-#[sql("SELECT id, device_id, media_server_id, stream_key, token, state, auto_recover, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams WHERE id = $1")]
+#[sql("SELECT id, device_id, media_server_tag, stream_key, app, token, state, auto_recover, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams WHERE id = $1")]
 pub async fn stream_select_by_id(
     rb: &dyn rbatis::Executor,
     id: i64,
@@ -747,7 +765,7 @@ pub async fn stream_select_by_id(
     impled!()
 }
 
-#[sql("SELECT id, device_id, media_server_id, stream_key, token, state, auto_recover, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams WHERE token = $1")]
+#[sql("SELECT id, device_id, media_server_tag, stream_key, app, token, state, auto_recover, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams WHERE token = $1")]
 pub async fn stream_select_by_token(
     rb: &dyn rbatis::Executor,
     token: &str,
@@ -755,12 +773,13 @@ pub async fn stream_select_by_token(
     impled!()
 }
 
-#[sql("INSERT INTO streams (device_id, media_server_id, stream_key, token, state, auto_recover, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id")]
+#[sql("INSERT INTO streams (device_id, media_server_tag, stream_key, app, token, state, auto_recover, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id")]
 pub async fn stream_insert(
     rb: &dyn rbatis::Executor,
     device_id: i64,
     media_server_id: Option<String>,
     stream_key: &str,
+    app: &str,
     token: Option<&str>,
     state: &str,
     auto_recover: Option<bool>,
@@ -780,7 +799,7 @@ pub async fn stream_insert(
 pub async fn stream_update(
     rb: &dyn rbatis::Executor,
     device_id: Option<i64>,
-    media_server_id: Option<String>,
+    media_server_tag: Option<String>,
     stream_key: Option<&str>,
     state: Option<&str>,
     auto_recover: Option<bool>,
