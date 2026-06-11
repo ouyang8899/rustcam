@@ -36,13 +36,14 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
     fn server_type(&self) -> &str { "zlmediakit" }
 
     async fn is_online(&self) -> bool {
-        self.client.get::<serde_json::Value>("/index/api/getServerInfo").await.is_ok()
+        self.client.get::<serde_json::Value>("/index/api/getStatistic").await.is_ok()
     }
 
     async fn get_status(&self) -> anyhow::Result<ServerStatus> {
         #[derive(Deserialize)]
         struct ApiResp { code: i32, data: Option<serde_json::Value> }
-        let resp: ApiResp = self.client.get("/index/api/getServerInfo").await?;
+        let resp: ApiResp = self.client.get("/index/api/getStatistic").await
+            .map_err(|e| anyhow::anyhow!("ZLMediaKit getStatistic failed: {} (url: {}{})", e, self.client.base_url(), "/index/api/getStatistic"))?;
         let data = resp.data.unwrap_or_default();
 
         Ok(ServerStatus {

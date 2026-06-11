@@ -42,12 +42,13 @@ pub async fn list_servers_handler(
     let servers = registry.media_server_service.list();
     let mut result = Vec::new();
 
-    for server in servers {
-        let status = registry.media.cluster.get_server_status(&server.name).await;
+        for server in servers {
+        let status = registry.media.cluster.get_server_status(&server.server_tag).await;
         result.push(serde_json::json!({
             "id": server.id,
             "name": server.name,
             "url": server.url,
+            "api_key": server.api_key,
             "server_type": server.server_type,
             "server_tag": server.server_tag,
             "weight": server.weight,
@@ -90,6 +91,7 @@ pub async fn create_server_handler(
         "id": server.id,
         "name": server.name,
         "url": server.url,
+        "api_key": server.api_key,
         "server_type": server.server_type,
         "server_tag": server.server_tag,
         "weight": server.weight,
@@ -107,12 +109,13 @@ pub async fn get_server_handler(
     let server = registry.media_server_service.get(&tag)
         .ok_or_else(|| AppError::NotFound(format!("Server {} not found", tag)))?;
 
-    let status = registry.media.cluster.get_server_status(&server.name).await;
+    let status = registry.media.cluster.get_server_status(&server.server_tag).await;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "id": server.id,
         "name": server.name,
         "url": server.url,
+        "api_key": server.api_key,
         "server_type": server.server_type,
         "server_tag": server.server_tag,
         "weight": server.weight,
@@ -147,7 +150,9 @@ pub async fn update_server_handler(
         "id": server.id,
         "name": server.name,
         "url": server.url,
+        "api_key": server.api_key,
         "server_type": server.server_type,
+        "server_tag": server.server_tag,
         "enabled": server.enabled,
     }))))
 }
@@ -176,7 +181,7 @@ pub async fn server_status_handler(
     let server = registry.media_server_service.get(&tag)
         .ok_or_else(|| AppError::NotFound(format!("Server {} not found", tag)))?;
 
-    let status = registry.media.cluster.get_server_status(&server.name).await;
+    let status = registry.media.cluster.get_server_status(&server.server_tag).await;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "online": status.as_ref().map(|s| s.online).unwrap_or(false),
@@ -195,7 +200,7 @@ pub async fn refresh_server_handler(
     let server = registry.media_server_service.get(&tag)
         .ok_or_else(|| AppError::NotFound(format!("Server {} not found", tag)))?;
 
-    let status = registry.media.cluster.get_server_status(&server.name).await;
+    let status = registry.media.cluster.get_server_status(&server.server_tag).await;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "online": status.as_ref().map(|s| s.online).unwrap_or(false),

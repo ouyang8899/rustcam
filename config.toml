@@ -18,8 +18,8 @@ pool_size = 10
 
 [[media_servers.servers]]
 name = "zlmediakit-1"
-url = "http://localhost:8081"
-api_key = "0123456789abcdef"
+url = "http://192.168.137.57:80"
+api_key = "yRF342lDM8wJ8O0dwwax4FFjiGet9ikW"
 server_type = "zlmediakit"
 weight = 100
 enabled = true
