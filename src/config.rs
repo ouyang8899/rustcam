@@ -35,6 +35,7 @@ pub struct ServerConfig {
 pub struct DatabaseConfig {
     pub url: String,
     pub max_connections: u32,
+    pub debug_sql: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
@@ -211,6 +212,7 @@ impl Default for DatabaseConfig {
         Self {
             url: "postgres://postgres:123456@127.0.0.1:5434/rustcam".to_string(),
             max_connections: 10,
+            debug_sql: Some(false),
         }
     }
 }

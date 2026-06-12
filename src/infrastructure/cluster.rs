@@ -82,9 +82,9 @@ impl ClusterManager {
         }
     }
 
-    pub async fn is_stream_online(&self, stream_key: &str, app: &str, server_tag: &str) -> bool {
+    pub async fn is_stream_online(&self, app: &str, stream_key: &str, server_tag: &str) -> bool {
         if let Some(adapter) = self.servers.get(server_tag) {
-            match adapter.value().is_stream_online(stream_key, app).await {
+            match adapter.value().is_stream_online(app, stream_key).await {
                 Ok(online) => return online,
                 Err(e) => tracing::warn!("[ClusterManager] is_stream_online failed for {}: {}", stream_key, e),
             }

@@ -46,7 +46,7 @@ impl MediaServerAdapter for SrsAdapter {
         })
     }
 
-    async fn add_stream_proxy(&self, stream_key: &str, _app: &str, rtsp_url: &str) -> anyhow::Result<StreamInfo> {
+    async fn add_stream_proxy(&self, _app: &str, stream_key: &str, rtsp_url: &str) -> anyhow::Result<StreamInfo> {
         let base = self.base_host();
         let rtsp = format!("rtsp://{}/{}", base, stream_key);
         let rtmp = format!("rtmp://{}/live/{}", base, stream_key);
@@ -61,8 +61,8 @@ impl MediaServerAdapter for SrsAdapter {
         })
     }
 
-    async fn remove_stream_proxy(&self, _stream_key: &str, _app: &str) -> anyhow::Result<()> { Ok(()) }
-    async fn get_play_url(&self, stream_key: &str, _app: &str, protocol: Protocol) -> anyhow::Result<String> {
+    async fn remove_stream_proxy(&self, _app: &str, _stream_key: &str) -> anyhow::Result<()> { Ok(()) }
+    async fn get_play_url(&self, _app: &str, stream_key: &str, protocol: Protocol) -> anyhow::Result<String> {
         let base = self.base_host();
         match protocol {
             Protocol::Rtsp => Ok(format!("rtsp://{}/{}", base, stream_key)),
@@ -73,17 +73,17 @@ impl MediaServerAdapter for SrsAdapter {
     }
     async fn get_session_count(&self) -> anyhow::Result<u32> { Ok(0) }
     async fn get_sessions(&self) -> anyhow::Result<Vec<serde_json::Value>> { Ok(vec![]) }
-    async fn is_stream_online(&self, _stream_key: &str, _app: &str) -> anyhow::Result<bool> { Ok(false) }
+    async fn is_stream_online(&self, _app: &str, _stream_key: &str) -> anyhow::Result<bool> { Ok(false) }
     async fn ptz_control(&self, _stream_key: &str, _command: &str, _channel: u8) -> anyhow::Result<()> { Ok(()) }
-    async fn start_recording(&self, _stream_key: &str, _app: &str, _format: &str, _output_path: Option<&str>) -> anyhow::Result<RecordingInfo> {
+    async fn start_recording(&self, _app: &str, _stream_key: &str, _format: &str, _output_path: Option<&str>) -> anyhow::Result<RecordingInfo> {
         Ok(RecordingInfo { stream_key: String::new(), output_path: String::new(), started_at: chrono::Utc::now().timestamp() })
     }
-    async fn stop_recording(&self, _stream_key: &str, _app: &str, _format: &str) -> anyhow::Result<()> { Ok(()) }
+    async fn stop_recording(&self, _app: &str, _stream_key: &str, _format: &str) -> anyhow::Result<()> { Ok(()) }
     async fn is_recording(&self, _stream_key: &str, _format: &str) -> anyhow::Result<bool> { Ok(false) }
-    async fn list_recordings(&self, _stream_key: &str, _app: &str) -> anyhow::Result<Vec<RecordingFile>> { Ok(vec![]) }
+    async fn list_recordings(&self, _app: &str, _stream_key: &str) -> anyhow::Result<Vec<RecordingFile>> { Ok(vec![]) }
     async fn open_rtp_server(&self, _stream_id: &str, _port: u16, _transport: RtpTransport) -> anyhow::Result<(u16, String)> {
         Err(anyhow::anyhow!("RTP server not supported for SRS"))
     }
     async fn close_rtp_server(&self, _stream_id: &str) -> anyhow::Result<()> { Ok(()) }
-    async fn get_media_info(&self, _stream_key: &str, _app: &str) -> anyhow::Result<Option<serde_json::Value>> { Ok(None) }
+    async fn get_media_info(&self, _app: &str, _stream_key: &str) -> anyhow::Result<Option<serde_json::Value>> { Ok(None) }
 }

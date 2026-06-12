@@ -78,6 +78,10 @@ pub struct Gb28181Adapter {
 }
 
 impl Gb28181Adapter {
+    async fn get_device_app(&self, channel_id: &str) -> Option<String> {
+        self.deps.device_lookup.find_by_tag(channel_id).await.and_then(|d| d.app)
+    }
+
     pub fn new(
         deps: ProtocolDeps,
         register_fn: Arc<dyn Fn(String, crate::protocol::adapter_manager::AdapterEntry) + Send + Sync>,
@@ -741,7 +745,9 @@ impl Gb28181Adapter {
         if let Some(session) = sub_session {
             if session.parent_device_id == session.channel_id {
                 tracing::info!("[GB28181] Single device BYE: channel={}, stream={}", session.channel_id, session.stream_key);
-                let _ = self.deps.stream_manager.stop_stream(&session.stream_key).await;
+                if let Some(app) = self.get_device_app(&session.channel_id).await {
+                    let _ = self.deps.stream_manager.stop_stream(&app, &session.stream_key).await;
+                }
                 self.deps.rtp_tunnel.unregister(&session.stream_key);
                 self.sessions.write().await.clear();
                 return (
@@ -754,7 +760,9 @@ impl Gb28181Adapter {
                 );
             }
             tracing::info!("[GB28181] Sub-device BYE: channel={}, stream={}", session.channel_id, session.stream_key);
-            let _ = self.deps.stream_manager.stop_stream(&session.stream_key).await;
+            if let Some(app) = self.get_device_app(&session.channel_id).await {
+                let _ = self.deps.stream_manager.stop_stream(&app, &session.stream_key).await;
+            }
             self.deps.rtp_tunnel.unregister(&session.stream_key);
             self.sessions.write().await.retain(|_, s| s.call_id != call_id);
             return (
@@ -769,7 +777,9 @@ impl Gb28181Adapter {
 
         tracing::warn!("[GB28181] BYE with unknown Call-ID: {}, iterating all sessions", call_id);
         for session in self.sessions.read().await.values() {
-            let _ = self.deps.stream_manager.stop_stream(&session.stream_key).await;
+            if let Some(app) = self.get_device_app(&session.channel_id).await {
+                let _ = self.deps.stream_manager.stop_stream(&app, &session.stream_key).await;
+            }
             self.deps.rtp_tunnel.unregister(&session.stream_key);
         }
         self.sessions.write().await.clear();
@@ -875,7 +885,7 @@ impl Gb28181Adapter {
             .map(|d| d.id)
             .unwrap_or(0);
         let start_result = self.deps.stream_manager
-            .start_gb28181_stream(device_id, &session.stream_key, 0, Some(&session.media_server_name))
+            .start_gb28181_stream(device_id, &session.stream_key)
             .await;
 
         if start_result.is_ok() {
@@ -883,10 +893,12 @@ impl Gb28181Adapter {
                 .entry(session.channel_id.clone())
                 .and_modify(|s| s.media_started = true);
 
-            if let Some(stream) = self.deps.stream_manager.get_stream_by_stream_key(&session.stream_key).await {
-                let mut s = stream.clone();
-                s.start();
-                let _ = self.deps.stream_manager.update_stream_state(&s).await;
+            if let Some(app) = self.get_device_app(&session.channel_id).await {
+                if let Some(stream) = self.deps.stream_manager.get_stream_by_stream_key(&app, &session.stream_key).await {
+                    let mut s = stream.clone();
+                    s.start();
+                    let _ = self.deps.stream_manager.update_stream_state(&s).await;
+                }
             }
 
             tracing::info!("[GB28181] Stream started: channel={} stream={}", session.channel_id, session.stream_key);
@@ -1177,7 +1189,9 @@ impl SignalAdapter for Gb28181Adapter {
         if let Some(old) = old_session {
             tracing::info!("[GB28181] start: cleaning up old session for channel={}", device_tag);
             if old.media_started {
-                let _ = self.deps.stream_manager.stop_stream(&old.stream_key).await;
+                if let Some(app) = self.get_device_app(&old.channel_id).await {
+                    let _ = self.deps.stream_manager.stop_stream(&app, &old.stream_key).await;
+                }
                 self.deps.rtp_tunnel.unregister(&old.stream_key);
             }
         }

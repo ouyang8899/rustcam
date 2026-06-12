@@ -102,7 +102,7 @@ impl ProtocolDeps {
         struct TestStreamManager;
         #[async_trait::async_trait]
         impl StreamManager for TestStreamManager {
-            async fn start_pull_stream(&self, _: i64, _: i64, _: &str) -> Result<StreamInfo, AppError> {
+            async fn start_pull_stream(&self, _: i64, _: &str) -> Result<StreamInfo, AppError> {
                 Ok(StreamInfo {
                     stream_key: "test_stream".to_string(),
                     play_url: "http://localhost/test".to_string(),
@@ -116,10 +116,10 @@ impl ProtocolDeps {
                     media_server_name: "test".to_string(),
                 })
             }
-            async fn start_gb28181_stream(&self, _: i64, _: &str, _: i64, _: Option<&str>) -> Result<StreamInfo, AppError> {
+            async fn start_gb28181_stream(&self, _: i64, _: &str) -> Result<StreamInfo, AppError> {
                 Err(AppError::Internal("not implemented".into()))
             }
-            async fn stop_stream(&self, _: &str) -> Result<(), AppError> { Ok(()) }
+            async fn stop_stream(&self, _: &str, _: &str) -> Result<(), AppError> { Ok(()) }
             async fn stop_streams_by_device(&self, _: i64) -> Result<(), AppError> { Ok(()) }
             async fn generate_token(&self, _: &str) -> Result<String, AppError> { Ok("test_token".into()) }
             async fn validate_token(&self, _: &str) -> Option<String> { Some("test_device".into()) }
@@ -131,7 +131,7 @@ impl ProtocolDeps {
                 }
             }
             async fn get_stats(&self) -> serde_json::Value { serde_json::json!({}) }
-            async fn get_stream_by_stream_key(&self, _: &str) -> Option<crate::domain::Stream> { None }
+            async fn get_stream_by_stream_key(&self, _: &str, _: &str) -> Option<crate::domain::Stream> { None }
             async fn update_stream_state(&self, _: &crate::domain::Stream) -> Result<(), AppError> { Ok(()) }
         }
 

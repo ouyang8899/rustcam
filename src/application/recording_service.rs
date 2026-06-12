@@ -75,7 +75,7 @@ impl RecordingService {
             .unwrap_or_else(|| "live".to_string());
 
         let rec_info = if let Some(adapter) = self.cluster.get_server(&recording.media_server_name) {
-            match adapter.start_recording(&recording.stream_key, &app, format_str, recording.output_path.as_deref()).await {
+            match adapter.start_recording(&app, &recording.stream_key, format_str, recording.output_path.as_deref()).await {
                 Ok(info) => {
                     tracing::info!(
                         "[RecordingService] Media server started recording: {} -> {}",
@@ -130,7 +130,7 @@ impl RecordingService {
             .unwrap_or_else(|| "live".to_string());
 
         if let Some(adapter) = self.cluster.get_server(&recording.media_server_name) {
-            if let Err(e) = adapter.stop_recording(&recording.stream_key, &app, format_str).await {
+            if let Err(e) = adapter.stop_recording(&app, &recording.stream_key, format_str).await {
                 tracing::warn!("[RecordingService] Failed to stop recording on media server: {}", e);
             }
         }
@@ -261,7 +261,7 @@ impl RecordingService {
             .unwrap_or_else(|| "live".to_string());
 
         if let Some(adapter) = self.cluster.get_server(&recording.media_server_name) {
-            match adapter.list_recordings(&recording.stream_key, &app).await {
+            match adapter.list_recordings(&app, &recording.stream_key).await {
                 Ok(files) => return Ok(files),
                 Err(e) => tracing::warn!("[RecordingService] Failed to list recordings: {}", e),
             }

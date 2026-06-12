@@ -55,12 +55,12 @@ pub trait DeviceLookup: Send + Sync {
 #[async_trait]
 pub trait StreamManager: Send + Sync {
     async fn start_pull_stream(
-        &self, device_id: i64, session_id: i64, rtsp_url: &str,
+        &self, device_id: i64, rtsp_url: &str,
     ) -> Result<StreamInfo, AppError>;
     async fn start_gb28181_stream(
-        &self, device_id: i64, stream_key: &str, session_id: i64, media_server_name: Option<&str>,
+        &self, device_id: i64, stream_key: &str,
     ) -> Result<StreamInfo, AppError>;
-    async fn stop_stream(&self, stream_key: &str) -> Result<(), AppError>;
+    async fn stop_stream(&self, app: &str, stream_key: &str) -> Result<(), AppError>;
     async fn stop_streams_by_device(&self, device_id: i64) -> Result<(), AppError>;
     async fn generate_token(&self, device_id: &str) -> Result<String, AppError>;
     async fn validate_token(&self, token: &str) -> Option<String>;
@@ -68,7 +68,7 @@ pub trait StreamManager: Send + Sync {
         &self, device: &Device, token: &str, stream_id: &str,
     ) -> crate::domain::device::PlayLinks;
     async fn get_stats(&self) -> serde_json::Value;
-    async fn get_stream_by_stream_key(&self, stream_key: &str) -> Option<Stream>;
+    async fn get_stream_by_stream_key(&self, app: &str, stream_key: &str) -> Option<Stream>;
     async fn update_stream_state(&self, stream: &Stream) -> Result<(), AppError>;
 }
 

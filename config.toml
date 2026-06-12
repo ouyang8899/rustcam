@@ -11,6 +11,7 @@ tls_enabled = false
 [database]
 url = "postgres://postgres:123456@127.0.0.1:5435/rustcam?options=-c%20client_encoding=UTF8"
 max_connections = 10
+debug_sql = true
 
 [redis]
 url = "redis://:123456@192.168.137.57:6379/"

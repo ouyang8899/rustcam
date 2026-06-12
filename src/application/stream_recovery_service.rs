@@ -219,7 +219,7 @@ impl StreamRecoveryService {
 
         let result = match device.protocol {
             Protocol::Gb28181 => {
-                self.stream_service.restart_gb28181_stream(stream_key, None).await
+                self.stream_service.restart_gb28181_stream(stream_key).await
             }
             _ => {
                 self.stream_service.restart_stream(stream_key, &rtsp_url).await

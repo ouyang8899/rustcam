@@ -94,7 +94,7 @@ impl PlayService {
         token: &str,
         stream_id: &str,
     ) -> PlayLinks {
-        self.build_play_links_with_server(device, token, stream_id, device.media_server_tag.as_deref())
+        self.build_play_links_with_server(device, token, stream_id, device.media_server_tag.as_deref(), None)
     }
 
     /// 构建播放链接，指定媒体服务器
@@ -104,6 +104,7 @@ impl PlayService {
         token: &str,
         stream_id: &str,
         media_server_name: Option<&str>,
+        app: Option<&str>,
     ) -> PlayLinks {
         let expires_at = chrono::Utc::now().timestamp() + self.token_ttl_secs;
 
@@ -138,7 +139,7 @@ impl PlayService {
             _ => String::new(),
         };
 
-        let app = device.app.as_deref().filter(|s| !s.is_empty()).unwrap_or("live");
+        let app = app.or(device.app.as_deref().filter(|s| !s.is_empty())).unwrap_or("live");
 
         PlayLinks {
             token: token.to_string(),

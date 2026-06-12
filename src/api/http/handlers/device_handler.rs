@@ -136,7 +136,7 @@ pub async fn delete_device_handler(
         .collect::<Vec<_>>();
 
     for stream in streams {
-        let _ = registry.stream_service.stop_stream(&stream.stream_key).await;
+        let _ = registry.stream_service.stop_stream(&stream.app, &stream.stream_key).await;
     }
 
     // 停止关联的录制
@@ -264,7 +264,7 @@ pub async fn start_device_handler(
                 let uname = device.device_username.as_deref().unwrap_or("");
                 let pwd = device.device_password.as_deref().unwrap_or("");
                 let full_url = inject_rtsp_auth(&uri.uri, uname, pwd);
-                let stream_info = registry.stream_service.start_pull_stream(id, 0, &full_url).await
+                let stream_info = registry.stream_service.start_pull_stream(id, &full_url).await
                     .map_err(|e| AppError::Internal(format!("Failed to start stream for profile {}: {}", profile.token, e)))?;
                 tracing::info!("[ONVIF] Started stream: profile={} play_url={}", profile.token, stream_info.play_url);
                 started.push(stream_info);
@@ -293,7 +293,7 @@ pub async fn start_device_handler(
             let pwd = device.device_password.as_deref().unwrap_or("");
             let full_url = inject_rtsp_auth(&raw_url, uname, pwd);
 
-            let stream_info = registry.stream_service.start_pull_stream(id, 0, &full_url).await
+            let stream_info = registry.stream_service.start_pull_stream(id, &full_url).await
                 .map_err(|e| AppError::Internal(format!("Failed to start stream: {}", e)))?;
             Ok(Json(ApiResponse::success(StartDeviceResult {
                 success: true,
@@ -306,7 +306,7 @@ pub async fn start_device_handler(
         Protocol::Hls | Protocol::WebRTC => {
             let url = device.select_source().map(|(_, url)| url)
                 .ok_or_else(|| AppError::BadRequest(format!("{} device has no stream source", device.protocol)))?;
-            let stream_info = registry.stream_service.start_pull_stream(id, 0, &url).await
+            let stream_info = registry.stream_service.start_pull_stream(id, &url).await
                 .map_err(|e| AppError::Internal(format!("Failed to start stream: {}", e)))?;
             Ok(Json(ApiResponse::success(StartDeviceResult {
                 success: true,

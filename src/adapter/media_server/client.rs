@@ -2,8 +2,7 @@ use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
-use tokio::time::sleep;
-use tracing::warn;
+use tokio::time::{timeout, Duration as TokioDuration};
 
 pub struct MediaServerClient {
     base_url: String,
@@ -29,7 +28,7 @@ impl MediaServerClient {
     pub async fn get_with_params<T: DeserializeOwned>(
         &self,
         path: &str,
-        params: &[(&str, &String)],  // 无生命周期标注
+        params: &[(&str, &String)],
     ) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let mut url_with_secret = format!("{}?secret={}", url, self.secret);
@@ -37,13 +36,18 @@ impl MediaServerClient {
             url_with_secret.push_str(&format!("&{}={}", k, v));
         }
 
-        let resp = self.http.get(&url_with_secret).send().await?;
+        let resp = timeout(TokioDuration::from_secs(15), self.http.get(&url_with_secret).send()).await
+            .map_err(|_| anyhow::anyhow!("GET request timeout after 15s"))??;
         let status = resp.status();
-        let body: serde_json::Value = resp.json().await?;
+        let body_text = resp.text().await
+            .map_err(|e| anyhow::anyhow!("read body failed: {}", e))?;
 
         if !status.is_success() {
-            anyhow::bail!("API error: {} - {}", status, body);
+            anyhow::bail!("API error: {} - {}", status, body_text);
         }
+
+        let body: serde_json::Value = serde_json::from_str(&body_text)
+            .context("Deserialize response")?;
         serde_json::from_value(body).context("Deserialize response")
     }
 
@@ -53,13 +57,19 @@ impl MediaServerClient {
         let url = format!("{}{}", self.base_url, path);
         let url_with_secret = format!("{}?secret={}", url, self.secret);
 
-        let resp = self.http.post(&url_with_secret).json(body).send().await?;
+        let resp = timeout(TokioDuration::from_secs(15), self.http.post(&url_with_secret).json(body).send()).await
+            .map_err(|_| anyhow::anyhow!("request timeout after 15s"))??;
+
         let status = resp.status();
-        let body: serde_json::Value = resp.json().await?;
+        let body_text = resp.text().await
+            .map_err(|e| anyhow::anyhow!("read body failed: {}", e))?;
 
         if !status.is_success() {
-            anyhow::bail!("API error: {} - {}", status, body);
+            anyhow::bail!("API error: {} - {}", status, body_text);
         }
+
+        let body: serde_json::Value = serde_json::from_str(&body_text)
+            .context("Deserialize response")?;
         serde_json::from_value(body).context("Deserialize response")
     }
 

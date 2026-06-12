@@ -19,7 +19,7 @@ impl ZlMediaKitAdapter {
         self.config.url.trim_start_matches("http://").trim_start_matches("https://").to_string()
     }
 
-    fn build_urls(&self, stream_key: &str, app: &str) -> (String, String, String, String) {
+    fn build_urls(&self, app: &str, stream_key: &str) -> (String, String, String, String) {
         let base = self.base_host();
         let rtsp = format!("rtsp://{}/{}/{}", base, app, stream_key);
         let rtmp = format!("rtmp://{}/{}/{}", base, app, stream_key);
@@ -57,7 +57,7 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         })
     }
 
-    async fn add_stream_proxy(&self, stream_key: &str, app: &str, rtsp_url: &str) -> anyhow::Result<StreamInfo> {
+    async fn add_stream_proxy(&self, app: &str, stream_key: &str, rtsp_url: &str) -> anyhow::Result<StreamInfo> {
         #[derive(Serialize)]
         struct AddProxyReq {
             vhost: String, app: String, stream: String, url: String, rtp_type: u32, timeout_ms: u32,
@@ -74,7 +74,7 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
 
         let _: serde_json::Value = self.client.post("/index/api/addStreamProxy", &req).await?;
 
-        let (rtsp, rtmp, hls, webrtc) = self.build_urls(stream_key, app);
+        let (rtsp, rtmp, hls, webrtc) = self.build_urls(app, stream_key);
         Ok(StreamInfo {
             stream_key: stream_key.to_string(),
             play_url: format!("http://{}/{}", self.base_host(), stream_key),
@@ -85,7 +85,7 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         })
     }
 
-    async fn remove_stream_proxy(&self, stream_key: &str, app: &str) -> anyhow::Result<()> {
+    async fn remove_stream_proxy(&self, app: &str, stream_key: &str) -> anyhow::Result<()> {
         #[derive(Serialize)]
         struct CloseReq { schema: String, vhost: String, app: String, stream: String, force: bool }
         let req = CloseReq {
@@ -95,11 +95,20 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
             stream: stream_key.to_string(),
             force: true
         };
-        let _: serde_json::Value = self.client.post("/index/api/closeStreams", &req).await?;
-        Ok(())
+
+        match self.client.post::<serde_json::Value, _>("/index/api/closeStreams", &req).await {
+            Ok(resp) => {
+                tracing::debug!("[ZLMediaKit] closeStreams response: {:?}", resp);
+                Ok(())
+            }
+            Err(e) => {
+                tracing::warn!("[ZLMediaKit] closeStreams failed for {}/{}: {}", app, stream_key, e);
+                Ok(())
+            }
+        }
     }
 
-    async fn get_play_url(&self, stream_key: &str, app: &str, protocol: Protocol) -> anyhow::Result<String> {
+    async fn get_play_url(&self, app: &str, stream_key: &str, protocol: Protocol) -> anyhow::Result<String> {
         let base = self.base_host();
         match protocol {
             Protocol::Rtsp => Ok(format!("rtsp://{}/{}/{}", base, app, stream_key)),
@@ -125,21 +134,36 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         Ok(resp.data.unwrap_or_default())
     }
 
-    async fn is_stream_online(&self, stream_key: &str, app: &str) -> anyhow::Result<bool> {
+    async fn is_stream_online(&self, app: &str, stream_key: &str) -> anyhow::Result<bool> {
         let params = [
+            ("vhost", &"__defaultVhost__".to_string()),
             ("app", &app.to_string()),
             ("stream", &stream_key.to_string()),
         ];
 
+        tracing::info!("[ZLMediaKit] is_stream_online: app={}, stream={}", app, stream_key);
+
         #[derive(Deserialize)]
-        struct Resp { code: i32, data: Option<Vec<serde_json::Value>> }
+        struct Resp { code: i32, data: Option<Vec<serde_json::Value>>, msg: Option<String> }
         let resp: Resp = self.client.get_with_params("/index/api/getMediaList", &params).await?;
+
+        tracing::info!("[ZLMediaKit] is_stream_online: app={}, stream={} -> code={}, msg={:?}, data_count={}", 
+            app, stream_key, resp.code, resp.msg, resp.data.as_ref().map(|d| d.len()).unwrap_or(0));
+
+        // 检查返回的流是否匹配我们查询的 stream_key
+        if let Some(data) = &resp.data {
+            for item in data {
+                if let Some(item_stream) = item.get("stream").and_then(|v| v.as_str()) {
+                    tracing::info!("[ZLMediaKit] is_stream_online: found stream in response: stream={}", item_stream);
+                }
+            }
+        }
 
         Ok(resp.code == 0 && resp.data.as_ref().map(|d| !d.is_empty()).unwrap_or(false))
     }
 
     async fn ptz_control(&self, _stream_key: &str, _command: &str, _channel: u8) -> anyhow::Result<()> { Ok(()) }
-    async fn start_recording(&self, stream_key: &str, app: &str, format: &str, output_path: Option<&str>) -> anyhow::Result<RecordingInfo> {
+    async fn start_recording(&self, app: &str, stream_key: &str, format: &str, output_path: Option<&str>) -> anyhow::Result<RecordingInfo> {
         let record_type = match format.to_lowercase().as_str() {
             "hls" | "flv" | "ts" => 0,
             _ => 1, // MP4
@@ -178,7 +202,7 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         })
     }
 
-    async fn stop_recording(&self, stream_key: &str, app: &str, format: &str) -> anyhow::Result<()> {
+    async fn stop_recording(&self, app: &str, stream_key: &str, format: &str) -> anyhow::Result<()> {
         let record_type = match format.to_lowercase().as_str() {
             "hls" | "flv" | "ts" => 0,
             _ => 1, // MP4
@@ -212,7 +236,7 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         Ok(())
     }
     async fn is_recording(&self, _stream_key: &str, _format: &str) -> anyhow::Result<bool> { Ok(false) }
-    async fn list_recordings(&self, stream_key: &str, app: &str) -> anyhow::Result<Vec<RecordingFile>> {
+    async fn list_recordings(&self, app: &str, stream_key: &str) -> anyhow::Result<Vec<RecordingFile>> {
         #[derive(Deserialize)]
         struct Resp {
             code: i32,
@@ -286,7 +310,7 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         Ok(())
     }
 
-    async fn get_media_info(&self, stream_key: &str, app: &str) -> anyhow::Result<Option<serde_json::Value>> {
+    async fn get_media_info(&self, app: &str, stream_key: &str) -> anyhow::Result<Option<serde_json::Value>> {
         let vhost = "__defaultVhost__".to_string();
         let schema = "rtsp".to_string();
         let app_str = app.to_string();

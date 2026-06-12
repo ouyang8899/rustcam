@@ -39,9 +39,12 @@ pub struct DbRepository {
 }
 
 impl DbRepository {
-    pub async fn new(url: &str) -> anyhow::Result<Self> {
+    pub async fn new(url: &str, debug_sql: bool) -> anyhow::Result<Self> {
         let rb = RBatis::new();
         rb.init(rbdc_pg::driver::PgDriver {}, url).ok();
+        if debug_sql {
+            tracing::info!("[DB] debug_sql enabled - SQL will be logged at INFO level");
+        }
         let repo = Self {
             rb,
             devices_cache: Arc::new(DashMap::new()),
@@ -681,22 +684,28 @@ impl DbRepository {
     }
 
     pub async fn update_stream(&self, stream: &Stream) -> Result<()> {
-        stream_update(
-            self.rb.acquire().await?.rb_ref(),
-            Some(stream.device_id),
-            Some(stream.media_server_tag.clone()),
-            Some(&stream.stream_key),
-            Some(&stream.state.to_string()),
-            Some(stream.auto_recover),
-            Some(stream.retry_count as i32),
-            Some(stream.max_retries as i32),
-            stream.last_error.clone(),
-            Some(stream.viewer_count as i32),
-            Some(stream.bandwidth_in as i64),
-            Some(stream.bandwidth_out as i64),
-            Some(RbatisDateTime::from_timestamp_millis(stream.last_keepalive_at.timestamp_millis())),
-            stream.id,
-        ).await.map_err(|e| AppError::Internal(e.to_string()))?;
+        let conn = self.rb.acquire().await?;
+        let update_result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            stream_update(
+                conn.rb_ref(),
+                Some(stream.device_id),
+                Some(stream.media_server_tag.clone()),
+                Some(&stream.stream_key),
+                Some(&stream.state.to_string()),
+                Some(stream.auto_recover),
+                Some(stream.retry_count as i32),
+                Some(stream.max_retries as i32),
+                stream.last_error.clone(),
+                Some(stream.viewer_count as i32),
+                Some(stream.bandwidth_in as i64),
+                Some(stream.bandwidth_out as i64),
+                Some(RbatisDateTime::from_timestamp_millis(stream.last_keepalive_at.timestamp_millis())),
+                stream.id,
+            )
+        ).await;
+        update_result.map_err(|_| AppError::Internal("update_stream timeout".to_string()))?
+            .map_err(|e| AppError::Internal(e.to_string()))?;
         self.streams_cache.insert(stream.id, stream.clone());
         self.streams_by_key_cache.insert(stream.stream_key.clone(), stream.id);
         Ok(())

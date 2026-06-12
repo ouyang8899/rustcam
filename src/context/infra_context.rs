@@ -22,7 +22,7 @@ impl InfraContext {
         tracing::info!("[InfraContext] Initializing infrastructure...");
 
         let db = Arc::new(
-            DbRepository::new(&config.database.url)
+            DbRepository::new(&config.database.url, config.database.debug_sql.unwrap_or(false))
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to initialize database: {}", e))?
         );
@@ -122,7 +122,7 @@ impl InfraContextBuilder {
 
                 let rt = tokio::runtime::Runtime::new().expect("Failed to create test runtime");
                 rt.block_on(async {
-                    DbRepository::new(&db_url).await.expect("Failed to create test DbRepository")
+                    DbRepository::new(&db_url, false).await.expect("Failed to create test DbRepository")
                 })
                     .into()
             }),

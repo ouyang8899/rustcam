@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS streams (
 CREATE INDEX IF NOT EXISTS idx_streams_device_id ON streams(device_id);
 CREATE INDEX IF NOT EXISTS idx_streams_state ON streams(state);
 CREATE INDEX IF NOT EXISTS idx_streams_token ON streams(token);
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_streams_device_stream_key ON streams(device_id, stream_key);
 
 -- ============================================
 -- Sessions Table
