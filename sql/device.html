@@ -1,16 +1,16 @@
 <mapper>
 <select id="device_select_by_id">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, view_count, created_at, last_seen, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
 FROM devices WHERE id = #{id}
 </select>
 
 <select id="device_select_all">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, view_count, created_at, last_seen, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
 FROM devices WHERE parent_device_tag IS NULL ORDER BY created_at DESC
 </select>
 
 <select id="device_select_all_paginated">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, view_count, created_at, last_seen, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
 FROM devices WHERE parent_device_tag IS NULL ORDER BY created_at DESC
 LIMIT #{limit} OFFSET #{offset}
 </select>
@@ -20,7 +20,7 @@ SELECT COUNT(*) FROM devices WHERE parent_device_tag IS NULL
 </select>
 
 <select id="device_select_online_paginated">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, view_count, created_at, last_seen, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
 FROM devices WHERE status = 'online'
 ORDER BY created_at DESC
 LIMIT #{limit} OFFSET #{offset}
@@ -31,22 +31,22 @@ SELECT COUNT(*) FROM devices WHERE status = 'online'
 </select>
 
 <select id="device_select_by_device_tag">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, view_count, created_at, last_seen, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
 FROM devices WHERE device_tag = #{device_tag}
 </select>
 
 <select id="device_select_by_parent_device_tag">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, view_count, created_at, last_seen, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
 FROM devices WHERE parent_device_tag = #{parent_device_tag} ORDER BY created_at
 </select>
 
 <select id="device_select_by_stream_key">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, view_count, created_at, last_seen, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
 FROM devices WHERE extended->>'stream_key' = #{stream_key}
 </select>
 
 <select id="device_select_by_status">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, view_count, created_at, last_seen, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
 FROM devices WHERE parent_device_tag IS NULL AND status = #{status} ORDER BY created_at DESC
 </select>
 
@@ -62,9 +62,7 @@ INSERT INTO devices
 <if test="device_tag != null">, device_tag</if>
 <if test="parent_device_tag != null">, parent_device_tag</if>
 <if test="is_public != null">, is_public</if>
-<if test="view_count != null">, view_count</if>
 <if test="created_at != null">, created_at</if>
-<if test="last_seen != null">, last_seen</if>
 <if test="device_password != null">, device_password</if>
 <if test="playback_username != null">, playback_username</if>
 <if test="playback_password != null">, playback_password</if>
@@ -89,9 +87,7 @@ VALUES
 <if test="device_tag != null">, #{device_tag}</if>
 <if test="parent_device_tag != null">, #{parent_device_tag}</if>
 <if test="is_public != null">, #{is_public}</if>
-<if test="view_count != null">, #{view_count}</if>
 <if test="created_at != null">, #{created_at}</if>
-<if test="last_seen != null">, #{last_seen}</if>
 <if test="device_password != null">, #{device_password}</if>
 <if test="playback_username != null">, #{playback_username}</if>
 <if test="playback_password != null">, #{playback_password}</if>
@@ -119,8 +115,6 @@ UPDATE devices
 <if test="device_tag != null">device_tag = #{device_tag},</if>
 <if test="parent_device_tag != null">parent_device_tag = #{parent_device_tag},</if>
 <if test="is_public != null">is_public = #{is_public},</if>
-<if test="view_count != null">view_count = #{view_count},</if>
-<if test="last_seen != null">last_seen = #{last_seen},</if>
 <if test="device_password != null">device_password = #{device_password},</if>
 <if test="playback_username != null">playback_username = #{playback_username},</if>
 <if test="playback_password != null">playback_password = #{playback_password},</if>

@@ -64,7 +64,7 @@ pub trait StreamManager: Send + Sync {
     async fn stop_streams_by_device(&self, device_id: i64) -> Result<(), AppError>;
     async fn generate_token(&self, device_id: &str) -> Result<String, AppError>;
     async fn validate_token(&self, token: &str) -> Option<String>;
-    fn build_play_links(
+    async fn build_play_links(
         &self, device: &Device, token: &str, stream_id: &str,
     ) -> crate::domain::device::PlayLinks;
     async fn get_stats(&self) -> serde_json::Value;

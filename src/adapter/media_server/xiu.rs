@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use serde::Deserialize;
-use crate::adapter::media_server::{MediaServerAdapter, Protocol, RecordingInfo, RecordingFile, RtpTransport, ServerStatus, StreamInfo};
+use crate::adapter::media_server::{MediaServerAdapter, Protocol, RecordingInfo, RecordingFile, RtpTransport, ServerStatus, StreamInfo, host_with_port_from_config, format_rtsp_auth};
 use crate::config::MediaServerConfig;
+use crate::domain::device::PlayLinks;
 
 pub struct XiuAdapter {
     config: MediaServerConfig,
@@ -14,8 +15,8 @@ impl XiuAdapter {
         Self { config, base_url }
     }
 
-    fn base_host(&self) -> String {
-        self.config.url.trim_start_matches("http://").trim_start_matches("https://").to_string()
+    fn host_with_port(&self, protocol: Protocol) -> String {
+        host_with_port_from_config(&self.config, protocol)
     }
 }
 
@@ -40,13 +41,15 @@ impl MediaServerAdapter for XiuAdapter {
     }
 
     async fn add_stream_proxy(&self, _app: &str, stream_key: &str, _rtsp_url: &str) -> anyhow::Result<StreamInfo> {
-        let base = self.base_host();
+        let rtsp_host = self.host_with_port(Protocol::Rtsp);
+        let rtmp_host = self.host_with_port(Protocol::Rtmp);
+        let http_host = self.host_with_port(Protocol::Hls);
         Ok(StreamInfo {
             stream_key: stream_key.to_string(),
-            play_url: format!("http://{}/{}", base, stream_key),
-            rtsp_url: format!("rtsp://{}/{}", base, stream_key),
-            rtmp_url: format!("rtmp://{}/live/{}", base, stream_key),
-            hls_url: format!("http://{}/live/{}.m3u8", base, stream_key),
+            play_url: format!("http://{}/{}", http_host, stream_key),
+            rtsp_url: format!("rtsp://{}/{}", rtsp_host, stream_key),
+            rtmp_url: format!("rtmp://{}/live/{}", rtmp_host, stream_key),
+            hls_url: format!("http://{}/live/{}.m3u8", http_host, stream_key),
             webrtc_url: String::new(), flv_url: None, web_flv_url: None,
             media_server_id: self.config.name.clone(), media_server_name: self.config.name.clone(),
         })
@@ -54,11 +57,11 @@ impl MediaServerAdapter for XiuAdapter {
 
     async fn remove_stream_proxy(&self, _app: &str, _stream_key: &str) -> anyhow::Result<()> { Ok(()) }
     async fn get_play_url(&self, _app: &str, stream_key: &str, protocol: Protocol) -> anyhow::Result<String> {
-        let base = self.base_host();
+        let host = self.host_with_port(protocol);
         match protocol {
-            Protocol::Rtsp => Ok(format!("rtsp://{}/{}", base, stream_key)),
-            Protocol::Rtmp => Ok(format!("rtmp://{}/live/{}", base, stream_key)),
-            Protocol::Hls => Ok(format!("http://{}/live/{}.m3u8", base, stream_key)),
+            Protocol::Rtsp => Ok(format!("rtsp://{}/{}", host, stream_key)),
+            Protocol::Rtmp => Ok(format!("rtmp://{}/live/{}", host, stream_key)),
+            Protocol::Hls => Ok(format!("http://{}/live/{}.m3u8", host, stream_key)),
             _ => Ok(String::new()),
         }
     }
@@ -77,4 +80,47 @@ impl MediaServerAdapter for XiuAdapter {
     }
     async fn close_rtp_server(&self, _stream_id: &str) -> anyhow::Result<()> { Ok(()) }
     async fn get_media_info(&self, _app: &str, _stream_key: &str) -> anyhow::Result<Option<serde_json::Value>> { Ok(None) }
+
+    async fn build_play_links(
+        &self,
+        _app: &str,
+        stream_key: &str,
+        token: &str,
+        expires_at: i64,
+        rtsp_auth: Option<(&str, &str)>,
+    ) -> anyhow::Result<PlayLinks> {
+        let rtsp_host = self.host_with_port(Protocol::Rtsp);
+        let rtmp_host = self.host_with_port(Protocol::Rtmp);
+        let http_host = self.host_with_port(Protocol::Hls);
+
+        let rtsp_auth_str = format_rtsp_auth(rtsp_auth);
+
+        Ok(PlayLinks {
+            token: token.to_string(),
+            stream_id: stream_key.to_string(),
+            expires_at,
+            ports: self.config.protocol_ports.clone(),
+            rtsp_signaling: Some(format!(
+                "rtsp://{}{}/{}?token={}",
+                rtsp_auth_str, rtsp_host, stream_key, token
+            )),
+            rtsp_media: Some(format!(
+                "rtsp://{}{}/{}?token={}",
+                rtsp_auth_str, rtsp_host, stream_key, token
+            )),
+            flv: Some(format!(
+                "http://{}/live/{}.flv?token={}",
+                http_host, stream_key, token
+            )),
+            hls: Some(format!(
+                "http://{}/live/{}.m3u8?token={}",
+                http_host, stream_key, token
+            )),
+            webrtc: None,
+            web_flv: Some(format!(
+                "ws://{}/live/{}.flv?token={}",
+                http_host, stream_key, token
+            )),
+        })
+    }
 }

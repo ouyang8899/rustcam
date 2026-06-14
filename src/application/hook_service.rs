@@ -82,6 +82,178 @@ pub enum HookEvent {
         file_size: Option<u64>,
         time_len: Option<f64>,
     },
+
+    /// 流量上报事件
+    #[serde(rename = "on_flow_report")]
+    OnFlowReport {
+        media_server_id: String,
+        app: String,
+        stream: String,
+        ip: Option<String>,
+        port: Option<u32>,
+        params: Option<String>,
+        duration: Option<u32>,
+        total_bytes: Option<u64>,
+        player: Option<bool>,
+        schema: Option<String>,
+        vhost: Option<String>,
+    },
+
+    /// HTTP 访问事件
+    #[serde(rename = "on_http_access")]
+    OnHttpAccess {
+        media_server_id: String,
+        ip: Option<String>,
+        port: Option<u16>,
+        params: Option<String>,
+        path: Option<String>,
+        is_dir: Option<bool>,
+        #[serde(flatten)]
+        headers: HashMap<String, String>,
+    },
+
+    /// RTSP 鉴权领域查询
+    #[serde(rename = "on_rtsp_realm")]
+    OnRtspRealm {
+        media_server_id: String,
+        stream_id: String,
+        app: Option<String>,
+        ip: Option<String>,
+        port: Option<u16>,
+        params: Option<String>,
+        schema: Option<String>,
+        vhost: Option<String>,
+    },
+
+    /// RTSP 鉴权事件
+    #[serde(rename = "on_rtsp_auth")]
+    OnRtspAuth {
+        media_server_id: String,
+        stream_id: String,
+        app: Option<String>,
+        ip: Option<String>,
+        port: Option<u16>,
+        params: Option<String>,
+        schema: Option<String>,
+        vhost: Option<String>,
+        realm: Option<String>,
+        user_name: Option<String>,
+        must_no_encrypt: Option<bool>,
+    },
+
+    /// Shell 登录事件
+    #[serde(rename = "on_shell_login")]
+    OnShellLogin {
+        media_server_id: String,
+        ip: Option<String>,
+        port: Option<u16>,
+        passwd: Option<String>,
+        user_name: Option<String>,
+    },
+
+    /// 流变更事件（注册/注销）
+    #[serde(rename = "on_stream_changed")]
+    OnStreamChanged {
+        media_server_id: String,
+        app: String,
+        stream: String,
+        vhost: Option<String>,
+        schema: Option<String>,
+        regist: bool,
+        origin_type: Option<u8>,
+        origin_type_str: Option<String>,
+        origin_url: Option<String>,
+        reader_count: Option<u32>,
+        total_reader_count: Option<u32>,
+        alive_second: Option<u32>,
+        bytes_speed: Option<u64>,
+        tracks: Option<Vec<StreamTrackInfo>>,
+    },
+
+    /// 流无人观看事件
+    #[serde(rename = "on_stream_none_reader")]
+    OnStreamNoneReader {
+        media_server_id: String,
+        app: String,
+        stream: String,
+        vhost: Option<String>,
+        schema: Option<String>,
+    },
+
+    /// 流未找到事件
+    #[serde(rename = "on_stream_not_found")]
+    OnStreamNotFound {
+        media_server_id: String,
+        stream_id: String,
+        app: Option<String>,
+        ip: Option<String>,
+        port: Option<u16>,
+        params: Option<String>,
+        schema: Option<String>,
+        vhost: Option<String>,
+    },
+
+    /// 服务器启动事件
+    #[serde(rename = "on_server_started")]
+    OnServerStarted {
+        media_server_id: String,
+        #[serde(flatten)]
+        config: HashMap<String, serde_json::Value>,
+    },
+
+    /// 服务器心跳事件
+    #[serde(rename = "on_server_keepalive")]
+    OnServerKeepalive {
+        media_server_id: String,
+        data: Option<ServerKeepaliveData>,
+    },
+
+    /// RTP 服务器超时事件
+    #[serde(rename = "on_rtp_server_timeout")]
+    OnRtpServerTimeout {
+        media_server_id: String,
+        local_port: Option<u16>,
+        re_use_port: Option<bool>,
+        ssrc: Option<u32>,
+        stream_id: Option<String>,
+        tcp_mode: Option<u8>,
+    },
+}
+
+/// 流轨道信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamTrackInfo {
+    pub codec_type: Option<u8>,
+    pub codec_id: Option<u8>,
+    pub codec_id_name: Option<String>,
+    pub ready: Option<bool>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub fps: Option<u32>,
+    pub sample_rate: Option<u32>,
+    pub sample_bit: Option<u16>,
+    pub channels: Option<u8>,
+}
+
+/// 服务器心跳数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerKeepaliveData {
+    pub buffer: Option<u32>,
+    pub buffer_like_string: Option<u32>,
+    pub buffer_list: Option<u32>,
+    pub buffer_raw: Option<u32>,
+    pub frame: Option<u32>,
+    pub frame_imp: Option<u32>,
+    pub media_source: Option<u32>,
+    pub multi_media_source_muxer: Option<u32>,
+    pub rtmp_packet: Option<u32>,
+    pub rtp_packet: Option<u32>,
+    pub socket: Option<u32>,
+    pub tcp_client: Option<u32>,
+    pub tcp_server: Option<u32>,
+    pub tcp_session: Option<u32>,
+    pub udp_server: Option<u32>,
+    pub udp_session: Option<u32>,
 }
 
 /// Hook 服务
@@ -220,6 +392,172 @@ impl HookService {
                 ..
             } => {
                 self.on_record_done(&stream_id, file_path.as_deref(), file_size, time_len)
+                    .await;
+                HookAction::Allow
+            }
+
+            HookEvent::OnFlowReport {
+                media_server_id,
+                stream,
+                ip,
+                port,
+                params,
+                duration,
+                total_bytes,
+                player,
+                ..
+            } => {
+                self.on_flow_report(
+                    &media_server_id,
+                    &stream,
+                    ip.as_deref(),
+                    port,
+                    params.as_deref(),
+                    duration,
+                    total_bytes,
+                    player,
+                )
+                .await;
+                HookAction::Allow
+            }
+
+            HookEvent::OnHttpAccess {
+                media_server_id,
+                ip,
+                port,
+                path,
+                is_dir,
+                ..
+            } => {
+                self.on_http_access(
+                    &media_server_id,
+                    ip.as_deref(),
+                    port,
+                    path.as_deref(),
+                    is_dir,
+                )
+                .await
+            }
+
+            HookEvent::OnRtspRealm {
+                media_server_id,
+                stream_id,
+                ip,
+                ..
+            } => {
+                self.on_rtsp_realm(&media_server_id, &stream_id, ip.as_deref())
+                    .await
+            }
+
+            HookEvent::OnRtspAuth {
+                media_server_id,
+                stream_id,
+                ip,
+                user_name,
+                must_no_encrypt,
+                ..
+            } => {
+                self.on_rtsp_auth(
+                    &media_server_id,
+                    &stream_id,
+                    ip.as_deref(),
+                    user_name.as_deref(),
+                    must_no_encrypt.unwrap_or(false),
+                )
+                .await
+            }
+
+            HookEvent::OnShellLogin {
+                media_server_id,
+                ip,
+                passwd,
+                user_name,
+                ..
+            } => {
+                self.on_shell_login(
+                    &media_server_id,
+                    ip.as_deref(),
+                    passwd.as_deref(),
+                    user_name.as_deref(),
+                )
+                .await
+            }
+
+            HookEvent::OnStreamChanged {
+                media_server_id,
+                app,
+                stream,
+                regist,
+                origin_type,
+                origin_type_str,
+                reader_count,
+                total_reader_count,
+                alive_second,
+                bytes_speed,
+                tracks,
+                ..
+            } => {
+                self.on_stream_changed(
+                    &media_server_id,
+                    &app,
+                    &stream,
+                    regist,
+                    origin_type,
+                    origin_type_str.as_deref(),
+                    reader_count,
+                    total_reader_count,
+                    alive_second,
+                    bytes_speed,
+                    tracks.as_ref(),
+                )
+                .await;
+                HookAction::Allow
+            }
+
+            HookEvent::OnStreamNoneReader {
+                media_server_id,
+                app,
+                stream,
+                ..
+            } => {
+                self.on_stream_none_reader(&media_server_id, &app, &stream)
+                    .await;
+                HookAction::Allow
+            }
+
+            HookEvent::OnStreamNotFound {
+                media_server_id,
+                stream_id,
+                ip,
+                ..
+            } => {
+                self.on_stream_not_found(&media_server_id, &stream_id, ip.as_deref())
+                    .await
+            }
+
+            HookEvent::OnServerStarted {
+                media_server_id,
+                config,
+            } => {
+                self.on_server_started(&media_server_id, &config).await;
+                HookAction::Allow
+            }
+
+            HookEvent::OnServerKeepalive {
+                media_server_id,
+                data,
+            } => {
+                self.on_server_keepalive(&media_server_id, data.as_ref())
+                    .await;
+                HookAction::Allow
+            }
+
+            HookEvent::OnRtpServerTimeout {
+                media_server_id,
+                stream_id,
+                ..
+            } => {
+                self.on_rtp_server_timeout(&media_server_id, stream_id.as_deref())
                     .await;
                 HookAction::Allow
             }
@@ -368,6 +706,18 @@ impl HookService {
         const STREAM_TTL_SECS: u64 = 86400;
         if let Err(e) = self.redis.expire_key(&format!("stream:{}", stream_id), STREAM_TTL_SECS).await {
             tracing::debug!("[Hook] on_keepalive: failed to refresh stream TTL: {}", e);
+        }
+
+        if let Some(stream) = self.find_stream_by_stream_key(stream_id) {
+            if stream.device_id > 0 {
+                if let Some(device) = self.repo.devices_cache().get(&stream.device_id) {
+                    let mut device = (*device).clone();
+                    device.set_online();
+                    if let Err(e) = self.repo.update_device(&device).await {
+                        tracing::debug!("[Hook] on_keepalive: failed to update device online status: {}", e);
+                    }
+                }
+            }
         }
     }
 
@@ -543,6 +893,16 @@ impl HookService {
             tracing::info!("[Hook] on_publish: registered push stream {} on server {} (device_id={})",
                 stream_id, media_server_id, stream.device_id);
         }
+
+        if let Some(did) = device_id {
+            if let Some(device) = self.repo.devices_cache().get(&did) {
+                let mut device = (*device).clone();
+                device.set_online();
+                self.repo.update_device(&device).await?;
+                tracing::info!("[Hook] on_publish: device {} is now online", did);
+            }
+        }
+
         Ok(())
     }
 
@@ -580,5 +940,190 @@ impl HookService {
             })
             .map(|s| s.clone())
             .collect()
+    }
+
+    async fn on_flow_report(
+        &self,
+        media_server_id: &str,
+        stream: &str,
+        ip: Option<&str>,
+        port: Option<u32>,
+        params: Option<&str>,
+        duration: Option<u32>,
+        total_bytes: Option<u64>,
+        player: Option<bool>,
+    ) {
+        tracing::info!(
+            "[Hook] on_flow_report: server={}, stream={}, ip={:?}, duration={:?}, bytes={:?}, player={:?}",
+            media_server_id, stream, ip, duration, total_bytes, player
+        );
+    }
+
+    async fn on_http_access(
+        &self,
+        media_server_id: &str,
+        ip: Option<&str>,
+        port: Option<u16>,
+        path: Option<&str>,
+        is_dir: Option<bool>,
+    ) -> HookAction {
+        tracing::info!(
+            "[Hook] on_http_access: server={}, ip={:?}, path={:?}, is_dir={:?}",
+            media_server_id, ip, path, is_dir
+        );
+        HookAction::Allow
+    }
+
+    async fn on_rtsp_realm(
+        &self,
+        media_server_id: &str,
+        stream_id: &str,
+        ip: Option<&str>,
+    ) -> HookAction {
+        tracing::info!(
+            "[Hook] on_rtsp_realm: server={}, stream={}, ip={:?}",
+            media_server_id, stream_id, ip
+        );
+        HookAction::Allow
+    }
+
+    async fn on_rtsp_auth(
+        &self,
+        media_server_id: &str,
+        stream_id: &str,
+        ip: Option<&str>,
+        user_name: Option<&str>,
+        must_no_encrypt: bool,
+    ) -> HookAction {
+        tracing::info!(
+            "[Hook] on_rtsp_auth: server={}, stream={}, ip={:?}, user={:?}, must_no_encrypt={}",
+            media_server_id, stream_id, ip, user_name, must_no_encrypt
+        );
+        HookAction::Allow
+    }
+
+    async fn on_shell_login(
+        &self,
+        media_server_id: &str,
+        ip: Option<&str>,
+        passwd: Option<&str>,
+        user_name: Option<&str>,
+    ) -> HookAction {
+        tracing::info!(
+            "[Hook] on_shell_login: server={}, ip={:?}, user={:?}",
+            media_server_id, ip, user_name
+        );
+        HookAction::Allow
+    }
+
+    async fn on_stream_changed(
+        &self,
+        media_server_id: &str,
+        app: &str,
+        stream: &str,
+        regist: bool,
+        origin_type: Option<u8>,
+        origin_type_str: Option<&str>,
+        reader_count: Option<u32>,
+        total_reader_count: Option<u32>,
+        alive_second: Option<u32>,
+        bytes_speed: Option<u64>,
+        tracks: Option<&Vec<StreamTrackInfo>>,
+    ) {
+        tracing::info!(
+            "[Hook] on_stream_changed: server={}, app={}, stream={}, regist={}, origin_type={:?}, readers={:?}/{:?}",
+            media_server_id, app, stream, regist, origin_type_str, reader_count, total_reader_count
+        );
+
+        if !regist {
+            if let Some(s) = self.find_stream_by_stream_key(stream) {
+                let mut s = s;
+                s.stopped();
+                if let Err(e) = self.repo.update_stream(&s).await {
+                    tracing::warn!("[Hook] on_stream_changed: failed to stop stream: {}", e);
+                }
+                tracing::info!("[Hook] on_stream_changed: stream {} stopped", stream);
+            }
+            return;
+        }
+
+        if let Some(s) = self.find_stream_by_stream_key(stream) {
+            let mut s = s;
+            s.update_keepalive();
+            if s.state != crate::domain::StreamState::Active {
+                s.start();
+            }
+            if let Err(e) = self.repo.update_stream(&s).await {
+                tracing::warn!("[Hook] on_stream_changed: failed to update stream: {}", e);
+            }
+        }
+
+        if let Some(device_id) = self.find_device_by_push_stream(stream) {
+            if let Some(device) = self.repo.devices_cache().get(&device_id) {
+                let mut device = (*device).clone();
+                device.set_online();
+                if let Err(e) = self.repo.update_device(&device).await {
+                    tracing::warn!("[Hook] on_stream_changed: failed to update device online status: {}", e);
+                }
+            }
+        }
+    }
+
+    async fn on_stream_none_reader(
+        &self,
+        media_server_id: &str,
+        app: &str,
+        stream: &str,
+    ) {
+        tracing::info!(
+            "[Hook] on_stream_none_reader: server={}, app={}, stream={}",
+            media_server_id, app, stream
+        );
+    }
+
+    async fn on_stream_not_found(
+        &self,
+        media_server_id: &str,
+        stream_id: &str,
+        ip: Option<&str>,
+    ) -> HookAction {
+        tracing::info!(
+            "[Hook] on_stream_not_found: server={}, stream={}, ip={:?}",
+            media_server_id, stream_id, ip
+        );
+        HookAction::Allow
+    }
+
+    async fn on_server_started(
+        &self,
+        media_server_id: &str,
+        config: &std::collections::HashMap<String, serde_json::Value>,
+    ) {
+        tracing::info!(
+            "[Hook] on_server_started: server={}",
+            media_server_id
+        );
+    }
+
+    async fn on_server_keepalive(
+        &self,
+        media_server_id: &str,
+        data: Option<&ServerKeepaliveData>,
+    ) {
+        tracing::debug!(
+            "[Hook] on_server_keepalive: server={}, data={:?}",
+            media_server_id, data
+        );
+    }
+
+    async fn on_rtp_server_timeout(
+        &self,
+        media_server_id: &str,
+        stream_id: Option<&str>,
+    ) {
+        tracing::info!(
+            "[Hook] on_rtp_server_timeout: server={}, stream_id={:?}",
+            media_server_id, stream_id
+        );
     }
 }

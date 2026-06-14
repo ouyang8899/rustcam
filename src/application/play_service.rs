@@ -88,17 +88,17 @@ impl PlayService {
     }
 
     /// 构建播放链接
-    pub fn build_play_links(
+    pub async fn build_play_links(
         &self,
         device: &Device,
         token: &str,
         stream_id: &str,
     ) -> PlayLinks {
-        self.build_play_links_with_server(device, token, stream_id, device.media_server_tag.as_deref(), None)
+        self.build_play_links_with_server(device, token, stream_id, device.media_server_tag.as_deref(), None).await
     }
 
     /// 构建播放链接，指定媒体服务器
-    pub fn build_play_links_with_server(
+    pub async fn build_play_links_with_server(
         &self,
         device: &Device,
         token: &str,
@@ -108,68 +108,44 @@ impl PlayService {
     ) -> PlayLinks {
         let expires_at = chrono::Utc::now().timestamp() + self.token_ttl_secs;
 
-        let server_name = media_server_name.or(device.media_server_tag.as_deref()).unwrap_or("default");
-        let ports = self.media_server_service
-            .get(server_name)
-            .or_else(|| self.media_server_service.get_enabled_servers().first().cloned())
-            .map(|s| s.protocol_ports)
-            .unwrap_or_default();
-        let c_ports = ports.clone();
-        let host = if device.host.is_empty() {
-            self.media_server_service
-                .get_enabled_servers()
-                .first()
-                .map(|s| s.url.clone())
-                .unwrap_or_else(|| "localhost".to_string())
-                .trim_start_matches("http://")
-                .trim_start_matches("https://")
-                .split(':')
-                .next()
-                .unwrap_or("localhost")
-                .to_string()
-        } else {
-            device.host.clone()
-        };
-
+        let server_tag = media_server_name.or(device.media_server_tag.as_deref()).unwrap_or("default");
+        
         let rtsp_auth = match (
             device.playback_username.as_deref(),
             device.playback_password.as_deref(),
         ) {
-            (Some(u), Some(p)) => format!("{}:{}@", u, p),
-            _ => String::new(),
+            (Some(u), Some(p)) => Some((u, p)),
+            _ => None,
         };
 
-        let app = app.or(device.app.as_deref().filter(|s| !s.is_empty())).unwrap_or("live");
+        let app = app.or(device.app.as_deref().filter(|s| !s.is_empty())).unwrap_or("live").to_string();
+
+        if let Some(adapter) = self.cluster.get_server(server_tag) {
+            match adapter.build_play_links(&app, stream_id, token, expires_at, rtsp_auth).await {
+                Ok(links) => return links,
+                Err(e) => tracing::warn!("[PlayService] build_play_links failed for {}: {}", server_tag, e),
+            }
+        }
+
+        tracing::warn!("[PlayService] Media server {} not found, using fallback", server_tag);
+        
+        let ports = self.media_server_service
+            .get(server_tag)
+            .or_else(|| self.media_server_service.get_enabled_servers().first().cloned())
+            .map(|s| s.protocol_ports)
+            .unwrap_or_default();
 
         PlayLinks {
             token: token.to_string(),
             stream_id: stream_id.to_string(),
             expires_at,
             ports,
-            rtsp_signaling: Some(format!(
-                "rtsp://{}{}:{}/{}/{}?token={}",
-                rtsp_auth, host, c_ports.rtsp.unwrap_or(554), app, stream_id, token
-            )),
-            rtsp_media: Some(format!(
-                "rtsp://{}{}:{}/{}/{}?token={}",
-                rtsp_auth, host, c_ports.rtp_tcp.unwrap_or(8555), app, stream_id, token
-            )),
-            flv: Some(format!(
-                "http://{}:{}/{}/{}.flv?token={}",
-                host, c_ports.http_flv.unwrap_or(8080), app, stream_id, token
-            )),
-            hls: Some(format!(
-                "http://{}:{}/{}/{}.m3u8?token={}",
-                host, c_ports.http.unwrap_or(80), app, stream_id, token
-            )),
-            webrtc: Some(format!(
-                "http://{}:{}/webrtc/play/{}?token={}",
-                host, c_ports.http.unwrap_or(80), stream_id, token
-            )),
-            web_flv: Some(format!(
-                "ws://{}:{}/{}/{}.flv?token={}",
-                host, c_ports.ws_flv.unwrap_or(8080), app, stream_id, token
-            )),
+            rtsp_signaling: None,
+            rtsp_media: None,
+            flv: None,
+            hls: None,
+            webrtc: None,
+            web_flv: None,
         }
     }
 }

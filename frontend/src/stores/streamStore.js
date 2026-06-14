@@ -53,5 +53,9 @@ export const useStreamStore = defineStore('streams', {
       await this.fetchStreams()
       ElMessage.success('流已停止')
     },
+
+    hasActiveStream(deviceId) {
+      return this.streams.some(s => s.device_id === deviceId && (s.state === 'Active' || s.state === 'Starting' || s.state === 'Recovering'))
+    },
   },
 })

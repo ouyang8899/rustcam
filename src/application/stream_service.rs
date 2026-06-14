@@ -41,7 +41,7 @@ impl StreamService {
         let server_tag = if let Some(ref tag) = device.media_server_tag {
             if self.media.cluster.get_server(tag).is_none() {
                 return Err(AppError::MediaServerError(
-                    format!("Device bound media server '{}' is not available", tag)
+                    format!("Device bound media server '{}' is not online/available", tag)
                 ));
             }
             tag.clone()
@@ -67,7 +67,7 @@ impl StreamService {
         let app = device.app.clone().unwrap_or_else(|| "live".to_string());
         let stream_key = device.stream_key.clone()
             .filter(|sk| !sk.is_empty())
-            .unwrap_or_else(|| format!("{}_{}", device_id, Uuid::new_v4()));
+            .unwrap_or_else(|| format!("{}", Uuid::new_v4()));
 
         let existing_in_cache = {
             let cache = self.infra.db.streams_cache();
@@ -127,13 +127,20 @@ impl StreamService {
                     tracing::warn!("[StreamService] set_stream_info failed: {}", e);
                 }
             }
-
-            let token = Uuid::new_v4().to_string();
-            let stream = Stream::new(device_id, server_tag.clone(), stream_key.clone(), app.clone(), token);
-            if let Err(e) = self.infra.db.create_stream(&stream).await {
-                tracing::warn!("[StreamService] create_stream failed: {}", e);
+            let existing_in_cache = {
+                let cache = self.infra.db.streams_cache();
+                cache.iter().find(|s| s.app == app && s.stream_key == stream_key && s.device_id == device_id).map(|s| s.clone())
+            };
+            if let Some(c) = existing_in_cache{
+                tracing::info!("steam_key {} exist in streams!",stream_key);
+            } else{
+                let token = Uuid::new_v4().to_string();
+                let stream = Stream::new(device_id, server_tag.clone(), stream_key.clone(), app.clone(), token);
+                if let Err(e) = self.infra.db.create_stream(&stream).await {
+                    tracing::warn!("[StreamService] create_stream failed: {}", e);
+                }
             }
-
+            
             self.start_recording_for_device(device_id, &server_tag, &app, &stream_key).await;
         }
 
@@ -243,7 +250,7 @@ impl StreamService {
         };
         let play_links = self.media.play_service.build_play_links_with_server(
             &device, &token, stream_key, Some(&server_tag), Some("rtp"),
-        );
+        ).await;
 
         let stream_info = StreamInfo {
             stream_key: stream_key.to_string(),
@@ -519,7 +526,7 @@ impl StreamService {
         let token = Uuid::new_v4().to_string();
         let play_links = self.media.play_service.build_play_links_with_server(
             &device, &token, stream_key, Some(server_tag.as_str()), Some("rtp"),
-        );
+        ).await;
 
         let stream_info = StreamInfo {
             stream_key: stream_key.to_string(),
@@ -614,10 +621,10 @@ impl StreamManager for StreamService {
         self.media.play_service.validate_token(token).await
     }
 
-    fn build_play_links(
+    async fn build_play_links(
         &self, device: &crate::domain::Device, token: &str, stream_id: &str,
     ) -> crate::domain::device::PlayLinks {
-        self.media.play_service.build_play_links(device, token, stream_id)
+        self.media.play_service.build_play_links(device, token, stream_id).await
     }
 
     async fn get_stats(&self) -> serde_json::Value {

@@ -115,7 +115,6 @@ impl DeviceService {
                 if let Some(mut device) = existing {
                     device.name = name.clone();
                     device.set_online();
-                    device.last_seen = Some(Utc::now());
                     if let Some(ref sk) = stream_key {
                         device.stream_key = Some(sk.clone());
                     }
@@ -126,7 +125,6 @@ impl DeviceService {
                     device.device_tag = device_tag.clone();
                     device.stream_key = stream_key.clone().or_else(|| Some(Uuid::new_v4().to_string()));
                     device.set_online();
-                    device.last_seen = Some(Utc::now());
                     infra.db.create_device(&device).await?;
                     infra.ws_broadcaster.device_online(device.id);
                 }
@@ -156,10 +154,10 @@ impl DeviceService {
                 }
             }
 
-            SignalEvent::DeviceKeepalive { device_id: _, device_tag, timestamp } => {
+            SignalEvent::DeviceKeepalive { device_id: _, device_tag, timestamp: _ } => {
                 let tag = device_tag.as_deref().unwrap_or("");
                 if let Some(mut device) = infra.db.get_device_by_device_tag(tag).await {
-                    device.last_seen = Some(*timestamp);
+                    device.set_online();
                     infra.db.update_device(&device).await?;
                 }
             }

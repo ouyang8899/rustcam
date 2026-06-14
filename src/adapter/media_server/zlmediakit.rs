@@ -1,8 +1,9 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use crate::adapter::media_server::{MediaServerAdapter, Protocol, RecordingInfo, RecordingFile, RtpTransport, ServerStatus, StreamInfo};
+use crate::adapter::media_server::{MediaServerAdapter, Protocol, RecordingInfo, RecordingFile, RtpTransport, ServerStatus, StreamInfo, host_with_port_from_config, base_host_from_config, format_rtsp_auth};
 use crate::adapter::media_server::client::MediaServerClient;
 use crate::config::MediaServerConfig;
+use crate::domain::device::PlayLinks;
 
 pub struct ZlMediaKitAdapter {
     config: MediaServerConfig,
@@ -15,16 +16,18 @@ impl ZlMediaKitAdapter {
         Self { config, client }
     }
 
-    fn base_host(&self) -> String {
-        self.config.url.trim_start_matches("http://").trim_start_matches("https://").to_string()
+    fn host_with_port(&self, protocol: Protocol) -> String {
+        host_with_port_from_config(&self.config, protocol)
     }
 
     fn build_urls(&self, app: &str, stream_key: &str) -> (String, String, String, String) {
-        let base = self.base_host();
-        let rtsp = format!("rtsp://{}/{}/{}", base, app, stream_key);
-        let rtmp = format!("rtmp://{}/{}/{}", base, app, stream_key);
-        let hls = format!("http://{}/{}/{}.m3u8", base, app, stream_key);
-        let webrtc = format!("http://{}/webrtc/play/{}/{}", base, app, stream_key);
+        let rtsp_host = self.host_with_port(Protocol::Rtsp);
+        let rtmp_host = self.host_with_port(Protocol::Rtmp);
+        let http_host = self.host_with_port(Protocol::Hls);
+        let rtsp = format!("rtsp://{}/{}/{}", rtsp_host, app, stream_key);
+        let rtmp = format!("rtmp://{}/{}/{}", rtmp_host, app, stream_key);
+        let hls = format!("http://{}/{}/{}.m3u8", http_host, app, stream_key);
+        let webrtc = format!("http://{}/webrtc/play/{}/{}", http_host, app, stream_key);
         (rtsp, rtmp, hls, webrtc)
     }
 }
@@ -77,7 +80,7 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         let (rtsp, rtmp, hls, webrtc) = self.build_urls(app, stream_key);
         Ok(StreamInfo {
             stream_key: stream_key.to_string(),
-            play_url: format!("http://{}/{}", self.base_host(), stream_key),
+            play_url: format!("http://{}/{}", self.host_with_port(Protocol::Hls), stream_key),
             rtsp_url: rtsp, rtmp_url: rtmp, hls_url: hls, webrtc_url: webrtc,
             flv_url: None, web_flv_url: None,
             media_server_id: self.config.name.clone(),
@@ -109,14 +112,14 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
     }
 
     async fn get_play_url(&self, app: &str, stream_key: &str, protocol: Protocol) -> anyhow::Result<String> {
-        let base = self.base_host();
+        let host = self.host_with_port(protocol);
         match protocol {
-            Protocol::Rtsp => Ok(format!("rtsp://{}/{}/{}", base, app, stream_key)),
-            Protocol::Rtmp => Ok(format!("rtmp://{}/{}/{}", base, app, stream_key)),
-            Protocol::Hls => Ok(format!("http://{}/{}/{}.m3u8", base, app, stream_key)),
-            Protocol::WebRTC => Ok(format!("http://{}/webrtc/play/{}/{}", base, app, stream_key)),
-            Protocol::Flv => Ok(format!("http://{}/{}/{}.flv", base, app, stream_key)),
-            Protocol::WsFlv => Ok(format!("ws://{}/{}/{}.flv", base, app, stream_key)),
+            Protocol::Rtsp => Ok(format!("rtsp://{}/{}/{}", host, app, stream_key)),
+            Protocol::Rtmp => Ok(format!("rtmp://{}/{}/{}", host, app, stream_key)),
+            Protocol::Hls => Ok(format!("http://{}/{}/{}.m3u8", host, app, stream_key)),
+            Protocol::WebRTC => Ok(format!("http://{}/webrtc/play/{}/{}", host, app, stream_key)),
+            Protocol::Flv => Ok(format!("http://{}/{}/{}.flv", host, app, stream_key)),
+            Protocol::WsFlv => Ok(format!("ws://{}/{}/{}.flv", host, app, stream_key)),
         }
     }
 
@@ -301,7 +304,7 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
             ("stream_id", &stream_id.to_string()),
         ];
         let resp: Resp = self.client.get_with_params("/index/api/openRtpServer", &params).await?;
-        Ok((resp.port.unwrap_or(port), self.base_host()))
+        Ok((resp.port.unwrap_or(port), base_host_from_config(&self.config)))
     }
 
     async fn close_rtp_server(&self, stream_id: &str) -> anyhow::Result<()> {
@@ -325,5 +328,64 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         struct Resp { code: i32, tracks: Option<Vec<serde_json::Value>> }
         let resp: Resp = self.client.get_with_params("/index/api/getMediaInfo", &params).await?;
         Ok(resp.tracks.map(|t| serde_json::json!({ "tracks": t })))
+    }
+
+    async fn build_play_links(
+        &self,
+        app: &str,
+        stream_key: &str,
+        token: &str,
+        expires_at: i64,
+        rtsp_auth: Option<(&str, &str)>,
+    ) -> anyhow::Result<PlayLinks> {
+        let rtsp_signaling_host = self.host_with_port(Protocol::Rtsp);
+        let rtsp_media_host = self.host_with_port(Protocol::Rtsp);
+        let http_host = self.host_with_port(Protocol::Hls);
+        let ws_host = self.host_with_port(Protocol::WsFlv);
+
+        let rtsp_auth_str = format_rtsp_auth(rtsp_auth);
+
+        Ok(PlayLinks {
+            token: token.to_string(),
+            stream_id: stream_key.to_string(),
+            expires_at,
+            ports: self.config.protocol_ports.clone(),
+            rtsp_signaling: Some(format!(
+                "rtsp://{}{}:{}/{}/{}?token={}",
+                rtsp_auth_str, rtsp_signaling_host,
+                self.config.protocol_ports.rtsp.unwrap_or(554),
+                app, stream_key, token
+            )),
+            rtsp_media: Some(format!(
+                "rtsp://{}{}:{}/{}/{}?token={}",
+                rtsp_auth_str, rtsp_media_host,
+                self.config.protocol_ports.rtp_tcp.unwrap_or(8555),
+                app, stream_key, token
+            )),
+            flv: Some(format!(
+                "http://{}:{}/{}/{}.flv?token={}",
+                http_host,
+                self.config.protocol_ports.http_flv.unwrap_or(8080),
+                app, stream_key, token
+            )),
+            hls: Some(format!(
+                "http://{}:{}/{}/{}.m3u8?token={}",
+                http_host,
+                self.config.protocol_ports.hls.or(self.config.protocol_ports.http).unwrap_or(80),
+                app, stream_key, token
+            )),
+            webrtc: Some(format!(
+                "http://{}:{}/webrtc/play/{}?token={}",
+                http_host,
+                self.config.protocol_ports.webrtc.or(self.config.protocol_ports.http).unwrap_or(80),
+                stream_key, token
+            )),
+            web_flv: Some(format!(
+                "ws://{}:{}/{}/{}.flv?token={}",
+                ws_host,
+                self.config.protocol_ports.ws_flv.unwrap_or(8080),
+                app, stream_key, token
+            )),
+        })
     }
 }

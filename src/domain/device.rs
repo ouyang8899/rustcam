@@ -122,9 +122,7 @@ pub struct Device {
     pub protocol: Protocol,
     pub status: DeviceStatus,
     pub is_public: bool,
-    pub view_count: i64,
     pub created_at: DateTime<Utc>,
-    pub last_seen: Option<DateTime<Utc>>,
 
     pub host: String,
     pub port: u16,
@@ -151,6 +149,12 @@ pub struct Device {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extended: Option<serde_json::Value>,
+
+    #[serde(skip_serializing, default)]
+    pub is_online: bool,
+
+    #[serde(default)]
+    pub has_stream: bool,
 }
 
 impl Device {
@@ -161,9 +165,7 @@ impl Device {
             protocol,
             status: DeviceStatus::Offline,
             is_public: false,
-            view_count: 0,
             created_at: Utc::now(),
-            last_seen: None,
             host: String::new(),
             port: 0,
             device_username: None,
@@ -180,20 +182,19 @@ impl Device {
             region_code: None,
             group_id: None,
             extended: None,
+            is_online: false,
+            has_stream: false,
         }
     }
 
     pub fn set_online(&mut self) {
         self.status = DeviceStatus::Online;
-        self.last_seen = Some(Utc::now());
+        self.is_online = true;
     }
 
     pub fn set_offline(&mut self) {
         self.status = DeviceStatus::Offline;
-    }
-
-    pub fn increment_view_count(&mut self) {
-        self.view_count += 1;
+        self.is_online = false;
     }
 
     pub fn select_source(&self) -> Option<(StreamProtocol, String)> {

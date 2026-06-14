@@ -25,10 +25,8 @@ CREATE TABLE IF NOT EXISTS devices (
     device_tag VARCHAR(255),
     parent_device_tag VARCHAR(255),
     is_public BOOLEAN NOT NULL DEFAULT FALSE,
-    view_count BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_seen TIMESTAMPTZ,
     group_id BIGINT,
     extended JSONB
 );

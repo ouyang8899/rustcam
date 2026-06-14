@@ -190,7 +190,7 @@ pub async fn get_play_links_handler(
 
     let stream_id = format!("live/{}", device.id);
     let token = registry.play_service.generate_token(&device.id.to_string()).await?;
-    let play_links = registry.play_service.build_play_links(&device, &token, &stream_id);
+    let play_links = registry.play_service.build_play_links(&device, &token, &stream_id).await;
 
     Ok(Json(ApiResponse::success(play_links)))
 }

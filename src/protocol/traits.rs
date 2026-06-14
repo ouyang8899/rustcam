@@ -123,7 +123,7 @@ impl ProtocolDeps {
             async fn stop_streams_by_device(&self, _: i64) -> Result<(), AppError> { Ok(()) }
             async fn generate_token(&self, _: &str) -> Result<String, AppError> { Ok("test_token".into()) }
             async fn validate_token(&self, _: &str) -> Option<String> { Some("test_device".into()) }
-            fn build_play_links(&self, device: &crate::domain::Device, token: &str, stream_id: &str) -> crate::domain::device::PlayLinks {
+            async fn build_play_links(&self, device: &crate::domain::Device, token: &str, stream_id: &str) -> crate::domain::device::PlayLinks {
                 crate::domain::device::PlayLinks {
                     token: token.to_string(), stream_id: stream_id.to_string(), expires_at: 0,
                     ports: Default::default(),

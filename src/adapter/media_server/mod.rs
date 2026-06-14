@@ -2,6 +2,47 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use crate::domain::device::PlayLinks;
+use crate::config::MediaServerConfig;
+
+pub fn format_rtsp_auth(auth: Option<(&str, &str)>) -> String {
+    match auth {
+        Some((u, p)) => format!("{}:{}@", u, p),
+        None => String::new(),
+    }
+}
+
+pub fn host_with_port_from_config(config: &MediaServerConfig, protocol: Protocol) -> String {
+    let host = base_host_from_config(config);
+    
+    let port = match protocol {
+        Protocol::Rtsp => config.protocol_ports.rtsp.unwrap_or(554),
+        Protocol::Rtmp => config.protocol_ports.rtmp.unwrap_or(1935),
+        Protocol::Hls | Protocol::Flv | Protocol::WsFlv => {
+            config.protocol_ports.http_flv
+                .or(config.protocol_ports.http)
+                .or(config.protocol_ports.hls)
+                .unwrap_or(8080)
+        },
+        Protocol::WebRTC => {
+            config.protocol_ports.webrtc
+                .or(config.protocol_ports.http)
+                .unwrap_or(8080)
+        },
+    };
+    format!("{}:{}", host, port)
+}
+
+pub fn base_host_from_config(config: &MediaServerConfig) -> String {
+    config.url
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .split(':')
+        .next()
+        .unwrap_or("localhost")
+        .to_string()
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub enum RtpTransport {
     #[default]
@@ -99,6 +140,14 @@ pub trait MediaServerAdapter: Send + Sync {
     async fn open_rtp_server(&self, stream_id: &str, port: u16, transport: RtpTransport) -> anyhow::Result<(u16, String)>;
     async fn close_rtp_server(&self, stream_id: &str) -> anyhow::Result<()>;
     async fn get_media_info(&self, app: &str, stream_key: &str) -> anyhow::Result<Option<serde_json::Value>>;
+    async fn build_play_links(
+        &self,
+        app: &str,
+        stream_key: &str,
+        token: &str,
+        expires_at: i64,
+        rtsp_auth: Option<(&str, &str)>,
+    ) -> anyhow::Result<PlayLinks>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

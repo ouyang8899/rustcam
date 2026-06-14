@@ -35,11 +35,11 @@
             <div class="data-card__body" v-if="groupMode === 'region'">
               <el-skeleton animated :rows="3" :loading="regionLoading">
                 <div class="region-all-item" :class="{ active: selectedRegion === '' }" @click="onRegionAllClick">
-                  全部 <span class="count">{{ totalDeviceCount }}</span>
+                  全部 <span class="count">{{ deviceStore.total }}</span>
                 </div>
                 <el-tree
                   ref="regionTreeRef"
-                  :data="regionTree"
+                  :data="regionStore.regionTree"
                   :props="{ label: 'name', children: 'children' }"
                   node-key="gb28181_code"
                   :default-expand-all="false"
@@ -51,14 +51,14 @@
                     <span>{{ data.name }} ({{ data.device_count || 0 }})</span>
                   </template>
                 </el-tree>
-                <el-empty v-if="!regionLoading && regionTree.length === 0" description="暂无地区数据" :image-size="60" />
+                <el-empty v-if="!regionLoading && regionStore.regionTree.length === 0" description="暂无地区数据" :image-size="60" />
               </el-skeleton>
             </div>
             <div class="data-card__body" v-else>
               <el-button size="small" :icon="Plus" style="margin-bottom: 8px" @click="addRootGroup">新建分组</el-button>
               <el-skeleton animated :rows="3" :loading="groupLoading">
                 <div class="region-all-item" :class="{ active: selectedGroup === '' }" @click="onGroupAllClick">
-                  全部 <span class="count">{{ totalDeviceCount }}</span>
+                  全部 <span class="count">{{ deviceStore.total }}</span>
                 </div>
                 <el-tree
                   ref="groupTreeRef"
@@ -109,7 +109,7 @@
         </el-col>
 
         <el-col :span="18">
-          <el-text type="info" style="margin-bottom: 12px; display: block">共 {{ totalDevices }} 台设备</el-text>
+          <el-text type="info" style="margin-bottom: 12px; display: block">共 {{ deviceStore.total }} 台设备</el-text>
           <div class="data-card">
             <el-skeleton animated :rows="5" :loading="tableLoading">
               <el-table :data="filteredDevices" row-key="id" empty-text="暂无设备">
@@ -144,7 +144,7 @@
                   <el-table-column label="媒体服务器" prop="media_server_name" min-width="120" show-overflow-tooltip />
                   <el-table-column label="操作" width="190" align="center">
                     <template #default="{ row }">
-                      <template v-if="deviceStreamMap.has(row.id)">
+                      <template v-if="row.has_stream">
                         <el-button size="small" disabled>播放</el-button>
                         <el-button size="small" type="primary" plain @click="router.push('/streams')">流</el-button>
                       </template>
@@ -160,8 +160,8 @@
             <el-pagination
               v-if="!tableLoading"
               v-model:current-page="currentPage"
-              :page-size="pageLimit"
-              :total="totalDevices"
+              :page-size="deviceStore.limit"
+              :total="deviceStore.total"
               layout="prev, pager, next"
               style="margin-top: 12px; justify-content: flex-end"
               @current-change="fetchDevices"
@@ -194,7 +194,7 @@
         <el-form-item label="媒体服务器">
           <el-select v-model="form.media_server_name" clearable style="width: 100%">
             <el-option value="">自动选择</el-option>
-            <el-option v-for="s in servers" :key="s.name" :label="`${s.name} (${s.server_type})`" :value="s.name" />
+            <el-option v-for="s in mediaServerStore.servers" :key="s.name" :label="`${s.name} (${s.server_type})`" :value="s.name" />
           </el-select>
         </el-form-item>
 
@@ -492,15 +492,7 @@ const toast = useToast()
 const router = useRouter()
 const route = useRoute()
 
-const deviceStreamMap = computed(() => {
-  const m = new Map()
-  for (const s of streamStore.streams) {
-    if (s.device_id && (s.state === 'Active' || s.state === 'Starting' || s.state === 'Recovering')) {
-      m.set(s.device_id, s)
-    }
-  }
-  return m
-})
+
 
 function protocolColor(protocol) {
   const map = {
@@ -512,12 +504,10 @@ function protocolColor(protocol) {
   return map[protocol] || 'var(--text-muted)'
 }
 
-const tableLoading = ref(false)
-const regionLoading = ref(false)
-const groupLoading = ref(false)
+const tableLoading = computed(() => deviceStore.loading)
+const regionLoading = computed(() => regionStore.loading)
+const groupLoading = computed(() => groupStore.loading)
 
-const devices = ref([])
-const servers = ref([])
 const showModal = ref(false)
 const searchQuery = ref('')
 const protocolFilter = ref('')
@@ -538,29 +528,30 @@ const onvifDiscoverPwd = ref('')
 const onvifRtspUrls = ref([])
 const onvifFetchingProfiles = ref(false)
 const submitting = ref(false)
-const regionTree = ref([])
 const onvifDiscovering = ref(false)
 const gbRegionCascader = ref([])
 const sipIdSuffix = ref('')
-const totalDeviceCount = ref(0)
 const selectedRegion = ref('')
 const groupMode = ref('region')
 const selectedGroup = ref('')
 const regionTreeRef = ref(null)
 const groupTreeRef = ref(null)
-const pageLimit = ref(50)
 const contextmenuVisible = ref(false)
 const contextmenuX = ref(0)
 const contextmenuY = ref(0)
 const contextmenuNode = ref(null)
-const pageOffset = ref(0)
-const totalDevices = ref(0)
-const currentPage = computed(() => Math.floor(pageOffset.value / pageLimit.value) + 1)
+const expandedGroupIds = ref(new Set())
+
+const currentPage = ref(Math.floor(deviceStore.offset / deviceStore.limit) + 1)
+
+watch(currentPage, (page) => {
+  deviceStore.offset = (page - 1) * deviceStore.limit
+})
 
 let copiedTimer = null
 
 const hasGroupData = computed(() => {
-  if (groupMode.value === 'region') return regionTree.value.length > 0
+  if (groupMode.value === 'region') return regionStore.regionTree.length > 0
   return groupStore.groupTree.length > 0
 })
 
@@ -613,7 +604,7 @@ const streamKeyPlaceholder = computed(() => {
 
 const rtspPushServer = computed(() => {
   if (!form.value.media_server_name) return null
-  return servers.value.find(s => s.name === form.value.media_server_name) || null
+  return mediaServerStore.servers.find(s => s.name === form.value.media_server_name) || null
 })
 
 const rtspPushAddress = computed(() => {
@@ -630,7 +621,7 @@ const rtspPushPort = computed(() => {
 
 const rtmpPushServer = computed(() => {
   if (!form.value.media_server_name) return null
-  return servers.value.find(s => s.name === form.value.media_server_name) || null
+  return mediaServerStore.servers.find(s => s.name === form.value.media_server_name) || null
 })
 
 const rtmpPushAddress = computed(() => {
@@ -688,7 +679,7 @@ const availablePlayLinks = computed(() => {
 })
 
 const filteredDevices = computed(() => {
-  return devices.value.filter(device => {
+  return deviceStore.devices.filter(device => {
     const matchesSearch = !searchQuery.value || device.name.toLowerCase().includes(searchQuery.value.toLowerCase())
     const matchesProtocol = !protocolFilter.value || device.protocol === protocolFilter.value
     const matchesStatus = !statusFilter.value || device.status === statusFilter.value
@@ -744,24 +735,16 @@ watch(() => form.value.rtsp_mode, (newMode) => {
 })
 
 onMounted(async () => {
-  tableLoading.value = true
-  regionLoading.value = true
-  groupLoading.value = true
   await Promise.all([fetchDevices(), mediaServerStore.fetchServers(), fetchRegionTree(), fetchGroupTree()])
-  servers.value = mediaServerStore.servers
-  regionTree.value = regionStore.regionTree.map(p => ({ ...p, expanded: false }))
   groupStore.groupTree.forEach(g => g.expanded = false)
   if (groupStore.groupTree.length > 0) {
     expandedGroupIds.value = new Set(groupStore.groupTree.map(n => n.id))
   }
-  tableLoading.value = false
-  regionLoading.value = false
-  groupLoading.value = false
   document.addEventListener('click', closeContextmenu)
 
   const editId = route.query.edit
   if (editId) {
-    const device = devices.value.find(d => String(d.id) === String(editId))
+    const device = deviceStore.devices.find(d => String(d.id) === String(editId))
     if (device) openEditModal(device)
   }
 })
@@ -842,34 +825,15 @@ async function onvifFetchFormProfiles() {
 }
 
 async function fetchDevices() {
-  try {
-    await deviceStore.fetchDevices(pageLimit.value, pageOffset.value)
-    devices.value = deviceStore.devices
-    totalDevices.value = deviceStore.total
-    totalDeviceCount.value = deviceStore.total
-  } finally {
-    tableLoading.value = false
-  }
+  await deviceStore.fetchDevices(deviceStore.limit, deviceStore.offset)
 }
 
 async function fetchRegionTree() {
-  regionLoading.value = true
-  try {
-    await regionStore.fetchRegionTree()
-    regionTree.value = regionStore.regionTree.map(p => ({ ...p, expanded: false }))
-  } finally {
-    regionLoading.value = false
-  }
+  await regionStore.fetchRegionTree()
 }
 
 async function fetchGroupTree() {
-  groupLoading.value = true
-  try {
-    await groupStore.fetchGroupTree()
-    groupStore.groupTree.forEach(g => g.expanded = false)
-  } finally {
-    groupLoading.value = false
-  }
+  await groupStore.fetchGroupTree()
 }
 
 watch(groupMode, () => { selectedRegion.value = ''; selectedGroup.value = '' })
@@ -889,8 +853,6 @@ function closeContextmenu() {
   contextmenuVisible.value = false
   contextmenuNode.value = null
 }
-
-const expandedGroupIds = ref(new Set())
 
 function findParentChain(nodeId, tree, chain = []) {
   for (const node of tree) {

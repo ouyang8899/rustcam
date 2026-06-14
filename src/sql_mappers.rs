@@ -18,9 +18,7 @@ pub struct DeviceRow {
     pub device_tag: Option<String>,
     pub parent_device_tag: Option<String>,
     pub is_public: bool,
-    pub view_count: Option<i64>,
     pub created_at: RbatisDateTime,
-    pub last_seen: Option<RbatisDateTime>,
     pub device_password: Option<String>,
     pub playback_username: Option<String>,
     pub playback_password: Option<String>,
@@ -94,19 +92,13 @@ impl TryFrom<DeviceRow> for Device {
         let created_at = chrono::DateTime::from_timestamp(row.created_at.unix_timestamp(), 0)
             .unwrap_or_else(chrono::Utc::now);
 
-        let last_seen = row.last_seen.as_ref().and_then(|s| {
-            chrono::DateTime::from_timestamp(s.unix_timestamp(), 0)
-        });
-
-        Ok(Device {
+        let device = Device {
             id: row.id,
             name: row.name,
             protocol,
             status,
             is_public: row.is_public,
-            view_count: row.view_count.unwrap_or(0),
             created_at,
-            last_seen,
             host: if row.host.is_empty() { get_str("host").unwrap_or_default() } else { row.host },
             port: row.port.unwrap_or(0) as u16,
             device_username: get_str("device_username"),
@@ -123,7 +115,10 @@ impl TryFrom<DeviceRow> for Device {
             region_code: row.region_code.or_else(|| get_str("region_code")),
             group_id: row.group_id,
             extended: ext.into(),
-        })
+            is_online: false,
+            has_stream: false,
+        };
+        Ok(device)
     }
 }
 

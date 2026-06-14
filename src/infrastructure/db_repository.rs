@@ -172,9 +172,9 @@ impl DbRepository {
             device.device_tag.as_deref(),
             device.parent_device_tag.as_deref(),
             Some(device.is_public),
-            Some(device.view_count),
+            None::<i64>,
             Some(RbatisDateTime::from_timestamp_millis(device.created_at.timestamp_millis())),
-            device.last_seen.as_ref().map(|dt| RbatisDateTime::from_timestamp_millis(dt.timestamp_millis())),
+            None::<RbatisDateTime>,
             device.device_password.as_deref(),
             device.playback_username.as_deref(),
             device.playback_password.as_deref(),
@@ -217,7 +217,13 @@ impl DbRepository {
     }
 
     pub async fn list_devices(&self) -> Vec<Device> {
-        self.devices_cache.iter().map(|r| r.clone()).collect()
+        self.devices_cache.iter()
+            .map(|d| {
+                let mut device = d.clone();
+                device.has_stream = self.device_has_active_stream(device.id);
+                device
+            })
+            .collect()
     }
 
     pub async fn list_devices_paginated(&self, limit: usize, offset: usize, search: Option<&str>) -> Vec<Device> {
@@ -234,8 +240,17 @@ impl DbRepository {
             })
             .skip(offset)
             .take(limit)
-            .map(|r| r.clone())
+            .map(|d| {
+                let mut device = d.clone();
+                device.has_stream = self.device_has_active_stream(device.id);
+                device
+            })
             .collect()
+    }
+
+    pub fn device_has_active_stream(&self, device_id: i64) -> bool {
+        self.streams_cache.iter()
+            .any(|s| s.device_id == device_id && s.state.is_alive())
     }
 
     pub async fn count_devices_filtered(&self, search: Option<&str>) -> usize {
@@ -313,8 +328,8 @@ impl DbRepository {
             device.device_tag.as_deref(),
             device.parent_device_tag.as_deref(),
             Some(device.is_public),
-            Some(device.view_count),
-            device.last_seen.as_ref().map(|dt| RbatisDateTime::from_timestamp_millis(dt.timestamp_millis())),
+            None::<i64>,
+            None::<RbatisDateTime>,
             device.device_password.as_deref(),
             device.playback_username.as_deref(),
             device.playback_password.as_deref(),

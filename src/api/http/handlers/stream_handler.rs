@@ -110,7 +110,7 @@ pub async fn get_stream_play_links_handler(
         .ok_or_else(|| AppError::NotFound(format!("Device {} not found", stream.device_id)))?;
     let play_links = registry.play_service.build_play_links_with_server(
         &device, &stream.token, &stream.stream_key, Some(&stream.media_server_tag), None,
-    );
+    ).await;
     Ok(Json(ApiResponse::success(play_links)))
 }
 
