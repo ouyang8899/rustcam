@@ -34,3 +34,8 @@ export async function stopStream(id) {
   const res = await request.delete(`/streams/${id}`)
   return res.data
 }
+
+export async function restartStream(id) {
+  const res = await request.post(`/streams/${id}/restart`)
+  return res.data
+}

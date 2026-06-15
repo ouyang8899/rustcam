@@ -28,6 +28,16 @@ impl RedisBus {
         })
     }
 
+    pub fn new_disconnected(url: &str) -> Self {
+        let url = url.to_string();
+        tracing::warn!("[Redis] Created disconnected bus for: {}", url);
+        Self {
+            url,
+            conn: Arc::new(RwLock::new(None)),
+            max_retries: 2,
+        }
+    }
+
     async fn create_connection(url: &str) -> anyhow::Result<MultiplexedConnection> {
         let client = Client::open(url)?;
         let conn = timeout(

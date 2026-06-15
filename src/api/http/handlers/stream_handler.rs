@@ -86,6 +86,22 @@ pub async fn stop_stream_handler(
     Ok(Json(ApiResponse::success(())))
 }
 
+/// POST /api/v1/streams/:id/restart
+pub async fn restart_stream_handler(
+    State(state): State<Arc<FullState>>,
+    Path(id): Path<i64>,
+) -> Result<Json<ApiResponse<StreamInfo>>, AppError> {
+    let registry = &state.app.registry;
+    let stream = registry.stream_service.get_stream(id).await?
+        .ok_or_else(|| AppError::NotFound(format!("Stream {} not found", id)))?;
+    
+    let device = registry.device_service.get_device(stream.device_id).await?
+        .ok_or_else(|| AppError::NotFound(format!("Device {} not found", stream.device_id)))?;
+    
+    let stream_info = registry.stream_service.restart_stream_by_id(stream.id).await?;
+    Ok(Json(ApiResponse::success(stream_info)))
+}
+
 /// GET /api/v1/streams/:id/play
 pub async fn get_stream_play_url(
     State(state): State<Arc<FullState>>,

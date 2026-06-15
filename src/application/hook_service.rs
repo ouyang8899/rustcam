@@ -25,47 +25,83 @@ pub enum HookEvent {
     /// 播放事件
     #[serde(rename = "on_play")]
     OnPlay {
+        #[serde(rename = "mediaServerId")]
         media_server_id: String,
+        #[serde(rename = "stream")]
         stream_id: String,
+        #[serde(rename = "ip")]
         ip: Option<String>,
+        #[serde(rename = "port")]
         port: Option<u16>,
+        #[serde(rename = "schema")]
         schema: Option<String>,
-        #[serde(default)]
-        params: Option<HashMap<String, String>>,
+        #[serde(rename = "params", default)]
+        params: Option<String>,
+        #[serde(rename = "app")]
+        app: Option<String>,
+        #[serde(rename = "vhost")]
+        vhost: Option<String>,
     },
 
     /// 心跳事件
     #[serde(rename = "on_keepalive")]
     OnKeepalive {
+        #[serde(rename = "mediaServerId")]
         media_server_id: String,
-        stream_id: String,
+        #[serde(rename = "stream")]
+        stream_id: Option<String>,
+        #[serde(rename = "ip")]
         ip: Option<String>,
     },
 
     /// 停止播放事件
     #[serde(rename = "on_stop")]
     OnStop {
+        #[serde(rename = "mediaServerId")]
         media_server_id: String,
+        #[serde(rename = "stream")]
         stream_id: String,
+        #[serde(rename = "ip")]
         ip: Option<String>,
-        #[serde(default)]
-        params: Option<HashMap<String, String>>,
+        #[serde(rename = "port")]
+        port: Option<u16>,
+        #[serde(rename = "schema")]
+        schema: Option<String>,
+        #[serde(rename = "params", default)]
+        params: Option<String>,
+        #[serde(rename = "app")]
+        app: Option<String>,
+        #[serde(rename = "vhost")]
+        vhost: Option<String>,
     },
 
     /// 推流事件
     #[serde(rename = "on_publish")]
     OnPublish {
+        #[serde(rename = "mediaServerId")]
         media_server_id: String,
+        #[serde(rename = "stream")]
         stream_id: String,
+        #[serde(rename = "ip")]
         ip: Option<String>,
+        #[serde(rename = "app")]
+        app: Option<String>,
+        #[serde(rename = "vhost")]
+        vhost: Option<String>,
+        #[serde(rename = "params", default)]
+        params: Option<String>,
     },
 
     /// RTCP 统计事件
     #[serde(rename = "on_rtcp_stats")]
     OnRtcpStats {
+        #[serde(rename = "mediaServerId")]
         media_server_id: String,
+        #[serde(rename = "stream")]
         stream_id: String,
+        #[serde(rename = "bytesSent")]
         bytes_sent: Option<u64>,
+        #[serde(rename = "bytesReceived")]
         bytes_received: Option<u64>,
     },
 
@@ -75,38 +111,61 @@ pub enum HookEvent {
     #[serde(alias = "on_record_flv")]
     #[serde(alias = "on_record_hls")]
     OnRecordDone {
+        #[serde(rename = "mediaServerId")]
         media_server_id: String,
+        #[serde(rename = "stream")]
         stream_id: String,
+        #[serde(rename = "app")]
         app: String,
+        #[serde(rename = "file_path")]
         file_path: Option<String>,
+        #[serde(rename = "file_size")]
         file_size: Option<u64>,
+        #[serde(rename = "time_len")]
         time_len: Option<f64>,
     },
 
     /// 流量上报事件
     #[serde(rename = "on_flow_report")]
     OnFlowReport {
+        #[serde(rename = "mediaServerId")]
         media_server_id: String,
+        #[serde(rename = "app")]
         app: String,
+        #[serde(rename = "stream")]
         stream: String,
+        #[serde(rename = "ip")]
         ip: Option<String>,
+        #[serde(rename = "port")]
         port: Option<u32>,
+        #[serde(rename = "params")]
         params: Option<String>,
+        #[serde(rename = "duration")]
         duration: Option<u32>,
+        #[serde(rename = "totalBytes")]
         total_bytes: Option<u64>,
+        #[serde(rename = "player")]
         player: Option<bool>,
+        #[serde(rename = "schema")]
         schema: Option<String>,
+        #[serde(rename = "vhost")]
         vhost: Option<String>,
     },
 
     /// HTTP 访问事件
     #[serde(rename = "on_http_access")]
     OnHttpAccess {
+        #[serde(rename = "mediaServerId")]
         media_server_id: String,
+        #[serde(rename = "ip")]
         ip: Option<String>,
+        #[serde(rename = "port")]
         port: Option<u16>,
+        #[serde(rename = "params")]
         params: Option<String>,
+        #[serde(rename = "path")]
         path: Option<String>,
+        #[serde(rename = "is_dir")]
         is_dir: Option<bool>,
         #[serde(flatten)]
         headers: HashMap<String, String>,
@@ -115,7 +174,9 @@ pub enum HookEvent {
     /// RTSP 鉴权领域查询
     #[serde(rename = "on_rtsp_realm")]
     OnRtspRealm {
+        #[serde(rename = "mediaServerId")]
         media_server_id: String,
+        #[serde(rename = "stream")]
         stream_id: String,
         app: Option<String>,
         ip: Option<String>,
@@ -128,7 +189,9 @@ pub enum HookEvent {
     /// RTSP 鉴权事件
     #[serde(rename = "on_rtsp_auth")]
     OnRtspAuth {
+        #[serde(rename = "mediaServerId")]
         media_server_id: String,
+        #[serde(rename = "stream")]
         stream_id: String,
         app: Option<String>,
         ip: Option<String>,
@@ -144,6 +207,7 @@ pub enum HookEvent {
     /// Shell 登录事件
     #[serde(rename = "on_shell_login")]
     OnShellLogin {
+        #[serde(rename = "mediaServerId")]
         media_server_id: String,
         ip: Option<String>,
         port: Option<u16>,
@@ -154,6 +218,7 @@ pub enum HookEvent {
     /// 流变更事件（注册/注销）
     #[serde(rename = "on_stream_changed")]
     OnStreamChanged {
+        #[serde(rename = "mediaServerId")]
         media_server_id: String,
         app: String,
         stream: String,
@@ -173,6 +238,7 @@ pub enum HookEvent {
     /// 流无人观看事件
     #[serde(rename = "on_stream_none_reader")]
     OnStreamNoneReader {
+        #[serde(rename = "mediaServerId")]
         media_server_id: String,
         app: String,
         stream: String,
@@ -183,7 +249,9 @@ pub enum HookEvent {
     /// 流未找到事件
     #[serde(rename = "on_stream_not_found")]
     OnStreamNotFound {
+        #[serde(rename = "mediaServerId")]
         media_server_id: String,
+        #[serde(rename = "stream")]
         stream_id: String,
         app: Option<String>,
         ip: Option<String>,
@@ -196,6 +264,7 @@ pub enum HookEvent {
     /// 服务器启动事件
     #[serde(rename = "on_server_started")]
     OnServerStarted {
+        #[serde(rename = "mediaServerId")]
         media_server_id: String,
         #[serde(flatten)]
         config: HashMap<String, serde_json::Value>,
@@ -204,6 +273,7 @@ pub enum HookEvent {
     /// 服务器心跳事件
     #[serde(rename = "on_server_keepalive")]
     OnServerKeepalive {
+        #[serde(rename = "mediaServerId")]
         media_server_id: String,
         data: Option<ServerKeepaliveData>,
     },
@@ -334,10 +404,13 @@ impl HookService {
                 media_server_id,
                 stream_id,
                 ip,
+                port: _,
+                schema: _,
                 params,
-                ..
+                app,
+                vhost: _,
             } => {
-                self.on_play(&media_server_id, &stream_id, ip.as_deref(), params.as_ref())
+                self.on_play(&media_server_id, &stream_id, ip.as_deref(), params.as_deref(), app.as_deref())
                     .await
             }
 
@@ -346,7 +419,7 @@ impl HookService {
                 stream_id,
                 ip,
             } => {
-                self.on_keepalive(&media_server_id, &stream_id, ip.as_deref())
+                self.on_keepalive(&media_server_id, stream_id.as_deref(), ip.as_deref())
                     .await;
                 HookAction::Allow
             }
@@ -355,10 +428,13 @@ impl HookService {
                 media_server_id,
                 stream_id,
                 ip,
+                port: _,
+                schema: _,
                 params,
-                ..
+                app: _,
+                vhost: _,
             } => {
-                self.on_stop(&media_server_id, &stream_id, ip.as_deref(), params.as_ref())
+                self.on_stop(&media_server_id, &stream_id, ip.as_deref(), params.as_deref())
                     .await;
                 HookAction::Allow
             }
@@ -367,8 +443,11 @@ impl HookService {
                 media_server_id,
                 stream_id,
                 ip,
+                app,
+                vhost: _,
+                params,
             } => {
-                self.on_publish(&media_server_id, &stream_id, ip.as_deref())
+                self.on_publish(&media_server_id, &stream_id, ip.as_deref(), app.as_deref(), params.as_deref())
                     .await;
                 HookAction::Allow
             }
@@ -572,7 +651,8 @@ impl HookService {
         media_server_id: &str,
         stream_id: &str,
         client_ip: Option<&str>,
-        params: Option<&HashMap<String, String>>,
+        params: Option<&str>,
+        _app: Option<&str>,
     ) -> HookAction {
         tracing::info!(
             "[Hook] on_play: server={}, stream={}, ip={:?}",
@@ -581,10 +661,23 @@ impl HookService {
             client_ip
         );
 
+        // 解析 params 为 HashMap (格式: token=xxx&key=value)
+        let params_map: HashMap<String, String> = params
+            .map(|p| {
+                p.split('&')
+                    .filter_map(|pair| {
+                        let mut parts = pair.split('=');
+                        match (parts.next(), parts.next()) {
+                            (Some(k), Some(v)) => Some((k.to_string(), v.to_string())),
+                            _ => None,
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         // 提取 Token
-        let token = params
-            .and_then(|p| p.get("token"))
-            .map(|s| s.as_str());
+        let token = params_map.get("token").map(|s| s.as_str());
 
         let token = match token {
             Some(t) => t,
@@ -646,7 +739,7 @@ impl HookService {
         media_server_id: &str,
         stream_id: &str,
         client_ip: Option<&str>,
-        _params: Option<&HashMap<String, String>>,
+        _params: Option<&str>,
     ) {
         tracing::info!(
             "[Hook] on_stop: server={}, stream={}, ip={:?}",
@@ -682,14 +775,18 @@ impl HookService {
     async fn on_keepalive(
         &self,
         media_server_id: &str,
-        stream_id: &str,
+        stream_id: Option<&str>,
         _client_ip: Option<&str>,
     ) {
         tracing::debug!(
-            "[Hook] on_keepalive: server={}, stream={}",
+            "[Hook] on_keepalive: server={}, stream={:?}",
             media_server_id,
             stream_id
         );
+
+        let Some(stream_id) = stream_id else {
+            return;
+        };
 
         let sessions = self.find_sessions_by_stream(stream_id).await;
         for session in sessions {
@@ -729,6 +826,8 @@ impl HookService {
         media_server_id: &str,
         stream_id: &str,
         client_ip: Option<&str>,
+        _app: Option<&str>,
+        _params: Option<&str>,
     ) {
         tracing::info!(
             "[Hook] on_publish: server={}, stream={}, ip={:?}",

@@ -4,7 +4,9 @@ use crate::adapter::media_server::{MediaServerAdapter, Protocol, RecordingInfo, 
 use crate::adapter::media_server::client::MediaServerClient;
 use crate::config::MediaServerConfig;
 use crate::domain::device::PlayLinks;
-
+use tracing::{info, error,debug, Level};
+use tracing_log::LogTracer;
+use tracing_subscriber::FmtSubscriber;
 pub struct ZlMediaKitAdapter {
     config: MediaServerConfig,
     client: MediaServerClient,
@@ -61,26 +63,36 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
     }
 
     async fn add_stream_proxy(&self, app: &str, stream_key: &str, rtsp_url: &str) -> anyhow::Result<StreamInfo> {
-        #[derive(Serialize)]
-        struct AddProxyReq {
-            vhost: String, app: String, stream: String, url: String, rtp_type: u32, timeout_ms: u32,
+        let vhost = "__defaultVhost__".to_string();
+        let app_str = app.to_string();
+        let stream_str = stream_key.to_string();
+        let url_str = rtsp_url.to_string();
+        let rtp_type = "0".to_string();
+        let timeout_ms = "10000".to_string();
+
+        let params = vec![
+            ("vhost", &vhost),
+            ("app", &app_str),
+            ("stream", &stream_str),
+            ("url", &url_str),
+            ("rtp_type", &rtp_type),
+            ("timeout_ms", &timeout_ms),
+        ];
+
+        let ret_data: serde_json::Value = self.client.get_with_params("/index/api/addStreamProxy", &params).await?;
+        tracing::debug!("/index/api/addStreamProxy return = {}" , ret_data.to_string());
+
+        if let Some(code) = ret_data.get("code").and_then(|v| v.as_i64()) {
+            if code != 0 {
+                let msg = ret_data.get("msg").and_then(|v| v.as_str()).unwrap_or("unknown");
+                anyhow::bail!("ZLMediaKit addStreamProxy failed: code={}, msg={}", code, msg);
+            }
         }
-
-        let req = AddProxyReq {
-            vhost: "__defaultVhost__".to_string(),
-            app: app.to_string(),
-            stream: stream_key.to_string(),
-            url: rtsp_url.to_string(),
-            rtp_type: 0,
-            timeout_ms: 10000,
-        };
-
-        let _: serde_json::Value = self.client.post("/index/api/addStreamProxy", &req).await?;
 
         let (rtsp, rtmp, hls, webrtc) = self.build_urls(app, stream_key);
         Ok(StreamInfo {
             stream_key: stream_key.to_string(),
-            play_url: format!("http://{}/{}", self.host_with_port(Protocol::Hls), stream_key),
+            play_url: format!("http://{}/{}/{}", self.host_with_port(Protocol::Hls),app, stream_key),
             rtsp_url: rtsp, rtmp_url: rtmp, hls_url: hls, webrtc_url: webrtc,
             flv_url: None, web_flv_url: None,
             media_server_id: self.config.name.clone(),

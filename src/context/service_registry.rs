@@ -6,6 +6,7 @@ use crate::application::{
     DeviceService, StreamService, SessionService, RecordingService,
     MediaServerService, HookService, PlayerLayoutService,
     PlayService, WsBroadcaster, StreamRecoveryService,
+    zlmediakit_hook::ZlMediaKitHookHandler,
 };
 use crate::domain::traits::{DeviceLookup, StreamManager, EventPublisher, CacheStore};
 use crate::protocol::traits::ProtocolDeps;
@@ -43,8 +44,11 @@ pub struct ServiceRegistry {
     /// 媒体服务器管理服务
     pub media_server_service: Arc<MediaServerService>,
 
-    /// WebHook 回调服务
+    /// WebHook 回调服务 (旧版兼容)
     pub hook_service: Arc<HookService>,
+
+    /// ZLMediaKit Hook 处理器
+    pub zlmediakit_hook_handler: Arc<ZlMediaKitHookHandler>,
 
     /// 播放器布局服务
     pub player_layout_service: Arc<PlayerLayoutService>,
@@ -124,6 +128,17 @@ impl ServiceRegistry {
             recording_service.clone(),
         ));
 
+        // ZLMediaKit Hook 处理器
+        let zlmediakit_hook_handler = Arc::new(
+            ZlMediaKitHookHandler::from_context(
+                &infra,
+                &media,
+                recording_service.clone(),
+                infra.config().media_servers.servers.first()
+                    .and_then(|s| s.api_key.clone().into()),
+            ).with_stream_recovery_service(stream_recovery_service.clone())
+        );
+
 
 
         // 播放器布局服务
@@ -161,6 +176,7 @@ impl ServiceRegistry {
             recording_service,
             media_server_service,
             hook_service,
+            zlmediakit_hook_handler,
             player_layout_service,
             play_service,
             ws_broadcaster,
@@ -198,6 +214,7 @@ impl ServiceRegistry {
             self.infra.redis.clone(),
             self.media.cluster.clone(),
             self.media_server_service.clone(),
+            Some(self.stream_recovery_service.clone()),
             self.infra.config().cluster.health_check_interval_secs,
         );
         let monitor = std::sync::Arc::new(monitor);

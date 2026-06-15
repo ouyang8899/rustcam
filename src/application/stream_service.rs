@@ -315,6 +315,52 @@ impl StreamService {
         Ok(())
     }
 
+    /// 重启流：先停止再启动
+    pub async fn restart_stream_by_id(&self, stream_id: i64) -> Result<StreamInfo> {
+        let stream = self.get_stream(stream_id).await?
+            .ok_or_else(|| AppError::NotFound(format!("Stream {} not found", stream_id)))?;
+
+        let device = self.infra.db.devices_cache().get(&stream.device_id)
+            .ok_or_else(|| AppError::NotFound(format!("Device {} not found", stream.device_id)))?
+            .clone();
+
+        let tag = stream.media_server_tag.clone();
+        let app = stream.app.clone();
+        let stream_key = stream.stream_key.clone();
+
+        self.stop_stream(&app, &stream_key).await?;
+
+        let adapter = self.media.cluster.get_server(&tag)
+            .ok_or_else(|| AppError::MediaServerError(
+                format!("Media server '{}' not found", tag)
+            ))?;
+
+        let rtsp_url = device.select_source()
+            .map(|(_, url)| {
+                let (user, pass) = match (device.device_username.as_ref(), device.device_password.as_ref()) {
+                    (Some(u), Some(p)) => (u.as_str(), p.as_str()),
+                    _ => return url,
+                };
+                if let Some(stripped) = url.strip_prefix("rtsp://") {
+                    format!("rtsp://{}:{}@{}", user, pass, stripped)
+                } else {
+                    url
+                }
+            })
+            .unwrap_or_default();
+
+        let stream_info = adapter.add_stream_proxy(&app, &stream_key, &rtsp_url).await?;
+
+        let mut updated_stream = stream.clone();
+        updated_stream.start();
+        updated_stream.retry_count = 0;
+        updated_stream.last_error = None;
+        self.infra.db.update_stream(&updated_stream).await?;
+
+        tracing::info!("[StreamService] Stream restarted: {} on {}", stream_key, tag);
+        Ok(stream_info)
+    }
+
     /// 停止设备的所有流
     ///
     /// 包括：设备自身的流 + 推送流（device_id=0但stream_key属于该设备）

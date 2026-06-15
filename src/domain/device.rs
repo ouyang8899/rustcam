@@ -198,12 +198,12 @@ impl Device {
     }
 
     pub fn select_source(&self) -> Option<(StreamProtocol, String)> {
-        self.push_urls
+        self.pull_urls
             .iter()
             .min_by_key(|p| p.priority)
             .map(|p| (p.protocol, p.url.clone()))
             .or_else(|| {
-                self.pull_urls
+                self.push_urls
                     .iter()
                     .min_by_key(|p| p.priority)
                     .map(|p| (p.protocol, p.url.clone()))
@@ -216,6 +216,14 @@ impl Device {
                     .filter(|url| !url.is_empty())
                     .map(|url| (StreamProtocol::Rtsp, url.to_string()))
             })
+    }
+
+    pub fn is_push_mode(&self) -> bool {
+        !self.push_urls.is_empty()
+    }
+
+    pub fn is_pull_mode(&self) -> bool {
+        self.push_urls.is_empty() && !self.pull_urls.is_empty()
     }
 
     pub fn recording_config(&self) -> RecordingConfig {

@@ -18,12 +18,12 @@ impl PostgresAuthRepository {
         let rb = RBatis::new();
         rb.init(PgDriver {}, database_url).ok();
         let repo = Self { rb };
-        repo.init_tables().await?;
-        repo.seed_default_data().await?;
+        repo.init_tables().await;
+        repo.seed_default_data().await;
         Ok(repo)
     }
 
-    async fn init_tables(&self) -> anyhow::Result<()> {
+    async fn init_tables(&self) {
         let tables = [
             "CREATE TABLE IF NOT EXISTS permissions (id UUID PRIMARY KEY, name VARCHAR(255) NOT NULL UNIQUE, description TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS roles (id UUID PRIMARY KEY, name VARCHAR(255) NOT NULL UNIQUE, description TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
@@ -31,33 +31,54 @@ impl PostgresAuthRepository {
             "CREATE TABLE IF NOT EXISTS user_roles (user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE, PRIMARY KEY (user_id, role_id))",
             "CREATE TABLE IF NOT EXISTS role_permissions (role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE, permission_id UUID NOT NULL REFERENCES permissions(id) ON DELETE CASCADE, PRIMARY KEY (role_id, permission_id))",
         ];
-        for sql in tables { self.rb.exec(sql, vec![]).await?; }
-        Ok(())
+        for sql in tables {
+            if let Err(e) = self.rb.exec(sql, vec![]).await {
+                tracing::warn!("[AuthDB] init_tables warning (may already exist): {}", e);
+            }
+        }
+        tracing::info!("[AuthDB] init_tables completed");
     }
 
-    async fn seed_default_data(&self) -> anyhow::Result<()> {
-        let count: Vec<Value> = self.rb.exec_decode("SELECT COUNT(*) as c FROM users WHERE username = 'admin'", vec![]).await?;
-        if !count.is_empty() && count[0]["c"].as_i64().unwrap_or(0) > 0 { return Ok(()); }
+    async fn seed_default_data(&self) {
+        let count: Vec<Value> = match self.rb.exec_decode("SELECT COUNT(*) as c FROM users WHERE username = 'admin'", vec![]).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!("[AuthDB] seed_default_data skipped (table not ready): {}", e);
+                return;
+            }
+        };
+        if !count.is_empty() && count[0]["c"].as_i64().unwrap_or(0) > 0 { return; }
 
         let now = chrono::Utc::now().to_rfc3339();
         let admin_role_id = Uuid::new_v4();
         let admin_user_id = Uuid::new_v4();
 
-        self.rb.exec("INSERT INTO roles (id, name, description, created_at, updated_at) VALUES ($1::uuid, $2, $3, $4, $5)",
-                     vec![rbs::value![admin_role_id.to_string(), "Admin", "Administrator", now.clone(), now.clone()]]).await.ok();
+        if let Err(e) = self.rb.exec("INSERT INTO roles (id, name, description, created_at, updated_at) VALUES ($1::uuid, $2, $3, $4, $5)",
+                     vec![rbs::value![admin_role_id.to_string(), "Admin", "Administrator", now.clone(), now.clone()]]).await {
+            tracing::warn!("[AuthDB] seed_default_data (role may exist): {}", e);
+        }
 
         let hasher = argon2::Argon2::default();
         let salt = argon2::password_hash::SaltString::generate(&mut rand::thread_rng());
-        let hash = hasher.hash_password("admin123".as_bytes(), &salt).map_err(|e| anyhow::anyhow!("{}", e))?.to_string();
+        let hash = match hasher.hash_password("admin123".as_bytes(), &salt) {
+            Ok(h) => h.to_string(),
+            Err(e) => {
+                tracing::warn!("[AuthDB] seed_default_data (hash failed): {}", e);
+                return;
+            }
+        };
 
-        self.rb.exec("INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES ($1::uuid, $2, $3, $4, $5)",
-                     vec![rbs::value![admin_user_id.to_string(), "admin", hash, now.clone(), now.clone()]]).await.ok();
+        if let Err(e) = self.rb.exec("INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES ($1::uuid, $2, $3, $4, $5)",
+                     vec![rbs::value![admin_user_id.to_string(), "admin", hash, now.clone(), now.clone()]]).await {
+            tracing::warn!("[AuthDB] seed_default_data (user may exist): {}", e);
+        }
 
-        self.rb.exec("INSERT INTO user_roles (user_id, role_id) VALUES ($1::uuid, $2::uuid)",
-                     vec![rbs::value![admin_user_id.to_string(), admin_role_id.to_string()]]).await.ok();
+        if let Err(e) = self.rb.exec("INSERT INTO user_roles (user_id, role_id) VALUES ($1::uuid, $2::uuid)",
+                     vec![rbs::value![admin_user_id.to_string(), admin_role_id.to_string()]]).await {
+            tracing::warn!("[AuthDB] seed_default_data (user_roles may exist): {}", e);
+        }
 
-        tracing::info!("Default admin user created: admin / admin123");
-        Ok(())
+        tracing::info!("[AuthDB] seed_default_data completed");
     }
 }
 

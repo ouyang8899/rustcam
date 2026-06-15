@@ -114,6 +114,13 @@ pub enum SignalEvent {
         device_tag: Option<String>,
         channels: Vec<CatalogChannel>,
     },
+    MediaServerOnline {
+        media_server_tag: String,
+    },
+    MediaServerOffline {
+        media_server_tag: String,
+        reason: Option<String>,
+    },
 }
 impl SignalEvent {
     /// 获取事件类型字符串
@@ -135,6 +142,8 @@ impl SignalEvent {
             SignalEvent::QueryDeviceInfo { .. } => "query_device_info".to_string(),
             SignalEvent::QueryDeviceStatus { .. } => "query_device_status".to_string(),
             SignalEvent::CatalogResponse { .. } => "catalog_response".to_string(),
+            SignalEvent::MediaServerOnline { .. } => "media_server_online".to_string(),
+            SignalEvent::MediaServerOffline { .. } => "media_server_offline".to_string(),
         }
     }
 }

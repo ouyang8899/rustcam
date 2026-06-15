@@ -13,12 +13,14 @@
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
-        <el-select v-model="stateFilter" clearable placeholder="全部状态" style="width: 110px">
+        <el-select v-model="stateFilter" clearable placeholder="全部状态" style="width: 120px">
           <el-option value="Active" label="活跃" />
           <el-option value="Idle" label="空闲" />
           <el-option value="Starting" label="启动中" />
           <el-option value="Stopping" label="停止中" />
+          <el-option value="Recovering" label="恢复中" />
           <el-option value="Error" label="错误" />
+          <el-option value="Stopped" label="已停止" />
         </el-select>
         <el-button :icon="Refresh" :loading="streamStore.loading" @click="fetchStreams">刷新</el-button>
         <el-button type="primary" :icon="Plus" @click="showAddModal = true">添加流</el-button>
@@ -41,7 +43,7 @@
             </template>
           </el-table-column>
           <el-table-column label="设备ID" prop="device_id" width="100" align="center" />
-          <el-table-column label="状态" width="100" align="center">
+          <el-table-column label="状态" width="110" align="center">
             <template #default="{ row }">
               <el-tag :type="stateType(row.state)" size="small">{{ stateLabel(row.state) }}</el-tag>
             </template>
@@ -56,7 +58,7 @@
           </el-table-column>
           <el-table-column label="媒体服务器" width="150" align="center">
             <template #default="{ row }">
-              {{ row.media_server_id || '-' }}
+              {{ row.media_server_tag || '-' }}
             </template>
           </el-table-column>
           <el-table-column label="创建时间" width="180" align="center">
@@ -64,10 +66,23 @@
               {{ formatTime(row.created_at) }}
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="160" align="center" fixed="right">
+          <el-table-column label="操作" width="200" align="center" fixed="right">
             <template #default="{ row }">
               <el-button size="small" type="primary" plain @click.stop="$router.push(`/streams/${row.id}`)">详情</el-button>
-              <el-button size="small" type="danger" plain @click.stop="confirmStop(row)">停止</el-button>
+              <el-button 
+                v-if="row.state === 'Idle' || row.state === 'Stopped' || row.state === 'Error'" 
+                size="small" 
+                type="success" 
+                plain 
+                @click.stop="confirmStart(row)"
+              >启动</el-button>
+              <el-button 
+                v-if="row.state === 'Active' || row.state === 'Starting' || row.state === 'Recovering'" 
+                size="small" 
+                type="danger" 
+                plain 
+                @click.stop="confirmStop(row)"
+              >停止</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -199,13 +214,20 @@ async function confirmStop(stream) {
   } catch {}
 }
 
+async function confirmStart(stream) {
+  try {
+    await ElMessageBox.confirm(`确定启动流 "${stream.stream_key || stream.id}" 吗？`, '确认启动', { type: 'warning' })
+    await streamStore.restartStream(stream.id)
+  } catch {}
+}
+
 function stateType(state) {
-  const map = { Active: 'success', Idle: 'info', Starting: 'warning', Stopping: 'warning', Error: 'danger' }
+  const map = { Active: 'success', Idle: 'info', Starting: 'warning', Stopping: 'warning', Recovering: 'warning', Error: 'danger', Stopped: 'info' }
   return map[state] || 'info'
 }
 
 function stateLabel(state) {
-  const map = { Active: '活跃', Idle: '空闲', Starting: '启动中', Stopping: '停止中', Error: '错误' }
+  const map = { Active: '活跃', Idle: '空闲', Starting: '启动中', Stopping: '停止中', Recovering: '恢复中', Error: '错误', Stopped: '已停止' }
   return map[state] || state
 }
 

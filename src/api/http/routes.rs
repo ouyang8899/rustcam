@@ -2,6 +2,7 @@ use std::sync::Arc;
 use axum::{
     Router,
     routing::{get, post, put, delete},
+    extract::Path,
 };
 use crate::api::state::FullState;
 use crate::api::http::handlers::{
@@ -71,6 +72,7 @@ fn protected_routes(state: Arc<FullState>) -> Router {
         .route("/api/v1/streams/{id}/play", get(stream_handler::get_stream_play_url))
         .route("/api/v1/streams/{id}/play-links", get(stream_handler::get_stream_play_links_handler))
         .route("/api/v1/streams/{id}/online", get(stream_handler::is_stream_online_handler))
+        .route("/api/v1/streams/{id}/restart", post(stream_handler::restart_stream_handler))
 
         // 服务器管理
         .route("/api/v1/servers", get(server_handler::list_servers_handler))
@@ -149,6 +151,9 @@ fn public_routes(state: Arc<FullState>) -> Router {
         .route("/", get(root_handler))
         .route("/api/v1/health", get(health_handler))
         .route("/api/v1/metrics", get(metrics_handler))
+        // ZLMediaKit hook 事件路由：/hook/{event_name}
+        .route("/hook/{event_name}", get(hook_handler).post(hook_handler))
+        // 兼容：所有事件发到同一个 URL
         .route("/hook", get(hook_handler).post(hook_handler))
         .route("/api/v1/auth/login", post(crate::auth::handlers::login))
         .route("/api/v1/auth/refresh", post(crate::auth::handlers::refresh))
@@ -188,25 +193,29 @@ async fn metrics_handler(
 
 async fn hook_handler(
     State(state): State<Arc<FullState>>,
+    Path(event_name): Path<String>,
     Json(body): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
-    tracing::debug!("[Hook] Received: {:?}", body);
+    tracing::debug!("[Hook] Received event={}, body={}", event_name, serde_json::to_string_pretty(&body).unwrap_or_default());
+
+    // 构建完整事件 JSON（注入 event 字段）
+    let mut map = serde_json::Map::new();
+    if let Some(obj) = body.as_object() {
+        for (k, v) in obj {
+            map.insert(k.clone(), v.clone());
+        }
+    }
+    map.insert("event".to_string(), serde_json::Value::String(event_name.clone()));
+    let event_json = serde_json::Value::Object(map);
 
     // 解析事件
-    match serde_json::from_value::<crate::application::hook_service::HookEvent>(body.clone()) {
+    match serde_json::from_value::<crate::application::zlmediakit_hook::ZlMediaKitHookEvent>(event_json) {
         Ok(event) => {
-            let action = state.app.registry.hook_service.handle(event).await;
-            match action {
-                crate::application::hook_service::HookAction::Allow => {
-                    Json(serde_json::json!({ "code": 0, "msg": "ok" }))
-                }
-                crate::application::hook_service::HookAction::Deny(msg) => {
-                    Json(serde_json::json!({ "code": 1, "msg": msg }))
-                }
-            }
+            let response = state.app.registry.zlmediakit_hook_handler.handle(event).await;
+            Json(serde_json::to_value(response).unwrap_or(serde_json::json!({ "code": 0, "msg": "ok" })))
         }
-        Err(_) => {
-            // 无法解析事件，默认允许
+        Err(e) => {
+            tracing::warn!("[Hook] Failed to parse event={}: {}", event_name, e);
             Json(serde_json::json!({ "code": 0, "msg": "ok" }))
         }
     }

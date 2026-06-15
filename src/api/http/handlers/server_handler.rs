@@ -87,6 +87,11 @@ pub async fn create_server_handler(
 
     registry.media.cluster.register_server(server.to_config());
 
+    if server.enabled {
+        registry.stream_recovery_service.mark_streams_recovering_for_media_server(&server.server_tag).await;
+        registry.stream_recovery_service.recover_streams_for_media_server(&server.server_tag).await;
+    }
+
     Ok(Json(ApiResponse::success(serde_json::json!({
         "id": server.id,
         "name": server.name,
@@ -145,6 +150,11 @@ pub async fn update_server_handler(
 
     registry.media.cluster.unregister_server(&old.name);
     registry.media.cluster.register_server(server.to_config());
+
+    if server.enabled {
+        registry.stream_recovery_service.mark_streams_recovering_for_media_server(&server.server_tag).await;
+        registry.stream_recovery_service.recover_streams_for_media_server(&server.server_tag).await;
+    }
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "id": server.id,
@@ -217,6 +227,9 @@ pub async fn enable_server_handler(
     let updated = registry.media_server_service.update_enabled(&tag, true)
         .ok_or_else(|| AppError::NotFound(format!("Server {} not found", tag)))?;
     registry.media.cluster.set_server_enabled(&updated.name, true);
+
+    registry.stream_recovery_service.mark_streams_recovering_for_media_server(&updated.server_tag).await;
+    registry.stream_recovery_service.recover_streams_for_media_server(&updated.server_tag).await;
 
     Ok(Json(ApiResponse::success(serde_json::json!({
         "id": updated.id, "name": updated.name, "enabled": updated.enabled,

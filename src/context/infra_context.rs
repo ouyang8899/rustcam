@@ -27,11 +27,13 @@ impl InfraContext {
                 .map_err(|e| anyhow::anyhow!("Failed to initialize database: {}", e))?
         );
 
-        let redis = Arc::new(
-            RedisStore::new(&config.redis.url)
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to initialize Redis: {}", e))?
-        );
+        let redis = match RedisStore::new(&config.redis.url).await {
+            Ok(r) => Arc::new(r),
+            Err(e) => {
+                tracing::warn!("[InfraContext] Redis connection failed (will retry later): {}", e);
+                Arc::new(RedisStore::new_placeholder(&config.redis.url))
+            }
+        };
 
         let event_bus = Arc::new(EventBus::new());
         let metrics = Arc::new(Metrics::new());

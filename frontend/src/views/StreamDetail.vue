@@ -14,7 +14,22 @@
         </div>
         <div class="header-right">
           <el-button :icon="Refresh" size="small" :loading="loading" @click="fetchData">刷新</el-button>
-          <el-button type="danger" plain size="small" :loading="stopping" @click="confirmStop">停止流</el-button>
+          <el-button 
+            v-if="stream?.state === 'Error' || stream?.state === 'Recovering' || stream?.state === 'Idle' || stream?.state === 'Stopped'" 
+            type="success" 
+            plain 
+            size="small" 
+            :loading="starting" 
+            @click="confirmRestart"
+          >重启</el-button>
+          <el-button 
+            v-if="stream?.state === 'Active' || stream?.state === 'Starting'" 
+            type="danger" 
+            plain 
+            size="small" 
+            :loading="stopping" 
+            @click="confirmStop"
+          >停止流</el-button>
         </div>
       </div>
 
@@ -82,6 +97,15 @@
               <el-descriptions-item label="状态">
                 <el-tag :type="stateType(stream.state)" size="small">{{ stateLabel(stream.state) }}</el-tag>
               </el-descriptions-item>
+              <el-descriptions-item label="自动恢复">
+                <el-tag size="small" :type="stream.auto_recover ? 'success' : 'info'">
+                  {{ stream.auto_recover ? '是' : '否' }}
+                </el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="重试次数">{{ stream.retry_count || 0 }} / {{ stream.max_retries || 20 }}</el-descriptions-item>
+              <el-descriptions-item label="错误信息" v-if="stream.last_error">
+                <span style="color: var(--color-danger); font-size: 12px;">{{ stream.last_error }}</span>
+              </el-descriptions-item>
               <el-descriptions-item label="观看人数">{{ stream.viewer_count || 0 }}</el-descriptions-item>
               <el-descriptions-item label="媒体服务器">{{ stream.media_server_id }}</el-descriptions-item>
               <el-descriptions-item label="设备 ID">{{ stream.device_id }}</el-descriptions-item>
@@ -90,19 +114,52 @@
           </el-card>
 
           <el-card shadow="never" style="margin-top: 16px">
-            <template #header>设备信息</template>
+            <template #header>
+              <span>设备信息</span>
+              <el-button text size="small" style="float: right" @click="$router.push(`/devices/${device.id}`)">
+                查看详情
+              </el-button>
+            </template>
             <div v-if="device">
               <el-descriptions :column="1" border size="small">
                 <el-descriptions-item label="名称">{{ device.name }}</el-descriptions-item>
-                <el-descriptions-item label="协议">{{ device.protocol }}</el-descriptions-item>
+                <el-descriptions-item label="协议">
+                  <el-tag size="small">{{ device.protocol }}</el-tag>
+                </el-descriptions-item>
                 <el-descriptions-item label="状态">
                   <span class="status-dot" :class="device.status?.toLowerCase()" />
                   {{ device.status }}
                 </el-descriptions-item>
+                <el-descriptions-item label="设备地址">{{ device.host }}:{{ device.port }}</el-descriptions-item>
+                <el-descriptions-item label="媒体服务器">{{ device.media_server_tag || '-' }}</el-descriptions-item>
+                <el-descriptions-item label="应用">{{ device.app || '-' }}</el-descriptions-item>
+                <el-descriptions-item label="流标识">{{ device.stream_key || '-' }}</el-descriptions-item>
+                <el-descriptions-item label="设备标签">{{ device.device_tag || '-' }}</el-descriptions-item>
+                <el-descriptions-item label="父设备">{{ device.parent_device_tag || '-' }}</el-descriptions-item>
+                <el-descriptions-item label="公开流">
+                  <el-tag size="small" :type="device.is_public ? 'success' : 'info'">
+                    {{ device.is_public ? '是' : '否' }}
+                  </el-tag>
+                </el-descriptions-item>
+                <el-descriptions-item label="有流">
+                  <el-tag size="small" :type="device.has_stream ? 'success' : 'info'">
+                    {{ device.has_stream ? '是' : '否' }}
+                  </el-tag>
+                </el-descriptions-item>
+                <el-descriptions-item label="创建时间">{{ formatTime(device.created_at) }}</el-descriptions-item>
+                <el-descriptions-item label="推流地址" v-if="device.push_urls?.length">
+                  <div v-for="(url, i) in device.push_urls" :key="i" class="url-item">
+                    <el-tag size="small" type="warning">{{ url.protocol }}</el-tag>
+                    <span class="url-text">{{ url.url }}</span>
+                  </div>
+                </el-descriptions-item>
+                <el-descriptions-item label="拉流地址" v-if="device.pull_urls?.length">
+                  <div v-for="(url, i) in device.pull_urls" :key="i" class="url-item">
+                    <el-tag size="small" type="info">{{ url.protocol }}</el-tag>
+                    <span class="url-text">{{ url.url }}</span>
+                  </div>
+                </el-descriptions-item>
               </el-descriptions>
-              <el-button type="primary" plain size="small" style="margin-top: 12px; width: 100%" @click="$router.push(`/devices/${device.id}`)">
-                查看设备详情
-              </el-button>
             </div>
             <el-skeleton v-else animated :rows="3" />
           </el-card>
@@ -134,6 +191,7 @@ const deviceStore = useDeviceStore()
 const id = computed(() => Number(route.params.id))
 const loading = ref(false)
 const stopping = ref(false)
+const starting = ref(false)
 const previewLoading = ref(false)
 const playingUrl = ref('')
 const playingType = ref('auto')
@@ -143,12 +201,12 @@ const device = ref(null)
 const playerRef = ref(null)
 
 const stateType = (state) => {
-  const map = { Active: 'success', Idle: 'info', Starting: 'warning', Stopping: 'warning', Error: 'danger' }
+  const map = { Active: 'success', Idle: 'info', Starting: 'warning', Stopping: 'warning', Recovering: 'warning', Error: 'danger', Stopped: 'info' }
   return map[state] || 'info'
 }
 
 const stateLabel = (state) => {
-  const map = { Active: '活跃', Idle: '空闲', Starting: '启动中', Stopping: '停止中', Error: '错误', Stopped: '已停止' }
+  const map = { Active: '活跃', Idle: '空闲', Starting: '启动中', Stopping: '停止中', Recovering: '恢复中', Error: '错误', Stopped: '已停止' }
   return map[state] || state
 }
 
@@ -235,6 +293,20 @@ async function confirmStop() {
   }
 }
 
+async function confirmRestart() {
+  try {
+    await ElMessageBox.confirm('确定重启此流吗？', '确认', { type: 'warning' })
+    starting.value = true
+    await streamStore.restartStream(id.value)
+    ElMessage.success('流已启动')
+    await fetchData()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('启动失败')
+  } finally {
+    starting.value = false
+  }
+}
+
 function formatTime(ts) {
   if (!ts) return '-'
   const d = new Date(ts)
@@ -262,4 +334,5 @@ onUnmounted(() => {
 .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: var(--space-1); }
 .status-dot.online { background: var(--color-success); }
 .status-dot.offline { background: var(--text-muted); }
+.url-item { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 </style>

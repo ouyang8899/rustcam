@@ -16,6 +16,12 @@ impl RedisStore {
         Ok(Self { bus })
     }
 
+    pub fn new_placeholder(url: &str) -> Self {
+        Self {
+            bus: RedisBus::new_disconnected(url),
+        }
+    }
+
     #[cfg(test)]
     pub fn new_mock() -> Self {
         // Mock 实现用于测试

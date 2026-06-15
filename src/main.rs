@@ -91,7 +91,7 @@ fn create_adapter_registry(_deps: ProtocolDeps) -> AdapterRegistry {
 /// 初始化日志系统
 fn init_tracing() {
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
+        .with_max_level(Level::TRACE)
         .with_target(false)
         .with_thread_ids(true)
         .with_file(true)

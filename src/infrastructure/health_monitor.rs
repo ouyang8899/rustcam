@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use crate::adapter::media_server::MediaServerAdapter;
 use crate::application::media_server_service::MediaServerService;
+use crate::application::StreamRecoveryService;
 use crate::domain::traits::CacheStore;
 use crate::infrastructure::RedisStore;
 use crate::infrastructure::cluster::ClusterManager;
@@ -14,6 +15,7 @@ pub struct HealthMonitor {
     redis: Arc<RedisStore>,
     cluster: Arc<ClusterManager>,
     media_server_service: Arc<MediaServerService>,
+    stream_recovery_service: Option<Arc<StreamRecoveryService>>,
     interval_secs: u64,
 }
 
@@ -22,12 +24,14 @@ impl HealthMonitor {
         redis: Arc<RedisStore>,
         cluster: Arc<ClusterManager>,
         media_server_service: Arc<MediaServerService>,
+        stream_recovery_service: Option<Arc<StreamRecoveryService>>,
         interval_secs: u64,
     ) -> Self {
         Self {
             redis,
             cluster,
             media_server_service,
+            stream_recovery_service,
             interval_secs,
         }
     }
@@ -37,7 +41,14 @@ impl HealthMonitor {
 
         tokio::spawn(async move {
             tracing::info!("[HealthMonitor] Started (interval: {}s)", self.interval_secs);
-
+            let cluster_tags = self.cluster.get_all_server_tags().clone();
+            for  config_tag in &cluster_tags {
+                if let Some(ref svc) = self.stream_recovery_service {
+                    tracing::info!("[HealthMonitor] Triggering stream recovery for server {}", config_tag);
+                   // svc.mark_streams_recovering_for_media_server(&config_tag).await;
+                    svc.restart_streams_for_media_server(&config_tag).await;
+                }
+            }
             loop {
                 let start = std::time::Instant::now();
                 self.sync_servers().await;
@@ -76,6 +87,12 @@ impl HealthMonitor {
                             // 在线且启用但不在 cluster 中 → 注册
                             self.cluster.register_server(server.to_config());
                             tracing::info!("[HealthMonitor] Server {} registered to cluster (online)", tag);
+
+                            // 触发该媒体服务器上的流恢复
+                            if let Some(ref svc) = self.stream_recovery_service {
+                                tracing::info!("[HealthMonitor] Restarting streams on server {}", tag);
+                                svc.restart_streams_for_media_server(&tag).await;
+                            }
                         }
                         self.update_server_status(&tag, &status).await;
                     } else {

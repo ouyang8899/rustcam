@@ -54,6 +54,17 @@ export const useStreamStore = defineStore('streams', {
       ElMessage.success('流已停止')
     },
 
+    async restartStream(id) {
+      this.loading = true
+      try {
+        await api.restartStream(id)
+        await this.fetchStreams()
+        ElMessage.success('流已启动')
+      } finally {
+        this.loading = false
+      }
+    },
+
     hasActiveStream(deviceId) {
       return this.streams.some(s => s.device_id === deviceId && (s.state === 'Active' || s.state === 'Starting' || s.state === 'Recovering'))
     },

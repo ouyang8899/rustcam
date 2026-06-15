@@ -157,8 +157,16 @@ impl DeviceService {
             SignalEvent::DeviceKeepalive { device_id: _, device_tag, timestamp: _ } => {
                 let tag = device_tag.as_deref().unwrap_or("");
                 if let Some(mut device) = infra.db.get_device_by_device_tag(tag).await {
+                    let was_offline = device.status == crate::domain::DeviceStatus::Offline;
                     device.set_online();
                     infra.db.update_device(&device).await?;
+                    infra.ws_broadcaster.device_online(device.id);
+                    if was_offline {
+                        let _ = infra.publish_event(SignalEvent::DeviceOnline {
+                            device_id: device.id,
+                            device_tag: Some(tag.to_string()),
+                        }).await;
+                    }
                 }
             }
 
