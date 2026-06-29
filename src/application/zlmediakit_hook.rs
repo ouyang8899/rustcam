@@ -15,6 +15,14 @@ pub struct HookResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub msg: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub err: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub second: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub close: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub realm: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encrypted: Option<bool>,
@@ -65,11 +73,21 @@ impl HookResponse {
             ..Default::default()
         }
     }
+
+    pub fn http_access(path: &str, second: u32) -> Self {
+        Self {
+            code: 0,
+            err: Some(String::new()),
+            path: Some(path.to_string()),
+            second: Some(second),
+            ..Default::default()
+        }
+    }
 }
 
 impl Default for HookResponse {
     fn default() -> Self {
-        Self { code: 0, msg: None, realm: None, encrypted: None, passwd: None, enable_hls: None, enable_rtmp: None, enable_rtsp: None, enable_mp4: None, enable_audio: None, add_mute_audio: None, mp4_save_path: None, hls_save_path: None }
+        Self { code: 0, msg: None, err: None, path: None, second: None, close: None, realm: None, encrypted: None, passwd: None, enable_hls: None, enable_rtmp: None, enable_rtsp: None, enable_mp4: None, enable_audio: None, add_mute_audio: None, mp4_save_path: None, hls_save_path: None }
     }
 }
 
@@ -592,80 +610,13 @@ impl ZlMediaKitHookHandler {
     }
 
     async fn on_play(&self, media_server_tag: &str, stream: &str, ip: Option<&String>, params: Option<&String>, _app: Option<&String>) -> HookResponse {
-        tracing::debug!("[ZlMediaKit Hook] on_play: server={}, stream={}, ip={:?}, params={:?}", 
+        tracing::info!("[ZlMediaKit Hook] on_play: server={}, stream={}, ip={:?}, params={:?}", 
             media_server_tag, stream, ip, params);
-
-        // 验证 secret（管理员免鉴权）
-        if self.validate_secret(params.map(|s| s.as_str())) {
-            tracing::debug!("[ZlMediaKit Hook] on_play: admin access, skipping token validation");
-            return HookResponse::allow();
-        }
-
-        // 验证 media_server_tag
-        if self.validate_media_server(media_server_tag).is_none() {
-            tracing::warn!("[ZlMediaKit Hook] on_play: unknown media_server_tag={}", media_server_tag);
-            return HookResponse::deny("Unknown media server");
-        }
-
-        // 解析 token
-        let params_map = Self::parse_params(params.map(|s| s.as_str()));
-        let token = match params_map.get("token").map(|s| s.as_str()) {
-            Some(t) => t,
-            None => {
-                tracing::warn!("[ZlMediaKit Hook] on_play: no token for stream={}", stream);
-                return HookResponse::deny("Missing token");
-            }
-        };
-
-        // 验证 token
-        let stream_obj = match self.repo.get_stream_by_token(token).await {
-            Ok(Some(s)) => s,
-            Ok(None) => {
-                tracing::warn!("[ZlMediaKit Hook] on_play: invalid token for stream={}", stream);
-                return HookResponse::deny("Invalid token");
-            }
-            Err(e) => {
-                tracing::error!("[ZlMediaKit Hook] on_play: failed to get stream by token: {}", e);
-                return HookResponse::deny("Internal error");
-            }
-        };
-
-        // 验证 stream 匹配
-        if stream_obj.stream_key != stream {
-            tracing::warn!("[ZlMediaKit Hook] on_play: stream mismatch, token={} vs stream={}", stream, stream_obj.stream_key);
-            return HookResponse::deny("Stream mismatch");
-        }
-
-        // 更新观看人数
-        if let Err(e) = self.increment_stream_viewers(&stream_obj.stream_key).await {
-            tracing::warn!("[ZlMediaKit Hook] on_play: failed to increment viewers: {}", e);
-        }
-
-        // 创建会话
-        let mut session = crate::domain::Session::new(
-            crate::domain::SessionType::Play,
-            stream_obj.device_id,
-            0,
-        );
-        session.state = crate::domain::SessionState::Active;
-        session.client_ip = ip.cloned();
-        session.media_server_id = Some(media_server_tag.to_string());
-        session.stream_id = stream_obj.stream_key.clone();
-        session.refresh_expiry(self.session_expiry_secs);
-
-        if let Err(e) = self.repo.create_session(&session).await {
-            tracing::error!("[ZlMediaKit Hook] on_play: failed to create session: {}", e);
-            return HookResponse::deny("Failed to create session");
-        }
-
-        self.repo.sessions_cache().insert(session.id, session);
-        tracing::debug!("[ZlMediaKit Hook] on_play: session created, stream={}", stream);
-
         HookResponse::allow()
     }
 
     async fn on_publish(&self, media_server_tag: &str, stream: &str, ip: Option<&String>, _app: Option<&String>, params: Option<&String>) -> HookResponse {
-        tracing::debug!("[ZlMediaKit Hook] on_publish: server={}, stream={}, ip={:?}, params={:?}", 
+        tracing::info!("[ZlMediaKit Hook] on_publish: server={}, stream={}, ip={:?}, params={:?}", 
             media_server_tag, stream, ip, params);
 
         // 验证 secret
@@ -690,7 +641,7 @@ impl ZlMediaKitHookHandler {
     }
 
     async fn on_stop(&self, media_server_tag: &str, stream: &str, _ip: Option<&String>, _params: Option<&String>) -> HookResponse {
-        tracing::debug!("[ZlMediaKit Hook] on_stop: server={}, stream={}", media_server_tag, stream);
+        tracing::info!("[ZlMediaKit Hook] on_stop: server={}, stream={}", media_server_tag, stream);
 
         let sessions = self.find_sessions_by_stream(stream).await;
         for session in sessions {
@@ -752,7 +703,7 @@ impl ZlMediaKitHookHandler {
     }
 
     async fn on_record_done(&self, media_server_tag: &str, stream: &str, _app: &str, file_path: Option<&String>, file_size: Option<u64>, time_len: Option<f64>) -> HookResponse {
-        tracing::debug!("[ZlMediaKit Hook] on_record_done: server={}, stream={}, file={:?}, size={:?}, duration={:?}", 
+        tracing::info!("[ZlMediaKit Hook] on_record_done: server={}, stream={}, file={:?}, size={:?}, duration={:?}", 
             media_server_tag, stream, file_path, file_size, time_len);
 
         let filename = file_path
@@ -772,25 +723,26 @@ impl ZlMediaKitHookHandler {
     }
 
     async fn on_record_ts(&self, media_server_tag: &str, stream: &str, app: &str, schema: Option<&str>, file_path: Option<&String>, file_size: Option<u64>, segment_index: Option<u32>, segment_duration: Option<f64>) -> HookResponse {
-        tracing::debug!("[ZlMediaKit Hook] on_record_ts: server={}, stream={}, app={}, schema={:?}, file={:?}, size={:?}, segment={:?}, duration={:?}", 
+        tracing::info!("[ZlMediaKit Hook] on_record_ts: server={}, stream={}, app={}, schema={:?}, file={:?}, size={:?}, segment={:?}, duration={:?}", 
             media_server_tag, stream, app, schema, file_path, file_size, segment_index, segment_duration);
 
         HookResponse::allow()
     }
 
     async fn on_flow_report(&self, media_server_tag: &str, stream: &str, ip: Option<&String>, duration: Option<u32>, total_bytes: Option<u64>, player: Option<bool>) -> HookResponse {
-        tracing::debug!("[ZlMediaKit Hook] on_flow_report: server={}, stream={}, player={:?}, bytes={:?}, duration={:?}", 
+        tracing::info!("[ZlMediaKit Hook] on_flow_report: server={}, stream={}, player={:?}, bytes={:?}, duration={:?}", 
             media_server_tag, stream, player, total_bytes, duration);
         HookResponse::allow()
     }
 
     async fn on_http_access(&self, media_server_tag: &str, ip: Option<&String>, path: Option<&String>) -> HookResponse {
-        tracing::debug!("[ZlMediaKit Hook] on_http_access: server={}, path={:?}, ip={:?}", media_server_tag, path, ip);
-        HookResponse::allow()
+        tracing::info!("[ZlMediaKit Hook] on_http_access: server={}, path={:?}, ip={:?}", media_server_tag, path, ip);
+        let allowed_path = path.map(|s| s.as_str()).unwrap_or("");
+        HookResponse::http_access(allowed_path, 600)
     }
 
     async fn on_rtsp_realm(&self, media_server_tag: &str, stream: &str, ip: Option<&String>, params: Option<&String>) -> HookResponse {
-        tracing::debug!("[ZlMediaKit Hook] on_rtsp_realm: server={}, stream={}, ip={:?}", media_server_tag, stream, ip);
+        tracing::info!("[ZlMediaKit Hook] on_rtsp_realm: server={}, stream={}, ip={:?}", media_server_tag, stream, ip);
 
         // 如果启用了 secret 验证且参数匹配，直接返回空 realm（不需要鉴权）
         if self.validate_secret(params.map(|s| s.as_str())) {
@@ -810,7 +762,7 @@ impl ZlMediaKitHookHandler {
     }
 
     async fn on_rtsp_auth(&self, media_server_tag: &str, stream: &str, ip: Option<&String>, user_name: Option<&str>, params: Option<&String>) -> HookResponse {
-        tracing::debug!("[ZlMediaKit Hook] on_rtsp_auth: server={}, stream={}, user={:?}", media_server_tag, stream, user_name);
+        tracing::info!("[ZlMediaKit Hook] on_rtsp_auth: server={}, stream={}, user={:?}", media_server_tag, stream, user_name);
 
         // 验证 secret
         if self.validate_secret(params.map(|s| s.as_str())) {
@@ -846,12 +798,12 @@ impl ZlMediaKitHookHandler {
     }
 
     async fn on_shell_login(&self, media_server_tag: &str, ip: Option<&String>, user_name: Option<&str>) -> HookResponse {
-        tracing::debug!("[ZlMediaKit Hook] on_shell_login: server={}, user={:?}", media_server_tag, user_name);
+        tracing::info!("[ZlMediaKit Hook] on_shell_login: server={}, user={:?}", media_server_tag, user_name);
         HookResponse::allow()
     }
 
     async fn on_stream_changed(&self, media_server_tag: &str, app: &str, stream: &str, regist: bool) -> HookResponse {
-        tracing::debug!("[ZlMediaKit Hook] on_stream_changed: server={}, app={}, stream={}, regist={}", 
+        tracing::info!("[ZlMediaKit Hook] on_stream_changed: server={}, app={}, stream={}, regist={}", 
             media_server_tag, app, stream, regist);
 
         if !regist {
@@ -880,13 +832,13 @@ impl ZlMediaKitHookHandler {
     }
 
     async fn on_stream_none_reader(&self, media_server_tag: &str, app: &str, stream: &str) -> HookResponse {
-        tracing::debug!("[ZlMediaKit Hook] on_stream_none_reader: server={}, app={}, stream={}", 
+        tracing::info!("[ZlMediaKit Hook] on_stream_none_reader: server={}, app={}, stream={}", 
             media_server_tag, app, stream);
         HookResponse::allow()
     }
 
     async fn on_stream_not_found(&self, media_server_tag: &str, stream: &str, ip: Option<&String>) -> HookResponse {
-        tracing::debug!("[ZlMediaKit Hook] on_stream_not_found: server={}, stream={}, ip={:?}", 
+        tracing::info!("[ZlMediaKit Hook] on_stream_not_found: server={}, stream={}, ip={:?}", 
             media_server_tag, stream, ip);
         HookResponse::allow()
     }
@@ -919,13 +871,13 @@ impl ZlMediaKitHookHandler {
     }
 
     async fn on_send_rtp_stopped(&self, media_server_tag: &str, stream_id: Option<&str>, local_port: Option<u16>, ssrc: Option<&str>, ip: Option<&String>, rtp: Option<bool>) -> HookResponse {
-        tracing::debug!("[ZlMediaKit Hook] on_send_rtp_stopped: server={}, stream_id={:?}, port={:?}, ssrc={:?}, ip={:?}, rtp={:?}", 
+        tracing::info!("[ZlMediaKit Hook] on_send_rtp_stopped: server={}, stream_id={:?}, port={:?}, ssrc={:?}, ip={:?}, rtp={:?}", 
             media_server_tag, stream_id, local_port, ssrc, ip, rtp);
         HookResponse::allow()
     }
 
     async fn on_rtp_server_timeout(&self, media_server_tag: &str, stream_id: Option<&str>) -> HookResponse {
-        tracing::debug!("[ZlMediaKit Hook] on_rtp_server_timeout: server={}, stream_id={:?}", 
+        tracing::info!("[ZlMediaKit Hook] on_rtp_server_timeout: server={}, stream_id={:?}", 
             media_server_tag, stream_id);
         HookResponse::allow()
     }

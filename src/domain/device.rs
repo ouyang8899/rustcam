@@ -319,6 +319,7 @@ pub struct UpdateDeviceRequest {
     pub group_id: Option<i64>,
     pub is_public: Option<bool>,
     pub extended: Option<serde_json::Value>,
+    pub status: Option<DeviceStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

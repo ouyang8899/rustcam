@@ -45,7 +45,7 @@ impl HealthMonitor {
             for  config_tag in &cluster_tags {
                 if let Some(ref svc) = self.stream_recovery_service {
                     tracing::info!("[HealthMonitor] Triggering stream recovery for server {}", config_tag);
-                   // svc.mark_streams_recovering_for_media_server(&config_tag).await;
+                    svc.mark_streams_recovering_for_media_server(&config_tag).await;
                     svc.restart_streams_for_media_server(&config_tag).await;
                 }
             }

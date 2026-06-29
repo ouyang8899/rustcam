@@ -365,6 +365,14 @@ pub async fn server_select_by_id(
 }
 
 #[html_sql("sql/server.html")]
+pub async fn server_select_by_tag(
+    rb: &dyn rbatis::Executor,
+    server_tag: &str,
+) -> rbatis::Result<Option<ServerRow>> {
+    impled!()
+}
+
+#[html_sql("sql/server.html")]
 pub async fn server_select_by_name(
     rb: &dyn rbatis::Executor,
     name: &str,
@@ -670,7 +678,6 @@ pub struct StreamRow {
     pub app: String,
     pub token: Option<String>,
     pub state: String,
-    pub auto_recover: Option<bool>,
     pub retry_count: Option<i32>,
     pub max_retries: Option<i32>,
     pub last_error: Option<String>,
@@ -709,7 +716,6 @@ impl TryFrom<StreamRow> for Stream {
             app: row.app,
             token: row.token.unwrap_or_default(),
             state,
-            auto_recover: row.auto_recover.unwrap_or(true),
             retry_count: row.retry_count.unwrap_or(0) as u8,
             max_retries: row.max_retries.unwrap_or(5) as u8,
             last_error: row.last_error.clone(),
@@ -732,7 +738,6 @@ impl Stream {
             app: self.app.clone(),
             token: Some(self.token.clone()),
             state: self.state.to_string(),
-            auto_recover: Some(self.auto_recover),
             retry_count: Some(self.retry_count as i32),
             max_retries: Some(self.max_retries as i32),
             last_error: self.last_error.clone(),
@@ -745,14 +750,14 @@ impl Stream {
     }
 }
 
-#[sql("SELECT id, device_id, media_server_tag, stream_key, app, token, state, auto_recover, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams ORDER BY created_at DESC")]
+#[sql("SELECT id, device_id, media_server_tag, stream_key, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams ORDER BY created_at DESC")]
 pub async fn stream_select_all(
     rb: &dyn rbatis::Executor,
 ) -> rbatis::Result<Vec<StreamRow>> {
     impled!()
 }
 
-#[sql("SELECT id, device_id, media_server_tag, stream_key, app, token, state, auto_recover, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams WHERE id = $1")]
+#[sql("SELECT id, device_id, media_server_tag, stream_key, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams WHERE id = $1")]
 pub async fn stream_select_by_id(
     rb: &dyn rbatis::Executor,
     id: i64,
@@ -760,7 +765,7 @@ pub async fn stream_select_by_id(
     impled!()
 }
 
-#[sql("SELECT id, device_id, media_server_tag, stream_key, app, token, state, auto_recover, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams WHERE token = $1")]
+#[sql("SELECT id, device_id, media_server_tag, stream_key, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams WHERE token = $1")]
 pub async fn stream_select_by_token(
     rb: &dyn rbatis::Executor,
     token: &str,
@@ -768,7 +773,7 @@ pub async fn stream_select_by_token(
     impled!()
 }
 
-#[sql("INSERT INTO streams (device_id, media_server_tag, stream_key, app, token, state, auto_recover, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id")]
+#[sql("INSERT INTO streams (device_id, media_server_tag, stream_key, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id")]
 pub async fn stream_insert(
     rb: &dyn rbatis::Executor,
     device_id: i64,
@@ -777,7 +782,6 @@ pub async fn stream_insert(
     app: &str,
     token: Option<&str>,
     state: &str,
-    auto_recover: Option<bool>,
     retry_count: Option<i32>,
     max_retries: Option<i32>,
     last_error: Option<String>,
@@ -797,7 +801,6 @@ pub async fn stream_update(
     media_server_tag: Option<String>,
     stream_key: Option<&str>,
     state: Option<&str>,
-    auto_recover: Option<bool>,
     retry_count: Option<i32>,
     max_retries: Option<i32>,
     last_error: Option<String>,

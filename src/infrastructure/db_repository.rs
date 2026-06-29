@@ -17,7 +17,7 @@ use crate::sql_mappers::{
     device_select_by_parent_device_tag,
     group_select_all, group_insert, group_update, group_delete,
     region_select_all, region_select_children,
-    server_insert, server_update, server_delete_by_id,
+    server_insert, server_update, server_delete_by_id, server_select_by_tag,
     session_insert, session_delete_by_id,
     stream_insert, stream_update, stream_select_by_token, stream_delete_by_device_id,
     recording_insert, recording_update, recording_delete_by_id,
@@ -58,7 +58,25 @@ impl DbRepository {
         Ok(repo)
     }
 
-    async fn load_caches(&self) -> anyhow::Result<()> {
+    pub async fn new_without_load(url: &str, debug_sql: bool) -> anyhow::Result<Self> {
+        let rb = RBatis::new();
+        rb.init(rbdc_pg::driver::PgDriver {}, url).ok();
+        if debug_sql {
+            tracing::info!("[DB] debug_sql enabled - SQL will be logged at INFO level");
+        }
+        let repo = Self {
+            rb,
+            devices_cache: Arc::new(DashMap::new()),
+            servers_cache: Arc::new(DashMap::new()),
+            sessions_cache: Arc::new(DashMap::new()),
+            streams_cache: Arc::new(DashMap::new()),
+            streams_by_key_cache: Arc::new(DashMap::new()),
+            recordings_cache: Arc::new(DashMap::new()),
+        };
+        Ok(repo)
+    }
+
+    pub async fn load_caches(&self) -> anyhow::Result<()> {
         let devices = device_select_all(self.rb.acquire().await?.rb_ref())
             .await
             .map_err(|e| anyhow::anyhow!("load devices: {}", e))?;
@@ -520,7 +538,7 @@ impl DbRepository {
 
     pub async fn create_server(&self, server: &Server) -> Result<i64> {
         let protocol_ports_json = serde_json::to_value(&server.protocol_ports).unwrap_or(serde_json::Value::Object(Default::default()));
-        let result = server_insert(
+        server_insert(
             self.rb.acquire().await?.rb_ref(),
             Some(&server.name),
             Some(&server.url),
@@ -532,21 +550,14 @@ impl DbRepository {
             Some(protocol_ports_json),
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
 
-        let id = result.last_insert_id.as_i64().unwrap_or(0);
-        self.servers_cache.insert(id, ServerRow {
-            id,
-            name: server.name.clone(),
-            url: server.url.clone(),
-            api_key: server.api_key.clone(),
-            server_type: server.server_type.to_string(),
-            weight: server.weight as i32,
-            enabled: server.enabled,
-            server_tag: server.server_tag.clone(),
-            protocol_ports: serde_json::to_value(&server.protocol_ports).unwrap_or_default(),
-            created_at: RbatisDateTime::from_timestamp_millis(server.created_at.timestamp_millis()),
-            updated_at: RbatisDateTime::from_timestamp_millis(server.updated_at.timestamp_millis()),
-        });
-        Ok(id)
+        // 查询刚插入的记录获取实际 id
+        let row = server_select_by_tag(self.rb.acquire().await?.rb_ref(), &server.server_tag)
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .ok_or_else(|| AppError::Internal("Failed to get inserted server".to_string()))?;
+
+        self.servers_cache.insert(row.id, row.clone());
+        Ok(row.id)
     }
 
     pub async fn update_server(&self, server: &Server) -> Result<()> {
@@ -585,6 +596,17 @@ impl DbRepository {
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         self.servers_cache.remove(&id);
         Ok(())
+    }
+
+    pub async fn server_exists_by_tag(&self, tag: &str) -> anyhow::Result<bool> {
+        match server_select_by_tag(self.rb.acquire().await?.rb_ref(), tag).await {
+            Ok(Some(_)) => Ok(true),
+            Ok(None) => Ok(false),
+            Err(e) => {
+                tracing::warn!("[DbRepository] server_exists_by_tag failed: {}", e);
+                Ok(false)
+            }
+        }
     }
 
     // ─── Session methods ──────────────────────────────────────────────
@@ -656,7 +678,6 @@ impl DbRepository {
             &stream.app,
             Some(&stream.token),
             &stream.state.to_string(),
-            Some(stream.auto_recover),
             Some(stream.retry_count as i32),
             Some(stream.max_retries as i32),
             stream.last_error.clone(),
@@ -708,7 +729,6 @@ impl DbRepository {
                 Some(stream.media_server_tag.clone()),
                 Some(&stream.stream_key),
                 Some(&stream.state.to_string()),
-                Some(stream.auto_recover),
                 Some(stream.retry_count as i32),
                 Some(stream.max_retries as i32),
                 stream.last_error.clone(),

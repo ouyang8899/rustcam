@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use tokio::sync::RwLock;
 use dashmap::DashMap;
 use crate::context::{InfraContext, MediaContext};
-use crate::domain::{Device, DeviceStatus, Protocol, CreateDeviceRequest, UpdateDeviceRequest};
+use crate::domain::{Device, DeviceStatus, Protocol, CreateDeviceRequest, UpdateDeviceRequest, StreamState};
 use crate::domain::traits::{CacheStoreExt, DeviceLookup};
 use crate::domain::region::{Region, RegionNode};
 use crate::domain::device_group::{DeviceGroup, DeviceGroupNode, CreateGroupRequest, UpdateGroupRequest};
@@ -16,19 +16,22 @@ use crate::protocol::event::{SignalEvent, ProtocolType, PtzCommand};
 use crate::protocol::onvif::OnvifPtzService;
 use crate::protocol::adapter_manager;
 use crate::domain::{PullUrl, StreamProtocol};
+use crate::application::StreamService;
 
 pub struct DeviceService {
     infra: InfraContext,
     media: MediaContext,
+    stream_service: Arc<StreamService>,
     shutdown_tx: Arc<RwLock<Option<tokio::sync::watch::Sender<()>>>>,
     ptz_last_cmd: Arc<DashMap<i64, Instant>>,
 }
 
 impl DeviceService {
-    pub fn new(infra: InfraContext, media: MediaContext) -> Self {
+    pub fn new(infra: InfraContext, media: MediaContext, stream_service: Arc<StreamService>) -> Self {
         Self {
             infra,
             media,
+            stream_service,
             shutdown_tx: Arc::new(RwLock::new(None)),
             ptz_last_cmd: Arc::new(DashMap::new()),
         }
@@ -719,6 +722,9 @@ impl DeviceService {
         if let Some(v) = req.region_code { device.region_code = Some(v); }
         if let Some(v) = req.group_id { device.group_id = Some(v); }
         if let Some(v) = req.is_public { device.is_public = v; }
+        
+        let status_changed_to_maintaining = req.status.map(|s| s == DeviceStatus::Maintaining).unwrap_or(false);
+        if let Some(v) = req.status { device.status = v; }
 
         // 处理 extended 字段 - 合并请求中的 extended
         if let Some(req_extended) = req.extended {
@@ -734,7 +740,45 @@ impl DeviceService {
         }
 
         self.infra.db.update_device(&device).await?;
+
+        // 如果设备进入维护状态，停止关联的流
+        if status_changed_to_maintaining {
+            tracing::info!("[DeviceService] Device {} entered Maintaining status, stopping associated streams", id);
+            if let Err(e) = self.stream_service.stop_streams_by_device(id).await {
+                tracing::warn!("[DeviceService] Failed to stop streams for device {} in maintenance: {}", id, e);
+            }
+        }
+
         Ok(device)
+    }
+
+    pub async fn sync_device_status_from_stream(&self, device_id: i64, stream_state: StreamState) -> Result<()> {
+        let mut device = match self.infra.db.get_device(device_id).await? {
+            Some(d) => d,
+            None => return Ok(()),
+        };
+
+        if device.status == DeviceStatus::Maintaining {
+            tracing::debug!("[DeviceService] Device {} is in Maintaining status, skipping sync", device_id);
+            return Ok(());
+        }
+
+        let new_status = match stream_state {
+            StreamState::Active | StreamState::Starting | StreamState::Recovering => DeviceStatus::Online,
+            StreamState::Error => DeviceStatus::Error,
+            StreamState::Idle | StreamState::Stopping | StreamState::Stopped => DeviceStatus::Offline,
+        };
+
+        if device.status != new_status {
+            tracing::info!(
+                "[DeviceService] Syncing device {} status: {} -> {} (stream state: {:?})",
+                device_id, device.status, new_status, stream_state
+            );
+            device.status = new_status;
+            self.infra.db.update_device(&device).await?;
+        }
+
+        Ok(())
     }
 
     pub async fn delete_device(&self, id: i64) -> Result<()> {
@@ -1171,6 +1215,7 @@ impl Clone for DeviceService {
         Self {
             infra: self.infra.clone(),
             media: self.media.clone(),
+            stream_service: self.stream_service.clone(),
             shutdown_tx: Arc::new(RwLock::new(None)),
             ptz_last_cmd: self.ptz_last_cmd.clone(),
         }

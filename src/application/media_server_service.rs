@@ -115,8 +115,7 @@ impl MediaServerService {
     /// # 参数
     /// * `repo` - 数据库仓库
     /// * `cluster` - 集群管理器
-    /// * `config_servers` - 配置文件中的服务器列表
-    pub fn new(repo: Arc<DbRepository>, cluster: Arc<ClusterManager>, config_servers: Vec<MediaServerConfig>) -> Self {
+    pub fn new(repo: Arc<DbRepository>, cluster: Arc<ClusterManager>) -> Self {
         let servers = Arc::new(DashMap::new());
 
         // 从数据库加载已有服务器
@@ -154,38 +153,13 @@ impl MediaServerService {
                 "[MediaServerService]   DB server: tag={}, name={}",
                 ms.server_tag, ms.name
             );
-            servers.insert(ms.server_tag.clone(), ms);
-        }
-
-        // 加载配置文件中的服务器（配置优先）
-        for cfg in config_servers {
-            let server_type = ServerType::from_str(&cfg.server_type)
-                .unwrap_or(ServerType::Zlmediakit);
-
-            let tag = if cfg.server_tag.is_empty() {
-                cfg.name.clone()
-            } else {
-                cfg.server_tag.clone()
-            };
-
-            let ms = ManagedServer {
-                id: 0,
-                name: cfg.name,
-                url: cfg.url,
-                api_key: cfg.api_key,
-                server_type,
-                weight: cfg.weight,
-                enabled: cfg.enabled,
-                server_tag: tag,
-                protocol_ports: cfg.protocol_ports,
-                created_at: chrono::Utc::now(),
-            };
-
-            tracing::info!(
-                "[MediaServerService]   Config server: tag={}, name={}, type={}",
-                ms.server_tag, ms.name, ms.server_type
-            );
-            servers.insert(ms.server_tag.clone(), ms);
+            servers.insert(ms.server_tag.clone(), ms.clone());
+            
+            // 注册数据库服务器到集群
+            if ms.enabled {
+                cluster.register_server(ms.to_config());
+                tracing::info!("[MediaServerService]   DB server {} registered to cluster", ms.server_tag);
+            }
         }
 
         tracing::info!(
@@ -314,6 +288,13 @@ impl MediaServerService {
                     "[MediaServerService] Failed to persist server update: {}",
                     e
                 );
+            }
+
+            // 重新注册到集群（更新 adapter 的配置缓存）
+            self.cluster.unregister_server(&updated.server_tag);
+            if updated.enabled {
+                self.cluster.register_server(updated.to_config());
+                tracing::info!("[MediaServerService] Server {} re-registered to cluster with updated config", updated.server_tag);
             }
 
             tracing::info!(

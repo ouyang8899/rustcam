@@ -2,6 +2,7 @@ use std::sync::Arc;
 use crate::config::AppConfig;
 use crate::context::{InfraContext, MediaContext};
 use crate::infrastructure::cluster::ClusterManager;
+use crate::infrastructure::db_repository::DbRepository;
 use crate::application::{
     DeviceService, StreamService, SessionService, RecordingService,
     MediaServerService, HookService, PlayerLayoutService,
@@ -69,18 +70,88 @@ impl ServiceRegistry {
         tracing::info!("[ServiceRegistry] Building service registry...");
 
         // ── 第1层: 基础设施上下文 ──
-        let infra = InfraContext::new(config).await?;
+        // 先创建 DbRepository（不加载缓存）
+        let db = Arc::new(
+            DbRepository::new_without_load(&config.database.url, config.database.debug_sql.unwrap_or(false))
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to initialize database: {}", e))?
+        );
+
+        // 同步配置服务器到数据库（load_caches 之前）
+        for cfg in &config.media_servers.servers {
+            let tag = if cfg.server_tag.is_empty() {
+                cfg.name.clone()
+            } else {
+                cfg.server_tag.clone()
+            };
+
+            let exists_in_db = db.server_exists_by_tag(&tag).await?;
+            if !exists_in_db {
+                tracing::info!("[ServiceRegistry] Syncing config server '{}' to DB", tag);
+                let new_server = crate::domain::server::Server {
+                    id: 0,
+                    name: cfg.name.clone(),
+                    url: cfg.url.clone(),
+                    api_key: cfg.api_key.clone(),
+                    server_type: crate::domain::server::ServerType::from_str(&cfg.server_type).unwrap_or(crate::domain::server::ServerType::Zlmediakit),
+                    weight: cfg.weight,
+                    enabled: cfg.enabled,
+                    server_tag: tag.clone(),
+                    protocol_ports: cfg.protocol_ports.clone(),
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
+                };
+                if let Err(e) = db.create_server(&new_server).await {
+                    tracing::warn!("[ServiceRegistry] Failed to sync config server to DB: {}", e);
+                }
+            }
+        }
+
+        // 加载缓存
+        db.load_caches().await?;
+
+        // 构建 InfraContext
+        let infra = InfraContext::from_parts(db.clone(), Arc::new(config)).await?;
 
         // ── 第2层: 媒体上下文 ──
-        let cluster = Arc::new(ClusterManager::new_from_configs(
-            infra.config().media_servers.servers.clone(),
-        ));
+        let cluster = Arc::new(ClusterManager::new_from_configs(vec![]));
 
-        // 媒体服务器管理服务
+        // 先同步配置服务器到数据库（直接查数据库）
+        for cfg in &infra.config().media_servers.servers {
+            let tag = if cfg.server_tag.is_empty() {
+                cfg.name.clone()
+            } else {
+                cfg.server_tag.clone()
+            };
+
+            // 直接查数据库
+            let exists_in_db = infra.db.server_exists_by_tag(&tag).await?;
+
+            if !exists_in_db {
+                tracing::info!("[ServiceRegistry] Syncing config server '{}' to DB", tag);
+                let new_server = crate::domain::server::Server {
+                    id: 0,
+                    name: cfg.name.clone(),
+                    url: cfg.url.clone(),
+                    api_key: cfg.api_key.clone(),
+                    server_type: crate::domain::server::ServerType::from_str(&cfg.server_type).unwrap_or(crate::domain::server::ServerType::Zlmediakit),
+                    weight: cfg.weight,
+                    enabled: cfg.enabled,
+                    server_tag: tag.clone(),
+                    protocol_ports: cfg.protocol_ports.clone(),
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
+                };
+                if let Err(e) = infra.db.create_server(&new_server).await {
+                    tracing::warn!("[ServiceRegistry] Failed to sync config server to DB: {}", e);
+                }
+            }
+        }
+
+        // 媒体服务器管理服务（从数据库加载）
         let media_server_service = Arc::new(MediaServerService::new(
             infra.db.clone(),
             cluster.clone(),
-            infra.config().media_servers.servers.clone(),
         ));
 
         let media = MediaContext::new(&infra, cluster,media_server_service.clone()).await?;
@@ -111,6 +182,7 @@ impl ServiceRegistry {
         let device_service = Arc::new(DeviceService::new(
             infra.clone(),
             media.clone(),
+            stream_service.clone(),
         ));
 
         // 会话服务
@@ -129,13 +201,15 @@ impl ServiceRegistry {
         ));
 
         // ZLMediaKit Hook 处理器
+        let zlm_api_key = media_server_service.list().iter()
+            .find(|s| s.server_type == crate::domain::server::ServerType::Zlmediakit)
+            .map(|s| s.api_key.clone());
         let zlmediakit_hook_handler = Arc::new(
             ZlMediaKitHookHandler::from_context(
                 &infra,
                 &media,
                 recording_service.clone(),
-                infra.config().media_servers.servers.first()
-                    .and_then(|s| s.api_key.clone().into()),
+                zlm_api_key,
             ).with_stream_recovery_service(stream_recovery_service.clone())
         );
 

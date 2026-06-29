@@ -221,7 +221,7 @@ const playLinkRows = computed(() => {
   return rows
 })
 
-const protocolMap = { 'HLS': 'hls', 'FLV': 'flv', 'WebFLV': 'flv', 'RTSP': 'rtsp', 'WebRTC': 'webrtc' }
+const protocolMap = { 'HLS': 'hls', 'FLV': 'flv', 'WebFLV': 'wsflv', 'RTSP': 'rtsp', 'WebRTC': 'webrtc' }
 
 const playLinksFromStore = computed(() => playLinks.value)
 
@@ -252,7 +252,13 @@ async function startPreview() {
     return
   }
   playingUrl.value = playLinks.value.hls || playLinks.value.flv || playLinks.value.web_flv
-  playingType.value = playingUrl.value.includes('.m3u8') ? 'hls' : 'flv'
+  if (playingUrl.value.includes('.m3u8')) {
+    playingType.value = 'hls'
+  } else if (playingUrl.value.startsWith('ws://') || playingUrl.value.startsWith('wss://')) {
+    playingType.value = 'wsflv'
+  } else {
+    playingType.value = 'flv'
+  }
 }
 
 function playProtocol(protocol, url) {

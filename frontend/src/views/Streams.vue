@@ -79,10 +79,10 @@
               <el-button 
                 v-if="row.state === 'Active' || row.state === 'Starting' || row.state === 'Recovering'" 
                 size="small" 
-                type="danger" 
+                type="warning" 
                 plain 
-                @click.stop="confirmStop(row)"
-              >停止</el-button>
+                @click.stop="confirmMaintenance(row)"
+              >维护</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -124,10 +124,12 @@ import { useRoute } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { Search, Refresh, Plus, User } from '@element-plus/icons-vue'
 import { useStreamStore } from '../stores/streamStore'
+import { useDeviceStore } from '../stores/deviceStore'
 import DataCard from '../components/common/DataCard.vue'
 
 const route = useRoute()
 const streamStore = useStreamStore()
+const deviceStore = useDeviceStore()
 const streams = ref([])
 const showAddModal = ref(false)
 const addForm = ref({ deviceId: '', rtspUrl: '' })
@@ -207,10 +209,10 @@ async function addStream() {
   }
 }
 
-async function confirmStop(stream) {
+async function confirmMaintenance(stream) {
   try {
-    await ElMessageBox.confirm(`确定停止流 "${stream.stream_key || stream.id}" 吗？`, '确认停止', { type: 'warning' })
-    await streamStore.stopStream(stream.id)
+    await ElMessageBox.confirm(`确定让设备 "${stream.device_id}" 进入维护状态吗？`, '确认维护', { type: 'warning' })
+    await deviceStore.updateDevice(stream.device_id, { status: 'Maintaining' })
   } catch {}
 }
 

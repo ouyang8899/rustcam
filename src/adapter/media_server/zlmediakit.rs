@@ -28,7 +28,7 @@ impl ZlMediaKitAdapter {
         let http_host = self.host_with_port(Protocol::Hls);
         let rtsp = format!("rtsp://{}/{}/{}", rtsp_host, app, stream_key);
         let rtmp = format!("rtmp://{}/{}/{}", rtmp_host, app, stream_key);
-        let hls = format!("http://{}/{}/{}.m3u8", http_host, app, stream_key);
+        let hls = format!("http://{}/{}/{}/hls.m3u8", http_host, app, stream_key);
         let webrtc = format!("http://{}/webrtc/play/{}/{}", http_host, app, stream_key);
         (rtsp, rtmp, hls, webrtc)
     }
@@ -82,8 +82,16 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         let ret_data: serde_json::Value = self.client.get_with_params("/index/api/addStreamProxy", &params).await?;
         tracing::debug!("/index/api/addStreamProxy return = {}" , ret_data.to_string());
 
-        if let Some(code) = ret_data.get("code").and_then(|v| v.as_i64()) {
-            if code != 0 {
+        if let Some(code_val) = ret_data.get("code") {
+            let code = code_val.as_i64().unwrap_or(0);
+            if code == -1 {
+                let msg = ret_data.get("msg").and_then(|v| v.as_str()).unwrap_or("");
+                if msg.contains("already exists") || msg.contains("该流已经存在") {
+                    tracing::info!("[ZlMediaKit] Stream {} already exists, treating as success", stream_key);
+                } else {
+                    anyhow::bail!("ZLMediaKit addStreamProxy failed: code={}, msg={}", code, msg);
+                }
+            } else if code != 0 {
                 let msg = ret_data.get("msg").and_then(|v| v.as_str()).unwrap_or("unknown");
                 anyhow::bail!("ZLMediaKit addStreamProxy failed: code={}, msg={}", code, msg);
             }
@@ -92,7 +100,7 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         let (rtsp, rtmp, hls, webrtc) = self.build_urls(app, stream_key);
         Ok(StreamInfo {
             stream_key: stream_key.to_string(),
-            play_url: format!("http://{}/{}/{}", self.host_with_port(Protocol::Hls),app, stream_key),
+            play_url: format!("http://{}/{}/{}/hls.m3u8", self.host_with_port(Protocol::Hls),app, stream_key),
             rtsp_url: rtsp, rtmp_url: rtmp, hls_url: hls, webrtc_url: webrtc,
             flv_url: None, web_flv_url: None,
             media_server_id: self.config.name.clone(),
@@ -128,10 +136,11 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         match protocol {
             Protocol::Rtsp => Ok(format!("rtsp://{}/{}/{}", host, app, stream_key)),
             Protocol::Rtmp => Ok(format!("rtmp://{}/{}/{}", host, app, stream_key)),
-            Protocol::Hls => Ok(format!("http://{}/{}/{}.m3u8", host, app, stream_key)),
+            Protocol::Hls => Ok(format!("http://{}/{}/{}/hls.m3u8", host, app, stream_key)),
+            Protocol::Http => Ok(format!("http://{}/{}/", host, app)),
             Protocol::WebRTC => Ok(format!("http://{}/webrtc/play/{}/{}", host, app, stream_key)),
-            Protocol::Flv => Ok(format!("http://{}/{}/{}.flv", host, app, stream_key)),
-            Protocol::WsFlv => Ok(format!("ws://{}/{}/{}.flv", host, app, stream_key)),
+            Protocol::Flv => Ok(format!("http://{}/{}/{}.live.flv", host, app, stream_key)),
+            Protocol::WsFlv => Ok(format!("ws://{}/{}/{}.live.flv", host, app, stream_key)),
         }
     }
 
@@ -350,10 +359,15 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         expires_at: i64,
         rtsp_auth: Option<(&str, &str)>,
     ) -> anyhow::Result<PlayLinks> {
+        tracing::info!("[ZLMediaKit] config.url={}, http_flv={:?}, hls={:?}", self.config.url, self.config.protocol_ports.http_flv, self.config.protocol_ports.hls);
         let rtsp_signaling_host = self.host_with_port(Protocol::Rtsp);
         let rtsp_media_host = self.host_with_port(Protocol::Rtsp);
-        let http_host = self.host_with_port(Protocol::Hls);
-        let ws_host = self.host_with_port(Protocol::WsFlv);
+        let hls_host = self.host_with_port(Protocol::Hls);
+        let flv_host = self.host_with_port(Protocol::Flv);
+        let ws_flv_host = self.host_with_port(Protocol::WsFlv);
+        let webrtc_host = self.host_with_port(Protocol::WebRTC);
+
+        tracing::info!("[ZLMediaKit] hosts: rtsp={}, hls={}, flv={}, ws_flv={}, webrtc={}", rtsp_signaling_host, hls_host, flv_host, ws_flv_host, webrtc_host);
 
         let rtsp_auth_str = format_rtsp_auth(rtsp_auth);
 
@@ -363,39 +377,33 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
             expires_at,
             ports: self.config.protocol_ports.clone(),
             rtsp_signaling: Some(format!(
-                "rtsp://{}{}:{}/{}/{}?token={}",
+                "rtsp://{}{}/{}/{}?token={}",
                 rtsp_auth_str, rtsp_signaling_host,
-                self.config.protocol_ports.rtsp.unwrap_or(554),
                 app, stream_key, token
             )),
             rtsp_media: Some(format!(
-                "rtsp://{}{}:{}/{}/{}?token={}",
+                "rtsp://{}{}/{}/{}?token={}",
                 rtsp_auth_str, rtsp_media_host,
-                self.config.protocol_ports.rtp_tcp.unwrap_or(8555),
                 app, stream_key, token
             )),
             flv: Some(format!(
-                "http://{}:{}/{}/{}.flv?token={}",
-                http_host,
-                self.config.protocol_ports.http_flv.unwrap_or(8080),
+                "http://{}/{}/{}.live.flv?token={}",
+                flv_host,
                 app, stream_key, token
             )),
             hls: Some(format!(
-                "http://{}:{}/{}/{}.m3u8?token={}",
-                http_host,
-                self.config.protocol_ports.hls.or(self.config.protocol_ports.http).unwrap_or(80),
+                "http://{}/{}/{}/hls.m3u8?token={}",
+                hls_host,
                 app, stream_key, token
             )),
             webrtc: Some(format!(
-                "http://{}:{}/webrtc/play/{}?token={}",
-                http_host,
-                self.config.protocol_ports.webrtc.or(self.config.protocol_ports.http).unwrap_or(80),
+                "http://{}/webrtc/play/{}?token={}",
+                webrtc_host,
                 stream_key, token
             )),
             web_flv: Some(format!(
-                "ws://{}:{}/{}/{}.flv?token={}",
-                ws_host,
-                self.config.protocol_ports.ws_flv.unwrap_or(8080),
+                "ws://{}/{}/{}.live.flv?token={}",
+                ws_flv_host,
                 app, stream_key, token
             )),
         })

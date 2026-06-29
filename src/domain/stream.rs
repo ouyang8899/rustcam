@@ -41,11 +41,6 @@ impl std::fmt::Display for StreamState {
 }
 
 impl StreamState {
-    /// 处于该状态的流会在设备恢复后自动重启
-    pub fn is_auto_recoverable(&self) -> bool {
-        matches!(self, StreamState::Recovering | StreamState::Error)
-    }
-
     /// 流是否处于存活/活跃状态
     pub fn is_alive(&self) -> bool {
         matches!(
@@ -64,8 +59,6 @@ pub struct Stream {
     pub app: String,
     pub token: String,
     pub state: StreamState,
-    /// 是否启用自动恢复（设备离线后重新上线时自动重启流）
-    pub auto_recover: bool,
     /// 当前重试次数
     pub retry_count: u8,
     /// 最大重试次数（超过后进入 Stopped 状态，不再自动恢复）
@@ -95,7 +88,6 @@ impl Stream {
             app,
             token,
             state: StreamState::Starting,
-            auto_recover: true,
             retry_count: 0,
             max_retries: 20,
             last_error: None,
@@ -125,7 +117,6 @@ impl Stream {
 
     pub fn stopped(&mut self) {
         self.state = StreamState::Stopped;
-        self.auto_recover = false;
     }
 
     pub fn error(&mut self, reason: &str) {
@@ -134,7 +125,7 @@ impl Stream {
     }
 
     pub fn should_retry(&self) -> bool {
-        self.auto_recover && self.retry_count < self.max_retries
+        self.retry_count < self.max_retries
     }
 
     pub fn increment_retry(&mut self) {

@@ -120,8 +120,12 @@ impl SessionService {
         let server = self.media.cluster.select_server().await
             .ok_or_else(|| AppError::MediaServerError("No available media server".to_string()))?;
 
-        let app = "live".to_string();
-        let stream_id = format!("{}_{}", session.device_id, id);
+        let device = self.infra.db.get_device(session.device_id).await?
+            .ok_or_else(|| AppError::NotFound(format!("Device {} not found", session.device_id)))?;
+        let app = device.app.unwrap_or_else(|| "live".to_string());
+        let stream_id = device.stream_key.clone()
+            .filter(|sk| !sk.is_empty())
+            .unwrap_or_else(|| format!("{}", uuid::Uuid::new_v4()));
         let stream_info = server.add_stream_proxy(&app, &stream_id, rtsp_url).await?;
 
         self.infra.redis.set_stream_info(&stream_id, &stream_info).await?;

@@ -188,7 +188,9 @@ pub async fn get_play_links_handler(
     device.select_source()
         .ok_or_else(|| AppError::BadRequest("Device has no stream source configured".to_string()))?;
 
-    let stream_id = format!("live/{}", device.id);
+    let stream_id = device.stream_key.clone()
+        .filter(|sk| !sk.is_empty())
+        .unwrap_or_else(|| format!("{}", uuid::Uuid::new_v4()));
     let token = registry.play_service.generate_token(&device.id.to_string()).await?;
     let play_links = registry.play_service.build_play_links(&device, &token, &stream_id).await;
 

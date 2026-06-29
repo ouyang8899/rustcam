@@ -56,6 +56,37 @@ impl InfraContext {
         })
     }
 
+    pub async fn from_parts(db: Arc<DbRepository>, config: Arc<AppConfig>) -> anyhow::Result<Self> {
+        tracing::info!("[InfraContext] Building from parts...");
+
+        let redis = match RedisStore::new(&config.redis.url).await {
+            Ok(r) => Arc::new(r),
+            Err(e) => {
+                tracing::warn!("[InfraContext] Redis connection failed (will retry later): {}", e);
+                Arc::new(RedisStore::new_placeholder(&config.redis.url))
+            }
+        };
+
+        let event_bus = Arc::new(EventBus::new());
+        let metrics = Arc::new(Metrics::new());
+        let ws_broadcaster = Arc::new(WsBroadcaster::new());
+
+        tracing::info!(
+            "[InfraContext] Initialized: db={}, redis={}",
+            config.database.url.split('@').last().unwrap_or("***"),
+            config.redis.url
+        );
+
+        Ok(Self {
+            db,
+            redis,
+            event_bus,
+            metrics,
+            ws_broadcaster,
+            config,
+        })
+    }
+
     pub fn subscribe_events(&self) -> broadcast::Receiver<SignalEvent> {
         self.event_bus.subscribe()
     }

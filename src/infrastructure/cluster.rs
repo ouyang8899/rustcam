@@ -26,18 +26,11 @@ impl ClusterManager {
         Self::new_from_configs(config.servers)
     }
 
-    pub fn new_from_configs(configs: Vec<MediaServerConfig>) -> Self {
+    pub fn new_from_configs(_configs: Vec<MediaServerConfig>) -> Self {
         let servers = Arc::new(DashMap::new());
         let enabled = Arc::new(DashMap::new());
         let strategy = ClusterStrategy::RoundRobin;
         let round_robin = Arc::new(std::sync::atomic::AtomicU32::new(0));
-
-        for server_config in &configs {
-            if let Some(adapter) = Self::create_adapter(server_config) {
-                servers.insert(server_config.server_tag.clone(), adapter);
-                enabled.insert(server_config.server_tag.clone(), server_config.enabled);
-            }
-        }
 
         Self { servers, enabled, strategy, round_robin }
     }

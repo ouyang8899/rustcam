@@ -57,11 +57,11 @@ impl MediaContext {
             infra.redis.clone(),
             config.session.expiration_secs,
             cluster.clone(),
-            media_server_service.clone(),  // ✅ 传入
+            media_server_service.clone(),
         ));
-        // 查找 ZLMediaKit 服务器地址
-        let zlm_server_url = config.media_servers.servers.iter()
-            .find(|s| s.server_type == "zlmediakit")
+        // 从数据库查找 ZLMediaKit 服务器地址
+        let zlm_server_url = media_server_service.list().iter()
+            .find(|s| s.server_type == crate::domain::server::ServerType::Zlmediakit)
             .map(|s| {
                 s.url
                     .trim_start_matches("http://")

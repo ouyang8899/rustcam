@@ -12,8 +12,7 @@
         <el-col :span="12" style="text-align: right">
           <el-button :icon="Refresh" @click="fetchPlayLinks">刷新链接</el-button>
           <el-button type="primary" :icon="Edit" @click="$router.push({ path: '/devices', query: { edit: route.params.id } })">编辑设备</el-button>
-          <el-button v-if="!activeStream" type="success" :icon="VideoPlay" @click="showPullModal = true">启动拉流</el-button>
-          <el-button v-else type="warning" :icon="Close" @click="stopPull">停止拉流</el-button>
+          <el-button type="warning" :icon="Close" @click="toggleMaintenanceAndStop">维护</el-button>
         </el-col>
       </el-row>
 
@@ -128,13 +127,22 @@
                   <template #header><span>设备信息</span></template>
                   <el-descriptions :column="1" border size="small">
                     <el-descriptions-item label="状态">
-                      <span class="status-dot" :class="device.status?.toLowerCase() === 'online' ? 'online' : 'offline'" style="margin-right: 6px" />{{ device.status }}
+                      <span class="status-dot" :class="getStatusClass(device.status)" style="margin-right: 6px" />{{ device.status }}
                     </el-descriptions-item>
                     <el-descriptions-item label="观看次数">{{ device.view_count }}</el-descriptions-item>
                     <el-descriptions-item label="媒体服务器">{{ device.media_server_name || '-' }}</el-descriptions-item>
                     <el-descriptions-item label="应用名称">{{ device.app || '-' }}</el-descriptions-item>
                     <el-descriptions-item label="流标识">{{ device.stream_key || '-' }}</el-descriptions-item>
                     <el-descriptions-item label="拉流状态">{{ activeStream ? '已启动' : '未启动' }}</el-descriptions-item>
+                    <el-descriptions-item label="维护模式">
+                      <el-switch
+                        v-model="maintenanceMode"
+                        active-text="开启"
+                        inactive-text="关闭"
+                        :loading="maintenanceLoading"
+                        @change="toggleMaintenance"
+                      />
+                    </el-descriptions-item>
                     <el-descriptions-item label="主机地址">{{ device.host || '-' }}:{{ device.port || '-' }}</el-descriptions-item>
                     <el-descriptions-item label="创建时间">{{ formatDate(device.created_at) }}</el-descriptions-item>
                     <el-descriptions-item label="最后在线">{{ device.last_seen ? formatDate(device.last_seen) : '从未' }}</el-descriptions-item>
@@ -380,6 +388,8 @@ const activeStream = ref(null)
 const pullForm = ref({ rtspUrl: '' })
 const pullLoading = ref(false)
 const pullError = ref('')
+const maintenanceMode = ref(false)
+const maintenanceLoading = ref(false)
 let copiedTimer = null
 const editingPresetToken = ref(null)
 const editingPresetName = ref('')
@@ -455,7 +465,12 @@ const activeStreamType = computed(() => {
   if (selectedLink.value) return selectedLink.value.type
   if (!playLinks.value) return 'auto'
   if (playLinks.value.hls) return 'hls'
-  if (playLinks.value.web_flv || playLinks.value.flv) return 'flv'
+  if (playLinks.value.web_flv) {
+    const url = playLinks.value.web_flv
+    if (url.startsWith('ws://') || url.startsWith('wss://')) return 'wsflv'
+    return 'flv'
+  }
+  if (playLinks.value.flv) return 'flv'
   return 'auto'
 })
 
@@ -466,6 +481,7 @@ onMounted(async () => {
 
 watch(device, async (d) => {
   if (d && isPtzDevice.value) { await fetchPresets(); await refreshPtzStatus() }
+  if (d) { maintenanceMode.value = d.status === 'Maintaining' }
 }, { immediate: true })
 
 async function startPull() {
@@ -491,6 +507,39 @@ async function stopPull() {
   } catch (e) { console.error('Failed to stop pull:', e) }
 }
 
+async function toggleMaintenanceAndStop() {
+  maintenanceLoading.value = true
+  try {
+    if (activeStream.value) {
+      await streamStore.stopStream(activeStream.value.id)
+      activeStream.value = null
+    }
+    await deviceStore.updateDevice(device.value.id, { status: 'Maintaining' })
+    device.value.status = 'Maintaining'
+    maintenanceMode.value = true
+    ElMessage.success('已开启维护模式并停止拉流')
+  } catch (e) {
+    ElMessage.error('操作失败: ' + (e.message || e))
+  } finally {
+    maintenanceLoading.value = false
+  }
+}
+
+async function toggleMaintenance(val) {
+  if (!device.value) return
+  maintenanceLoading.value = true
+  try {
+    await deviceStore.updateDevice(device.value.id, { status: val ? 'Maintaining' : 'Online' })
+    device.value.status = val ? 'Maintaining' : 'Online'
+    ElMessage.success(val ? '已开启维护模式' : '已关闭维护模式')
+  } catch (e) {
+    maintenanceMode.value = !val
+    ElMessage.error('设置维护模式失败: ' + (e.message || e))
+  } finally {
+    maintenanceLoading.value = false
+  }
+}
+
 async function checkActiveStream() {
   await streamStore.fetchStreams()
   if (device.value) {
@@ -513,7 +562,11 @@ async function fetchDevice() { loading.value = true; try { device.value = await 
 async function fetchPlayLinks() { loadingLinks.value = true; try { playLinks.value = await deviceStore.getPlayLinks(route.params.id); selectedLink.value = null; activePlayerTab.value = 'player' } finally { loadingLinks.value = false } }
 
 function playStream(link) {
-  selectedLink.value = { url: link.url, type: link.key === 'hls' ? 'hls' : link.key.includes('flv') ? 'flv' : 'auto' }
+  let type = 'auto'
+  if (link.key === 'hls') type = 'hls'
+  else if (link.key === 'web_flv') type = 'wsflv'
+  else if (link.key === 'flv') type = 'flv'
+  selectedLink.value = { url: link.url, type }
   activePlayerTab.value = 'player'
 }
 
@@ -535,6 +588,14 @@ async function copyLink(text) {
 
 function formatDate(dateStr) { if (!dateStr) return '-'; return new Date(dateStr).toLocaleString('zh-CN', { hour12: false }) }
 function formatExpiry(ts) { if (!ts) return '-'; return new Date(ts * 1000).toLocaleString('zh-CN', { hour12: false }) }
+function getStatusClass(status) {
+  if (!status) return 'offline'
+  const s = status.toLowerCase()
+  if (s === 'online') return 'online'
+  if (s === 'maintaining') return 'maintaining'
+  if (s === 'error') return 'error'
+  return 'offline'
+}
 
 async function ptzCmd(cmd) {
   clearTimeout(ptzTimeout)

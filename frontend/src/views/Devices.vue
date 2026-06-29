@@ -12,9 +12,11 @@
           <el-option value="Onvif" label="ONVIF" />
           <el-option value="Rtmp" label="RTMP" />
         </el-select>
-        <el-select v-model="statusFilter" clearable placeholder="全部状态" style="width: 100px">
+        <el-select v-model="statusFilter" clearable placeholder="全部状态" style="width: 120px">
           <el-option value="Online" label="在线" />
           <el-option value="Offline" label="离线" />
+          <el-option value="Maintaining" label="维护中" />
+          <el-option value="Error" label="错误" />
         </el-select>
         <el-button type="primary" :icon="Plus" @click="openAddModal()">添加设备</el-button>
       </div>
@@ -115,7 +117,7 @@
               <el-table :data="filteredDevices" row-key="id" empty-text="暂无设备">
                   <el-table-column label="状态" width="70" align="center">
                     <template #default="{ row }">
-                      <StatusDot :status="row.status?.toLowerCase() === 'online' ? 'online' : 'offline'" />
+                      <StatusDot :status="getDeviceStatusClass(row.status)" />
                     </template>
                   </el-table-column>
                   <el-table-column label="名称" min-width="180">
@@ -502,6 +504,15 @@ function protocolColor(protocol) {
     'RTMP': 'var(--protocol-rtmp)',
   }
   return map[protocol] || 'var(--text-muted)'
+}
+
+function getDeviceStatusClass(status) {
+  if (!status) return 'offline'
+  const s = status.toLowerCase()
+  if (s === 'online') return 'online'
+  if (s === 'maintaining') return 'maintaining'
+  if (s === 'error') return 'error'
+  return 'offline'
 }
 
 const tableLoading = computed(() => deviceStore.loading)

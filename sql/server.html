@@ -17,6 +17,12 @@ FROM servers
 WHERE id = #{id}
 </select>
 
+<select id="server_select_by_tag">
+SELECT id, name, url, api_key, server_type, weight, enabled, server_tag, protocol_ports, created_at, updated_at
+FROM servers
+WHERE server_tag = #{server_tag}
+</select>
+
 <insert id="server_insert">
 INSERT INTO servers
 <trim prefix="(" suffix=")" prefixOverrides="">

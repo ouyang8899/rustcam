@@ -34,7 +34,7 @@
         </div>
       </div>
 
-      <div >
+      <div class="controls">
         <div>
           <div>
             <button @click="togglePlay">
@@ -52,9 +52,8 @@
           </div>
 
           <div>
-            <div v-if="isLive">
-              <span></span>
-              <span>LIVE</span>
+            <div v-if="isLive" class="live-tag">
+              LIVE
             </div>
 
             <div v-if="bitrate">
@@ -123,7 +122,8 @@ let mediaSource = null
 let mseVideoBuffer = null
 let mseAudioBuffer = null
 let mseReady = false
-let wsBuffer = []
+let wsAccumulator = null
+let wsAccumulatorLen = 0
 let wsConnected = false
 let flvHeaderParsed = false
 let videoCodec = null
@@ -151,6 +151,7 @@ async function initPlayer() {
   isVideoReady.value = false
 
   const protocol = props.type === 'auto' ? detectProtocol(url) : props.type
+  console.log('[VideoPlayer] initPlayer:', { url, propsType: props.type, detectedProtocol: protocol })
 
   try {
     switch (protocol) {
@@ -215,6 +216,7 @@ async function initHls(url) {
 }
 
 async function initFlv(url) {
+  console.log('[VideoPlayer] initFlv called with:', url)
   if (flvjs.isSupported()) {
     flvInstance = flvjs.createPlayer({
       type: 'flv',
@@ -223,7 +225,7 @@ async function initFlv(url) {
       hasVideo: true,
       isLive: props.isLive
     }, {
-      enableWorker: true,
+      enableWorker: false,
       enableStashBuffer: false,
       stashInitialSize: 128
     })
@@ -232,6 +234,7 @@ async function initFlv(url) {
     flvInstance.load()
 
     flvInstance.on(flvjs.Events.LOADING_COMPLETE, () => {
+      console.log('[VideoPlayer] FLV LOADING_COMPLETE')
       loading.value = false
       isVideoReady.value = true
       if (props.autoplay || props.isLive) {
@@ -240,6 +243,7 @@ async function initFlv(url) {
     })
 
     flvInstance.on(flvjs.Events.ERROR, (errType, errDetail) => {
+      console.error('[VideoPlayer] FLV ERROR:', errType, errDetail)
       error.value = `FLV Error: ${errDetail}`
       emit('error', error.value)
     })
@@ -248,180 +252,51 @@ async function initFlv(url) {
       bitrate.value = Math.round(info.speed / 1000)
     })
   } else {
+    console.error('[VideoPlayer] FLV not supported')
     error.value = 'FLV not supported'
   }
 }
 
 async function initWsFlv(url) {
-  loading.value = true
-  isVideoReady.value = false
-  wsBuffer = []
-  flvHeaderParsed = false
-  mseReady = false
-  videoCodec = null
-  audioCodec = null
-
-  const video = videoRef.value
-
-  if (!window.MediaSource) {
-    error.value = 'MediaSource not supported. Opening in new window...'
-    setTimeout(() => window.open(url, '_blank'), 1500)
-    return
-  }
-
-  try {
-    mediaSource = new MediaSource()
-    video.src = URL.createObjectURL(mediaSource)
-
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('MediaSource timeout')), 5000)
-      mediaSource.addEventListener('sourceopen', () => {
-        clearTimeout(timeout)
-        resolve()
-      })
-      mediaSource.addEventListener('error', (e) => {
-        clearTimeout(timeout)
-        reject(new Error('MediaSource error'))
-      })
+  console.log('[VideoPlayer] initWsFlv called with:', url)
+  if (flvjs.isSupported()) {
+    flvInstance = flvjs.createPlayer({
+      type: 'flv',
+      url: url,
+      hasAudio: true,
+      hasVideo: true,
+      isLive: props.isLive
+    }, {
+      enableWorker: false,
+      enableStashBuffer: false,
+      stashInitialSize: 128
     })
 
-    mseReady = true
-    startWsFlvSocket()
-  } catch (e) {
-    error.value = 'WebSocket FLV requires a compatible browser. Opening in new window...'
-    setTimeout(() => window.open(url, '_blank'), 1500)
+    flvInstance.attachMediaElement(videoRef.value)
+    flvInstance.load()
+
+    flvInstance.on(flvjs.Events.LOADING_COMPLETE, () => {
+      console.log('[VideoPlayer] FLV LOADING_COMPLETE')
+      loading.value = false
+      isVideoReady.value = true
+    })
+
+    flvInstance.on(flvjs.Events.ERROR, (errType, errDetail) => {
+      console.error('[VideoPlayer] FLV ERROR:', errType, errDetail)
+      error.value = `FLV Error: ${errDetail}`
+      emit('error', error.value)
+    })
+
+    flvInstance.on(flvjs.Events.STATISTICS_INFO, (info) => {
+      bitrate.value = Math.round(info.speed / 1000)
+    })
+
     loading.value = false
-  }
-
-  function startWsFlvSocket() {
-    wsInstance = new WebSocket(url)
-    wsInstance.binaryType = 'arraybuffer'
-
-    wsInstance.onopen = () => {
-      wsConnected = true
-      loading.value = false
-    }
-
-    wsInstance.onmessage = (e) => {
-      wsBuffer.push(e.data)
-      if (!flvHeaderParsed) {
-        processFlvHeader()
-      } else {
-        processFlvTags()
-      }
-    }
-
-    wsInstance.onerror = () => {
-      if (!error.value) {
-        error.value = 'WebSocket connection error'
-        emit('error', error.value)
-      }
-    }
-
-    wsInstance.onclose = () => {
-      wsConnected = false
-    }
-  }
-
-  function processFlvHeader() {
-    if (wsBuffer.length === 0) return
-    const data = wsBuffer[0]
-    if (!(data instanceof ArrayBuffer) || new Uint8Array(data).length < 13) return
-
-    const uint8 = new Uint8Array(data)
-    if (uint8[0] !== 0x46 || uint8[1] !== 0x4C || uint8[2] !== 0x56) return
-
-    flvHeaderParsed = true
-    const hasVideo = (uint8[4] & 0x01) !== 0
-    const hasAudio = (uint8[4] & 0x04) !== 0
-    wsBuffer.shift()
-
-    try {
-      if (hasVideo && MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E"')) {
-        mseVideoBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01E"')
-        mseVideoBuffer.mode = 'sequence'
-      }
-      if (hasAudio && MediaSource.isTypeSupported('audio/mp4; codecs="mp4a.40.2"')) {
-        mseAudioBuffer = mediaSource.addSourceBuffer('audio/mp4; codecs="mp4a.40.2"')
-        mseAudioBuffer.mode = 'sequence'
-      }
-    } catch (e) {}
-
-    if (!mseVideoBuffer && !mseAudioBuffer) {
-      error.value = 'Browser codec not supported for WebSocket FLV'
-      loading.value = false
-      return
-    }
-
-    video.play().catch(() => {})
     isVideoReady.value = true
+  } else {
+    console.error('[VideoPlayer] FLV not supported')
+    error.value = 'FLV not supported'
     loading.value = false
-
-    processFlvTags()
-  }
-
-  function processFlvTags() {
-    while (wsBuffer.length > 0) {
-      const data = wsBuffer[0]
-      if (!(data instanceof ArrayBuffer)) break
-
-      const uint8 = new Uint8Array(data)
-      if (uint8.length < 15) break
-
-      const tagType = uint8[0]
-      const dataSize = (uint8[1] << 16) | (uint8[2] << 8) | uint8[3]
-      const tagSizeWithHeader = dataSize + 15
-
-      if (uint8.length < tagSizeWithHeader) break
-
-      const tagData = uint8.slice(15, tagSizeWithHeader - 4)
-      wsBuffer.shift()
-
-      if (tagType === 9 && mseVideoBuffer && !mseVideoBuffer.updating) {
-        const codec = (tagData[0] >> 4) & 0x0F
-        if (codec === 7) {
-          if (tagData.length > 5) {
-            const naluData = tagData.slice(5)
-            const annexB = convertToAnnexB(naluData)
-            try { mseVideoBuffer.appendBuffer(annexB) } catch (e) {}
-          }
-        }
-      } else if (tagType === 8 && mseAudioBuffer && !mseAudioBuffer.updating) {
-        const fmt = (tagData[0] >> 4) & 0x0F
-        if (fmt === 10 && tagData.length > 2) {
-          const aacData = tagData.slice(1)
-          try { mseAudioBuffer.appendBuffer(aacData) } catch (e) {}
-        }
-      }
-    }
-  }
-
-  function convertToAnnexB(naluData) {
-    const startCode = new Uint8Array([0, 0, 0, 1])
-    const result = []
-    let i = 0
-    while (i < naluData.length) {
-      let length = 0
-      if (i + 4 <= naluData.length) {
-        length = (naluData[i] << 24) | (naluData[i + 1] << 16) | (naluData[i + 2] << 8) | naluData[i + 3]
-        i += 4
-      }
-      if (length > 0 && i + length <= naluData.length) {
-        result.push(startCode)
-        result.push(naluData.slice(i, i + length))
-        i += length
-      } else {
-        break
-      }
-    }
-    const totalLen = result.reduce((sum, arr) => sum + arr.length, 0)
-    const out = new Uint8Array(totalLen)
-    let pos = 0
-    for (const arr of result) {
-      out.set(arr, pos)
-      pos += arr.length
-    }
-    return out
   }
 }
 
@@ -442,7 +317,8 @@ function destroyPlayer() {
     wsInstance = null
   }
   wsConnected = false
-  wsBuffer = []
+  wsAccumulator = null
+  wsAccumulatorLen = 0
   flvHeaderParsed = false
   if (mediaSource) {
     if (mseVideoBuffer) {
@@ -601,5 +477,64 @@ defineExpose({
   destroy: destroyPlayer
 })
 </script>
+
+<style scoped>
+video {
+  max-width: 100%;
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.controls {
+  background: rgba(0, 0, 0, 0.7);
+  padding: 8px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.controls > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.controls button {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 8px;
+  cursor: pointer;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.controls button:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.controls button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.controls > div > div {
+  color: white;
+  font-size: 12px;
+  font-family: Arial, sans-serif;
+}
+
+.controls .live-tag {
+  background: #e74c3c;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: bold;
+  margin-left: 8px;
+}
+</style>
 
 

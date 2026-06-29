@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">媒体服务器</h1>
+      <h1 class="page-title">媒体服务器管理</h1>
       <div class="page-toolbar">
         <el-button type="default" :loading="refreshingAll" @click="refreshAll">
           <el-icon><Refresh /></el-icon> 刷新全部
@@ -18,8 +18,9 @@
         <div v-for="server in servers" :key="server.server_tag" class="server-card" :class="{ selected: selectedServer?.server_tag === server.server_tag }" @click="selectServer(server)">
           <div class="server-card__header">
             <StatusDot :status="server.online ? 'online' : 'offline'" />
-            <span class="server-name">{{ server.name }}</span>
-            <el-tag v-if="server.server_tag" size="small" type="warning">{{ server.server_tag }}</el-tag>
+            <span>媒体服务器</span>
+            
+
             <el-tag size="small" :type="server.online ? 'success' : 'info'">
               {{ server.online ? '在线' : '离线' }}
             </el-tag>
@@ -39,6 +40,14 @@
             </div>
           </div>
           <div class="server-card__body">
+            <div class="metric-row">
+              <span class="metric-row__label">名称</span>
+              <span class="metric-row__value">{{ server.name }}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-row__label">Tag</span>
+              <span class="metric-row__value">{{ server.server_tag }}</span>
+            </div>
             <div class="metric-row">
               <span class="metric-row__label">类型</span>
               <span class="metric-row__value">{{ server.server_type?.toUpperCase() }}</span>
@@ -302,7 +311,7 @@ onUnmounted(() => { if (refreshInterval) clearInterval(refreshInterval) })
 <style scoped>
 .server-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: var(--space-4);
 }
 .server-card {
@@ -327,17 +336,23 @@ onUnmounted(() => { if (refreshInterval) clearInterval(refreshInterval) })
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--border);
   background: var(--bg-elevated);
+  min-width: 0;
 }
 .server-name {
   flex: 1;
   font-weight: var(--weight-semibold);
   font-size: var(--text-base);
   color: var(--text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .server-card__actions {
   display: flex;
   gap: 2px;
   margin-left: auto;
+  flex-shrink: 0;
 }
 .server-card__body {
   padding: var(--space-4);

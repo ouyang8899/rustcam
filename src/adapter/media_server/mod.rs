@@ -13,34 +13,57 @@ pub fn format_rtsp_auth(auth: Option<(&str, &str)>) -> String {
 }
 
 pub fn host_with_port_from_config(config: &MediaServerConfig, protocol: Protocol) -> String {
-    let host = base_host_from_config(config);
+    let (host, url_port) = extract_host_and_port(&config.url);
+    tracing::debug!("[host_with_port] config.url={}, extracted host={}, url_port={:?}, protocol={:?}", config.url, host, url_port, protocol);
     
     let port = match protocol {
         Protocol::Rtsp => config.protocol_ports.rtsp.unwrap_or(554),
         Protocol::Rtmp => config.protocol_ports.rtmp.unwrap_or(1935),
-        Protocol::Hls | Protocol::Flv | Protocol::WsFlv => {
-            config.protocol_ports.http_flv
-                .or(config.protocol_ports.http)
-                .or(config.protocol_ports.hls)
-                .unwrap_or(8080)
-        },
-        Protocol::WebRTC => {
-            config.protocol_ports.webrtc
-                .or(config.protocol_ports.http)
-                .unwrap_or(8080)
-        },
+        Protocol::Hls => config.protocol_ports.hls.unwrap_or(8080),
+        Protocol::Http => config.protocol_ports.http.unwrap_or(8080),
+        Protocol::Flv => config.protocol_ports.http_flv.unwrap_or(8080),
+        Protocol::WsFlv => config.protocol_ports.ws_flv.unwrap_or(8080),
+        Protocol::WebRTC => config.protocol_ports.webrtc.unwrap_or(8080),
     };
     format!("{}:{}", host, port)
 }
 
-pub fn base_host_from_config(config: &MediaServerConfig) -> String {
-    config.url
+pub fn extract_host_and_port(url: &str) -> (String, Option<u16>) {
+    let url = url
         .trim_start_matches("http://")
-        .trim_start_matches("https://")
-        .split(':')
-        .next()
-        .unwrap_or("localhost")
-        .to_string()
+        .trim_start_matches("https://");
+    
+    let (host_port, _path) = if let Some(idx) = url.find('/') {
+        (&url[..idx], &url[idx..])
+    } else {
+        (url, "")
+    };
+    
+    let dot_count = host_port.matches('.').count();
+    let is_ipv4 = dot_count == 3 && host_port.chars().filter(|c| *c == ':').count() == 1;
+    
+    if is_ipv4 {
+        if let Some(idx) = host_port.rfind(':') {
+            let host = &host_port[..idx];
+            let port_str = &host_port[idx+1..];
+            let port = port_str.parse::<u16>().ok();
+            return (host.to_string(), port);
+        }
+    }
+    
+    if let Some(idx) = host_port.find(':') {
+        let host = &host_port[..idx];
+        let port_str = &host_port[idx+1..];
+        let port = port_str.parse::<u16>().ok();
+        return (host.to_string(), port);
+    }
+    
+    (host_port.to_string(), None)
+}
+
+pub fn base_host_from_config(config: &MediaServerConfig) -> String {
+    let (host, _) = extract_host_and_port(&config.url);
+    host
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -110,6 +133,7 @@ pub enum Protocol {
     Rtsp,
     Rtmp,
     Hls,
+    Http,
     WebRTC,
     Flv,
     WsFlv,

@@ -103,8 +103,7 @@ impl StreamRecoveryService {
             .into_iter()
             .filter(|s| {
                 s.device_id == device_id
-                    && s.auto_recover
-                    && matches!(s.state, StreamState::Active | StreamState::Starting | StreamState::Recovering)
+                    && matches!(s.state, StreamState::Active | StreamState::Starting | StreamState::Recovering | StreamState::Idle)
             })
             .collect();
 
@@ -134,7 +133,6 @@ impl StreamRecoveryService {
             .iter()
             .filter(|s| {
                 s.media_server_tag == media_server_tag
-                    && s.auto_recover
                     && matches!(s.state, StreamState::Active | StreamState::Starting)
             })
             .map(|r| r.clone())
@@ -189,8 +187,7 @@ impl StreamRecoveryService {
             .iter()
             .filter(|s| {
                 s.media_server_tag == media_server_tag
-                    && s.auto_recover
-                    && matches!(s.state, StreamState::Active | StreamState::Starting | StreamState::Recovering)
+                    && matches!(s.state, StreamState::Active | StreamState::Starting | StreamState::Recovering | StreamState::Idle)
             })
             .map(|r| r.clone())
             .collect();
@@ -207,6 +204,21 @@ impl StreamRecoveryService {
                     continue;
                 }
             };
+
+            if device.status == crate::domain::DeviceStatus::Maintaining {
+                tracing::debug!(
+                    stream_key = %stream.stream_key,
+                    device_id = %device.id,
+                    device_status = ?device.status,
+                    "[StreamRecoveryService] Device is maintaining, skipping stream restart"
+                );
+                continue;
+            }
+
+            if stream.state == StreamState::Idle {
+                self.handle_idle_stream(media_server_tag, &stream).await;
+                continue;
+            }
 
             match device.protocol {
                 Protocol::Gb28181 => {
@@ -266,6 +278,44 @@ impl StreamRecoveryService {
         }
     }
 
+    async fn handle_idle_stream(&self, media_server_tag: &str, stream: &Stream) {
+        let adapter = match self.media.cluster.get_server(media_server_tag) {
+            Some(a) => a,
+            None => {
+                tracing::warn!("[StreamRecoveryService] Media server {} not found for Idle stream", media_server_tag);
+                return;
+            }
+        };
+
+        match adapter.is_stream_online(&stream.app, &stream.stream_key).await {
+            Ok(true) => {
+                let mut s = stream.clone();
+                s.start();
+                s.last_error = None;
+                if let Err(e) = self.infra.db.update_stream(&s).await {
+                    tracing::warn!("[StreamRecoveryService] Failed to sync Idle stream to Active: {}", e);
+                } else {
+                    tracing::info!("[StreamRecoveryService] Idle stream {} synced to Active (still online on media server)", stream.stream_key);
+                }
+                self.sync_device_status(stream.device_id, StreamState::Active).await;
+            }
+            Ok(false) => {
+                tracing::info!("[StreamRecoveryService] Idle stream {} not on media server, will restart", stream.stream_key);
+                if let Some(device) = self.infra.db.devices_cache().get(&stream.device_id) {
+                    self.direct_restart_stream(&device.clone(), stream).await;
+                } else {
+                    tracing::warn!("[StreamRecoveryService] Device {} not found for Idle stream restart", stream.device_id);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("[StreamRecoveryService] is_stream_online failed for {}, assuming offline: {}", stream.stream_key, e);
+                if let Some(device) = self.infra.db.devices_cache().get(&stream.device_id) {
+                    self.direct_restart_stream(&device.clone(), stream).await;
+                }
+            }
+        }
+    }
+
     async fn direct_restart_stream(&self, device: &Device, stream: &Stream) {
         let stream_key = &stream.stream_key;
         let tag = &stream.media_server_tag;
@@ -320,6 +370,7 @@ impl StreamRecoveryService {
                 if let Err(e) = self.infra.db.update_stream(&s).await {
                     tracing::warn!("[StreamRecoveryService] Failed to update stream state: {}", e);
                 }
+                self.sync_device_status(stream.device_id, StreamState::Active).await;
             }
             Err(e) => {
                 tracing::error!(
@@ -328,6 +379,41 @@ impl StreamRecoveryService {
                     "[StreamRecoveryService] Direct restart failed"
                 );
                 self.record_failure(stream, &e.to_string()).await;
+                self.sync_device_status(stream.device_id, StreamState::Error).await;
+            }
+        }
+    }
+
+    async fn sync_device_status(&self, device_id: i64, stream_state: StreamState) {
+        use crate::domain::DeviceStatus;
+
+        let mut device = match self.infra.db.devices_cache().get(&device_id) {
+            Some(d) => d.clone(),
+            None => return,
+        };
+
+        if device.status == DeviceStatus::Maintaining {
+            tracing::debug!(
+                "[StreamRecoveryService] Device {} is in Maintaining status, skipping sync",
+                device_id
+            );
+            return;
+        }
+
+        let new_status = match stream_state {
+            StreamState::Active | StreamState::Starting | StreamState::Recovering => DeviceStatus::Online,
+            StreamState::Error => DeviceStatus::Error,
+            StreamState::Idle | StreamState::Stopping | StreamState::Stopped => DeviceStatus::Offline,
+        };
+
+        if device.status != new_status {
+            tracing::info!(
+                "[StreamRecoveryService] Syncing device {} status: {} -> {} (stream state: {:?})",
+                device_id, device.status, new_status, stream_state
+            );
+            device.status = new_status;
+            if let Err(e) = self.infra.db.update_device(&device).await {
+                tracing::warn!("[StreamRecoveryService] Failed to sync device status: {}", e);
             }
         }
     }
@@ -337,7 +423,6 @@ impl StreamRecoveryService {
             .iter()
             .filter(|s| {
                 s.media_server_tag == media_server_tag
-                    && s.auto_recover
                     && s.should_retry()
                     && matches!(s.state, StreamState::Recovering | StreamState::Error)
             })
@@ -373,7 +458,7 @@ impl StreamRecoveryService {
             }
         };
 
-        if device.status != crate::domain::DeviceStatus::Online {
+        if device.status == crate::domain::DeviceStatus::Maintaining {
             return;
         }
 
@@ -382,7 +467,6 @@ impl StreamRecoveryService {
             .into_iter()
             .filter(|s| {
                 s.device_id == device_id
-                    && s.auto_recover
                     && s.should_retry()
                     && matches!(s.state, StreamState::Recovering | StreamState::Error)
             })
@@ -398,8 +482,7 @@ impl StreamRecoveryService {
             .await
             .into_iter()
             .filter(|s| {
-                s.auto_recover
-                    && s.should_retry()
+                s.should_retry()
                     && matches!(s.state, StreamState::Recovering | StreamState::Error)
             })
             .collect();
@@ -410,7 +493,7 @@ impl StreamRecoveryService {
                 None => continue,
             };
 
-            if device.status != crate::domain::DeviceStatus::Online {
+            if device.status == crate::domain::DeviceStatus::Maintaining {
                 continue;
             }
 
@@ -475,6 +558,7 @@ impl StreamRecoveryService {
                     "[StreamRecoveryService] Recovery succeeded"
                 );
                 self.metrics_inc("stream_recovery_success");
+                self.sync_device_status(device.id, StreamState::Active).await;
                 let _ = self.infra.publish_event(SignalEvent::StreamRecover {
                     device_id: device.id,
                     stream_key: info.stream_key,
@@ -489,6 +573,7 @@ impl StreamRecoveryService {
                 );
                 self.metrics_inc("stream_recovery_failures");
                 self.record_failure(stream, &e.to_string()).await;
+                self.sync_device_status(device.id, StreamState::Error).await;
             }
         }
     }

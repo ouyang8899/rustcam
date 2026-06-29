@@ -43,8 +43,57 @@ pub async fn list_servers_handler(
     let mut result = Vec::new();
 
         for server in servers {
-        let status = registry.media.cluster.get_server_status(&server.server_tag).await;
-        result.push(serde_json::json!({
+            let status = registry.media.cluster.get_server_status(&server.server_tag).await;
+            result.push(serde_json::json!({
+                "id": server.id,
+                "name": server.name,
+                "url": server.url,
+                "api_key": server.api_key,
+                "server_type": server.server_type,
+                "server_tag": server.server_tag,
+                "weight": server.weight,
+                "enabled": server.enabled,
+                "online": status.as_ref().map(|s| s.online).unwrap_or(false),
+                "session_count": status.as_ref().map(|s| s.session_count).unwrap_or(0),
+                "cpu_usage": status.as_ref().map(|s| s.cpu_usage).unwrap_or(0.0),
+                "memory_usage": status.as_ref().map(|s| s.memory_usage).unwrap_or(0.0),
+                "protocol_ports": server.protocol_ports,
+            }));
+        }
+
+        Ok(Json(ApiResponse::success(result)))
+    }
+
+    /// POST /api/v1/servers
+    pub async fn create_server_handler(
+        State(state): State<Arc<FullState>>,
+        Json(req): Json<CreateServerRequest>,
+    ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
+        let registry = &state.app.registry;
+
+        if req.name.trim().is_empty() {
+            return Err(AppError::BadRequest("Server name cannot be empty".to_string()));
+        }
+
+        let server_type = ServerType::from_str(&req.server_type)
+            .ok_or_else(|| AppError::BadRequest(format!("Invalid server_type: {}", req.server_type)))?;
+
+        let weight = req.weight.unwrap_or(100);
+        let protocol_ports = req.protocol_ports.clone().unwrap_or_default();
+        let server_tag = req.server_tag.trim().to_string();
+
+        let server = registry.media_server_service.create(
+            req.name, req.url, req.api_key, server_type, weight, server_tag, protocol_ports,
+        ).await;
+
+        registry.media.cluster.register_server(server.to_config());
+
+        if server.enabled {
+            registry.stream_recovery_service.mark_streams_recovering_for_media_server(&server.server_tag).await;
+            registry.stream_recovery_service.recover_streams_for_media_server(&server.server_tag).await;
+        }
+
+        Ok(Json(ApiResponse::success(serde_json::json!({
             "id": server.id,
             "name": server.name,
             "url": server.url,
@@ -53,59 +102,11 @@ pub async fn list_servers_handler(
             "server_tag": server.server_tag,
             "weight": server.weight,
             "enabled": server.enabled,
-            "online": status.as_ref().map(|s| s.online).unwrap_or(false),
-            "session_count": status.as_ref().map(|s| s.session_count).unwrap_or(0),
-            "cpu_usage": status.as_ref().map(|s| s.cpu_usage).unwrap_or(0.0),
-            "memory_usage": status.as_ref().map(|s| s.memory_usage).unwrap_or(0.0),
-        }));
+            "created_at": server.created_at,
+        }))))
     }
 
-    Ok(Json(ApiResponse::success(result)))
-}
-
-/// POST /api/v1/servers
-pub async fn create_server_handler(
-    State(state): State<Arc<FullState>>,
-    Json(req): Json<CreateServerRequest>,
-) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
-    let registry = &state.app.registry;
-
-    if req.name.trim().is_empty() {
-        return Err(AppError::BadRequest("Server name cannot be empty".to_string()));
-    }
-
-    let server_type = ServerType::from_str(&req.server_type)
-        .ok_or_else(|| AppError::BadRequest(format!("Invalid server_type: {}", req.server_type)))?;
-
-    let weight = req.weight.unwrap_or(100);
-    let protocol_ports = req.protocol_ports.clone().unwrap_or_default();
-    let server_tag = req.server_tag.trim().to_string();
-
-    let server = registry.media_server_service.create(
-        req.name, req.url, req.api_key, server_type, weight, server_tag, protocol_ports,
-    ).await;
-
-    registry.media.cluster.register_server(server.to_config());
-
-    if server.enabled {
-        registry.stream_recovery_service.mark_streams_recovering_for_media_server(&server.server_tag).await;
-        registry.stream_recovery_service.recover_streams_for_media_server(&server.server_tag).await;
-    }
-
-    Ok(Json(ApiResponse::success(serde_json::json!({
-        "id": server.id,
-        "name": server.name,
-        "url": server.url,
-        "api_key": server.api_key,
-        "server_type": server.server_type,
-        "server_tag": server.server_tag,
-        "weight": server.weight,
-        "enabled": server.enabled,
-        "created_at": server.created_at,
-    }))))
-}
-
-/// GET /api/v1/servers/:tag
+    /// GET /api/v1/servers/:tag
 pub async fn get_server_handler(
     State(state): State<Arc<FullState>>,
     Path(tag): Path<String>,
@@ -127,6 +128,9 @@ pub async fn get_server_handler(
         "enabled": server.enabled,
         "online": status.as_ref().map(|s| s.online).unwrap_or(false),
         "session_count": status.as_ref().map(|s| s.session_count).unwrap_or(0),
+        "cpu_usage": status.as_ref().map(|s| s.cpu_usage).unwrap_or(0.0),
+        "memory_usage": status.as_ref().map(|s| s.memory_usage).unwrap_or(0.0),
+        "protocol_ports": server.protocol_ports,
     }))))
 }
 
