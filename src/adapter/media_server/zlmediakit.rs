@@ -397,9 +397,9 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
                 app, stream_key, token
             )),
             webrtc: Some(format!(
-                "http://{}/webrtc/play/{}?token={}",
-                webrtc_host,
-                stream_key, token
+                "http://{}/webrtc/play?app={}&stream={}&type=play",
+                flv_host,
+                app, stream_key
             )),
             web_flv: Some(format!(
                 "ws://{}/{}/{}.live.flv?token={}",

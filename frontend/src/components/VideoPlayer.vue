@@ -12,8 +12,9 @@
     <div v-else >
       <video
         ref="videoRef"
-       
-        
+        playsinline
+        autoplay
+        muted
         @click="togglePlay"
         @dblclick="toggleFullscreen"
       ></video>
@@ -118,6 +119,7 @@ const hideControlsTimer = ref(null)
 let hlsInstance = null
 let flvInstance = null
 let wsInstance = null
+let pc = null
 let mediaSource = null
 let mseVideoBuffer = null
 let mseAudioBuffer = null
@@ -163,6 +165,9 @@ async function initPlayer() {
         break
       case 'wsflv':
         await initWsFlv(url)
+        break
+      case 'webrtc':
+        await initWebRTC(url)
         break
       default:
         error.value = 'Unsupported protocol'
@@ -300,6 +305,100 @@ async function initWsFlv(url) {
   }
 }
 
+async function initWebRTC(url) {
+  console.log('[VideoPlayer] initWebRTC called with:', url, '-', new Date().toISOString())
+  loading.value = true
+  error.value = null
+
+  try {
+    const urlObj = new URL(url)
+    const app = urlObj.searchParams.get('app') || 'live'
+    const stream = urlObj.searchParams.get('stream') || ''
+    
+    const signalingUrl = `http://${urlObj.host}/index/api/webrtc?app=${app}&stream=${stream}&type=play`
+    console.log('[VideoPlayer] Signaling URL:', signalingUrl)
+
+    pc = new RTCPeerConnection({
+      iceServers: []
+    })
+
+    pc.addTransceiver('video', { direction: 'recvonly' })
+    pc.addTransceiver('audio', { direction: 'recvonly' })
+
+    pc.ontrack = (event) => {
+      console.log('[VideoPlayer] RTCPeerConnection ontrack:', event, '-', new Date().toISOString())
+      console.log('[VideoPlayer] streams[0]:', event.streams[0])
+      console.log('[VideoPlayer] streams[0].getVideoTracks():', event.streams[0]?.getVideoTracks())
+      console.log('[VideoPlayer] streams[0].getAudioTracks():', event.streams[0]?.getAudioTracks())
+      if (videoRef.value && event.streams[0]) {
+        const videoEl = videoRef.value
+        videoEl.srcObject = event.streams[0]
+        console.log('[VideoPlayer] video.srcObject set:', videoEl.srcObject)
+        loading.value = false
+        isVideoReady.value = true
+        event.streams[0].getVideoTracks().forEach(track => {
+          track.playoutDelayHint = 0
+        })
+        videoEl.play().then(() => {
+          console.log('[VideoPlayer] play() succeeded -', new Date().toISOString())
+        }).catch(e => {
+          console.error('[VideoPlayer] play() failed:', e)
+        })
+      }
+    }
+
+    pc.onicecandidate = (event) => {
+      console.log('[VideoPlayer] ICE candidate:', event.candidate)
+    }
+
+    pc.onconnectionstatechange = () => {
+      console.log('[VideoPlayer] Connection state:', pc.connectionState, '-', new Date().toISOString())
+      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+        error.value = 'WebRTC connection failed'
+        loading.value = false
+      }
+    }
+
+    const offer = await pc.createOffer()
+    await pc.setLocalDescription(offer)
+    console.log('[VideoPlayer] SDP offer created, posting to:', signalingUrl)
+    console.log('[VideoPlayer] SDP length:', pc.localDescription.sdp.length)
+
+    const response = await fetch(signalingUrl, {
+      method: 'POST',
+      body: pc.localDescription.sdp,
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+    })
+
+    console.log('[VideoPlayer] Response status:', response.status)
+    console.log('[VideoPlayer] Response headers:', [...response.headers.entries()])
+    
+    if (!response.ok) {
+      const text = await response.text()
+      console.error('[VideoPlayer] Response error:', text)
+      throw new Error(`WebRTC signaling failed: ${response.status}`)
+    }
+
+    const answerData = await response.json()
+    console.log('[VideoPlayer] SDP answer received:', answerData)
+
+    if (answerData.code !== 0) {
+      throw new Error(`WebRTC signaling error: code=${answerData.code}`)
+    }
+
+    await pc.setRemoteDescription(new RTCSessionDescription({
+      type: 'answer',
+      sdp: answerData.sdp
+    }))
+
+    console.log('[VideoPlayer] WebRTC setup complete')
+  } catch (e) {
+    console.error('[VideoPlayer] WebRTC error:', e)
+    error.value = `WebRTC Error: ${e.message}`
+    loading.value = false
+  }
+}
+
 function destroyPlayer() {
   if (hlsInstance) {
     hlsInstance.destroy()
@@ -315,6 +414,10 @@ function destroyPlayer() {
   if (wsInstance) {
     wsInstance.close()
     wsInstance = null
+  }
+  if (pc) {
+    pc.close()
+    pc = null
   }
   wsConnected = false
   wsAccumulator = null
@@ -446,7 +549,17 @@ onMounted(() => {
     })
 
     video.addEventListener('waiting', () => {
+      console.log('[VideoPlayer] video waiting (buffering)')
       loading.value = true
+    })
+
+    video.addEventListener('playing', () => {
+      console.log('[VideoPlayer] video playing event - latency:', video.currentTime, '-', new Date().toISOString())
+      loading.value = false
+    })
+
+    video.addEventListener('canplay', () => {
+      console.log('[VideoPlayer] video canplay event')
     })
 
     video.addEventListener('canplay', () => {
