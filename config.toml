@@ -61,6 +61,10 @@ server_gb_id = "64010000001000000001"
 bind_ip = "0.0.0.0"
 tcp_signaling_port = 5060
 udp_signaling_port = 5061
+tcp_audio_port_start = 15000
+tcp_audio_port_end = 15100
+tcp_audio_idle_timeout_secs = 30
+tcp_audio_max_servers = 10
 
 [jwt]
 secret = "change-me-in-production"

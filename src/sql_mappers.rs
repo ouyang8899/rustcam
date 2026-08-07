@@ -1076,7 +1076,7 @@ impl From<AlarmRow> for crate::domain::alarm::Alarm {
     }
 }
 
-#[sql("INSERT INTO gb28181_alarms (device_id, device_tag, alarm_type, alarm_time, alarm_method, alarm_priority, description) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, device_id, device_tag, alarm_type, alarm_time, alarm_method, alarm_priority, description, processed, created_at")]
+#[sql("INSERT INTO alarms (device_id, device_tag, alarm_type, alarm_time, alarm_method, alarm_priority, description) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, device_id, device_tag, alarm_type, alarm_time, alarm_method, alarm_priority, description, processed, created_at")]
 pub async fn alarm_insert(
     rb: &dyn rbatis::Executor,
     device_id: i64,
@@ -1088,7 +1088,7 @@ pub async fn alarm_insert(
     description: Option<&str>,
 ) -> rbatis::Result<Vec<AlarmRow>> { impled!() }
 
-#[sql("SELECT id, device_id, device_tag, alarm_type, alarm_time, alarm_method, alarm_priority, description, processed, created_at FROM gb28181_alarms WHERE device_id = $1 ORDER BY alarm_time DESC LIMIT $2 OFFSET $3")]
+#[sql("SELECT id, device_id, device_tag, alarm_type, alarm_time, alarm_method, alarm_priority, description, processed, created_at FROM alarms WHERE device_id = $1 ORDER BY alarm_time DESC LIMIT $2 OFFSET $3")]
 pub async fn alarm_select_by_device(
     rb: &dyn rbatis::Executor,
     device_id: i64,
@@ -1096,18 +1096,18 @@ pub async fn alarm_select_by_device(
     offset: i64,
 ) -> rbatis::Result<Vec<AlarmRow>> { impled!() }
 
-#[sql("SELECT id, device_id, device_tag, alarm_type, alarm_time, alarm_method, alarm_priority, description, processed, created_at FROM gb28181_alarms ORDER BY alarm_time DESC LIMIT $1 OFFSET $2")]
+#[sql("SELECT id, device_id, device_tag, alarm_type, alarm_time, alarm_method, alarm_priority, description, processed, created_at FROM alarms ORDER BY alarm_time DESC LIMIT $1 OFFSET $2")]
 pub async fn alarm_select_all(
     rb: &dyn rbatis::Executor,
     limit: i64,
     offset: i64,
 ) -> rbatis::Result<Vec<AlarmRow>> { impled!() }
 
-#[sql("SELECT COUNT(*) FROM gb28181_alarms WHERE device_id = $1")]
+#[sql("SELECT COUNT(*) FROM alarms WHERE device_id = $1")]
 pub async fn alarm_count_by_device(rb: &dyn rbatis::Executor, device_id: i64) -> rbatis::Result<i64> { impled!() }
 
-#[sql("SELECT COUNT(*) FROM gb28181_alarms")]
+#[sql("SELECT COUNT(*) FROM alarms")]
 pub async fn alarm_count_all(rb: &dyn rbatis::Executor) -> rbatis::Result<i64> { impled!() }
 
-#[sql("UPDATE gb28181_alarms SET processed = $1 WHERE id = $2")]
+#[sql("UPDATE alarms SET processed = $1 WHERE id = $2")]
 pub async fn alarm_mark_processed(rb: &dyn rbatis::Executor, processed: bool, id: i64) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }

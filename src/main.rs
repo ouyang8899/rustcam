@@ -233,6 +233,14 @@ async fn main() -> anyhow::Result<()> {
         registry.infra.config().signaling_server.bind_ip.clone(),
         registry.infra.config().signaling_server.tcp_signaling_port,
     );
+    rustcam_media::protocol::gb28181::init_tcp_audio_server_pool(
+        rustcam_media::protocol::gb28181::TcpAudioServerConfig {
+            port_start: registry.infra.config().signaling_server.tcp_audio_port_start,
+            port_end: registry.infra.config().signaling_server.tcp_audio_port_end,
+            idle_timeout_secs: registry.infra.config().signaling_server.tcp_audio_idle_timeout_secs,
+            max_servers: registry.infra.config().signaling_server.tcp_audio_max_servers,
+        }
+    );
 
     // 10. 并发运行所有服务
     let http_server = axum::serve(listener, app);

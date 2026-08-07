@@ -182,6 +182,10 @@ pub struct SignalingServerConfig {
     pub bind_ip: String,
     pub tcp_signaling_port: u16,
     pub udp_signaling_port: u16,
+    pub tcp_audio_port_start: u16,
+    pub tcp_audio_port_end: u16,
+    pub tcp_audio_idle_timeout_secs: u64,
+    pub tcp_audio_max_servers: usize,
 }
 
 impl Default for SignalingServerConfig {
@@ -191,6 +195,10 @@ impl Default for SignalingServerConfig {
             bind_ip: "0.0.0.0".to_string(),
             tcp_signaling_port: 5060,
             udp_signaling_port: 5061,
+            tcp_audio_port_start: 15000,
+            tcp_audio_port_end: 15100,
+            tcp_audio_idle_timeout_secs: 30,
+            tcp_audio_max_servers: 10,
         }
     }
 }
