@@ -57,6 +57,11 @@
           <template #title><span>公开直播</span></template>
         </el-menu-item>
 
+        <el-menu-item index="/alarms">
+          <el-icon><Bell /></el-icon>
+          <template #title><span>报警记录</span></template>
+        </el-menu-item>
+
         <el-sub-menu index="/wall-group">
           <template #title>
             <el-icon><Grid /></el-icon>
@@ -120,7 +125,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import { Monitor, VideoCamera, DataLine, VideoPlay, Cpu, Compass, Grid, User, Sunny, Moon, DArrowLeft, DArrowRight, SwitchButton } from '@element-plus/icons-vue'
+import { Monitor, VideoCamera, DataLine, VideoPlay, Cpu, Compass, Grid, User, Sunny, Moon, DArrowLeft, DArrowRight, SwitchButton, Bell } from '@element-plus/icons-vue'
 import { useThemeStore } from '../../stores/themeStore'
 import { useAuthStore } from '../../stores/authStore'
 import { useWsConnection } from '../../composables/useWsConnection'

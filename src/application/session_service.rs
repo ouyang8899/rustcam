@@ -123,9 +123,14 @@ impl SessionService {
         let device = self.infra.db.get_device(session.device_id).await?
             .ok_or_else(|| AppError::NotFound(format!("Device {} not found", session.device_id)))?;
         let app = device.app.unwrap_or_else(|| "live".to_string());
-        let stream_id = device.stream_key.clone()
-            .filter(|sk| !sk.is_empty())
-            .unwrap_or_else(|| format!("{}", uuid::Uuid::new_v4()));
+        
+        let stream_id = {
+            let cache = self.infra.db.streams_cache();
+            cache.iter()
+                .find(|s| s.device_id == session.device_id)
+                .map(|s| s.stream_key.clone())
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+        };
         let stream_info = server.add_stream_proxy(&app, &stream_id, rtsp_url).await?;
 
         self.infra.redis.set_stream_info(&stream_id, &stream_info).await?;

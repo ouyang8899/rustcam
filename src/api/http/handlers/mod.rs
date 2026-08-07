@@ -1,3 +1,4 @@
+pub mod alarm_handler;
 pub mod dashboard;
 pub mod device_handler;
 pub mod stream_handler;

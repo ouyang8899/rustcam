@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use tokio::sync::RwLock;
 use dashmap::DashMap;
 use crate::context::{InfraContext, MediaContext};
-use crate::domain::{Device, DeviceStatus, Protocol, CreateDeviceRequest, UpdateDeviceRequest, StreamState};
+use crate::domain::{Alarm, CreateAlarmRequest, Device, DeviceStatus, DeviceType, Protocol, CreateDeviceRequest, UpdateDeviceRequest, StreamState};
 use crate::domain::traits::{CacheStoreExt, DeviceLookup};
 use crate::domain::region::{Region, RegionNode};
 use crate::domain::device_group::{DeviceGroup, DeviceGroupNode, CreateGroupRequest, UpdateGroupRequest};
@@ -109,8 +109,6 @@ impl DeviceService {
 
                 let existing = if let Some(ref tag) = device_tag {
                     infra.db.get_device_by_device_tag(tag).await
-                } else if let Some(ref sk) = stream_key {
-                    infra.db.get_device_by_stream_key(sk).await
                 } else {
                     None
                 };
@@ -118,22 +116,18 @@ impl DeviceService {
                 if let Some(mut device) = existing {
                     device.name = name.clone();
                     device.set_online();
-                    if let Some(ref sk) = stream_key {
-                        device.stream_key = Some(sk.clone());
-                    }
                     infra.db.update_device(&device).await?;
                     infra.ws_broadcaster.device_online(device.id);
                 } else {
                     let mut device = Device::new(name.clone(), proto);
                     device.device_tag = device_tag.clone();
-                    device.stream_key = stream_key.clone().or_else(|| Some(Uuid::new_v4().to_string()));
                     device.set_online();
                     infra.db.create_device(&device).await?;
                     infra.ws_broadcaster.device_online(device.id);
                 }
 
                 let _ = infra.redis.publish_event("device_registered", &serde_json::json!({
-                    "device_tag": device_tag, "name": name, "stream_key": stream_key,
+                    "device_tag": device_tag, "name": name,
                     "manufacturer": manufacturer, "model": model,
                     "protocol": protocol.to_string(),
                 })).await;
@@ -201,8 +195,10 @@ impl DeviceService {
                         device.device_tag = Some(ch.device_id.clone());
                         device.parent_device_tag = Some(parent_tag.to_string());
                         device.status = if ch.is_online() { DeviceStatus::Online } else { DeviceStatus::Offline };
-                        device.stream_key = Some(Uuid::new_v4().to_string());
                         device.extended = Some(extended);
+                        device.is_channel = true;
+                        device.device_type = DeviceType::IPC;
+                        device.channel_id = Some(ch.device_id.clone());
                         if let Err(e) = infra.db.create_device(&device).await {
                             tracing::error!("[DeviceService] Create channel {} failed: {}", ch.device_id, e);
                         }
@@ -210,16 +206,51 @@ impl DeviceService {
                 }
             }
 
-            SignalEvent::Alarm { device_id, alarm_type, message, .. } => {
+            SignalEvent::Alarm { device_id, alarm_type, message, timestamp } => {
                 tracing::warn!("[DeviceService] Alarm: device={} type={} msg={}", device_id, alarm_type, message);
+                let device_id_num: i64 = device_id.parse().unwrap_or(0);
+                let device_tag = match infra.db.get_device(device_id_num).await {
+                    Ok(Some(d)) => d.device_tag.unwrap_or_default(),
+                    _ => String::new(),
+                };
+                let create_req = CreateAlarmRequest {
+                    device_id: device_id_num,
+                    device_tag,
+                    alarm_type: alarm_type.clone(),
+                    alarm_time: *timestamp,
+                    alarm_method: Some(1),
+                    alarm_priority: Some(0),
+                    description: Some(message.clone()),
+                };
+                if let Err(e) = infra.db.save_alarm(&create_req).await {
+                    tracing::error!("[DeviceService] Save alarm failed: {}", e);
+                }
                 let _ = infra.redis.publish_event("alarm", &serde_json::json!({
                     "device_id": device_id, "alarm_type": alarm_type, "message": message,
                 })).await;
-                infra.ws_broadcaster.alarm(device_id.parse().unwrap_or(0), alarm_type, message);
+                infra.ws_broadcaster.alarm(device_id_num, alarm_type, message);
             }
 
             SignalEvent::PtzControl { device_id, command, speed } => {
                 Self::try_dispatch_ptz(infra, ptz_last_cmd, &device_id, &command, &speed).await;
+            }
+            SignalEvent::QueryDeviceConfig { device_id, device_tag, config_type } => {
+                tracing::info!("[DeviceService] DeviceConfig query: device_id={} tag={:?} type={}", device_id, device_tag, config_type);
+            }
+            SignalEvent::SetDeviceConfig { device_id, device_tag, config_type, config_value } => {
+                tracing::info!("[DeviceService] DeviceConfig set: device_id={} tag={:?} type={} value={}", device_id, device_tag, config_type, config_value);
+            }
+            SignalEvent::PresetQuery { device_id, device_tag, channel_id } => {
+                tracing::info!("[DeviceService] PresetQuery: device_id={} tag={:?} channel={}", device_id, device_tag, channel_id);
+            }
+            SignalEvent::PresetSet { device_id, device_tag, channel_id, preset_name } => {
+                tracing::info!("[DeviceService] PresetSet: device_id={} tag={:?} channel={} name={}", device_id, device_tag, channel_id, preset_name);
+            }
+            SignalEvent::PresetGoto { device_id: _, device_tag, channel_id, preset_index } => {
+                tracing::info!("[DeviceService] PresetGoto: tag={:?} channel={} index={}", device_tag, channel_id, preset_index);
+            }
+            SignalEvent::PresetRemove { device_id, device_tag, channel_id, preset_index } => {
+                tracing::info!("[DeviceService] PresetRemove: device_id={} tag={:?} channel={} index={}", device_id, device_tag, channel_id, preset_index);
             }
             _ => {}
         }
@@ -618,7 +649,9 @@ impl DeviceService {
                 "onvif_token": stream.token,
                 "parent_device_tag": device_tag,
             }));
-            child.stream_key = Some(stream_key.clone());
+            child.is_channel = true;
+            child.device_type = DeviceType::IPC;
+            child.channel_id = Some(stream.token.clone());
 
             let rtsp_url_with_auth = if let (Some(u), Some(p)) = (&parent.device_username, &parent.device_password) {
                 Self::embed_rtsp_auth(&stream.rtsp_url, u, p)
@@ -666,8 +699,6 @@ impl DeviceService {
             }
         }
 
-        let stream_key = Uuid::new_v4().to_string();
-
         let mut device = Device::new(req.name.clone(), req.protocol);
         device.host = req.host.clone().unwrap_or_default();
         device.port = req.port.unwrap_or(0);
@@ -678,7 +709,6 @@ impl DeviceService {
         device.playback_username = req.playback_username.clone();
         device.playback_password = req.playback_password.clone();
         device.media_server_tag = req.media_server_tag.clone();
-        device.stream_key = Some(stream_key);
         device.app = req.app.clone();
         device.device_tag = req.device_tag.clone();
         device.region_code = req.region_code.clone();
@@ -715,7 +745,6 @@ impl DeviceService {
         if let Some(v) = req.playback_username { device.playback_username = Some(v); }
         if let Some(v) = req.playback_password { device.playback_password = Some(v); }
         if let Some(v) = req.media_server_tag { device.media_server_tag = Some(v); }
-        if let Some(v) = req.stream_key { device.stream_key = Some(v); }
         if let Some(v) = req.app { device.app = Some(v); }
         if let Some(v) = req.device_tag { device.device_tag = Some(v); }
         if let Some(v) = req.parent_device_tag { device.parent_device_tag = Some(v); }

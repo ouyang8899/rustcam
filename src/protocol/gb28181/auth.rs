@@ -188,9 +188,16 @@ mod tests {
 
     #[test]
     fn test_nonce_lifecycle() {
-        let nonce = generate_nonce();
-        assert!(verify_nonce(&nonce));
+        let nonce1 = generate_nonce();
+        let nonce2 = generate_nonce();
+        assert!(verify_nonce(&nonce1));
         assert!(!verify_nonce("nonexistent"));
-        assert!(!verify_nonce(&nonce));
+        assert!(verify_nonce(&nonce1));
+        assert!(verify_nonce(&nonce2));
+        consume_nonce(&nonce1);
+        assert!(!verify_nonce(&nonce1));
+        assert!(verify_nonce(&nonce2));
+        consume_nonce(&nonce2);
+        assert!(!verify_nonce(&nonce2));
     }
 }

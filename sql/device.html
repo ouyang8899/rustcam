@@ -1,53 +1,53 @@
 <mapper>
 <select id="device_select_by_id">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, is_channel, device_type, device_type_code, channel_id, channel_extended, is_default
 FROM devices WHERE id = #{id}
 </select>
 
 <select id="device_select_all">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
-FROM devices WHERE parent_device_tag IS NULL ORDER BY created_at DESC
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, is_channel, device_type, device_type_code, channel_id, channel_extended, is_default
+FROM devices WHERE parent_device_tag IS NULL AND is_channel = false ORDER BY created_at DESC
 </select>
 
 <select id="device_select_all_paginated">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
-FROM devices WHERE parent_device_tag IS NULL ORDER BY created_at DESC
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, is_channel, device_type, device_type_code, channel_id, channel_extended, is_default
+FROM devices WHERE parent_device_tag IS NULL AND is_channel = false ORDER BY created_at DESC
 LIMIT #{limit} OFFSET #{offset}
 </select>
 
 <select id="device_count_top_level">
-SELECT COUNT(*) FROM devices WHERE parent_device_tag IS NULL
+SELECT COUNT(*) FROM devices WHERE parent_device_tag IS NULL AND is_channel = false
 </select>
 
 <select id="device_select_online_paginated">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
-FROM devices WHERE status = 'online'
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, is_channel, device_type, device_type_code, channel_id, channel_extended, is_default
+FROM devices WHERE status = 'online' AND is_channel = false
 ORDER BY created_at DESC
 LIMIT #{limit} OFFSET #{offset}
 </select>
 
 <select id="device_count_online">
-SELECT COUNT(*) FROM devices WHERE status = 'online'
+SELECT COUNT(*) FROM devices WHERE status = 'online' AND is_channel = false
 </select>
 
 <select id="device_select_by_device_tag">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, is_channel, device_type, device_type_code, channel_id, channel_extended, is_default
 FROM devices WHERE device_tag = #{device_tag}
 </select>
 
 <select id="device_select_by_parent_device_tag">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, is_channel, device_type, device_type_code, channel_id, channel_extended, is_default
 FROM devices WHERE parent_device_tag = #{parent_device_tag} ORDER BY created_at
 </select>
 
-<select id="device_select_by_stream_key">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
-FROM devices WHERE extended->>'stream_key' = #{stream_key}
+<select id="device_select_by_status">
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, is_channel, device_type, device_type_code, channel_id, channel_extended, is_default
+FROM devices WHERE is_channel = false AND status = #{status} ORDER BY created_at DESC
 </select>
 
-<select id="device_select_by_status">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app
-FROM devices WHERE parent_device_tag IS NULL AND status = #{status} ORDER BY created_at DESC
+<select id="device_select_channels">
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, is_channel, device_type, device_type_code, channel_id, channel_extended, is_default
+FROM devices WHERE is_channel = true ORDER BY created_at DESC
 </select>
 
 <insert id="device_insert">
@@ -75,6 +75,12 @@ INSERT INTO devices
 <if test="extended != null">, extended</if>
 <if test="group_id != null">, group_id</if>
 <if test="app != null">, app</if>
+<if test="is_channel != null">, is_channel</if>
+<if test="device_type != null">, device_type</if>
+<if test="device_type_code != null">, device_type_code</if>
+<if test="channel_id != null">, channel_id</if>
+<if test="channel_extended != null">, channel_extended</if>
+<if test="is_default != null">, is_default</if>
 </trim>
 VALUES
 <trim prefix="(" suffix=")" prefixOverrides=",">
@@ -100,6 +106,12 @@ VALUES
 <if test="extended != null">, #{extended}</if>
 <if test="group_id != null">, #{group_id}</if>
 <if test="app != null">, #{app}</if>
+<if test="is_channel != null">, #{is_channel}</if>
+<if test="device_type != null">, #{device_type}</if>
+<if test="device_type_code != null">, #{device_type_code}</if>
+<if test="channel_id != null">, #{channel_id}</if>
+<if test="channel_extended != null">, #{channel_extended}</if>
+<if test="is_default != null">, #{is_default}</if>
 </trim>
 </insert>
 
@@ -129,6 +141,12 @@ UPDATE devices
 <if test="extended != null">extended = #{extended},</if>
 <if test="group_id != null">group_id = #{group_id},</if>
 <if test="app != null">app = #{app},</if>
+<if test="is_channel != null">is_channel = #{is_channel},</if>
+<if test="device_type != null">device_type = #{device_type},</if>
+<if test="device_type_code != null">device_type_code = #{device_type_code},</if>
+<if test="channel_id != null">channel_id = #{channel_id},</if>
+<if test="channel_extended != null">channel_extended = #{channel_extended},</if>
+<if test="is_default != null">is_default = #{is_default},</if>
 </set>
 WHERE id = #{id}
 </update>

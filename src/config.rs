@@ -210,7 +210,7 @@ impl Default for ServerConfig {
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
-            url: "postgres://postgres:123456@127.0.0.1:5434/rustcam".to_string(),
+            url: "postgres://postgres:123456@127.0.0.1:5435/rustcam".to_string(),
             max_connections: 10,
             debug_sql: Some(false),
         }

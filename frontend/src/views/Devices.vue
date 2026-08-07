@@ -18,6 +18,14 @@
           <el-option value="Maintaining" label="维护中" />
           <el-option value="Error" label="错误" />
         </el-select>
+        <el-select v-model="deviceTypeFilter" clearable placeholder="全部类型" style="width: 100px">
+          <el-option value="NVR" label="NVR" />
+          <el-option value="IPC" label="IPC" />
+          <el-option value="DVR" label="DVR" />
+          <el-option value="Camera" label="Camera" />
+          <el-option value="Platform" label="Platform" />
+          <el-option value="Other" label="Other" />
+        </el-select>
         <el-button type="primary" :icon="Plus" @click="openAddModal()">添加设备</el-button>
       </div>
     </div>
@@ -128,6 +136,12 @@
                   <el-table-column label="协议" width="100" align="center">
                     <template #default="{ row }">
                       <el-tag size="small" class="protocol-tag" :class="`protocol-${row.protocol?.toLowerCase()}`">{{ row.protocol }}</el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="类型" width="80" align="center">
+                    <template #default="{ row }">
+                      <el-tag v-if="row.is_channel" size="small" type="warning">通道</el-tag>
+                      <el-tag v-else size="small" type="info">{{ row.device_type || 'Other' }}</el-tag>
                     </template>
                   </el-table-column>
                   <el-table-column label="地址" min-width="140">
@@ -375,6 +389,68 @@
           </el-col>
         </el-row>
 
+        <div v-if="form.protocol === 'Gb28181' || form.protocol === 'Onvif' || (form.protocol === 'Rtsp' && form.rtsp_mode === 'pull')">
+          <el-divider>
+            <span style="font-size: 12px; color: #909399">流配置（可选）</span>
+            <el-switch v-model="form.enable_stream_config" size="small" style="margin-left: 8px" />
+          </el-divider>
+          <div v-if="form.enable_stream_config" style="background: #f5f7fa; padding: 16px; border-radius: 4px; margin-bottom: 16px">
+            <el-row :gutter="12">
+              <el-col :span="6">
+                <el-form-item label="视频编码">
+                  <el-select v-model="form.stream_config.video_codec" placeholder="选择编码" style="width: 100%">
+                    <el-option label="PS (MPEG-2)" value="PS" />
+                    <el-option label="H.264" value="H264" />
+                    <el-option label="H.265" value="H265" />
+                    <el-option label="MPEG-4" value="MPEG4" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="6">
+                <el-form-item label="音频编码">
+                  <el-select v-model="form.stream_config.audio_codec" placeholder="选择编码" style="width: 100%">
+                    <el-option label="PCMA (G.711 A)" value="PCMA" />
+                    <el-option label="PCMU (G.711 U)" value="PCMU" />
+                    <el-option label="AAC" value="AAC" />
+                    <el-option label="G.722" value="G722" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="6">
+                <el-form-item label="Profile/Level">
+                  <el-input v-model="form.stream_config.profile_level_id" placeholder="4D001F" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="6">
+                <el-form-item label="流模式">
+                  <el-select v-model="form.stream_config.stream_mode" placeholder="选择模式" style="width: 100%">
+                    <el-option label="recvonly (接收)" value="recvonly" />
+                    <el-option label="sendonly (发送)" value="sendonly" />
+                    <el-option label="sendrecv (双向)" value="sendrecv" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+            </el-row>
+            <el-row :gutter="12">
+              <el-col :span="8">
+                <el-form-item label="视频负载类型 (PT)">
+                  <el-input-number v-model="form.stream_config.video_payload_type" :min="0" :max="127" style="width: 100%" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="音频负载类型 (PT)">
+                  <el-input-number v-model="form.stream_config.audio_payload_type" :min="0" :max="127" style="width: 100%" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="SPS/PPS (H.264/265)">
+                  <el-input v-model="form.stream_config.sprop_parameter_sets" placeholder="Base64，可留空" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+          </div>
+        </div>
+
         <el-form-item>
           <el-checkbox v-model="form.is_public">公开设备（无需登录可观看）</el-checkbox>
         </el-form-item>
@@ -523,6 +599,7 @@ const showModal = ref(false)
 const searchQuery = ref('')
 const protocolFilter = ref('')
 const statusFilter = ref('')
+const deviceTypeFilter = ref('')
 const isEdit = ref(false)
 const editingId = ref(null)
 const showPlayLinksModal = ref(false)
@@ -694,13 +771,14 @@ const filteredDevices = computed(() => {
     const matchesSearch = !searchQuery.value || device.name.toLowerCase().includes(searchQuery.value.toLowerCase())
     const matchesProtocol = !protocolFilter.value || device.protocol === protocolFilter.value
     const matchesStatus = !statusFilter.value || device.status === statusFilter.value
+    const matchesDeviceType = !deviceTypeFilter.value || device.device_type === deviceTypeFilter.value
     const inRegionMode = groupMode.value === 'region'
     if (inRegionMode) {
       const matchesRegion = !selectedRegion.value || device.region_code === selectedRegion.value
-      return matchesSearch && matchesProtocol && matchesStatus && matchesRegion
+      return matchesSearch && matchesProtocol && matchesStatus && matchesDeviceType && matchesRegion
     } else {
       const matchesGroup = !selectedGroup.value || device.group_id === selectedGroup.value
-      return matchesSearch && matchesProtocol && matchesStatus && matchesGroup
+      return matchesSearch && matchesProtocol && matchesStatus && matchesDeviceType && matchesGroup
     }
   })
 })
@@ -712,6 +790,17 @@ const defaultForm = () => ({
   rtsp_mode: 'pull', app: 'live', rtsp_full_url: '',
   rtmp_mode: 'push',
   extended: {},
+  enable_stream_config: false,
+  stream_config: {
+    video_codec: 'PS',
+    audio_codec: 'PCMA',
+    video_payload_type: 96,
+    audio_payload_type: 8,
+    profile_level_id: '4D001F',
+    packaging_mode: 'HIS',
+    sprop_parameter_sets: '',
+    stream_mode: 'recvonly',
+  },
 })
 
 const form = ref(defaultForm())
@@ -972,6 +1061,7 @@ function openAddModal() {
 function openEditModal(device) {
   isEdit.value = true; editingId.value = device.id
   const ext = device.extended || {}
+  const devStreamConfig = device.stream_config || {}
   form.value = {
     name: device.name || '', protocol: device.protocol || 'Gb28181', host: device.host || '',
     port: device.port || 554, device_username: device.device_username || '', device_password: device.device_password || '',
@@ -986,6 +1076,17 @@ function openEditModal(device) {
     rtsp_full_url: ext.rtsp_full_url || device.rtsp_full_url || '',
     rtmp_mode: ext.rtmp_mode || device.rtmp_mode || 'push',
     extended: ext,
+    enable_stream_config: !!device.stream_config,
+    stream_config: {
+      video_codec: devStreamConfig.video_codec || 'PS',
+      audio_codec: devStreamConfig.audio_codec || 'PCMA',
+      video_payload_type: devStreamConfig.video_payload_type || 96,
+      audio_payload_type: devStreamConfig.audio_payload_type || 8,
+      profile_level_id: devStreamConfig.profile_level_id || '4D001F',
+      packaging_mode: devStreamConfig.packaging_mode || 'HIS',
+      sprop_parameter_sets: devStreamConfig.sprop_parameter_sets || '',
+      stream_mode: devStreamConfig.stream_mode || 'recvonly',
+    },
   }
   if (device.protocol === 'Gb28181' && device.device_tag) {
     const regionCode = device.region_code || ''
@@ -1047,6 +1148,16 @@ async function submitDevice() {
       rtsp_full_url: form.value.protocol === 'Rtsp' && form.value.rtsp_mode === 'pull' ? form.value.rtsp_full_url || null : null,
       rtmp_mode: form.value.protocol === 'Rtmp' ? form.value.rtmp_mode : undefined,
     },
+    stream_config: form.value.enable_stream_config ? {
+      video_codec: form.value.stream_config.video_codec || null,
+      audio_codec: form.value.stream_config.audio_codec || null,
+      video_payload_type: form.value.stream_config.video_payload_type,
+      audio_payload_type: form.value.stream_config.audio_payload_type,
+      profile_level_id: form.value.stream_config.profile_level_id || null,
+      packaging_mode: form.value.stream_config.packaging_mode || null,
+      sprop_parameter_sets: form.value.stream_config.sprop_parameter_sets || null,
+      stream_mode: form.value.stream_config.stream_mode || null,
+    } : null,
   }
   if (isEdit.value) {
     await deviceStore.updateDevice(editingId.value, payload)

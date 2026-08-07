@@ -6,6 +6,73 @@ use crate::domain::recording::RecordingFormat;
 use crate::domain::server::ServerProtocolPorts;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamConfig {
+    #[serde(
+        default = "default_video_codec",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub video_codec: Option<String>,
+
+    #[serde(
+        default = "default_audio_codec",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub audio_codec: Option<String>,
+
+    #[serde(default = "default_video_pt", skip_serializing_if = "Option::is_none")]
+    pub video_payload_type: Option<u8>,
+
+    #[serde(default = "default_audio_pt", skip_serializing_if = "Option::is_none")]
+    pub audio_payload_type: Option<u8>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_level_id: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub packaging_mode: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sprop_parameter_sets: Option<String>,
+
+    #[serde(
+        default = "default_stream_mode",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub stream_mode: Option<String>,
+}
+
+fn default_video_codec() -> Option<String> {
+    Some("PS".to_string())
+}
+fn default_audio_codec() -> Option<String> {
+    Some("PCMA".to_string())
+}
+fn default_video_pt() -> Option<u8> {
+    Some(96)
+}
+fn default_audio_pt() -> Option<u8> {
+    Some(8)
+}
+fn default_stream_mode() -> Option<String> {
+    Some("recvonly".to_string())
+}
+
+impl Default for StreamConfig {
+    fn default() -> Self {
+        Self {
+            video_codec: default_video_codec(),
+            audio_codec: default_audio_codec(),
+            video_payload_type: default_video_pt(),
+            audio_payload_type: default_audio_pt(),
+            profile_level_id: Some("4D001F".to_string()),
+            packaging_mode: Some("HIS".to_string()),
+            sprop_parameter_sets: None,
+            stream_mode: Some(default_stream_mode().unwrap()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -82,6 +149,66 @@ impl Default for DeviceStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum DeviceType {
+    NVR,
+    IPC,
+    DVR,
+    Encoder,
+    VideoServer,
+    Camera,
+    Platform,
+    Other,
+}
+
+impl fmt::Display for DeviceType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DeviceType::NVR => write!(f, "NVR"),
+            DeviceType::IPC => write!(f, "IPC"),
+            DeviceType::DVR => write!(f, "DVR"),
+            DeviceType::Encoder => write!(f, "Encoder"),
+            DeviceType::VideoServer => write!(f, "VideoServer"),
+            DeviceType::Camera => write!(f, "Camera"),
+            DeviceType::Platform => write!(f, "Platform"),
+            DeviceType::Other => write!(f, "Other"),
+        }
+    }
+}
+
+impl Default for DeviceType {
+    fn default() -> Self {
+        DeviceType::Other
+    }
+}
+
+impl DeviceType {
+    pub fn from_gb28181_code(code: &str) -> Self {
+        if code.len() < 13 {
+            return DeviceType::Other;
+        }
+        let type_code = &code[10..13];
+        match type_code {
+            "111" => DeviceType::DVR,
+            "112" => DeviceType::VideoServer,
+            "113" => DeviceType::Encoder,
+            "118" => DeviceType::NVR,
+            "130" => DeviceType::DVR,
+            "131" => DeviceType::Camera,
+            "132" => DeviceType::IPC,
+            _ => {
+                if let Ok(num) = type_code.parse::<u32>() {
+                    if (200..=216).contains(&num) {
+                        return DeviceType::Platform;
+                    }
+                }
+                DeviceType::Other
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamProtocol {
     Rtsp,
@@ -137,7 +264,6 @@ pub struct Device {
     pub playback_password: Option<String>,
 
     pub media_server_tag: Option<String>,
-    pub stream_key: Option<String>,
     pub app: Option<String>,
 
     pub device_tag: Option<String>,
@@ -155,6 +281,27 @@ pub struct Device {
 
     #[serde(default)]
     pub has_stream: bool,
+
+    #[serde(default)]
+    pub is_channel: bool,
+
+    #[serde(default)]
+    pub device_type: DeviceType,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_type_code: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_extended: Option<serde_json::Value>,
+
+    #[serde(default)]
+    pub is_default: bool,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_config: Option<StreamConfig>,
 }
 
 impl Device {
@@ -175,7 +322,6 @@ impl Device {
             playback_username: None,
             playback_password: None,
             media_server_tag: None,
-            stream_key: None,
             app: None,
             device_tag: None,
             parent_device_tag: None,
@@ -184,6 +330,13 @@ impl Device {
             extended: None,
             is_online: false,
             has_stream: false,
+            is_channel: false,
+            device_type: DeviceType::Other,
+            device_type_code: None,
+            channel_id: None,
+            channel_extended: None,
+            is_default: false,
+            stream_config: None,
         }
     }
 
@@ -264,13 +417,21 @@ pub struct CreateDeviceRequest {
     pub playback_username: Option<String>,
     pub playback_password: Option<String>,
     pub media_server_tag: Option<String>,
-    pub stream_key: Option<String>,
     pub app: Option<String>,
     pub device_tag: Option<String>,
     pub parent_device_tag: Option<String>,
     pub region_code: Option<String>,
     pub is_public: Option<bool>,
     pub extended: Option<serde_json::Value>,
+    #[serde(default)]
+    pub is_channel: Option<bool>,
+    #[serde(default)]
+    pub device_type: Option<DeviceType>,
+    pub device_type_code: Option<String>,
+    pub channel_id: Option<String>,
+    pub channel_extended: Option<serde_json::Value>,
+    #[serde(default)]
+    pub is_default: Option<bool>,
 }
 
 impl Default for CreateDeviceRequest {
@@ -287,13 +448,18 @@ impl Default for CreateDeviceRequest {
             playback_username: None,
             playback_password: None,
             media_server_tag: None,
-            stream_key: None,
             app: None,
             device_tag: None,
             parent_device_tag: None,
             region_code: None,
             is_public: Some(false),
             extended: None,
+            is_channel: Some(false),
+            device_type: None,
+            device_type_code: None,
+            channel_id: None,
+            channel_extended: None,
+            is_default: Some(false),
         }
     }
 }
@@ -311,7 +477,6 @@ pub struct UpdateDeviceRequest {
     pub playback_username: Option<String>,
     pub playback_password: Option<String>,
     pub media_server_tag: Option<String>,
-    pub stream_key: Option<String>,
     pub app: Option<String>,
     pub device_tag: Option<String>,
     pub parent_device_tag: Option<String>,
@@ -320,6 +485,12 @@ pub struct UpdateDeviceRequest {
     pub is_public: Option<bool>,
     pub extended: Option<serde_json::Value>,
     pub status: Option<DeviceStatus>,
+    pub is_channel: Option<bool>,
+    pub device_type: Option<DeviceType>,
+    pub device_type_code: Option<String>,
+    pub channel_id: Option<String>,
+    pub channel_extended: Option<serde_json::Value>,
+    pub is_default: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

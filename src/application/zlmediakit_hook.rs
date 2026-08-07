@@ -975,18 +975,17 @@ impl ZlMediaKitHookHandler {
     fn find_device_by_push_stream(&self, stream_id: &str) -> Option<i64> {
         for entry in self.repo.devices_cache().iter() {
             let device = entry.value();
-            if let Some(ref sk) = device.stream_key {
-                if !sk.is_empty() && stream_id.contains(sk) {
-                    return Some(device.id);
-                }
-            }
             for pu in &device.push_urls {
                 if !pu.url.is_empty() && (pu.url.contains(stream_id) || stream_id.contains(&device.device_tag.clone().unwrap_or_default())) {
                     return Some(device.id);
                 }
             }
         }
-        None
+        
+        let cache = self.repo.streams_cache();
+        cache.iter()
+            .find(|s| stream_id.contains(&s.stream_key) && !s.stream_key.is_empty())
+            .map(|s| s.device_id)
     }
 
     async fn find_sessions_by_stream(&self, stream_id: &str) -> Vec<crate::domain::Session> {

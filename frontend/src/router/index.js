@@ -68,6 +68,11 @@ const routes = [
         component: () => import('../views/UserManagement.vue'),
       },
       {
+        path: 'alarms',
+        name: 'Alarms',
+        component: () => import('../views/Alarms.vue'),
+      },
+      {
         path: 'video-wall',
         name: 'PlayerWall',
         component: () => import('../views/PlayerWallWrapper.vue'),

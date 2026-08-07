@@ -100,6 +100,14 @@
                       <el-descriptions-item label="SIP ID">{{ device.extended?.gb_id || device.gb_id || device.device_tag || '-' }}</el-descriptions-item>
                       <el-descriptions-item label="所属地区">{{ device.region_code || '-' }}</el-descriptions-item>
                     </template>
+                    <template v-if="device.stream_config && Object.keys(device.stream_config).length > 0">
+                      <el-descriptions-item label="视频编码">{{ device.stream_config.video_codec || 'PS' }}</el-descriptions-item>
+                      <el-descriptions-item label="音频编码">{{ device.stream_config.audio_codec || 'PCMA' }}</el-descriptions-item>
+                      <el-descriptions-item label="视频PT">{{ device.stream_config.video_payload_type ?? 96 }}</el-descriptions-item>
+                      <el-descriptions-item label="音频PT">{{ device.stream_config.audio_payload_type ?? 8 }}</el-descriptions-item>
+                      <el-descriptions-item label="Profile">{{ device.stream_config.profile_level_id || '4D001F' }}</el-descriptions-item>
+                      <el-descriptions-item label="流模式">{{ device.stream_config.stream_mode || 'recvonly' }}</el-descriptions-item>
+                    </template>
                   </el-descriptions>
                 </el-card>
 
@@ -129,6 +137,12 @@
                     <el-descriptions-item label="状态">
                       <span class="status-dot" :class="getStatusClass(device.status)" style="margin-right: 6px" />{{ device.status }}
                     </el-descriptions-item>
+                    <el-descriptions-item label="设备类型">
+                      <el-tag v-if="device.is_channel" size="small" type="warning">通道</el-tag>
+                      <el-tag v-else size="small">{{ device.device_type || 'Other' }}</el-tag>
+                    </el-descriptions-item>
+                    <el-descriptions-item label="通道ID" v-if="device.channel_id">{{ device.channel_id }}</el-descriptions-item>
+                    <el-descriptions-item label="父设备" v-if="device.parent_device_tag">{{ device.parent_device_tag }}</el-descriptions-item>
                     <el-descriptions-item label="观看次数">{{ device.view_count }}</el-descriptions-item>
                     <el-descriptions-item label="媒体服务器">{{ device.media_server_name || '-' }}</el-descriptions-item>
                     <el-descriptions-item label="应用名称">{{ device.app || '-' }}</el-descriptions-item>
@@ -171,6 +185,9 @@
                     <span class="ptz-ch-tag" :class="isPtzDevice ? 'ptz-tag-ok' : 'ptz-tag-off'" style="font-size: 8px; letter-spacing: 1px; padding: 1px 5px; border-radius: 2px; border: 1px solid;">{{ device.protocol }}</span>
                     <span v-if="ptzStatus">P={{ ptzStatus.position_pan?.toFixed(2) || '?' }} T={{ ptzStatus.position_tilt?.toFixed(2) || '?' }} Z={{ ptzStatus.position_zoom?.toFixed(2) || '?' }}</span>
                     <span style="margin-left: auto; font-size: 9px;" :style="{ color: ptzStatus?.moving ? 'var(--el-color-warning, #e6a23c)' : 'var(--el-color-success, #67c23a)' }">{{ ptzStatus?.moving ? '运动中' : '空闲' }}</span>
+                    <el-button v-if="isGb28181" size="small" :type="isTalking ? 'danger' : 'primary'" style="padding: 2px 8px; font-size: 9px;" @click="toggleVoiceTalk" :disabled="device.status?.toLowerCase() !== 'online'">
+                      {{ isTalking ? '结束对讲' : '语音对讲' }}
+                    </el-button>
                   </div>
                 </div>
 
@@ -318,6 +335,35 @@
                 </template>
               </el-skeleton>
             </el-card>
+
+            <el-card style="margin-top: 12px" v-if="isGb28181 || isOnvif">
+              <template #header>
+                <div style="display: flex; align-items: center; justify-content: space-between">
+                  <span>设备配置</span>
+                  <el-button size="small" @click="queryDeviceConfig">刷新配置</el-button>
+                </div>
+              </template>
+              <el-descriptions :column="2" border size="small">
+                <el-descriptions-item label="查询类型">
+                  <el-select v-model="configType" size="small" style="width: 120px">
+                    <el-option label="基本参数" value="BasicParam" />
+                    <el-option label="网络参数" value="NetworkParam" />
+                    <el-option label="视频参数" value="VideoParam" />
+                    <el-option label="视频源" value="VideoSrcParam" />
+                  </el-select>
+                </el-descriptions-item>
+                <el-descriptions-item label="操作">
+                  <el-button size="small" type="primary" @click="queryDeviceConfig">查询配置</el-button>
+                </el-descriptions-item>
+              </el-descriptions>
+              <el-skeleton animated :rows="3" :loading="configLoading" style="margin-top: 12px">
+                <template #default>
+                  <el-alert v-if="configError" :title="configError" type="error" :closable="false" style="margin-bottom: 12px" />
+                  <el-input v-else-if="configData" v-model="configData" type="textarea" :rows="6" readonly style="font-family: monospace; font-size: 12px" />
+                  <el-empty v-else description="点击「查询配置」获取设备配置信息" />
+                </template>
+              </el-skeleton>
+            </el-card>
           </div>
         </template>
       </el-skeleton>
@@ -395,6 +441,13 @@ const editingPresetToken = ref(null)
 const editingPresetName = ref('')
 const presetInputRefs = ref({})
 const servers = ref([])
+const configType = ref('BasicParam')
+const configData = ref('')
+const configLoading = ref(false)
+const configError = ref('')
+const isTalking = ref(false)
+const audioWs = ref(null)
+const mediaRecorder = ref(null)
 
 const proto = computed(() => (device.value?.protocol || '').toLowerCase())
 const isPtzDevice = computed(() => proto.value === 'onvif' || proto.value === 'gb28181')
@@ -541,18 +594,23 @@ async function toggleMaintenance(val) {
 }
 
 async function checkActiveStream() {
-  await streamStore.fetchStreams()
   if (device.value) {
-    const found = streamStore.streams.find(s => s.device_id === device.value.id)
-    if (found) {
-      try {
-        const online = await streamsApi.isStreamOnline(found.id)
-        activeStream.value = online ? found : null
-      } catch (e) {
-        console.error('Failed to check stream online status:', e)
-        activeStream.value = found
+    try {
+      const streams = await streamsApi.getStreamsByDevice(device.value.id)
+      const found = streams.length > 0 ? streams[0] : null
+      if (found) {
+        try {
+          const online = await streamsApi.isStreamOnline(found.id)
+          activeStream.value = online ? found : null
+        } catch (e) {
+          console.error('Failed to check stream online status:', e)
+          activeStream.value = found
+        }
+      } else {
+        activeStream.value = null
       }
-    } else {
+    } catch (e) {
+      console.error('Failed to fetch streams:', e)
       activeStream.value = null
     }
   }
@@ -560,6 +618,20 @@ async function checkActiveStream() {
 
 async function fetchDevice() { loading.value = true; try { device.value = await deviceStore.fetchDevice(route.params.id) } finally { loading.value = false } }
 async function fetchPlayLinks() { loadingLinks.value = true; try { playLinks.value = await deviceStore.getPlayLinks(route.params.id); selectedLink.value = null; activePlayerTab.value = 'player' } finally { loadingLinks.value = false } }
+
+async function queryDeviceConfig() {
+  configLoading.value = true
+  configError.value = ''
+  configData.value = ''
+  try {
+    const res = await request.get(`/devices/${route.params.id}/config`, { params: { type: configType.value } })
+    configData.value = res.data?.data || res.data || '无配置数据'
+  } catch (e) {
+    configError.value = '查询失败: ' + (e.message || e)
+  } finally {
+    configLoading.value = false
+  }
+}
 
 function playStream(link) {
   let type = 'auto'
@@ -605,6 +677,72 @@ async function ptzCmd(cmd) {
 function ptzStop() {
   clearTimeout(ptzTimeout)
   ptzTimeout = setTimeout(async () => { try { await deviceStore.ptzControl(route.params.id, 'stop', ptzSpeed.value) } catch (e) {} }, 200)
+}
+
+async function toggleVoiceTalk() {
+  if (isTalking.value) {
+    stopVoiceTalk()
+  } else {
+    startVoiceTalk()
+  }
+}
+
+async function startVoiceTalk() {
+  try {
+    const wsUrl = `ws://${window.location.host}/ws/audio-talk/${route.params.id}`
+    audioWs.value = new WebSocket(wsUrl)
+    
+    audioWs.value.onopen = async () => {
+      console.log('[VoiceTalk] WebSocket connected')
+      isTalking.value = true
+      
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        mediaRecorder.value = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+        
+        mediaRecorder.value.ondataavailable = (e) => {
+          if (e.data.size > 0 && audioWs.value?.readyState === WebSocket.OPEN) {
+            audioWs.value.send(e.data)
+          }
+        }
+        
+        mediaRecorder.value.start(100)
+      } catch (e) {
+        console.error('[VoiceTalk] Failed to get microphone:', e)
+        toast.error('无法访问麦克风')
+        stopVoiceTalk()
+      }
+    }
+    
+    audioWs.value.onclose = () => {
+      console.log('[VoiceTalk] WebSocket closed')
+      stopVoiceTalk()
+    }
+    
+    audioWs.value.onerror = (e) => {
+      console.error('[VoiceTalk] WebSocket error:', e)
+      toast.error('语音对讲连接失败')
+      stopVoiceTalk()
+    }
+  } catch (e) {
+    console.error('[VoiceTalk] Failed to start:', e)
+    toast.error('启动语音对讲失败')
+  }
+}
+
+function stopVoiceTalk() {
+  if (mediaRecorder.value && mediaRecorder.value.state !== 'inactive') {
+    mediaRecorder.value.stop()
+    mediaRecorder.value.stream.getTracks().forEach(track => track.stop())
+    mediaRecorder.value = null
+  }
+  
+  if (audioWs.value) {
+    audioWs.value.close()
+    audioWs.value = null
+  }
+  
+  isTalking.value = false
 }
 
 async function fetchPresets() {

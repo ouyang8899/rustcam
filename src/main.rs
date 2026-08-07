@@ -214,6 +214,19 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     });
+
+    // 11. GB28181 订阅超时清理任务（每 5 分钟）
+    let _gb28181_sub_cleanup = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(300));
+        loop {
+            interval.tick().await;
+            let removed = rustcam_media::protocol::cleanup_expired_subscriptions_all().await;
+            if removed > 0 {
+                tracing::debug!("[GB28181] Cleaned up {} expired subscriptions", removed);
+            }
+        }
+    });
+
     rustcam_media::protocol::gb28181::set_udp_sender(udp_socket);
     rustcam_media::protocol::gb28181::set_gb28181_platform_config(
         registry.infra.config().signaling_server.server_gb_id.clone(),

@@ -4,7 +4,7 @@ use rbatis::rbdc::datetime::DateTime as RbatisDateTime;
 use rbatis::RBatis;
 
 use crate::domain::server::Server;
-use crate::domain::{Device, DeviceStatus, Protocol, Recording, Session, Stream};
+use crate::domain::{Alarm, CreateAlarmRequest, Device, DeviceStatus, Protocol, Recording, Session, Stream};
 use crate::domain::device_group::{CreateGroupRequest, DeviceGroup, DeviceGroupNode, UpdateGroupRequest};
 use crate::domain::ptz::PtzPreset;
 use crate::domain::region::{Region, RegionNode};
@@ -21,6 +21,8 @@ use crate::sql_mappers::{
     session_insert, session_delete_by_id,
     stream_insert, stream_update, stream_select_by_token, stream_delete_by_device_id,
     recording_insert, recording_update, recording_delete_by_id,
+    alarm_insert, alarm_select_by_device, alarm_select_all,
+    alarm_count_by_device, alarm_count_all, alarm_mark_processed,
     ServerRow, GroupRow, SessionRow,
     layout_select_by_id, layout_select_all, layout_select_default,
     layout_insert, layout_update, layout_set_default, layout_delete,
@@ -179,6 +181,15 @@ impl DbRepository {
             .and_then(|v| v.as_str())
             .map(String::from);
 
+        let mut extended_for_db = device.extended.clone().unwrap_or(serde_json::Value::Object(Default::default()));
+        if let Some(stream_config) = &device.stream_config {
+            if let Some(obj) = extended_for_db.as_object_mut() {
+                obj.insert("stream_config".to_string(), serde_json::json!(stream_config));
+            }
+        }
+
+        let device_type_str = device.device_type.to_string();
+
         let result = device_insert(
             self.rb.acquire().await?.rb_ref(),
             Some(&device.name),
@@ -190,9 +201,7 @@ impl DbRepository {
             device.device_tag.as_deref(),
             device.parent_device_tag.as_deref(),
             Some(device.is_public),
-            None::<i64>,
             Some(RbatisDateTime::from_timestamp_millis(device.created_at.timestamp_millis())),
-            None::<RbatisDateTime>,
             device.device_password.as_deref(),
             device.playback_username.as_deref(),
             device.playback_password.as_deref(),
@@ -202,10 +211,15 @@ impl DbRepository {
             device.region_code.as_deref(),
             Some(RbatisDateTime::from_timestamp_millis(chrono::Utc::now().timestamp_millis())),
             ssrc.as_deref(),
-            gb_username.as_deref(),
-            gb_password.as_deref(),
-            device.extended.clone(),
+            Some(extended_for_db.clone()),
             device.group_id,
+            device.app.as_deref(),
+            Some(device.is_channel),
+            Some(&device_type_str),
+            device.device_type_code.as_deref(),
+            device.channel_id.as_deref(),
+            device.channel_extended.clone(),
+            Some(device.is_default),
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
 
         self.devices_cache.insert(device.id, device.clone());
@@ -223,9 +237,9 @@ impl DbRepository {
     }
 
     pub async fn get_device_by_stream_key(&self, stream_key: &str) -> Option<Device> {
-        self.devices_cache.iter()
-            .find(|d| d.stream_key.as_deref() == Some(stream_key))
-            .map(|r| r.clone())
+        let stream_id = self.get_stream_id_by_key(stream_key)?;
+        let stream = self.streams_cache.get(&stream_id)?;
+        self.get_device(stream.device_id).await.ok().flatten()
     }
 
     pub async fn get_device_by_protocol_and_host(&self, protocol: &Protocol, host: &str) -> Option<Device> {
@@ -312,27 +326,30 @@ impl DbRepository {
     }
 
     pub async fn update_device(&self, device: &Device) -> Result<()> {
-        let extended_json = device.extended.clone();
+        let mut extended_json = device.extended.clone().unwrap_or(serde_json::Value::Object(Default::default()));
+        if let Some(stream_config) = &device.stream_config {
+            if let Some(obj) = extended_json.as_object_mut() {
+                obj.insert("stream_config".to_string(), serde_json::json!(stream_config));
+            }
+        }
         let push_urls_json = serde_json::to_value(&device.push_urls).ok();
         let pull_urls_json = serde_json::to_value(&device.pull_urls).ok();
 
         // 从 extended 中提取协议特有字段
-        let rtsp_url = extended_json.as_ref()
-            .and_then(|e| e.get("rtsp_full_url"))
+        let rtsp_url = extended_json.get("rtsp_full_url")
             .and_then(|v| v.as_str())
             .map(String::from);
-        let gb_username = extended_json.as_ref()
-            .and_then(|e| e.get("gb_username"))
+        let gb_username = extended_json.get("gb_username")
             .and_then(|v| v.as_str())
             .map(String::from);
-        let gb_password = extended_json.as_ref()
-            .and_then(|e| e.get("gb_password"))
+        let gb_password = extended_json.get("gb_password")
             .and_then(|v| v.as_str())
             .map(String::from);
-        let ssrc = extended_json.as_ref()
-            .and_then(|e| e.get("ssrc"))
+        let ssrc = extended_json.get("ssrc")
             .and_then(|v| v.as_str())
             .map(String::from);
+
+        let device_type_str = device.device_type.to_string();
 
         device_update(
             self.rb.acquire().await?.rb_ref(),
@@ -346,8 +363,6 @@ impl DbRepository {
             device.device_tag.as_deref(),
             device.parent_device_tag.as_deref(),
             Some(device.is_public),
-            None::<i64>,
-            None::<RbatisDateTime>,
             device.device_password.as_deref(),
             device.playback_username.as_deref(),
             device.playback_password.as_deref(),
@@ -359,8 +374,15 @@ impl DbRepository {
             ssrc.as_deref(),
             gb_username.as_deref(),
             gb_password.as_deref(),
-            extended_json,
+            Some(extended_json),
             device.group_id,
+            device.app.as_deref(),
+            Some(device.is_channel),
+            Some(&device_type_str),
+            device.device_type_code.as_deref(),
+            device.channel_id.as_deref(),
+            device.channel_extended.clone(),
+            Some(device.is_default),
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
 
         self.devices_cache.insert(device.id, device.clone());
@@ -1079,5 +1101,57 @@ impl TryFrom<SessionRow> for Session {
             bytes_sent: row.bytes_sent as u64,
             bytes_received: row.bytes_received as u64,
         })
+    }
+}
+
+impl DbRepository {
+    pub async fn save_alarm(&self, alarm: &CreateAlarmRequest) -> Result<Alarm> {
+        let alarm_time = RbatisDateTime::from_timestamp_millis(alarm.alarm_time.timestamp_millis());
+        let rows = alarm_insert(
+            self.rb.acquire().await?.rb_ref(),
+            alarm.device_id,
+            &alarm.device_tag,
+            &alarm.alarm_type,
+            alarm_time,
+            alarm.alarm_method.unwrap_or(1),
+            alarm.alarm_priority.unwrap_or(0),
+            alarm.description.as_deref(),
+        ).await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        rows.into_iter().next().map(|r| r.into()).ok_or_else(|| AppError::Internal("Failed to insert alarm".to_string()))
+    }
+
+    pub async fn list_alarms(&self, device_id: Option<i64>, limit: usize, offset: usize) -> Result<Vec<Alarm>> {
+        let limit = limit as i64;
+        let offset = offset as i64;
+        let rows = if let Some(did) = device_id {
+            alarm_select_by_device(self.rb.acquire().await?.rb_ref(), did, limit, offset)
+                .await
+                .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?
+        } else {
+            alarm_select_all(self.rb.acquire().await?.rb_ref(), limit, offset)
+                .await
+                .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?
+        };
+        Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
+    pub async fn count_alarms(&self, device_id: Option<i64>) -> Result<i64> {
+        let count = if let Some(did) = device_id {
+            alarm_count_by_device(self.rb.acquire().await?.rb_ref(), did)
+                .await
+                .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?
+        } else {
+            alarm_count_all(self.rb.acquire().await?.rb_ref())
+                .await
+                .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?
+        };
+        Ok(count)
+    }
+
+    pub async fn mark_alarm_processed(&self, alarm_id: i64, processed: bool) -> Result<()> {
+        alarm_mark_processed(self.rb.acquire().await?.rb_ref(), processed, alarm_id)
+            .await
+            .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(())
     }
 }

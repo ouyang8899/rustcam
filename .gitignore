@@ -20,3 +20,5 @@ Cargo.lock
 /node_modules
 build.bat
 run.bat
+/document
+rustcam-plan.md

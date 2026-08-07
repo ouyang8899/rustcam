@@ -6,6 +6,7 @@ use axum::{
 };
 use crate::api::state::FullState;
 use crate::api::http::handlers::{
+    alarm_handler,
     dashboard,
     device_handler,
     stream_handler,
@@ -44,9 +45,15 @@ fn protected_routes(state: Arc<FullState>) -> Router {
         .route("/api/v1/devices/{id}", put(device_handler::update_device_handler))
         .route("/api/v1/devices/{id}", delete(device_handler::delete_device_handler))
         .route("/api/v1/devices/{id}/play", post(device_handler::play_device_handler))
+        .route("/api/v1/devices/{id}/playback", post(device_handler::playback_device_handler))
         .route("/api/v1/devices/{id}/play-links", get(device_handler::get_play_links_handler))
+        .route("/api/v1/devices/{id}/config", get(device_handler::get_device_config_handler))
         .route("/api/v1/devices/{id}/stop", post(device_handler::stop_device_handler))
         .route("/api/v1/devices/{id}/start", post(device_handler::start_device_handler))
+
+        // 报警管理
+        .route("/api/v1/alarms", get(alarm_handler::list_alarms_handler))
+        .route("/api/v1/alarms/{id}/processed", put(alarm_handler::mark_alarm_processed_handler))
 
         // PTZ 控制
         .route("/api/v1/devices/{id}/ptz", post(ptz_handler::ptz_control_handler))
@@ -73,6 +80,7 @@ fn protected_routes(state: Arc<FullState>) -> Router {
         .route("/api/v1/streams/{id}/play-links", get(stream_handler::get_stream_play_links_handler))
         .route("/api/v1/streams/{id}/online", get(stream_handler::is_stream_online_handler))
         .route("/api/v1/streams/{id}/restart", post(stream_handler::restart_stream_handler))
+        .route("/api/v1/streams/by-device/{device_id}", get(stream_handler::list_streams_by_device_handler))
 
         // 服务器管理
         .route("/api/v1/servers", get(server_handler::list_servers_handler))
@@ -160,6 +168,7 @@ fn public_routes(state: Arc<FullState>) -> Router {
         .route("/api/v1/public/streams", get(device_handler::list_public_streams_handler))
         .route("/api/v1/stats", get(stats_handler))
         .route("/ws", get(crate::api::websocket::ws_handler))
+        .route("/ws/audio-talk/:device_id", get(crate::api::websocket::audio_talk_handler))
         .with_state(state)
 }
 

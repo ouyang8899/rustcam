@@ -1,10 +1,11 @@
 use axum::extract::ws::{Message, WebSocket};
-use axum::extract::{State, WebSocketUpgrade};
+use axum::extract::{State, WebSocketUpgrade, Path};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use crate::api::FullState;
 use crate::application::ws_broadcaster::WsBroadcaster;
 use crate::error::AppError;
+use crate::protocol::adapter_manager;
 
 /// WebSocket 连接处理器
 pub async fn ws_handler(
@@ -25,13 +26,11 @@ async fn handle_socket(
     socket: WebSocket,
     broadcaster: Arc<WsBroadcaster>,
 ) {
-    // 方案：使用 tokio::select! 在同一个任务中处理收发
     let (mut sender, mut receiver) = socket.split();
     let mut broadcast_rx = broadcaster.subscribe();
 
     loop {
         tokio::select! {
-            // 接收客户端消息
             msg = receiver.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
@@ -58,7 +57,6 @@ async fn handle_socket(
                 }
             }
 
-            // 发送广播消息
             broadcast_msg = broadcast_rx.recv() => {
                 match broadcast_msg {
                     Ok(msg) => {
@@ -82,4 +80,69 @@ async fn handle_socket(
     }
 
     tracing::info!("[WebSocket] Connection closed");
+}
+
+/// WebSocket audio talk handler (Browser -> Device)
+pub async fn audio_talk_handler(
+    ws: WebSocketUpgrade,
+    Path(device_id): Path<i64>,
+    State(state): State<Arc<FullState>>,
+) -> Result<axum::response::Response, AppError> {
+    tracing::info!("[AudioTalk] WebSocket connection request for device {}", device_id);
+    Ok(ws.on_upgrade(move |socket| handle_audio_talk(socket, device_id, state)))
+}
+
+async fn handle_audio_talk(socket: WebSocket, device_id: i64, state: Arc<FullState>) {
+    let (mut sender, mut receiver) = socket.split();
+
+    loop {
+        tokio::select! {
+            msg = receiver.next() => {
+                match msg {
+                    Some(Ok(Message::Binary(data))) => {
+                        tracing::debug!("[AudioTalk] Received {} bytes from browser for device {}", data.len(), device_id);
+
+                        if let Some(device) = state.app.registry.device_service.get_device(device_id).await.ok().flatten() {
+                            if let Some(adapter_key) = device.device_tag.clone() {
+                                if let Some(adapter) = adapter_manager::get_adapter(&adapter_key) {
+                                    let mut guard = adapter.lock().await;
+
+                                    let pcm_data: Vec<i16> = data.chunks_exact(2)
+                                        .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
+                                        .collect();
+
+                                    if let Err(e) = guard.send_audio_to_device(&adapter_key, &pcm_data).await {
+                                        tracing::error!("[AudioTalk] Failed to send audio: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Text(text))) => {
+                        tracing::debug!("[AudioTalk] Received text: {}", text);
+                    }
+                    Some(Ok(Message::Ping(data))) => {
+                        if sender.send(Message::Pong(data)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) => {
+                        tracing::info!("[AudioTalk] Client closed connection for device {}", device_id);
+                        break;
+                    }
+                    Some(Err(e)) => {
+                        tracing::error!("[AudioTalk] Error: {}", e);
+                        break;
+                    }
+                    None => {
+                        tracing::info!("[AudioTalk] Client disconnected for device {}", device_id);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    tracing::info!("[AudioTalk] Connection closed for device {}", device_id);
 }

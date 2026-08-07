@@ -2,7 +2,7 @@ use rbatis::html_sql;
 use rbatis::rbdc::datetime::DateTime as RbatisDateTime;
 use rbatis::sql;
 use crate::domain::server::{Server, ServerType};
-use crate::domain::{Device, Protocol, DeviceStatus, PushUrl, PullUrl, Recording, RecordingState, RecordingFormat, Stream, StreamState};
+use crate::domain::{Device, Protocol, DeviceStatus, DeviceType, PushUrl, PullUrl, Recording, RecordingState, RecordingFormat, Stream, StreamState, StreamConfig};
 use crate::domain::region::RegionRow;
 use crate::error::AppError;
 
@@ -33,6 +33,12 @@ pub struct DeviceRow {
     pub gb_password: Option<String>,
     pub extended: Option<serde_json::Value>,
     pub group_id: Option<i64>,
+    pub is_channel: Option<bool>,
+    pub device_type: Option<String>,
+    pub device_type_code: Option<String>,
+    pub channel_id: Option<String>,
+    pub channel_extended: Option<serde_json::Value>,
+    pub is_default: Option<bool>,
 }
 
 impl TryFrom<DeviceRow> for Device {
@@ -88,9 +94,26 @@ impl TryFrom<DeviceRow> for Device {
                 .or_else(|| ext_obj.get("pull_urls").and_then(|v| serde_json::from_value(v.clone()).ok()))
                 .unwrap_or_default()
         };
+        let get_stream_config = || -> Option<StreamConfig> {
+            ext_obj.get("stream_config")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+        };
 
         let created_at = chrono::DateTime::from_timestamp(row.created_at.unix_timestamp(), 0)
             .unwrap_or_else(chrono::Utc::now);
+
+        let device_type = row.device_type.as_ref()
+            .map(|dt| match dt.as_str() {
+                "NVR" => DeviceType::NVR,
+                "IPC" => DeviceType::IPC,
+                "DVR" => DeviceType::DVR,
+                "Encoder" => DeviceType::Encoder,
+                "VideoServer" => DeviceType::VideoServer,
+                "Camera" => DeviceType::Camera,
+                "Platform" => DeviceType::Platform,
+                _ => DeviceType::Other,
+            })
+            .unwrap_or(DeviceType::Other);
 
         let device = Device {
             id: row.id,
@@ -108,7 +131,6 @@ impl TryFrom<DeviceRow> for Device {
             playback_username: row.playback_username.or_else(|| get_str("playback_username")),
             playback_password: row.playback_password.or_else(|| get_str("playback_password")),
             media_server_tag: row.media_server_tag.or_else(|| get_str("media_server_tag")),
-            stream_key: get_str("stream_key"),
             app: row.app.or_else(|| get_str("app")),
             device_tag: row.device_tag,
             parent_device_tag: row.parent_device_tag,
@@ -117,6 +139,13 @@ impl TryFrom<DeviceRow> for Device {
             extended: ext.into(),
             is_online: false,
             has_stream: false,
+            is_channel: row.is_channel.unwrap_or(false),
+            device_type,
+            device_type_code: row.device_type_code,
+            channel_id: row.channel_id,
+            channel_extended: row.channel_extended.clone(),
+            is_default: row.is_default.unwrap_or(false),
+            stream_config: get_stream_config(),
         };
         Ok(device)
     }
@@ -126,7 +155,6 @@ impl Device {
     pub fn extended_json(&self) -> serde_json::Value {
         serde_json::json!({
             "device_username": self.device_username,
-            "stream_key": self.stream_key,
         })
     }
 
@@ -162,22 +190,25 @@ pub async fn device_insert(
     device_tag: Option<&str>,
     parent_device_tag: Option<&str>,
     is_public: Option<bool>,
-    view_count: Option<i64>,
     created_at: Option<RbatisDateTime>,
-    last_seen: Option<RbatisDateTime>,
     device_password: Option<&str>,
     playback_username: Option<&str>,
     playback_password: Option<&str>,
-    media_server_name: Option<&str>,
+    media_server_tag: Option<&str>,
     push_urls: Option<serde_json::Value>,
     pull_urls: Option<serde_json::Value>,
     region_code: Option<&str>,
     updated_at: Option<RbatisDateTime>,
     ssrc: Option<&str>,
-    gb_username: Option<&str>,
-    gb_password: Option<&str>,
     extended: Option<serde_json::Value>,
     group_id: Option<i64>,
+    app: Option<&str>,
+    is_channel: Option<bool>,
+    device_type: Option<&str>,
+    device_type_code: Option<&str>,
+    channel_id: Option<&str>,
+    channel_extended: Option<serde_json::Value>,
+    is_default: Option<bool>,
 ) -> rbatis::Result<rbatis::rbdc::ExecResult> {
     impled!()
 }
@@ -195,12 +226,10 @@ pub async fn device_update(
     device_tag: Option<&str>,
     parent_device_tag: Option<&str>,
     is_public: Option<bool>,
-    view_count: Option<i64>,
-    last_seen: Option<RbatisDateTime>,
     device_password: Option<&str>,
     playback_username: Option<&str>,
     playback_password: Option<&str>,
-    media_server_name: Option<&str>,
+    media_server_tag: Option<&str>,
     push_urls: Option<serde_json::Value>,
     pull_urls: Option<serde_json::Value>,
     region_code: Option<&str>,
@@ -210,6 +239,13 @@ pub async fn device_update(
     gb_password: Option<&str>,
     extended: Option<serde_json::Value>,
     group_id: Option<i64>,
+    app: Option<&str>,
+    is_channel: Option<bool>,
+    device_type: Option<&str>,
+    device_type_code: Option<&str>,
+    channel_id: Option<&str>,
+    channel_extended: Option<serde_json::Value>,
+    is_default: Option<bool>,
 ) -> rbatis::Result<rbatis::rbdc::ExecResult> {
     impled!()
 }
@@ -298,14 +334,6 @@ pub async fn device_select_by_parent_device_tag(
 pub async fn device_select_by_device_tag(
     rb: &dyn rbatis::Executor,
     device_tag: &str,
-) -> rbatis::Result<Vec<DeviceRow>> {
-    impled!()
-}
-
-#[html_sql("sql/device.html")]
-pub async fn device_select_by_stream_key(
-    rb: &dyn rbatis::Executor,
-    stream_key: &str,
 ) -> rbatis::Result<Vec<DeviceRow>> {
     impled!()
 }
@@ -1012,3 +1040,74 @@ pub async fn layout_set_default(rb: &dyn rbatis::Executor) -> rbatis::Result<rba
 
 #[sql("DELETE FROM player_window_layouts WHERE id = $1")]
 pub async fn layout_delete(rb: &dyn rbatis::Executor, id: i64) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct AlarmRow {
+    pub id: i64,
+    pub device_id: i64,
+    pub device_tag: String,
+    pub alarm_type: String,
+    pub alarm_time: RbatisDateTime,
+    pub alarm_method: i32,
+    pub alarm_priority: i32,
+    pub description: Option<String>,
+    pub processed: bool,
+    pub created_at: RbatisDateTime,
+}
+
+impl From<AlarmRow> for crate::domain::alarm::Alarm {
+    fn from(row: AlarmRow) -> Self {
+        let alarm_time = chrono::DateTime::from_timestamp(row.alarm_time.unix_timestamp(), 0)
+            .unwrap_or_else(chrono::Utc::now);
+        let created_at = chrono::DateTime::from_timestamp(row.created_at.unix_timestamp(), 0)
+            .unwrap_or_else(chrono::Utc::now);
+        crate::domain::alarm::Alarm {
+            id: row.id,
+            device_id: row.device_id,
+            device_tag: row.device_tag,
+            alarm_type: row.alarm_type,
+            alarm_time,
+            alarm_method: row.alarm_method,
+            alarm_priority: row.alarm_priority,
+            description: row.description,
+            processed: row.processed,
+            created_at,
+        }
+    }
+}
+
+#[sql("INSERT INTO gb28181_alarms (device_id, device_tag, alarm_type, alarm_time, alarm_method, alarm_priority, description) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, device_id, device_tag, alarm_type, alarm_time, alarm_method, alarm_priority, description, processed, created_at")]
+pub async fn alarm_insert(
+    rb: &dyn rbatis::Executor,
+    device_id: i64,
+    device_tag: &str,
+    alarm_type: &str,
+    alarm_time: RbatisDateTime,
+    alarm_method: i32,
+    alarm_priority: i32,
+    description: Option<&str>,
+) -> rbatis::Result<Vec<AlarmRow>> { impled!() }
+
+#[sql("SELECT id, device_id, device_tag, alarm_type, alarm_time, alarm_method, alarm_priority, description, processed, created_at FROM gb28181_alarms WHERE device_id = $1 ORDER BY alarm_time DESC LIMIT $2 OFFSET $3")]
+pub async fn alarm_select_by_device(
+    rb: &dyn rbatis::Executor,
+    device_id: i64,
+    limit: i64,
+    offset: i64,
+) -> rbatis::Result<Vec<AlarmRow>> { impled!() }
+
+#[sql("SELECT id, device_id, device_tag, alarm_type, alarm_time, alarm_method, alarm_priority, description, processed, created_at FROM gb28181_alarms ORDER BY alarm_time DESC LIMIT $1 OFFSET $2")]
+pub async fn alarm_select_all(
+    rb: &dyn rbatis::Executor,
+    limit: i64,
+    offset: i64,
+) -> rbatis::Result<Vec<AlarmRow>> { impled!() }
+
+#[sql("SELECT COUNT(*) FROM gb28181_alarms WHERE device_id = $1")]
+pub async fn alarm_count_by_device(rb: &dyn rbatis::Executor, device_id: i64) -> rbatis::Result<i64> { impled!() }
+
+#[sql("SELECT COUNT(*) FROM gb28181_alarms")]
+pub async fn alarm_count_all(rb: &dyn rbatis::Executor) -> rbatis::Result<i64> { impled!() }
+
+#[sql("UPDATE gb28181_alarms SET processed = $1 WHERE id = $2")]
+pub async fn alarm_mark_processed(rb: &dyn rbatis::Executor, processed: bool, id: i64) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }

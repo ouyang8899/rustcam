@@ -36,7 +36,25 @@ pub trait SignalAdapter: Send + Sync {
 
     async fn start(&mut self, device_tag: &str) -> Result<()>;
 
+    async fn start_playback(&mut self, device_tag: &str, start_time: chrono::DateTime<chrono::Utc>, end_time: chrono::DateTime<chrono::Utc>) -> Result<()> {
+        Ok(())
+    }
+
+    async fn send_notify(&mut self, _device_tag: &str, _event_type: &str, _content: &str) -> Result<()> {
+        Ok(())
+    }
+
     async fn ptz_control(&mut self, channel_id: &str, command: &crate::protocol::event::PtzCommand, speed: Option<u8>) -> Result<()>;
+
+    async fn cleanup_expired_subscriptions(&self) -> usize { 0 }
+
+    async fn send_device_config_query(&self, _config_type: &str) -> Result<String> {
+        Ok(String::new())
+    }
+
+    async fn send_audio_to_device(&mut self, _device_tag: &str, _pcm_data: &[i16]) -> Result<()> {
+        Ok(())
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════

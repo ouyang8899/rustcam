@@ -73,9 +73,13 @@ pub async fn create_recording_handler(
     let device = registry.device_service.get_device(req.device_id).await?
         .ok_or_else(|| AppError::NotFound(format!("Device {} not found", req.device_id)))?;
 
-    let stream_id = device.stream_key.clone()
-        .filter(|sk| !sk.is_empty())
-        .unwrap_or_else(|| format!("recording/{}", device.id));
+    let stream_id = {
+        let cache = registry.infra.db.streams_cache();
+        cache.iter()
+            .find(|s| s.device_id == req.device_id)
+            .map(|s| s.stream_key.clone())
+            .unwrap_or_else(|| format!("recording/{}", device.id))
+    };
     let media_server = device.media_server_tag.clone().unwrap_or_else(|| "auto".to_string());
 
     let recording = registry.recording_service.create_recording(

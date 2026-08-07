@@ -1,3 +1,4 @@
+pub mod alarm;
 pub mod device;
 pub mod device_group;
 pub mod player_layout;
@@ -10,6 +11,7 @@ pub mod stream;
 pub mod user;
 pub mod traits;
 
+pub use alarm::*;
 pub use device::*;
 pub use ptz::*;
 pub use recording::*;

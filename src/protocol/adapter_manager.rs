@@ -28,3 +28,15 @@ pub fn remove_adapter(key: &str) {
 pub fn clear_adapters() {
     ADAPTER_MAP.write().unwrap().clear();
 }
+
+pub async fn cleanup_expired_subscriptions_all() -> usize {
+    let mut total = 0;
+    let keys: Vec<String> = ADAPTER_MAP.read().unwrap().keys().cloned().collect();
+    for key in keys {
+        if let Some(adapter) = get_adapter(&key) {
+            let guard = adapter.lock().await;
+            total += guard.cleanup_expired_subscriptions().await;
+        }
+    }
+    total
+}

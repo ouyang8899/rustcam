@@ -65,9 +65,14 @@ impl StreamService {
             ))?;
 
         let app = device.app.clone().unwrap_or_else(|| "live".to_string());
-        let stream_key = device.stream_key.clone()
-            .filter(|sk| !sk.is_empty())
-            .unwrap_or_else(|| format!("{}", Uuid::new_v4()));
+        
+        let stream_key = {
+            let cache = self.infra.db.streams_cache();
+            cache.iter()
+                .find(|s| s.device_id == device_id)
+                .map(|s| s.stream_key.clone())
+                .unwrap_or_else(|| Uuid::new_v4().to_string())
+        };
 
         let existing_in_cache = {
             let cache = self.infra.db.streams_cache();
@@ -506,6 +511,14 @@ impl StreamService {
         self.infra.db.list_streams().await
             .into_iter()
             .filter(|s| s.state == StreamState::Active)
+            .collect()
+    }
+
+    /// 根据设备ID获取流列表
+    pub async fn get_streams_by_device(&self, device_id: i64) -> Vec<Stream> {
+        self.infra.db.list_streams().await
+            .into_iter()
+            .filter(|s| s.device_id == device_id)
             .collect()
     }
 

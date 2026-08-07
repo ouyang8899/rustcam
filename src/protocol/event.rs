@@ -109,6 +109,40 @@ pub enum SignalEvent {
         device_id: i64,
         device_tag: Option<String>,
     },
+    QueryDeviceConfig {
+        device_id: i64,
+        device_tag: Option<String>,
+        config_type: String,
+    },
+    SetDeviceConfig {
+        device_id: i64,
+        device_tag: Option<String>,
+        config_type: String,
+        config_value: String,
+    },
+    PresetQuery {
+        device_id: i64,
+        device_tag: Option<String>,
+        channel_id: String,
+    },
+    PresetSet {
+        device_id: i64,
+        device_tag: Option<String>,
+        channel_id: String,
+        preset_name: String,
+    },
+    PresetGoto {
+        device_id: i64,
+        device_tag: Option<String>,
+        channel_id: String,
+        preset_index: u32,
+    },
+    PresetRemove {
+        device_id: i64,
+        device_tag: Option<String>,
+        channel_id: String,
+        preset_index: u32,
+    },
     CatalogResponse {
         device_id: i64,
         device_tag: Option<String>,
@@ -120,6 +154,39 @@ pub enum SignalEvent {
     MediaServerOffline {
         media_server_tag: String,
         reason: Option<String>,
+    },
+    DeviceSubscribe {
+        device_id: i64,
+        device_tag: Option<String>,
+        event_types: Vec<String>,
+        expires: u32,
+    },
+    DeviceNotify {
+        device_id: i64,
+        device_tag: Option<String>,
+        event_type: String,
+        expires: u32,
+    },
+    CatalogNotify {
+        device_id: i64,
+        device_tag: Option<String>,
+        event_type: String,
+        channels: Vec<CatalogChannel>,
+    },
+    StartAudioTalk {
+        device_id: i64,
+        device_tag: Option<String>,
+        audio_port: u16,
+    },
+    StopAudioTalk {
+        device_id: i64,
+        device_tag: Option<String>,
+    },
+    AudioData {
+        device_id: i64,
+        device_tag: Option<String>,
+        data: Vec<u8>,
+        timestamp: u32,
     },
 }
 impl SignalEvent {
@@ -141,9 +208,21 @@ impl SignalEvent {
             SignalEvent::Alarm { .. } => "alarm".to_string(),
             SignalEvent::QueryDeviceInfo { .. } => "query_device_info".to_string(),
             SignalEvent::QueryDeviceStatus { .. } => "query_device_status".to_string(),
+            SignalEvent::QueryDeviceConfig { .. } => "query_device_config".to_string(),
+            SignalEvent::SetDeviceConfig { .. } => "set_device_config".to_string(),
+            SignalEvent::PresetQuery { .. } => "preset_query".to_string(),
+            SignalEvent::PresetSet { .. } => "preset_set".to_string(),
+            SignalEvent::PresetGoto { .. } => "preset_goto".to_string(),
+            SignalEvent::PresetRemove { .. } => "preset_remove".to_string(),
             SignalEvent::CatalogResponse { .. } => "catalog_response".to_string(),
             SignalEvent::MediaServerOnline { .. } => "media_server_online".to_string(),
             SignalEvent::MediaServerOffline { .. } => "media_server_offline".to_string(),
+            SignalEvent::DeviceSubscribe { .. } => "device_subscribe".to_string(),
+            SignalEvent::DeviceNotify { .. } => "device_notify".to_string(),
+            SignalEvent::CatalogNotify { .. } => "catalog_notify".to_string(),
+            SignalEvent::StartAudioTalk { .. } => "start_audio_talk".to_string(),
+            SignalEvent::StopAudioTalk { .. } => "stop_audio_talk".to_string(),
+            SignalEvent::AudioData { .. } => "audio_data".to_string(),
         }
     }
 }
@@ -156,6 +235,25 @@ pub struct CatalogChannel {
     pub status: String,
     pub parental: bool,
     pub parent_id: Option<String>,
+    pub civil_code: Option<String>,
+    pub address: Option<String>,
+    pub ip_address: Option<String>,
+    pub port: Option<u16>,
+    pub owner: Option<String>,
+    pub secrecy: Option<u8>,
+    pub device_type: Option<String>,
+    pub ptz_type: Option<u8>,
+    pub info: Option<DeviceInfoBlock>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceInfoBlock {
+    pub device_type: Option<String>,
+    pub protocol: Option<String>,
+    pub ptz_type: Option<u8>,
+    pub video_input_number: Option<u8>,
+    pub audio_input_number: Option<u8>,
+    pub alarm_output_number: Option<u8>,
 }
 
 impl CatalogChannel {
@@ -165,6 +263,29 @@ impl CatalogChannel {
 
     pub fn is_directory(&self) -> bool {
         self.parental
+    }
+
+    pub fn get_device_type_code(&self) -> Option<u32> {
+        if self.device_id.len() >= 13 {
+            self.device_id[8..12].parse().ok()
+        } else {
+            None
+        }
+    }
+
+    pub fn is_voice_input_channel(&self) -> bool {
+        self.get_device_type_code() == Some(136)
+    }
+
+    pub fn is_voice_output_channel(&self) -> bool {
+        self.get_device_type_code() == Some(137)
+    }
+
+    pub fn is_audio_channel(&self) -> bool {
+        match self.get_device_type_code() {
+            Some(136) | Some(137) => true,
+            _ => false,
+        }
     }
 }
 
@@ -209,7 +330,7 @@ pub enum PtzCommand {
     RemovePreset { preset_token: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TransportType {
     UDP,
     TCP,

@@ -10,5 +10,5 @@ pub mod websocket;
 
 pub use event::ProtocolType;
 pub use adapter::{AdapterRegistry, SignalAdapter};
-pub use adapter_manager::{get_adapter, set_adapter, remove_adapter, clear_adapters, AdapterEntry};
+pub use adapter_manager::{get_adapter, set_adapter, remove_adapter, clear_adapters, cleanup_expired_subscriptions_all, AdapterEntry};
 pub use matcher::ProtocolMatcher;

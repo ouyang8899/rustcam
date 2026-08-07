@@ -23,6 +23,16 @@ impl PaginationQuery {
     pub fn offset(&self) -> usize { self.offset.unwrap_or(0) }
 }
 
+/// 设备流查询
+#[derive(Debug, Deserialize)]
+pub struct DeviceStreamsQuery {
+    pub device_id: Option<i64>,
+}
+
+impl DeviceStreamsQuery {
+    pub fn device_id(&self) -> Option<i64> { self.device_id }
+}
+
 /// 开始推流请求
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -52,6 +62,16 @@ pub async fn list_streams_handler(
         limit: q.limit(),
         offset: q.offset(),
     })))
+}
+
+/// GET /api/v1/streams/by-device/:device_id
+pub async fn list_streams_by_device_handler(
+    State(state): State<Arc<FullState>>,
+    Path(device_id): Path<i64>,
+) -> Result<Json<ApiResponse<Vec<Stream>>>, AppError> {
+    let registry = &state.app.registry;
+    let streams = registry.stream_service.get_streams_by_device(device_id).await;
+    Ok(Json(ApiResponse::success(streams)))
 }
 
 /// GET /api/v1/streams/:id

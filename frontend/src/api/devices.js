@@ -79,3 +79,11 @@ export async function ptzControl(id, command, speed = 50, presetToken = null) {
   const res = await request.post(`/devices/${id}/ptz`, body)
   return res.data
 }
+
+export async function startDevicePlayback(id, startTime, endTime) {
+  const res = await request.post(`/devices/${id}/playback`, {
+    start_time: startTime,
+    end_time: endTime,
+  })
+  return res.data.data
+}

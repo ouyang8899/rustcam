@@ -175,6 +175,50 @@ pub async fn play_device_handler(
     Ok(Json(ApiResponse::success(stream_info)))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PlaybackRequest {
+    pub start_time: String,
+    pub end_time: String,
+}
+
+/// POST /api/v1/devices/:id/playback
+pub async fn playback_device_handler(
+    State(state): State<Arc<FullState>>,
+    Path(id): Path<i64>,
+    Json(req): Json<PlaybackRequest>,
+) -> Result<Json<ApiResponse<StartDeviceResult>>, AppError> {
+    let registry = &state.app.registry;
+    let device = registry.device_service.get_device(id).await?
+        .ok_or_else(|| AppError::NotFound(format!("Device {} not found", id)))?;
+
+    let start_dt = chrono::DateTime::parse_from_rfc3339(&req.start_time)
+        .map_err(|_| AppError::BadRequest("Invalid start_time format".to_string()))?
+        .with_timezone(&chrono::Utc);
+    let end_dt = chrono::DateTime::parse_from_rfc3339(&req.end_time)
+        .map_err(|_| AppError::BadRequest("Invalid end_time format".to_string()))?
+        .with_timezone(&chrono::Utc);
+
+    match device.protocol {
+        Protocol::Gb28181 => {
+            let device_tag = device.device_tag.clone()
+                .ok_or_else(|| AppError::BadRequest(format!("Device {} has no device_tag", id)))?;
+            let adapter_key = device.parent_device_tag.clone().unwrap_or(device_tag.clone());
+            let adapter_arc = crate::protocol::adapter_manager::get_adapter(&adapter_key)
+                .ok_or_else(|| AppError::NotFound(format!("Device {} is offline", id)))?;
+
+            let mut inner = adapter_arc.lock().await;
+            (&mut *inner).start_playback(&device_tag, start_dt, end_dt).await
+                .map_err(|e| AppError::Internal(format!("Playback INVITE failed: {}", e)))?;
+
+            Ok(Json(ApiResponse::success(StartDeviceResult {
+                success: true,
+                message: "Playback INVITE sent".to_string(),
+            })))
+        }
+        _ => Err(AppError::BadRequest("Playback only supported for GB28181 devices".to_string()))
+    }
+}
+
 /// GET /api/v1/devices/:id/play-links
 pub async fn get_play_links_handler(
     State(state): State<Arc<FullState>>,
@@ -188,13 +232,54 @@ pub async fn get_play_links_handler(
     device.select_source()
         .ok_or_else(|| AppError::BadRequest("Device has no stream source configured".to_string()))?;
 
-    let stream_id = device.stream_key.clone()
-        .filter(|sk| !sk.is_empty())
-        .unwrap_or_else(|| format!("{}", uuid::Uuid::new_v4()));
+    let stream_id = {
+        let cache = registry.infra.db.streams_cache();
+        cache.iter()
+            .find(|s| s.device_id == id)
+            .map(|s| s.stream_key.clone())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+    };
     let token = registry.play_service.generate_token(&device.id.to_string()).await?;
     let play_links = registry.play_service.build_play_links(&device, &token, &stream_id).await;
 
     Ok(Json(ApiResponse::success(play_links)))
+}
+
+/// GET /api/v1/devices/:id/config?type=BasicParam
+#[derive(Debug, Deserialize)]
+pub struct DeviceConfigQuery {
+    pub r#type: Option<String>,
+}
+
+pub async fn get_device_config_handler(
+    State(state): State<Arc<FullState>>,
+    Path(id): Path<i64>,
+    Query(query): Query<DeviceConfigQuery>,
+) -> Result<Json<ApiResponse<String>>, AppError> {
+    let registry = &state.app.registry;
+
+    let device = registry.device_service.get_device(id).await?
+        .ok_or_else(|| AppError::NotFound(format!("Device {} not found", id)))?;
+
+    let config_type = query.r#type.as_deref().unwrap_or("BasicParam");
+    tracing::info!("[DeviceConfig] Query device {} config type={}", id, config_type);
+
+    let config_xml = match device.protocol {
+        Protocol::Gb28181 => {
+            let device_tag = device.device_tag.as_ref().ok_or_else(|| AppError::BadRequest("Device has no device tag".to_string()))?;
+            if let Some(adapter) = crate::protocol::adapter_manager::get_adapter(device_tag) {
+                let guard = adapter.lock().await;
+                let resp = guard.send_device_config_query(config_type).await
+                    .map_err(|e| AppError::BadRequest(format!("Config query failed: {}", e)))?;
+                resp
+            } else {
+                format!(r#"<Error>Device {} not connected</Error>"#, id)
+            }
+        }
+        _ => format!(r#"<Error>Protocol {} does not support config query</Error>"#, device.protocol),
+    };
+
+    Ok(Json(ApiResponse::success(config_xml)))
 }
 
 /// POST /api/v1/devices/:id/stop
