@@ -58,8 +58,13 @@
         </el-menu-item>
 
         <el-menu-item index="/alarms">
-          <el-icon><Bell /></el-icon>
-          <template #title><span>报警记录</span></template>
+          <el-icon>
+            <Bell />
+          </el-icon>
+          <template #title>
+            <span>报警记录</span>
+            <el-badge v-if="unprocessedAlarms > 0" :value="unprocessedAlarms > 99 ? '99+' : unprocessedAlarms" type="danger" style="margin-left: 8px" />
+          </template>
         </el-menu-item>
 
         <el-sub-menu index="/wall-group">
@@ -129,6 +134,7 @@ import { Monitor, VideoCamera, DataLine, VideoPlay, Cpu, Compass, Grid, User, Su
 import { useThemeStore } from '../../stores/themeStore'
 import { useAuthStore } from '../../stores/authStore'
 import { useWsConnection } from '../../composables/useWsConnection'
+import { getUnprocessedCount } from '../../api/alarms'
 
 const route = useRoute()
 const router = useRouter()
@@ -139,9 +145,13 @@ const { wsConnected, connect, disconnect } = useWsConnection()
 const collapsed = ref(false)
 const isAdmin = computed(() => auth.isAdmin)
 const currentRoute = computed(() => route.path)
+const unprocessedAlarms = ref(0)
 
-onMounted(() => {
-  if (auth.isAuthenticated) connect()
+onMounted(async () => {
+  if (auth.isAuthenticated) {
+    connect()
+    await fetchUnprocessedAlarms()
+  }
 })
 
 onUnmounted(() => {
@@ -150,6 +160,14 @@ onUnmounted(() => {
 
 function onMenuSelect(index) {
   router.push(index)
+}
+
+async function fetchUnprocessedAlarms() {
+  try {
+    unprocessedAlarms.value = await getUnprocessedCount()
+  } catch (e) {
+    console.warn('[Sidebar] Failed to fetch unprocessed alarms:', e)
+  }
 }
 
 async function handleLogout() {
