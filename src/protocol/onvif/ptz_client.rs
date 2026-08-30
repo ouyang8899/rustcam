@@ -325,32 +325,31 @@ impl OnvifPtzClient {
         loop {
             match reader.read_event() {
                 Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                    let local = e.name().local_name();
-                    let name = std::str::from_utf8(local.as_ref()).unwrap_or("");
+                    let name = e.name().local_name();
 
-                    if name == "PanTilt" {
+                    if name.into_inner() == "PanTilt" {
                         for attr in e.attributes().flatten() {
-                            let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
-                            let val = String::from_utf8_lossy(&attr.value);
-                            match key {
-                                "x" => pan = val.parse().ok(),
-                                "y" => tilt = val.parse().ok(),
-                                _ => {}
+                            let key = attr.key.into_inner();
+                            if let Ok(val) = attr.value.parse::<f64>() {
+                                match key {
+                                    "x" => pan = Some(val),
+                                    "y" => tilt = Some(val),
+                                    _ => {}
+                                }
                             }
                         }
                     }
-                    if name == "Zoom" {
+                    if name.into_inner() == "Zoom" {
                         for attr in e.attributes().flatten() {
-                            let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
+                            let key = attr.key.into_inner();
                             if key == "x" {
-                                zoom = String::from_utf8_lossy(&attr.value).parse().ok();
+                                zoom = attr.value.parse::<f64>().ok();
                             }
                         }
                     }
-                    if name == "MoveStatus" {
+                    if name.into_inner() == "MoveStatus" {
                         for attr in e.attributes().flatten() {
-                            let val = String::from_utf8_lossy(&attr.value);
-                            if val != "IDLE" {
+                            if attr.value.as_ref() != "IDLE" {
                                 moving = true;
                             }
                         }
@@ -378,22 +377,20 @@ impl OnvifPtzClient {
         loop {
             match reader.read_event() {
                 Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                    let local = e.name().local_name();
-                    let name = std::str::from_utf8(local.as_ref()).unwrap_or("");
+                    let name = e.name().local_name();
 
-                    if name == "Preset" || name == "PresetToken" {
+                    if name.into_inner() == "Preset" || name.into_inner() == "PresetToken" {
                         for attr in e.attributes().flatten() {
-                            let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
+                            let key = attr.key.into_inner();
                             if key == "token" {
-                                return Some(String::from_utf8_lossy(&attr.value).to_string());
+                                return Some(attr.value.to_string());
                             }
                         }
                     }
                 }
                 Ok(Event::End(ref e)) => {
-                    let local = e.name().local_name();
-                    let name = std::str::from_utf8(local.as_ref()).unwrap_or("");
-                    if name == "PresetToken" {
+                    let name = e.name().local_name();
+                    if name.into_inner() == "PresetToken" {
                         // 文本内容
                     }
                 }
@@ -415,33 +412,31 @@ impl OnvifPtzClient {
         loop {
             match reader.read_event() {
                 Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                    let local = e.name().local_name();
-                    let name = std::str::from_utf8(local.as_ref()).unwrap_or("");
-                    if name == "Preset" || name == "PTZPreset" {
+                    let name = e.name().local_name();
+                    if name.into_inner() == "Preset" || name.into_inner() == "PTZPreset" {
                         current_token = None;
                         current_name = None;
                         for attr in e.attributes().flatten() {
-                            let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
+                            let key = attr.key.into_inner();
                             if key == "token" {
-                                current_token = Some(String::from_utf8_lossy(&attr.value).to_string());
+                                current_token = Some(attr.value.to_string());
                             }
                         }
-                    } else if name == "Name" {
+                    } else if name.into_inner() == "Name" {
                         // will capture text in next text event
                     }
                 }
                 Ok(Event::Text(ref e)) => {
                     if current_token.is_some() && current_name.is_none() {
-                        let text = e.unescape().unwrap_or_default().to_string();
+                        let text = (&*e).to_string();
                         if !text.is_empty() {
                             current_name = Some(text);
                         }
                     }
                 }
                 Ok(Event::End(ref e)) => {
-                    let local = e.name().local_name();
-                    let name = std::str::from_utf8(local.as_ref()).unwrap_or("");
-                    if (name == "Preset" || name == "PTZPreset") && current_token.is_some() {
+                    let name = e.name().local_name();
+                    if (name.into_inner() == "Preset" || name.into_inner() == "PTZPreset") && current_token.is_some() {
                         if let Some(token) = current_token.take() {
                             results.push((token, current_name.take()));
                         }

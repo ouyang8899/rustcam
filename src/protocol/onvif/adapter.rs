@@ -348,19 +348,17 @@ impl OnvifAdapter {
         loop {
             match reader.read_event() {
                 Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                    let l = e.name().local_name();
-                    let name = std::str::from_utf8(l.as_ref()).unwrap_or("");
-                    if name == element {
+                    let name = e.name().local_name();
+                    if name.as_ref() == element {
                         capture = true;
                     }
                 }
                 Ok(Event::Text(ref e)) if capture => {
-                    result.push_str(&e.unescape().unwrap_or_default());
+                    result.push_str(&*e);
                 }
                 Ok(Event::End(ref e)) => {
-                    let l = e.name().local_name();
-                    let name = std::str::from_utf8(l.as_ref()).unwrap_or("");
-                    if name == element {
+                    let name = e.name().local_name();
+                    if name.as_ref() == element {
                         break;
                     }
                 }
@@ -385,24 +383,21 @@ impl OnvifAdapter {
         loop {
             match reader.read_event() {
                 Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                    let l = e.name().local_name();
-                    let name = std::str::from_utf8(l.as_ref()).unwrap_or("");
-                    if name == "ProfileToken" || name == "Profile" {
+                    let name = e.name().local_name();
+                    if name.as_ref() == "ProfileToken" || name.as_ref() == "Profile" {
                         for attr in e.attributes().flatten() {
-                            let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
-                            if key == "token" {
-                                return String::from_utf8_lossy(&attr.value).to_string();
+                            if attr.key.as_ref() == "token" {
+                                return attr.value.to_string();
                             }
                         }
                     }
                 }
                 Ok(Event::Text(ref e)) => {
-                    text_content = e.unescape().unwrap_or_default().to_string();
+                    text_content = (&*e).to_string();
                 }
                 Ok(Event::End(ref e)) => {
-                    let l = e.name().local_name();
-                    let name = std::str::from_utf8(l.as_ref()).unwrap_or("");
-                    if name == "ProfileToken" && !text_content.is_empty() {
+                    let name = e.name().local_name();
+                    if name.as_ref() == "ProfileToken" && !text_content.is_empty() {
                         return text_content.clone();
                     }
                 }
@@ -425,16 +420,14 @@ impl OnvifAdapter {
         loop {
             match reader.read_event() {
                 Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                    let l = e.name().local_name();
-                    let name = std::str::from_utf8(l.as_ref()).unwrap_or("");
-                    if name == "PanTilt" || name == "Zoom" {
+                    let name = e.name().local_name();
+                    if name.as_ref() == "PanTilt" || name.as_ref() == "Zoom" {
                         for attr in e.attributes().flatten() {
-                            let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
-                            let val_str = String::from_utf8_lossy(&attr.value);
-                            if let Ok(val) = val_str.parse::<f64>() {
+                            let key = attr.key.as_ref();
+                            if let Ok(val) = attr.value.parse::<f64>() {
                                 match key {
                                     "x" => {
-                                        if name == "Zoom" {
+                                        if name.as_ref() == "Zoom" {
                                             zoom = val;
                                         } else {
                                             pan = val;

@@ -5,9 +5,9 @@ use axum::{
 };
 use argon2::{
     Argon2, PasswordHash, PasswordVerifier,
-    password_hash::PasswordHasher, password_hash::SaltString,
-    password_hash::rand_core::OsRng,
 };
+use password_hash::phc::SaltString;
+use password_hash::PasswordHasher;
 use uuid::Uuid;
 use crate::api::FullState;
 use crate::error::{AppError, Result as AppResult};
@@ -141,10 +141,9 @@ pub async fn create_user(
     }
 
     // 哈希密码
-    let salt = SaltString::generate(&mut OsRng);
-    let argon2 = Argon2::default();
-    let password_hash = argon2
-        .hash_password(req.password.as_bytes(), &salt)
+    let salt = SaltString::generate();
+    let password_hash = Argon2::default()
+        .hash_password(req.password.as_bytes())
         .map_err(|e| AppError::BadRequest(format!("Password hash error: {}", e)))?
         .to_string();
 
@@ -210,10 +209,9 @@ pub async fn update_user(
     }
 
     if let Some(password) = req.password {
-        let salt = SaltString::generate(&mut OsRng);
-        let argon2 = Argon2::default();
-        user.password_hash = argon2
-            .hash_password(password.as_bytes(), &salt)
+        let salt = SaltString::generate();
+        user.password_hash = Argon2::default()
+            .hash_password(password.as_bytes())
             .map_err(|e| AppError::BadRequest(format!("Password hash error: {}", e)))?
             .to_string();
     }

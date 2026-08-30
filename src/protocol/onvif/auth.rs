@@ -2,7 +2,6 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
-use rand::RngCore;
 use sha1::{Digest, Sha1};
 
 const PASSWORD_DIGEST_URI: &str = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest";
@@ -27,7 +26,9 @@ pub enum PasswordType {
 }
 
 impl Default for PasswordType {
-    fn default() -> Self { PasswordType::Digest }
+    fn default() -> Self {
+        PasswordType::Digest
+    }
 }
 
 impl UsernameToken {
@@ -44,13 +45,23 @@ impl UsernameToken {
         let created = Self::extract_tag(soap_body, b"Created")
             .or_else(|| Self::extract_tag(soap_body, b"wsse:Created"))
             .unwrap_or_default();
-        Some(Self { username, password, password_type, nonce, created })
+        Some(Self {
+            username,
+            password,
+            password_type,
+            nonce,
+            created,
+        })
     }
 
     fn extract_password_type(soap_body: &[u8]) -> PasswordType {
         let content = String::from_utf8_lossy(soap_body);
-        if content.contains(PASSWORD_DIGEST_URI) { return PasswordType::Digest; }
-        if content.contains(PASSWORD_TEXT_URI) { return PasswordType::Text; }
+        if content.contains(PASSWORD_DIGEST_URI) {
+            return PasswordType::Digest;
+        }
+        if content.contains(PASSWORD_TEXT_URI) {
+            return PasswordType::Text;
+        }
         PasswordType::Unknown
     }
 
@@ -69,7 +80,9 @@ impl UsernameToken {
                 if let Some(end) = content[value_start..].find(&close_tag) {
                     let value = &content[value_start..value_start + end];
                     let trimmed = value.trim();
-                    if !trimmed.is_empty() { return Some(trimmed.to_string()); }
+                    if !trimmed.is_empty() {
+                        return Some(trimmed.to_string());
+                    }
                 }
             }
         }
@@ -77,14 +90,27 @@ impl UsernameToken {
     }
 
     pub fn verify(&self, stored_password: &str) -> bool {
-        if self.username.is_empty() || stored_password.is_empty() { return false; }
-        if self.nonce.is_empty() || self.created.is_empty() { return false; }
-        if self.password_type != PasswordType::Digest { return false; }
+        if self.username.is_empty() || stored_password.is_empty() {
+            return false;
+        }
+        if self.nonce.is_empty() || self.created.is_empty() {
+            return false;
+        }
+        if self.password_type != PasswordType::Digest {
+            return false;
+        }
 
-        if !Self::validate_timestamp(&self.created) { return false; }
-        if !Self::check_and_mark_nonce(&self.nonce) { return false; }
+        if !Self::validate_timestamp(&self.created) {
+            return false;
+        }
+        if !Self::check_and_mark_nonce(&self.nonce) {
+            return false;
+        }
 
-        let nonce_decoded = match STANDARD.decode(&self.nonce) { Ok(n) => n, Err(_) => return false };
+        let nonce_decoded = match STANDARD.decode(&self.nonce) {
+            Ok(n) => n,
+            Err(_) => return false,
+        };
         let mut hasher = Sha1::new();
         hasher.update(&nonce_decoded);
         hasher.update(self.created.as_bytes());
@@ -107,7 +133,9 @@ impl UsernameToken {
 
     fn check_and_mark_nonce(nonce: &str) -> bool {
         Self::cleanup_expired_nonces();
-        if NONCE_STORE.contains_key(nonce) { return false; }
+        if NONCE_STORE.contains_key(nonce) {
+            return false;
+        }
         let expiry = Utc::now().timestamp() + TIMESTAMP_TOLERANCE_SECS * 2;
         NONCE_STORE.insert(nonce.to_string(), expiry);
         true
@@ -120,7 +148,7 @@ impl UsernameToken {
 
     pub fn build_digest(_username: &str, password: &str) -> (String, String, String) {
         let mut nonce_bytes = [0u8; 16];
-        rand::thread_rng().fill_bytes(&mut nonce_bytes);
+        getrandom::getrandom(&mut nonce_bytes).expect("failed to get random bytes");
         let nonce_b64 = STANDARD.encode(nonce_bytes);
         let created = chrono::Utc::now().to_rfc3339();
         let mut hasher = Sha1::new();
@@ -162,8 +190,11 @@ mod tests {
         hasher.update(pwd_str.as_bytes());
         let digest = STANDARD.encode(hasher.finalize());
         let t = UsernameToken {
-            username: "admin".to_string(), password: digest,
-            password_type: PasswordType::Digest, nonce, created,
+            username: "admin".to_string(),
+            password: digest,
+            password_type: PasswordType::Digest,
+            nonce,
+            created,
         };
         assert!(t.verify(pwd_str));
     }
@@ -173,9 +204,21 @@ mod tests {
         let pwd = "admin123";
         let (nonce, created, _) = UsernameToken::build_digest("admin", pwd);
         let (_, _, digest) = UsernameToken::build_digest("admin", pwd);
-        let t1 = UsernameToken { username: "admin".to_string(), password: "any".to_string(), password_type: PasswordType::Digest, nonce: nonce.clone(), created: created.clone() };
+        let t1 = UsernameToken {
+            username: "admin".to_string(),
+            password: "any".to_string(),
+            password_type: PasswordType::Digest,
+            nonce: nonce.clone(),
+            created: created.clone(),
+        };
         let _ = t1.verify(pwd);
-        let t2 = UsernameToken { username: "admin".to_string(), password: "any".to_string(), password_type: PasswordType::Digest, nonce, created };
+        let t2 = UsernameToken {
+            username: "admin".to_string(),
+            password: "any".to_string(),
+            password_type: PasswordType::Digest,
+            nonce,
+            created,
+        };
         assert!(!t2.verify(pwd));
     }
 }

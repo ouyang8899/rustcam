@@ -58,9 +58,8 @@ impl PostgresAuthRepository {
             tracing::warn!("[AuthDB] seed_default_data (role may exist): {}", e);
         }
 
-        let hasher = argon2::Argon2::default();
-        let salt = argon2::password_hash::SaltString::generate(&mut rand::thread_rng());
-        let hash = match hasher.hash_password("admin123".as_bytes(), &salt) {
+        let salt = password_hash::phc::SaltString::generate();
+        let hash = match argon2::Argon2::default().hash_password("admin123".as_bytes()) {
             Ok(h) => h.to_string(),
             Err(e) => {
                 tracing::warn!("[AuthDB] seed_default_data (hash failed): {}", e);

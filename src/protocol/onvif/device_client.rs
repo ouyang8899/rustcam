@@ -291,15 +291,15 @@ impl OnvifDeviceClient {
             use quick_xml::events::Event;
             match reader.read_event() {
                 Ok(Event::Start(ref e)) => {
-                    let name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    let name = e.name().local_name().into_inner();
                     if name == "Service" {
                         in_service = true;
                         current_ns.clear();
                         current_xaddr.clear();
                         for attr in e.attributes().flatten() {
-                            let key = String::from_utf8_lossy(attr.key.as_ref()).into_owned();
+                            let key = attr.key.into_inner();
                             if key == "Namespace" {
-                                current_ns = String::from_utf8_lossy(&attr.value).into_owned();
+                                current_ns = attr.value.to_string();
                             }
                         }
                     }
@@ -307,9 +307,9 @@ impl OnvifDeviceClient {
                         let mut text = String::new();
                         loop {
                             match reader.read_event() {
-                                Ok(Event::Text(ref e)) => text.push_str(&e.unescape().unwrap_or_default()),
+                                Ok(Event::Text(ref e)) => text.push_str(&*e),
                                 Ok(Event::End(ref e)) => {
-                                    if String::from_utf8_lossy(e.name().as_ref()).into_owned() == "XAddr" { break; }
+                                    if e.name().local_name().into_inner() == "XAddr" { break; }
                                 }
                                 Ok(Event::Eof) | Err(_) => break,
                                 _ => {}
@@ -319,7 +319,7 @@ impl OnvifDeviceClient {
                     }
                 }
                 Ok(Event::End(ref e)) => {
-                    let name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    let name = e.name().local_name().into_inner();
                     if name == "Service" && in_service {
                         if !current_xaddr.is_empty() {
                             endpoints.push(OnvifServiceEndpoint {
@@ -348,7 +348,7 @@ impl OnvifDeviceClient {
             use quick_xml::events::Event;
             match reader.read_event() {
                 Ok(Event::Start(ref e)) => {
-                    let name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    let name = e.name().local_name().into_inner();
                     if name == category {
                         in_category = true;
                         depth = 1;
@@ -360,9 +360,9 @@ impl OnvifDeviceClient {
                             let mut text = String::new();
                             loop {
                                 match reader.read_event() {
-                                    Ok(Event::Text(ref e)) => text.push_str(&e.unescape().unwrap_or_default()),
+                                    Ok(Event::Text(ref e)) => text.push_str(&*e),
                                     Ok(Event::End(ref e)) => {
-                                        let en = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                                        let en = e.name().local_name().into_inner();
                                         if en == "XAddr" { break; }
                                     }
                                     Ok(Event::Eof) | Err(_) => break,

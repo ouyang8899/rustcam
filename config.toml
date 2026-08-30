@@ -14,13 +14,13 @@ max_connections = 10
 debug_sql = true
 
 [redis]
-url = "redis://:123456@192.168.137.57:6379/"
+url = "redis://:123456@127.0.0.1:6379/"
 pool_size = 10
 
 [[media_servers.servers]]
 name = "zlmediakit-1"
-url = "http://192.168.137.57:80"
-api_key = "yRF342lDM8wJ8O0dwwax4FFjiGet9ikW"
+url = "http://127.0.0.1:80"
+api_key = "hX56LNGxVJrdvDd0N8Q7fRlL8VGreVcz"
 server_type = "zlmediakit"
 weight = 100
 enabled = true

@@ -573,9 +573,10 @@ impl DbRepository {
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
 
         // 查询刚插入的记录获取实际 id
-        let row = server_select_by_tag(self.rb.acquire().await?.rb_ref(), &server.server_tag)
+        let rows = server_select_by_tag(self.rb.acquire().await?.rb_ref(), &server.server_tag)
             .await
-            .map_err(|e| AppError::Internal(e.to_string()))?
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        let row = rows.into_iter().next()
             .ok_or_else(|| AppError::Internal("Failed to get inserted server".to_string()))?;
 
         self.servers_cache.insert(row.id, row.clone());
@@ -622,8 +623,7 @@ impl DbRepository {
 
     pub async fn server_exists_by_tag(&self, tag: &str) -> anyhow::Result<bool> {
         match server_select_by_tag(self.rb.acquire().await?.rb_ref(), tag).await {
-            Ok(Some(_)) => Ok(true),
-            Ok(None) => Ok(false),
+            Ok(rows) => Ok(!rows.is_empty()),
             Err(e) => {
                 tracing::warn!("[DbRepository] server_exists_by_tag failed: {}", e);
                 Ok(false)

@@ -116,38 +116,6 @@ impl ServiceRegistry {
         // ── 第2层: 媒体上下文 ──
         let cluster = Arc::new(ClusterManager::new_from_configs(vec![]));
 
-        // 先同步配置服务器到数据库（直接查数据库）
-        for cfg in &infra.config().media_servers.servers {
-            let tag = if cfg.server_tag.is_empty() {
-                cfg.name.clone()
-            } else {
-                cfg.server_tag.clone()
-            };
-
-            // 直接查数据库
-            let exists_in_db = infra.db.server_exists_by_tag(&tag).await?;
-
-            if !exists_in_db {
-                tracing::info!("[ServiceRegistry] Syncing config server '{}' to DB", tag);
-                let new_server = crate::domain::server::Server {
-                    id: 0,
-                    name: cfg.name.clone(),
-                    url: cfg.url.clone(),
-                    api_key: cfg.api_key.clone(),
-                    server_type: crate::domain::server::ServerType::from_str(&cfg.server_type).unwrap_or(crate::domain::server::ServerType::Zlmediakit),
-                    weight: cfg.weight,
-                    enabled: cfg.enabled,
-                    server_tag: tag.clone(),
-                    protocol_ports: cfg.protocol_ports.clone(),
-                    created_at: chrono::Utc::now(),
-                    updated_at: chrono::Utc::now(),
-                };
-                if let Err(e) = infra.db.create_server(&new_server).await {
-                    tracing::warn!("[ServiceRegistry] Failed to sync config server to DB: {}", e);
-                }
-            }
-        }
-
         // 媒体服务器管理服务（从数据库加载）
         let media_server_service = Arc::new(MediaServerService::new(
             infra.db.clone(),

@@ -396,7 +396,7 @@ pub async fn server_select_by_id(
 pub async fn server_select_by_tag(
     rb: &dyn rbatis::Executor,
     server_tag: &str,
-) -> rbatis::Result<Option<ServerRow>> {
+) -> rbatis::Result<Vec<ServerRow>> {
     impled!()
 }
 
