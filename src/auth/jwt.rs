@@ -1,8 +1,8 @@
+use super::{config::JwtConfig, errors::AuthError, models::UserInfo};
 use chrono::{Duration, Utc};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use super::{config::JwtConfig, errors::AuthError, models::UserInfo};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
@@ -15,42 +15,76 @@ pub struct Claims {
 }
 
 impl Claims {
-    pub fn new(user_id: Uuid, username: &str, roles: Vec<String>, token_type: &str, expires_in: Duration) -> Self {
+    pub fn new(
+        user_id: Uuid,
+        username: &str,
+        roles: Vec<String>,
+        token_type: &str,
+        expires_in: Duration,
+    ) -> Self {
         let now = Utc::now();
         Self {
-            sub: user_id.to_string(), username: username.to_string(), roles,
-            exp: (now + expires_in).timestamp(), iat: now.timestamp(),
+            sub: user_id.to_string(),
+            username: username.to_string(),
+            roles,
+            exp: (now + expires_in).timestamp(),
+            iat: now.timestamp(),
             token_type: token_type.to_string(),
         }
     }
 }
 
 pub fn encode_token(
-    user_id: Uuid, username: &str, roles: Vec<String>,
-    token_type: &str, expires_in: Duration, secret: &str,
+    user_id: Uuid,
+    username: &str,
+    roles: Vec<String>,
+    token_type: &str,
+    expires_in: Duration,
+    secret: &str,
 ) -> Result<String, AuthError> {
     let claims = Claims::new(user_id, username, roles, token_type, expires_in);
-    encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))
-        .map_err(|e| AuthError::InvalidToken(e.to_string()))
+    let header = Header::new(Algorithm::HS256);
+
+    encode(
+        &header,
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .map_err(|e| AuthError::InvalidToken(e.to_string()))
 }
 
 pub fn decode_token(token: &str, secret: &str) -> Result<Claims, AuthError> {
-    decode::<Claims>(token, &DecodingKey::from_secret(secret.as_bytes()), &Validation::default())
-        .map(|data| data.claims)
-        .map_err(|e| {
-            if e.to_string().contains("ExpiredSignature") { AuthError::TokenExpired }
-            else { AuthError::InvalidToken(e.to_string()) }
-        })
+    decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &Validation::default(),
+    )
+    .map(|data| data.claims)
+    .map_err(|e| {
+        if e.to_string().contains("ExpiredSignature") {
+            AuthError::TokenExpired
+        } else {
+            AuthError::InvalidToken(e.to_string())
+        }
+    })
 }
 
 pub fn generate_tokens(user: &UserInfo, config: &JwtConfig) -> Result<(String, String), AuthError> {
     let access_token = encode_token(
-        user.id, &user.username, user.roles.clone(), "access",
-        Duration::minutes(config.access_token_expire_minutes), &config.secret,
+        user.id,
+        &user.username,
+        user.roles.clone(),
+        "access",
+        Duration::minutes(config.access_token_expire_minutes),
+        &config.secret,
     )?;
     let refresh_token = encode_token(
-        user.id, &user.username, user.roles.clone(), "refresh",
-        Duration::days(config.refresh_token_expire_days), &config.secret,
+        user.id,
+        &user.username,
+        user.roles.clone(),
+        "refresh",
+        Duration::days(config.refresh_token_expire_days),
+        &config.secret,
     )?;
     Ok((access_token, refresh_token))
 }

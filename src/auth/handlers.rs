@@ -24,7 +24,7 @@ pub async fn login(
     State(state): State<Arc<FullState>>,
     Json(req): Json<LoginRequest>,
 ) -> AppResult<Json<ApiResponse<LoginResponse>>> {
-    // 查找用户 — ✅ 只有 UserRepository 有 find_by_username，无需限定
+    // 查找用户
     let user = UserRepository::find_by_username(&*state.auth.repo, &req.username)
         .await
         .map_err(|e| AppError::Auth(e.to_string()))?
