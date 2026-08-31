@@ -4,8 +4,10 @@ mod ptz;
 pub mod audio;
 pub mod rtp;
 pub mod tcp_audio_pool;
+pub mod sip;
 
 pub use adapter::Gb28181Adapter;
+pub use sip::{SipMessage, SipUri, SipMethod, SipNameAddr};
 pub use tcp_audio_pool::{TcpAudioServerPool, TcpAudioServerConfig, TcpAudioConnection};
 
 use once_cell::sync::OnceCell;
@@ -18,12 +20,12 @@ static UDP_SENDER: OnceCell<Arc<tokio::net::UdpSocket>> = OnceCell::new();
 pub fn set_udp_sender(socket: Arc<tokio::net::UdpSocket>) { UDP_SENDER.set(socket).ok(); }
 pub fn get_udp_sender() -> Option<&'static Arc<tokio::net::UdpSocket>> { UDP_SENDER.get() }
 
-static GB28181_PLATFORM_CONFIG: OnceCell<(String, String, u16)> = OnceCell::new();
+static GB28181_PLATFORM_CONFIG: OnceCell<(String, String, String, u16)> = OnceCell::new();
 
-pub fn set_gb28181_platform_config(server_gb_id: String, ip: String, port: u16) {
-    GB28181_PLATFORM_CONFIG.set((server_gb_id, ip, port)).ok();
+pub fn set_gb28181_platform_config(server_gb_id: String, server_gb_domain: String, ip: String, port: u16) {
+    GB28181_PLATFORM_CONFIG.set((server_gb_id, server_gb_domain, ip, port)).ok();
 }
-pub fn get_gb28181_platform_config() -> &'static OnceCell<(String, String, u16)> {
+pub fn get_gb28181_platform_config() -> &'static OnceCell<(String, String, String, u16)> {
     &GB28181_PLATFORM_CONFIG
 }
 

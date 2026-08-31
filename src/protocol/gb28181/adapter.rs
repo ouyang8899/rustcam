@@ -17,6 +17,7 @@ use crate::protocol::gb28181::auth::{
     parse_sip_authorization, verify_sip_digest,
     generate_nonce, verify_nonce, consume_nonce, VerifyResult,
 };
+use crate::protocol::gb28181::sip::{SipMessage, SipUri, SipMethod, SipNameAddr};
 use crate::error::{Result, AppError};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -417,10 +418,10 @@ impl Gb28181Adapter {
     fn build_catalog_query(&self) -> Vec<u8> {
         let sn = self.seq.load(Ordering::SeqCst);
         let device_tag = self.device_tag_str();
-        let (platform_id, platform_ip, platform_port) = crate::protocol::gb28181::get_gb28181_platform_config()
+        let (platform_id, platform_domain, platform_ip, platform_port) = crate::protocol::gb28181::get_gb28181_platform_config()
             .get()
-            .map(|(id, ip, port)| (id.as_str(), ip.as_str(), *port))
-            .unwrap_or(("00000000000000000000", "0.0.0.0", 5060));
+            .map(|(id, domain, ip, port)| (id.as_str(), domain.as_str(), ip.as_str(), *port))
+            .unwrap_or(("00000000000000000000", "0000000000", "0.0.0.0", 5060));
 
         let body = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -429,26 +430,37 @@ impl Gb28181Adapter {
             sn, device_tag, device_tag
         );
 
-        let content_len = body.len();
         let ts = chrono::Utc::now().timestamp_millis() % 1000000;
         let call_id = format!("cat-{}", ts);
+        let from_uri = SipUri {
+            user: Some(platform_id.to_string()),
+            host: format!("{}:{}", platform_ip, platform_port),
+            port: None,
+            params: HashMap::new(),
+        };
+        let to_uri = SipUri {
+            user: Some(device_tag.to_string()),
+            host: format!("{}:{}", platform_ip, platform_port),
+            port: None,
+            params: HashMap::new(),
+        };
 
-        let via = format!("SIP/2.0/UDP {}:{};branch=z9hG4bKcat{}", platform_ip, platform_port, ts);
-        let from = format!("<sip:{}@{}:{}>;tag=cat{}", platform_id, platform_ip, platform_port, ts);
-        let to = format!("<sip:{}>", device_tag);
+        let from_name_addr = SipNameAddr::new(from_uri)
+            .with_param("domain", platform_domain)
+            .with_param("tag", &format!("cat{}", ts));
+        let to_name_addr = SipNameAddr::new(to_uri.clone());
 
-        format!(
-            "MESSAGE {} SIP/2.0\r\n\
-             Via: {}\r\n\
-             From: {}\r\n\
-             To: {}\r\n\
-             Call-ID: {}\r\n\
-             CSeq: {} MESSAGE\r\n\
-             Content-Type: Application/MANSCDP+xml\r\n\
-             User-Agent: RustCam-Media/2.0\r\n\
-             Content-Length: {}\r\n\r\n{}",
-            to, via, from, to, call_id, sn, content_len, body
-        ).into_bytes()
+        let msg = SipMessage::request(SipMethod::Message, to_uri)
+            .header("via", &format!("SIP/2.0/UDP {}:{};branch=z9hG4bKcat{}", platform_ip, platform_port, ts))
+            .header("from", &from_name_addr.to_string())
+            .header("to", &to_name_addr.to_string())
+            .header("call-id", &call_id)
+            .header("cseq", &format!("{} MESSAGE", sn))
+            .header("content-type", "Application/MANSCDP+xml")
+            .header("user-agent", "RustCam-Media/2.0")
+            .set_body(&body);
+
+        msg.to_string().into_bytes()
     }
 
     fn parse_catalog_response(&self, body: &str) -> Vec<CatalogChannel> {
@@ -1546,19 +1558,16 @@ impl SignalAdapter for Gb28181Adapter {
 
         loop {
             let buffer = (*self.recv_buffer).clone();
-            let (first_line, headers, body) = match Self::parse_sip_message(&buffer) {
-                Some(msg) => msg,
+            
+            let (sip_msg, consumed) = match SipMessage::from_buffer(&buffer) {
+                Some((msg, len)) => (msg, len),
                 None => break,
             };
 
             self.last_message_at = Some(chrono::Utc::now());
-
-            let consumed = {
-                let header_end = String::from_utf8_lossy(&buffer).find("\r\n\r\n").unwrap_or(0) + 4;
-                let cl = Self::get_header(&headers, "Content-Length").and_then(|v| v.parse().ok()).unwrap_or(0);
-                header_end + cl
-            };
             self.recv_buffer = Arc::new(buffer[consumed..].to_vec());
+
+            let (first_line, headers, body) = sip_msg.to_old_format();
 
             let (event, response) = if first_line.starts_with("SIP/2.0") {
                 self.handle_sip_response(&first_line, &headers, &body).await
@@ -1674,6 +1683,7 @@ impl SignalAdapter for Gb28181Adapter {
         let branch = format!("z9hG4bK{}", &call_id[..7]);
         let server_port = self.deps.config.server.port;
         let server_gb_id = &self.deps.config.signaling_server.server_gb_id;
+        let server_gb_domain = &self.deps.config.signaling_server.server_gb_domain;
 
         let parent_device_id = device.parent_device_tag.clone()
             .unwrap_or_else(|| device_tag.to_string());
@@ -1734,7 +1744,7 @@ impl SignalAdapter for Gb28181Adapter {
         let invite = format!(
             "INVITE sip:{to_uri} SIP/2.0\r\n\
              Via: {via}\r\n\
-             From: <sip:{from_uri}>;tag={from_tag}\r\n\
+             From: <sip:{from_uri}>;domain={server_gb_domain};tag={from_tag}\r\n\
              To: <sip:{to_uri}>\r\n\
              Call-ID: {call_id}\r\n\
              CSeq: {sn} INVITE\r\n\
@@ -1747,6 +1757,7 @@ impl SignalAdapter for Gb28181Adapter {
             to_uri = to_uri,
             via = via,
             from_uri = from_uri,
+            server_gb_domain = server_gb_domain,
             from_tag = from_tag,
             call_id = call_id,
             sn = sn,
@@ -1775,6 +1786,7 @@ impl SignalAdapter for Gb28181Adapter {
         let branch = format!("z9hG4bK{}", &call_id[..7]);
         let server_port = self.deps.config.server.port;
         let server_gb_id = &self.deps.config.signaling_server.server_gb_id;
+        let server_gb_domain = &self.deps.config.signaling_server.server_gb_domain;
 
         let parent_device_id = device.parent_device_tag.clone()
             .unwrap_or_else(|| device_tag.to_string());
@@ -1839,7 +1851,7 @@ impl SignalAdapter for Gb28181Adapter {
         let invite = format!(
             "INVITE sip:{to_uri} SIP/2.0\r\n\
              Via: {via}\r\n\
-             From: <sip:{from_uri}>;tag={from_tag}\r\n\
+             From: <sip:{from_uri}>;domain={server_gb_domain};tag={from_tag}\r\n\
              To: <sip:{to_uri}>\r\n\
              Call-ID: {call_id}\r\n\
              CSeq: {sn} INVITE\r\n\
@@ -1852,6 +1864,7 @@ impl SignalAdapter for Gb28181Adapter {
             to_uri = to_uri,
             via = via,
             from_uri = from_uri,
+            server_gb_domain = server_gb_domain,
             from_tag = from_tag,
             call_id = call_id,
             sn = sn,
@@ -1927,6 +1940,7 @@ impl SignalAdapter for Gb28181Adapter {
         let server_port = self.deps.config.server.port;
         let server_ip = self.remote_addr.map(|a| a.ip().to_string()).unwrap_or_else(|| "0.0.0.0".to_string());
         let server_gb_id = &self.deps.config.signaling_server.server_gb_id;
+        let server_gb_domain = &self.deps.config.signaling_server.server_gb_domain;
 
         let parent_device_id = device.parent_device_tag.clone().unwrap_or_else(|| device_tag.to_string());
         let device_host = device.host.clone();
@@ -1944,7 +1958,7 @@ impl SignalAdapter for Gb28181Adapter {
         let notify = format!(
             "NOTIFY sip:{to_uri} SIP/2.0\r\n\
              Via: {via}\r\n\
-             From: <sip:{from_uri}>;tag={from_tag}\r\n\
+             From: <sip:{from_uri}>;domain={server_gb_domain};tag={from_tag}\r\n\
              To: <sip:{to_uri}>;tag={to_tag}\r\n\
              Call-ID: {call_id}\r\n\
              CSeq: {sn} NOTIFY\r\n\
@@ -1957,6 +1971,7 @@ impl SignalAdapter for Gb28181Adapter {
             to_uri = to_uri,
             via = via,
             from_uri = from_uri,
+            server_gb_domain = server_gb_domain,
             from_tag = from_tag,
             to_tag = to_tag,
             call_id = call_id,
@@ -2006,7 +2021,7 @@ impl Gb28181Adapter {
     pub fn build_audio_invite_sdp(&self, device_ip: &str, audio_port: u16) -> String {
         let (platform_id, platform_ip, platform_port) = crate::protocol::gb28181::get_gb28181_platform_config()
             .get()
-            .map(|(id, ip, port)| (id.as_str(), ip.as_str(), *port))
+            .map(|(id, _, ip, port)| (id.as_str(), ip.as_str(), *port))
             .unwrap_or(("34020000000000000000", "0.0.0.0", 5060));
         
         format!(
@@ -2026,7 +2041,7 @@ a=rtpmap:8 PCMA/8000
     pub fn build_audio_invite_sdp_tcp(&self, device_ip: &str, tcp_port: u16) -> String {
         let (platform_id, platform_ip, platform_port) = crate::protocol::gb28181::get_gb28181_platform_config()
             .get()
-            .map(|(id, ip, port)| (id.as_str(), ip.as_str(), *port))
+            .map(|(id, _, ip, port)| (id.as_str(), ip.as_str(), *port))
             .unwrap_or(("34020000000000000000", "0.0.0.0", 5060));
         
         format!(
@@ -2099,7 +2114,7 @@ a=rtpmap:8 PCMA/8000
         
         let (platform_id, platform_ip, platform_port) = crate::protocol::gb28181::get_gb28181_platform_config()
             .get()
-            .map(|(id, ip, port)| (id.as_str(), ip.as_str(), *port))
+            .map(|(id, _, ip, port)| (id.as_str(), ip.as_str(), *port))
             .unwrap_or(("34020000000000000000", "0.0.0.0", 5060));
         
         let via_transport = match transport {
@@ -2144,7 +2159,7 @@ a=rtpmap:8 PCMA/8000
             
             let (platform_id, platform_ip, platform_port) = crate::protocol::gb28181::get_gb28181_platform_config()
                 .get()
-                .map(|(id, ip, port)| (id.as_str(), ip.as_str(), *port))
+                .map(|(id, _, ip, port)| (id.as_str(), ip.as_str(), *port))
                 .unwrap_or(("34020000000000000000", "0.0.0.0", 5060));
             
             let sip_msg = format!(
