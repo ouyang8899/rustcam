@@ -1,6 +1,7 @@
 pub mod alarm;
 pub mod device;
 pub mod device_group;
+pub mod gb28181_ref;
 pub mod player_layout;
 pub mod ptz;
 pub mod recording;

@@ -20,6 +20,7 @@ use crate::api::http::handlers::{
     region_handler,
     group_handler,
     onvif_handler,
+    gb28181_ref_handler,
 };
 
 async fn trace_layer(request: Request, next: Next) -> axum::response::Response {
@@ -148,6 +149,9 @@ fn protected_routes(state: Arc<FullState>) -> Router {
         .route("/api/v1/groups/{id}", put(group_handler::update_group_handler))
         .route("/api/v1/groups/{id}", delete(group_handler::delete_group_handler))
         .route("/api/v1/devices/{id}/group", put(group_handler::assign_device_group_handler))
+
+        // GB28181 参考数据
+        .route("/api/v1/gb28181/ref-data", get(gb28181_ref_handler::get_gb28181_ref_data_handler))
 
         // 认证用户管理
         .route("/api/v1/auth/me", get(crate::auth::handlers::me))

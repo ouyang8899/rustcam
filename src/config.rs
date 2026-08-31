@@ -216,8 +216,8 @@ pub struct SignalingServerConfig {
 impl Default for SignalingServerConfig {
     fn default() -> Self {
         Self {
-            server_gb_id: "64010000001000000001".to_string(),
-            server_gb_domain: "6401000000".to_string(),
+            server_gb_id: "31011500001000000001".to_string(),
+            server_gb_domain: "3101150000".to_string(),
             bind_ip: "0.0.0.0".to_string(),
             tcp_signaling_port: 5060,
             udp_signaling_port: 5061,

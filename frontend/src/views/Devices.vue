@@ -138,9 +138,12 @@
                       <el-tag size="small" class="protocol-tag" :class="`protocol-${row.protocol?.toLowerCase()}`">{{ row.protocol }}</el-tag>
                     </template>
                   </el-table-column>
-                  <el-table-column label="类型" width="80" align="center">
+                  <el-table-column label="类型" min-width="100" align="center">
                     <template #default="{ row }">
                       <el-tag v-if="row.is_channel" size="small" type="warning">通道</el-tag>
+                      <el-tag v-else-if="row.protocol && row.protocol.toLowerCase().includes('gb') && row.device_tag && row.device_tag.length >= 13" size="small" type="primary">
+                        {{ getDeviceTypeLabel(row.device_tag.substring(10, 13)) || row.device_type || 'Other' }}
+                      </el-tag>
                       <el-tag v-else size="small" type="info">{{ row.device_type || 'Other' }}</el-tag>
                     </template>
                   </el-table-column>
@@ -230,15 +233,22 @@
             </el-col>
             <el-col :span="12">
               <el-form-item label="自定义分组">
-                <el-tree-select
+                <el-select
                   v-model="form.group_id"
-                  :data="groupTreeWithAll"
-                  :props="{ label: 'name', children: 'children', value: 'id' }"
-                  clearable
-                  check-strictly
                   placeholder="选择分组（可选）"
+                  clearable
                   style="width: 100%"
-                />
+                >
+                  <template v-for="group in groupStore.groupTree" :key="group.id">
+                    <el-option :label="group.name" :value="group.id" />
+                    <template v-for="child in (group.children || [])" :key="child.id">
+                      <el-option :label="'  ├─ ' + child.name" :value="child.id" />
+                      <template v-for="grandchild in (child.children || [])" :key="grandchild.id">
+                        <el-option :label="'    └─ ' + grandchild.name" :value="grandchild.id" />
+                      </template>
+                    </template>
+                  </template>
+                </el-select>
               </el-form-item>
             </el-col>
         </el-row>
@@ -262,27 +272,113 @@
 
         <div v-if="form.protocol === 'Gb28181'">
           <el-divider>GB28181</el-divider>
+
+          <el-tabs v-model="gb28181Tab">
+            <el-tab-pane label="行业类型 *" name="industry">
+              <div class="tag-selector">
+                <el-tag
+                  v-for="opt in gbIndustryCodeOptions"
+                  :key="opt.value"
+                  :type="form.gb_industry_code === opt.value ? 'primary' : 'info'"
+                  class="tag-item selectable"
+                  @click="form.gb_industry_code = opt.value"
+                >
+                  {{ opt.label }}
+                </el-tag>
+              </div>
+            </el-tab-pane>
+            <el-tab-pane label="设备类型 *" name="device_type">
+              <div class="tag-selector">
+                <template v-for="opt in gbDeviceTypeOptions" :key="opt.value || opt.label">
+                  <div v-if="opt.type === 'header'" class="tag-category-header">{{ opt.label }}</div>
+                  <el-tag
+                    v-else
+                    :type="form.gb_device_type === opt.value ? 'primary' : 'info'"
+                    class="tag-item selectable"
+                    @click="form.gb_device_type = opt.value"
+                  >
+                    {{ opt.label }}
+                  </el-tag>
+                </template>
+              </div>
+            </el-tab-pane>
+            <el-tab-pane label="网络类型 *" name="network">
+              <div class="tag-selector">
+                <el-tag
+                  v-for="opt in gbNetworkCodeOptions"
+                  :key="opt.value"
+                  :type="form.gb_network_code === opt.value ? 'primary' : 'info'"
+                  class="tag-item selectable"
+                  @click="form.gb_network_code = opt.value"
+                >
+                  {{ opt.label }}
+                </el-tag>
+              </div>
+            </el-tab-pane>
+          </el-tabs>
+
+          <div class="gb28181-selected-row">
+            <el-tag 
+              class="selection-tag" 
+              :type="form.gb_industry_code ? 'success' : 'info'"
+              @click="gb28181Tab = 'industry'"
+            >
+              {{ getIndustryCodeLabel(form.gb_industry_code) || '未选行业' }}
+            </el-tag>
+            <el-tag 
+              class="selection-tag" 
+              :type="form.gb_device_type ? 'success' : 'info'"
+              @click="gb28181Tab = 'device_type'"
+            >
+              {{ getDeviceTypeLabel(form.gb_device_type) || '未选设备' }}
+            </el-tag>
+            <el-tag 
+              class="selection-tag" 
+              :type="form.gb_network_code ? 'success' : 'info'"
+              @click="gb28181Tab = 'network'"
+            >
+              {{ getNetworkCodeLabel(form.gb_network_code) || '未选网络' }}
+            </el-tag>
+          </div>
+
+          <div class="sip-id-row">
+            <el-form-item label="行政区划" class="sip-field">
+              <el-input :model-value="sipIdPrefix" disabled placeholder="6位" />
+            </el-form-item>
+            <span class="sip-plus">+</span>
+            <el-form-item label="基层" class="sip-field">
+              <el-input v-model="sipGbCode" placeholder="2位" maxlength="2" @input="sipGbCode = sipGbCode.replace(/\D/g, '')" />
+            </el-form-item>
+            <span class="sip-plus">+</span>
+            <el-form-item label="行业" class="sip-field">
+              <el-input :model-value="form.gb_industry_code" disabled placeholder="2位" />
+            </el-form-item>
+            <span class="sip-plus">+</span>
+            <el-form-item label="设备" class="sip-field">
+              <el-input :model-value="form.gb_device_type" disabled placeholder="3位" />
+            </el-form-item>
+            <span class="sip-plus">+</span>
+            <el-form-item label="网络" class="sip-field">
+              <el-input :model-value="form.gb_network_code" disabled placeholder="1位" />
+            </el-form-item>
+          </div>
+
+          <div class="sip-id-row sip-id-row-bottom">
+            <el-form-item label="后缀" class="sip-field">
+              <el-input v-model="sipIdSuffix" :placeholder="`${sipIdSuffixMaxLength}位`" maxlength="6" />
+            </el-form-item>
+            <span class="sip-equals">=</span>
+            <el-form-item label="SIP ID" class="sip-field sip-preview">
+              <el-input :model-value="sipIdPreview" disabled placeholder="20位">
+                <template #append>
+                  <span style="min-width: 40px">{{ sipIdPreview.length }}/20</span>
+                </template>
+              </el-input>
+            </el-form-item>
+          </div>
+
           <el-row :gutter="12">
-            <el-col :span="8">
-              <el-form-item label="SIP ID 前缀">
-                <el-input :model-value="sipIdPrefix" disabled placeholder="地区编码" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="16">
-              <el-form-item :label="`SIP ID 后缀 *（共 ${sipIdTotalLength} 位，已填 ${sipIdSuffix.length} 位）`" required>
-                <el-input v-model="sipIdSuffix" :placeholder="`输入 ${sipIdSuffixMaxLength} 位数字`" :disabled="!sipIdPrefix" :maxlength="sipIdSuffixMaxLength" />
-              </el-form-item>
-            </el-col>
-          </el-row>
-          <el-row :gutter="12">
-            <el-col :span="24">
-              <el-form-item label="SIP ID 预览">
-                <el-input :model-value="sipIdPreview" disabled placeholder="完整20位SIP ID" />
-              </el-form-item>
-            </el-col>
-          </el-row>
-          <el-row :gutter="12">
-            <el-col :span="24">
+            <el-col :span="12">
               <el-form-item label="SIP 密码 *" required>
                 <el-input v-model="form.device_password" type="password" show-password placeholder="设备SIP认证密码" />
               </el-form-item>
@@ -556,6 +652,7 @@ import { useMediaServerStore } from '../stores/mediaServerStore'
 import { useRegionStore } from '../stores/regionStore'
 import { useGroupStore } from '../stores/groupStore'
 import { useStreamStore } from '../stores/streamStore'
+import { useGb28181RefStore } from '../stores/gb28181RefStore'
 import { request } from '../utils/request'
 import { useToast } from '../composables/useToast'
 import StatusDot from '../components/common/StatusDot.vue'
@@ -566,6 +663,7 @@ const mediaServerStore = useMediaServerStore()
 const regionStore = useRegionStore()
 const groupStore = useGroupStore()
 const streamStore = useStreamStore()
+const gb28181RefStore = useGb28181RefStore()
 const toast = useToast()
 const router = useRouter()
 const route = useRoute()
@@ -618,7 +716,29 @@ const onvifFetchingProfiles = ref(false)
 const submitting = ref(false)
 const onvifDiscovering = ref(false)
 const gbRegionCascader = ref([])
-const sipIdSuffix = ref('')
+const sipGbCode = ref('00')  // 基层编码，默认00
+const sipIdSuffix = ref('')  // 后缀，最多6位数字
+
+watch(sipIdSuffix, (val) => {
+  const num = parseInt(val, 10)
+  if (isNaN(num) || num < 0) {
+    sipIdSuffix.value = ''
+  } else if (val.length > 6) {
+    sipIdSuffix.value = val.slice(0, 6)
+  }
+})
+
+watch(sipGbCode, (val) => {
+  const num = parseInt(val, 10)
+  if (isNaN(num) || num < 0) {
+    sipGbCode.value = '00'
+  } else if (val.length > 2) {
+    sipGbCode.value = val.slice(0, 2)
+  } else {
+    sipGbCode.value = val.padStart(2, '0')
+  }
+})
+
 const selectedRegion = ref('')
 const groupMode = ref('region')
 const selectedGroup = ref('')
@@ -645,20 +765,53 @@ const hasGroupData = computed(() => {
 
 const sipIdPrefix = computed(() => {
   if (!gbRegionCascader.value || gbRegionCascader.value.length === 0) return ''
-  return gbRegionCascader.value[gbRegionCascader.value.length - 1] || ''
+  const code = gbRegionCascader.value[gbRegionCascader.value.length - 1] || ''
+  return code  // 6位行政区划
 })
 
+function findRegionPath(code, tree, path = []) {
+  for (const node of tree) {
+    const currentPath = [...path, node.gb28181_code]
+    if (node.gb28181_code === code) {
+      return currentPath
+    }
+    if (node.children && node.children.length > 0) {
+      const found = findRegionPath(code, node.children, currentPath)
+      if (found) return found
+    }
+  }
+  return null
+}
+
 const sipIdTotalLength = 20
-const sipIdSuffixMaxLength = computed(() => sipIdTotalLength - (sipIdPrefix.value?.length || 0))
+const sipIdSuffixMaxLength = 6  // suffix is always 6 characters
 
 const sipIdPreview = computed(() => {
-  if (!sipIdPrefix.value || !sipIdSuffix.value) return ''
-  return sipIdPrefix.value + sipIdSuffix.value
+  if (!sipIdPrefix.value) return ''
+  const suffix = sipIdSuffix.value || ''
+  const paddedSuffix = suffix.padEnd(6, '_')
+  const gbCode = sipGbCode.value || '00'
+  // 6位行政区划 + 2位基层编码 + 2位行业 + 3位设备 + 1位网络 + 6位后缀 = 20位
+  return sipIdPrefix.value + gbCode + sipIdIndustryCode.value + (form.value.gb_device_type || '') + sipIdNetworkCode.value + paddedSuffix
 })
 
 const groupTreeWithAll = computed(() => {
   return [{ id: '', name: '全部', children: [] }, ...groupStore.groupTree]
 })
+
+function flattenGroups(groups, result = []) {
+  for (const group of groups) {
+    if (group.id != null) {
+      result.push({ id: String(group.id), name: group.name })
+    }
+    if (group.children && group.children.length > 0) {
+      flattenGroups(group.children, result)
+    }
+  }
+  return result
+}
+
+const flatGroupList = computed(() => flattenGroups(groupStore.groupTree))
 
 function onGbRegionChange(val) {
   sipIdSuffix.value = ''
@@ -789,6 +942,9 @@ const defaultForm = () => ({
   device_tag: '', group_id: null, is_public: false,
   rtsp_mode: 'pull', app: 'live', rtsp_full_url: '',
   rtmp_mode: 'push',
+  gb_device_type: '132',
+  gb_industry_code: '00',
+  gb_network_code: '0',
   extended: {},
   enable_stream_config: false,
   stream_config: {
@@ -803,6 +959,27 @@ const defaultForm = () => ({
   },
 })
 
+const gb28181Tab = ref('industry')
+const gbNetworkCodeOptions = computed(() => gb28181RefStore.networkCodeOptions)
+const gbIndustryCodeOptions = computed(() => gb28181RefStore.industryCodeOptions)
+const gbDeviceTypeOptions = computed(() => gb28181RefStore.deviceTypeOptions)
+
+const getNetworkCodeLabel = (code) => {
+  const opt = gbNetworkCodeOptions.value.find(o => o.value === code)
+  return opt ? opt.label : ''
+}
+const getDeviceTypeLabel = (code) => {
+  const opt = gbDeviceTypeOptions.value.find(o => o.value === code)
+  return opt ? opt.label : ''
+}
+const getIndustryCodeLabel = (code) => {
+  const opt = gbIndustryCodeOptions.value.find(o => o.value === code)
+  return opt ? opt.label : ''
+}
+
+const sipIdIndustryCode = computed(() => form.value.gb_industry_code || '')
+const sipIdNetworkCode = computed(() => form.value.gb_network_code || '')
+
 const form = ref(defaultForm())
 
 watch(() => form.value.protocol, (newProto) => {
@@ -814,6 +991,18 @@ watch(() => form.value.protocol, (newProto) => {
   if (newProto !== 'Rtmp') {
     form.value.rtmp_mode = 'push'
   }
+})
+
+watch(() => form.value.gb_device_type, () => {
+  sipIdSuffix.value = ''
+})
+
+watch(() => form.value.gb_industry_code, () => {
+  sipIdSuffix.value = ''
+})
+
+watch(() => form.value.gb_network_code, () => {
+  sipIdSuffix.value = ''
 })
 
 watch(() => form.value.rtsp_mode, (newMode) => {
@@ -835,7 +1024,13 @@ watch(() => form.value.rtsp_mode, (newMode) => {
 })
 
 onMounted(async () => {
-  await Promise.all([fetchDevices(), mediaServerStore.fetchServers(), fetchRegionTree(), fetchGroupTree()])
+  await Promise.all([
+    fetchDevices(),
+    mediaServerStore.fetchServers(),
+    fetchRegionTree(),
+    fetchGroupTree(),
+    gb28181RefStore.fetchRefData(),
+  ])
   groupStore.groupTree.forEach(g => g.expanded = false)
   if (groupStore.groupTree.length > 0) {
     expandedGroupIds.value = new Set(groupStore.groupTree.map(n => n.id))
@@ -1052,8 +1247,13 @@ async function deleteGroup(node) {
 
 function openAddModal() {
   isEdit.value = false; editingId.value = null
-  form.value = defaultForm()
+  const newForm = defaultForm()
+  newForm.gb_industry_code = newForm.gb_industry_code || '00'
+  newForm.gb_device_type = newForm.gb_device_type || '132'
+  newForm.gb_network_code = newForm.gb_network_code || '0'
+  form.value = newForm
   gbRegionCascader.value = []
+  sipGbCode.value = '00'
   sipIdSuffix.value = ''
   showModal.value = true
 }
@@ -1065,12 +1265,12 @@ function openEditModal(device) {
   form.value = {
     name: device.name || '', protocol: device.protocol || 'Gb28181', host: device.host || '',
     port: device.port || 554, device_username: device.device_username || '', device_password: device.device_password || '',
-    media_server_name: device.media_server_name || '',
-    stream_key: device.stream_key || '',
+    media_server_name: device.media_server_tag || '',
+    stream_key: ext.stream_key || '',
     pull_urls: device.pull_urls ? device.pull_urls.map(u => ({ ...u })) : [],
     push_urls: device.push_urls ? device.push_urls.map(u => ({ ...u })) : [],
     playback_username: device.playback_username || '', playback_password: device.playback_password || '',
-    device_tag: '', group_id: device.group_id || null, is_public: device.is_public || false,
+    device_tag: '', group_id: device.group_id ?? null, is_public: device.is_public || false,
     rtsp_mode: ext.rtsp_mode || device.rtsp_mode || 'pull',
     app: device.app || 'live',
     rtsp_full_url: ext.rtsp_full_url || device.rtsp_full_url || '',
@@ -1087,13 +1287,35 @@ function openEditModal(device) {
       sprop_parameter_sets: devStreamConfig.sprop_parameter_sets || '',
       stream_mode: devStreamConfig.stream_mode || 'recvonly',
     },
+    gb_industry_code: '',
+    gb_device_type: '',
+    gb_network_code: '',
   }
-  if (device.protocol === 'Gb28181' && device.device_tag) {
-    const regionCode = device.region_code || ''
-    gbRegionCascader.value = regionCode ? [regionCode] : []
-    sipIdSuffix.value = device.device_tag.replace(new RegExp(`^${regionCode}`), '')
+  const isGb28181 = device.protocol && device.protocol.toLowerCase().includes('gb')
+  if (isGb28181 && device.device_tag) {
+    const tag = device.device_tag || ''
+    // SIP ID 必须是20位，否则提示数据错误
+    if (tag.length !== 20) {
+      ElMessage.warning(`设备SIP ID格式错误: ${tag} (${tag.length}位)，应为20位`)
+    }
+    const regionCode = device.region_code || (tag.length >= 6 ? tag.substring(0, 6) : '')
+    // 尝试找到完整的层级路径
+    const regionPath = findRegionPath(regionCode, regionStore.regionTree)
+    gbRegionCascader.value = regionPath || (regionCode ? [regionCode] : [])
+    // SIP ID: 行政区划(6) + 基层(2) + 行业(2) + 设备(3) + 网络(1) + 后缀(6) = 20位
+    sipGbCode.value = tag.length >= 8 ? tag.substring(6, 8) : '00'
+    form.value.gb_industry_code = tag.length >= 10 ? tag.substring(8, 10) : ''
+    form.value.gb_device_type = tag.length >= 13 ? tag.substring(10, 13) : ''
+    form.value.gb_network_code = tag.length >= 14 ? tag.substring(13, 14) : ''
+    sipIdSuffix.value = tag.length >= 20 ? tag.substring(14, 20) : ''
   } else {
-    gbRegionCascader.value = []
+    const regionCode = device.region_code || ''
+    const regionPath = findRegionPath(regionCode, regionStore.regionTree)
+    gbRegionCascader.value = regionPath || (regionCode ? [regionCode] : [])
+    sipGbCode.value = '00'
+    form.value.gb_industry_code = ''
+    form.value.gb_device_type = ''
+    form.value.gb_network_code = ''
     sipIdSuffix.value = ''
   }
   if (device.protocol === 'Onvif' && device.host) {
@@ -1111,11 +1333,19 @@ function removePushUrl(index) { form.value.push_urls.splice(index, 1) }
 
 async function submitDevice() {
   if (!form.value.name.trim()) { ElMessage.error('请填写设备名称'); return }
-  if (!form.value.stream_key.trim()) { ElMessage.error('请填写流标识(stream_key)'); return }
+  if (form.value.protocol !== 'Gb28181' && !form.value.stream_key.trim()) { ElMessage.error('请填写流标识(stream_key)'); return }
   if (form.value.protocol === 'Gb28181') {
     if (!sipIdPrefix.value) { ElMessage.error('请选择所属地区'); return }
-    if (!sipIdSuffix.value || sipIdSuffix.value.length !== sipIdSuffixMaxLength.value) {
-      ElMessage.error(`SIP ID 后缀必须填写 ${sipIdSuffixMaxLength.value} 位数字`)
+    if (!form.value.gb_industry_code) { ElMessage.error('请选择行业类型'); return }
+    if (!form.value.gb_device_type) { ElMessage.error('请选择设备类型'); return }
+    if (!form.value.gb_network_code) { ElMessage.error('请选择网络类型'); return }
+    if (!sipIdSuffix.value || sipIdSuffix.value.length !== sipIdSuffixMaxLength) {
+      ElMessage.error(`SIP ID 后缀必须填写 ${sipIdSuffixMaxLength} 位数字`)
+      return
+    }
+    const previewLength = sipIdPreview.value.length
+    if (previewLength !== 20) {
+      ElMessage.error(`SIP ID 必须是20位，当前${previewLength}位，请检查：行政区划${sipIdPrefix.value.length}位 + 基层2位 + 行业2位 + 设备3位 + 网络1位 + 后缀6位`)
       return
     }
     if (!form.value.device_password) { ElMessage.error('请填写SIP密码'); return }
@@ -1129,14 +1359,13 @@ async function submitDevice() {
   if (form.value.protocol === 'Rtmp' && !form.value.stream_key.trim()) { ElMessage.error('请填写推流标识'); return }
 
   const finalDeviceTag = form.value.protocol === 'Gb28181'
-    ? sipIdPrefix.value + sipIdSuffix.value
+    ? sipIdPreview.value
     : form.value.device_tag || null
 
   const payload = {
     name: form.value.name, protocol: form.value.protocol,
     device_username: form.value.device_username || null, device_password: form.value.device_password || null,
-    media_server_name: form.value.media_server_name || null,
-    stream_key: form.value.stream_key || null,
+    media_server_tag: form.value.media_server_name || null,
     pull_urls: form.value.pull_urls.filter(u => u.url).length > 0 ? form.value.pull_urls : undefined,
     push_urls: form.value.push_urls.filter(u => u.url).length > 0 ? form.value.push_urls : undefined,
     playback_username: form.value.playback_username || null, playback_password: form.value.playback_password || null,
@@ -1147,6 +1376,7 @@ async function submitDevice() {
       rtsp_mode: form.value.protocol === 'Rtsp' ? form.value.rtsp_mode : undefined,
       rtsp_full_url: form.value.protocol === 'Rtsp' && form.value.rtsp_mode === 'pull' ? form.value.rtsp_full_url || null : null,
       rtmp_mode: form.value.protocol === 'Rtmp' ? form.value.rtmp_mode : undefined,
+      stream_key: form.value.stream_key || null,
     },
     stream_config: form.value.enable_stream_config ? {
       video_codec: form.value.stream_config.video_codec || null,
@@ -1175,14 +1405,14 @@ async function submitDevice() {
         name: `${form.value.name} - 通道${i + 1}`, protocol: 'Rtsp',
         device_username: form.value.device_username || null,
         device_password: form.value.device_password || null,
-        media_server_name: form.value.media_server_name || null,
-        stream_key: form.value.stream_key || null,
+        media_server_tag: form.value.media_server_name || null,
         rtsp_mode: 'pull', rtsp_full_url: url.url,
         pull_urls: [{ protocol: 'Rtsp', url: url.url, priority: 1 }],
         playback_username: form.value.playback_username || null,
         playback_password: form.value.playback_password || null,
         device_tag: null, region_code: null, group_id: form.value.group_id || null, is_public: form.value.is_public || false,
         app: form.value.app || null,
+        extended: { stream_key: form.value.stream_key || null },
       })
     }
     ElMessage.success(`成功创建 ${1 + form.value.pull_urls.length - 1} 个设备`)
@@ -1312,13 +1542,13 @@ async function confirmOnvifDevice() {
       name: parentName, protocol: 'Onvif',
       device_username: onvifDiscoverUser.value || null,
       device_password: onvifDiscoverPwd.value || null,
-      media_server_name: form.value.media_server_name || null,
-      stream_key: form.value.stream_key || null,
+      media_server_tag: form.value.media_server_name || null,
       pull_urls: onvifRtspUrls.value.map((r, i) => ({ protocol: 'Rtsp', url: r.url, priority: i + 1 })),
       playback_username: form.value.playback_username || null,
       playback_password: form.value.playback_password || null,
       device_tag: null, region_code: null, group_id: form.value.group_id || null, is_public: form.value.is_public || false,
       app: form.value.app || null,
+      extended: { stream_key: form.value.stream_key || null },
     }
     const parent = await deviceStore.createDevice(parentPayload)
     const parentId = parent?.id || parent?.data?.id
@@ -1329,8 +1559,7 @@ async function confirmOnvifDevice() {
           name: `${parentName} - ${childName}`, protocol: 'Rtsp',
           device_username: onvifDiscoverUser.value || null,
           device_password: onvifDiscoverPwd.value || null,
-          media_server_name: form.value.media_server_name || null,
-          stream_key: form.value.stream_key || null,
+          media_server_tag: form.value.media_server_name || null,
           rtsp_mode: 'pull',
           rtsp_full_url: onvifRtspUrls.value[i].url,
           pull_urls: [{ protocol: 'Rtsp', url: onvifRtspUrls.value[i].url, priority: 1 }],
@@ -1338,6 +1567,7 @@ async function confirmOnvifDevice() {
           playback_password: form.value.playback_password || null,
           device_tag: null, region_code: null, group_id: form.value.group_id || null, is_public: form.value.is_public || false,
           app: form.value.app || null,
+          extended: { stream_key: form.value.stream_key || null },
         })
       }
     }
@@ -1529,4 +1759,116 @@ async function copyLink(text) {
 .protocol-tag.protocol-rtsp    { background-color: var(--protocol-rtsp); }
 .protocol-tag.protocol-onvif   { background-color: var(--protocol-onvif); }
 .protocol-tag.protocol-rtmp    { background-color: var(--protocol-rtmp); }
+
+.tag-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 0;
+  min-height: 80px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.gb28181-selected-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+.selection-tag {
+  cursor: pointer;
+}
+.tag-item {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.tag-item.selectable {
+  user-select: none;
+}
+.tag-item:hover {
+  transform: translateY(-1px);
+}
+.tag-item.clear-btn {
+  border-style: dashed;
+}
+.tag-selected-info {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 4px 8px;
+  background: var(--bg-color);
+  border-radius: 4px;
+  margin-top: 8px;
+}
+.tag-category-header {
+  width: 100%;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 8px 0 4px 0;
+  padding-left: 4px;
+  border-left: 3px solid var(--color-primary);
+}
+.tag-category-header:first-child {
+  margin-top: 0;
+}
+
+.gb28181-selected-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-color);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.gb28181-selected-summary .summary-item {
+  color: var(--text-secondary);
+}
+.gb28181-selected-summary .summary-item strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.gb28181-selected-summary .summary-divider {
+  color: var(--border-color);
+}
+
+.sip-id-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 16px 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.sip-id-row-bottom {
+  margin-top: 8px;
+}
+.sip-id-row .el-form-item {
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+.sip-field {
+  width: 90px;
+}
+.sip-field .el-input__inner {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: center;
+  padding: 0 4px;
+}
+.sip-field.sip-preview {
+  width: 280px;
+}
+.sip-field.sip-preview .el-input__inner {
+  font-size: 14px;
+  letter-spacing: 1px;
+}
+.sip-plus, .sip-equals {
+  color: var(--text-muted);
+  font-weight: bold;
+  flex-shrink: 0;
+  align-self: flex-end;
+  padding-bottom: 6px;
+}
 </style>

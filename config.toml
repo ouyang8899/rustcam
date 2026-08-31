@@ -58,8 +58,8 @@ default_username = "admin"
 default_password = "admin"
 
 [signaling_server]
-server_gb_id = "64010000001000000001"
-server_gb_domain = "6401000000"
+server_gb_id = "31011500001000000001"
+server_gb_domain = "3101150000"
 bind_ip = "0.0.0.0"
 tcp_signaling_port = 5060
 udp_signaling_port = 5061

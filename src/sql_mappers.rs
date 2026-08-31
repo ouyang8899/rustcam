@@ -1111,3 +1111,85 @@ pub async fn alarm_count_all(rb: &dyn rbatis::Executor) -> rbatis::Result<i64> {
 
 #[sql("UPDATE alarms SET processed = $1 WHERE id = $2")]
 pub async fn alarm_mark_processed(rb: &dyn rbatis::Executor, processed: bool, id: i64) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+// ============================================
+// GB28181 Reference Data Queries
+// ============================================
+
+use crate::domain::gb28181_ref::{GbDeviceType, GbIndustryCode, GbNetworkCode};
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct GbDeviceTypeRow {
+    pub code: String,
+    pub name: String,
+    pub name_en: Option<String>,
+    pub category: String,
+    pub description: Option<String>,
+    pub can_have_children: bool,
+    pub sort_order: i32,
+}
+
+impl From<GbDeviceTypeRow> for GbDeviceType {
+    fn from(row: GbDeviceTypeRow) -> Self {
+        GbDeviceType {
+            code: row.code,
+            name: row.name,
+            name_en: row.name_en,
+            category: row.category,
+            description: row.description,
+            can_have_children: row.can_have_children,
+            sort_order: row.sort_order,
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct GbIndustryCodeRow {
+    pub code: String,
+    pub name: String,
+    pub name_en: Option<String>,
+    pub description: Option<String>,
+    pub sort_order: i32,
+}
+
+impl From<GbIndustryCodeRow> for GbIndustryCode {
+    fn from(row: GbIndustryCodeRow) -> Self {
+        GbIndustryCode {
+            code: row.code,
+            name: row.name,
+            name_en: row.name_en,
+            description: row.description,
+            sort_order: row.sort_order,
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct GbNetworkCodeRow {
+    pub code: String,
+    pub name: String,
+    pub name_en: Option<String>,
+    pub description: Option<String>,
+    pub sort_order: i32,
+}
+
+impl From<GbNetworkCodeRow> for GbNetworkCode {
+    fn from(row: GbNetworkCodeRow) -> Self {
+        GbNetworkCode {
+            code: row.code,
+            name: row.name,
+            name_en: row.name_en,
+            description: row.description,
+            sort_order: row.sort_order,
+        }
+    }
+}
+
+#[sql("SELECT code, name, name_en, category, description, can_have_children, sort_order FROM gb_device_types ORDER BY sort_order")]
+pub async fn gb_device_type_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<GbDeviceTypeRow>> { impled!() }
+
+#[sql("SELECT code, name, name_en, description, sort_order FROM gb_industry_codes ORDER BY sort_order")]
+pub async fn gb_industry_code_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<GbIndustryCodeRow>> { impled!() }
+
+#[sql("SELECT code, name, name_en, description, sort_order FROM gb_network_codes ORDER BY sort_order")]
+pub async fn gb_network_code_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<GbNetworkCodeRow>> { impled!() }
