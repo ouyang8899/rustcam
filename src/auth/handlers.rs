@@ -24,24 +24,49 @@ pub async fn login(
     State(state): State<Arc<FullState>>,
     Json(req): Json<LoginRequest>,
 ) -> AppResult<Json<ApiResponse<LoginResponse>>> {
+    tracing::debug!("[Auth] Login attempt for user: {}", req.username);
+
     // 查找用户
     let user = UserRepository::find_by_username(&*state.auth.repo, &req.username)
         .await
-        .map_err(|e| AppError::Auth(e.to_string()))?
-        .ok_or_else(|| AppError::Auth("Invalid credentials".to_string()))?;
+        .map_err(|e| {
+            tracing::debug!("[Auth] Login failed - DB error: {}", e);
+            AppError::Auth(e.to_string())
+        })?
+        .ok_or_else(|| {
+            tracing::debug!("[Auth] Login failed - user not found: {}", req.username);
+            AppError::Auth("Invalid credentials".to_string())
+        })?;
+
+    tracing::debug!("[Auth] User found: {} (id={})", user.username, user.id);
 
     // 验证密码
     let parsed_hash = PasswordHash::new(&user.password_hash)
-        .map_err(|e| AppError::Auth(format!("Password hash error: {}", e)))?;
+        .map_err(|e| {
+            tracing::debug!("[Auth] Login failed - password hash parse error: {}", e);
+            AppError::Auth(format!("Password hash error: {}", e))
+        })?;
 
-    Argon2::default()
+    let password_valid = Argon2::default()
         .verify_password(req.password.as_bytes(), &parsed_hash)
-        .map_err(|_| AppError::Auth("Invalid credentials".to_string()))?;
+        .is_ok();
+
+    if !password_valid {
+        tracing::debug!("[Auth] Login failed - invalid password for user: {}", req.username);
+        return Err(AppError::Auth("Invalid credentials".to_string()));
+    }
+
+    tracing::debug!("[Auth] Password verified for user: {}", user.username);
 
     // 获取角色
     let roles = UserRepository::get_user_roles(&*state.auth.repo, user.id)
         .await
-        .map_err(|e| AppError::Auth(e.to_string()))?;
+        .map_err(|e| {
+            tracing::debug!("[Auth] Login failed - get roles error: {}", e);
+            AppError::Auth(e.to_string())
+        })?;
+
+    tracing::debug!("[Auth] User {} has {} roles: {:?}", user.username, roles.len(), roles);
 
     let user_info = UserInfo {
         id: user.id,
@@ -51,7 +76,12 @@ pub async fn login(
 
     let (access_token, refresh_token) =
         crate::auth::jwt::generate_tokens(&user_info, &state.auth.jwt_config)
-            .map_err(|e| AppError::Auth(e.to_string()))?;
+            .map_err(|e| {
+                tracing::debug!("[Auth] Login failed - JWT generation error: {}", e);
+                AppError::Auth(e.to_string())
+            })?;
+
+    tracing::info!("[Auth] Login successful: {} (id={})", user.username, user.id);
 
     Ok(Json(ApiResponse::success(LoginResponse {
         access_token,

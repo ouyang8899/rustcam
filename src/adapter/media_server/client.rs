@@ -3,7 +3,8 @@ use reqwest::Client;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
 use tokio::time::{timeout, Duration as TokioDuration};
-use tracing::{info, error,debug, Level};
+use tracing::debug;
+
 pub struct MediaServerClient {
     base_url: String,
     secret: String,
@@ -36,11 +37,19 @@ impl MediaServerClient {
             url_with_secret.push_str(&format!("&{}={}", k, v));
         }
 
+        debug!("[MediaServer] GET {}", url_with_secret);
+
+        let start = std::time::Instant::now();
         let resp = timeout(TokioDuration::from_secs(15), self.http.get(&url_with_secret).send()).await
             .map_err(|_| anyhow::anyhow!("GET request timeout after 15s"))??;
+        let elapsed = start.elapsed();
+
         let status = resp.status();
         let body_text = resp.text().await
             .map_err(|e| anyhow::anyhow!("read body failed: {}", e))?;
+
+        debug!("[MediaServer] GET {} -> {} ({}ms)", url, status, elapsed.as_millis());
+        debug!("[MediaServer] GET {} response body: {}", url, body_text);
 
         if !status.is_success() {
             anyhow::bail!("API error: {} - {}", status, body_text);
@@ -56,14 +65,23 @@ impl MediaServerClient {
     ) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let url_with_secret = format!("{}?secret={}", url, self.secret);
-        tracing::debug!("POST URL {}", url_with_secret);
+        let body_json = serde_json::to_string(body).unwrap_or_default();
+
+        debug!("[MediaServer] POST {}", url_with_secret);
+        debug!("[MediaServer] POST {} body: {}", url, body_json);
+
+        let start = std::time::Instant::now();
         let resp = timeout(TokioDuration::from_secs(15), self.http.post(&url_with_secret).json(body).send()).await
             .map_err(|_| anyhow::anyhow!("request timeout after 15s"))??;
+        let elapsed = start.elapsed();
 
         let status = resp.status();
         let body_text = resp.text().await
             .map_err(|e| anyhow::anyhow!("read body failed: {}", e))?;
-        tracing::debug!("POST RETURN DATA {}", body_text);
+
+        debug!("[MediaServer] POST {} -> {} ({}ms)", url, status, elapsed.as_millis());
+        debug!("[MediaServer] POST {} response body: {}", url, body_text);
+
         if !status.is_success() {
             anyhow::bail!("API error: {} - {}", status, body_text);
         }

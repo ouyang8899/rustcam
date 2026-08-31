@@ -19,7 +19,7 @@ pub struct RedisBus {
 impl RedisBus {
     pub async fn new(url: &str) -> anyhow::Result<Self> {
         let url = url.to_string();
-        tracing::info!("[Redis] Connecting to: {}", url);
+        tracing::debug!("[Redis] Connecting to: {}", url);
         let conn = Self::create_connection(&url).await?;
         Ok(Self {
             url,
@@ -51,7 +51,7 @@ impl RedisBus {
     }
 
     pub async fn reconnect(&self) -> anyhow::Result<()> {
-        tracing::info!("[Redis] Reconnecting to: {}", self.url);
+        tracing::debug!("[Redis] Reconnecting to: {}", self.url);
         let new_conn = Self::create_connection(&self.url).await?;
         let mut conn = self.conn.write().await;
         *conn = Some(new_conn);
@@ -99,7 +99,7 @@ impl RedisBus {
             if attempt < self.max_retries {
                 match self.reconnect().await {
                     Ok(()) => {
-                        tracing::info!("[Redis] Reconnected for {}", operation_name);
+                        tracing::debug!("[Redis] Reconnected for {}", operation_name);
                         continue;
                     }
                     Err(e) => return Err(e),

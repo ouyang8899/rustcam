@@ -5,6 +5,28 @@ use std::path::Path;
 use crate::auth::config::JwtConfig;
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct LogConfig {
+    pub level: String,
+    #[serde(default)]
+    pub sql: bool,
+    #[serde(default)]
+    pub http: bool,
+    #[serde(default)]
+    pub media_server: bool,
+}
+
+impl Default for LogConfig {
+    fn default() -> Self {
+        Self {
+            level: "info".to_string(),
+            sql: false,
+            http: false,
+            media_server: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct AppConfig {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
@@ -16,6 +38,8 @@ pub struct AppConfig {
     pub rtsp_auth: RtspAuthConfig,
     pub signaling_server: SignalingServerConfig,
     pub jwt: JwtConfig,
+    #[serde(default)]
+    pub log: LogConfig,
     #[serde(default)]
     pub recovery: RecoveryConfig,
 }
@@ -179,6 +203,7 @@ impl Default for RtspAuthConfig {
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct SignalingServerConfig {
     pub server_gb_id: String,
+    pub server_gb_domain: String,
     pub bind_ip: String,
     pub tcp_signaling_port: u16,
     pub udp_signaling_port: u16,
@@ -192,6 +217,7 @@ impl Default for SignalingServerConfig {
     fn default() -> Self {
         Self {
             server_gb_id: "64010000001000000001".to_string(),
+            server_gb_domain: "6401000000".to_string(),
             bind_ip: "0.0.0.0".to_string(),
             tcp_signaling_port: 5060,
             udp_signaling_port: 5061,
@@ -274,6 +300,7 @@ impl Default for AppConfig {
             rtsp_auth: RtspAuthConfig::default(),
             signaling_server: SignalingServerConfig::default(),
             jwt: JwtConfig::default(),
+            log: LogConfig::default(),
             recovery: RecoveryConfig::default(),
         }
     }

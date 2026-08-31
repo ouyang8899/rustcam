@@ -89,9 +89,18 @@ fn create_adapter_registry(_deps: ProtocolDeps) -> AdapterRegistry {
 }
 
 /// 初始化日志系统
-fn init_tracing() {
+fn init_tracing(level: &str) {
+    let log_level = match level.to_lowercase().as_str() {
+        "trace" => Level::TRACE,
+        "debug" => Level::DEBUG,
+        "info" => Level::INFO,
+        "warn" => Level::WARN,
+        "error" => Level::ERROR,
+        _ => Level::INFO,
+    };
+
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::TRACE)
+        .with_max_level(log_level)
         .with_target(false)
         .with_thread_ids(true)
         .with_file(true)
@@ -114,29 +123,30 @@ fn assert_fullstate_bounds() {
 /// 主函数
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    init_tracing();
-    info!("Starting RustCam-Media v{}", env!("CARGO_PKG_VERSION"));
-
     // 1. 加载配置
     let config = AppConfig::load()?;
+
+    // 2. 初始化日志系统
+    init_tracing(&config.log.level);
+    info!("Starting RustCam-Media v{}", env!("CARGO_PKG_VERSION"));
     info!("Server: {}:{}", config.server.host, config.server.port);
 
-    // 2. 创建 ServiceRegistry
+    // 3. 创建 ServiceRegistry
     info!("Initializing services...");
     let registry = Arc::new(ServiceRegistry::new(config).await?);
     init_registry(registry.clone());
     registry.start_all().await;
     info!("All services started");
 
-    // 3. 创建协议适配器
+    // 4. 创建协议适配器
     let adapter_registry = Arc::new(create_adapter_registry(registry.protocol_deps.clone()));
     info!("Protocol adapters registered: {:?}", adapter_registry.registered_protocols());
 
-    // 4. 构建 HTTP 路由
+    // 5. 构建 HTTP 路由
     let auth_state = registry.get_auth_state().await?;
     let app = create_router(AppState::from_registry(&registry), auth_state);
 
-    // 5. 启动 HTTP 服务器
+    // 6. 启动 HTTP 服务器
     let http_addr = format!(
         "{}:{}",
         registry.infra.config().server.host,
@@ -145,7 +155,7 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(&http_addr).await?;
     info!("HTTP API server listening on {}", http_addr);
 
-    // 6. TCP 信令服务器
+    // 7. TCP 信令服务器
     let tcp_config = ServerConfig {
         bind_addr: format!(
             "{}:{}",
@@ -166,7 +176,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     info!("TCP signaling server listening on {}", tcp_config.bind_addr);
 
-    // 7. UDP 服务器
+    // 8. UDP 服务器
     let udp_config = UdpServerConfig {
         bind_addr: format!(
             "{}:{}",
@@ -189,9 +199,9 @@ async fn main() -> anyhow::Result<()> {
     );
     info!("UDP server listening on {}", udp_config.bind_addr);
 
-    // 8. GB28181 全局配置
+    // 9. GB28181 全局配置
 
-    // 9. 后台 nonce 清理任务（每 5 分钟清理过期 nonce）
+    // 10. 后台 nonce 清理任务（每 5 分钟清理过期 nonce）
     let _nonce_cleanup = tokio::spawn(async {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(300));
         loop {
@@ -230,6 +240,7 @@ async fn main() -> anyhow::Result<()> {
     rustcam_media::protocol::gb28181::set_udp_sender(udp_socket);
     rustcam_media::protocol::gb28181::set_gb28181_platform_config(
         registry.infra.config().signaling_server.server_gb_id.clone(),
+        registry.infra.config().signaling_server.server_gb_domain.clone(),
         registry.infra.config().signaling_server.bind_ip.clone(),
         registry.infra.config().signaling_server.tcp_signaling_port,
     );

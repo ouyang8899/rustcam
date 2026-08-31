@@ -3,6 +3,8 @@ use axum::{
     Router,
     routing::{get, post, put, delete},
     extract::Path,
+    middleware::Next,
+    extract::Request,
 };
 use crate::api::state::FullState;
 use crate::api::http::handlers::{
@@ -19,6 +21,23 @@ use crate::api::http::handlers::{
     group_handler,
     onvif_handler,
 };
+
+async fn trace_layer(request: Request, next: Next) -> axum::response::Response {
+    let method = request.method().clone();
+    let uri = request.uri().clone();
+    let start = std::time::Instant::now();
+
+    tracing::debug!("[HTTP] => {} {}", method, uri);
+
+    let response = next.run(request).await;
+
+    let elapsed = start.elapsed();
+    let status = response.status();
+
+    tracing::debug!("[HTTP] <= {} {} ({:.2?})", status.as_u16(), uri, elapsed);
+
+    response
+}
 
 /// 创建所有 API 路由
 pub fn create_routes(state: FullState) -> Router {
@@ -144,6 +163,9 @@ fn protected_routes(state: Arc<FullState>) -> Router {
         .route("/api/v1/permissions", get(crate::auth::handlers::list_permissions))
         .route("/api/v1/permissions", post(crate::auth::handlers::create_permission))
 
+        // HTTP trace layer (logs incoming requests at TRACE level)
+        .layer(axum::middleware::from_fn(trace_layer))
+
         // JWT 认证中间件
         .route_layer(axum::middleware::from_fn_with_state(
             state.auth.clone(),
@@ -169,6 +191,8 @@ fn public_routes(state: Arc<FullState>) -> Router {
         .route("/api/v1/stats", get(stats_handler))
         .route("/ws", get(crate::api::websocket::ws_handler))
         .route("/ws/audio-talk/{device_id}", get(crate::api::websocket::audio_talk_handler))
+        // HTTP trace layer (logs incoming requests at TRACE level)
+        .layer(axum::middleware::from_fn(trace_layer))
         .with_state(state)
 }
 

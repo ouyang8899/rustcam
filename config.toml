@@ -59,6 +59,7 @@ default_password = "admin"
 
 [signaling_server]
 server_gb_id = "64010000001000000001"
+server_gb_domain = "6401000000"
 bind_ip = "0.0.0.0"
 tcp_signaling_port = 5060
 udp_signaling_port = 5061
@@ -71,3 +72,9 @@ tcp_audio_max_servers = 10
 secret = "change-me-in-production"
 access_token_expire_minutes = 15
 refresh_token_expire_days = 7
+
+[log]
+level = "debug"
+sql = false
+http = false
+media_server = false
