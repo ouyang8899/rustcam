@@ -10,6 +10,7 @@ pub mod ws_broadcaster;
 pub mod ws_service;
 pub mod recording_service;
 pub mod player_layout_service;
+pub mod channel_service;
 
 pub use session_service::*;
 pub use device_service::*;
@@ -23,3 +24,4 @@ pub use hook_service::*;
 pub use zlmediakit_hook::{ZlMediaKitHookHandler, ZlMediaKitHookEvent, HookResponse, HookAction};
 pub use recording_service::RecordingService;
 pub use player_layout_service::PlayerLayoutService;
+pub use channel_service::ChannelService;

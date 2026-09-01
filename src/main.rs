@@ -123,6 +123,10 @@ fn assert_fullstate_bounds() {
 /// 主函数
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // 0. Initialize JWT CryptoProvider (required for jsonwebtoken 11.x)
+    jsonwebtoken::crypto::aws_lc::DEFAULT_PROVIDER.install_default()
+        .expect("Failed to install JWT CryptoProvider");
+
     // 1. 加载配置
     let config = AppConfig::load()?;
 

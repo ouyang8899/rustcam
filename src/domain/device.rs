@@ -5,35 +5,72 @@ use std::fmt;
 use crate::domain::recording::RecordingFormat;
 use crate::domain::server::ServerProtocolPorts;
 
+/// GB28181 流媒体配置
+///
+/// ## 视频配置 (video_*)
+/// - video_codec: 视频编码格式。常见值:
+///   - "PS" (默认): MPEG-PS, 海康大华常用
+///   - "H264": 纯H.264, 适用于大部分设备
+///   - "H265": H.265/HEVC, 部分新设备支持
+///   - "JPEG": MJPEG
+///
+/// ## 音频配置 (audio_*)
+/// - audio_codec: 音频编码格式。常见值:
+///   - "PCMA" (默认): G.711 A-law
+///   - "PCMU": G.711 μ-law  
+///   - "AAC": AAC-LC, 部分设备支持
+///   - "NONE"/"OFF": 禁用音频
+///
+/// ## RTP负载类型 (payload_type)
+/// - video_payload_type: 视频RTP负载类型, 通常96-127。一般96即可
+/// - audio_payload_type: 音频RTP负载类型, 8(G.711)是标准值
+///
+/// ## H.264特定 (profile_level_id, sprop_parameter_sets)
+/// - profile_level_id: SPS/PPS的profile_level_id, 如"4D001F"(Main Profile)
+/// - sprop_parameter_sets: Base64编码的SPS/PPS, 可从设备能力获取
+///
+/// ## PS封装特定 (packaging_mode)
+/// - packaging_mode: "HIS" (默认) 表示96字节头封装
+///
+/// ## 传输模式 (stream_mode)
+/// - stream_mode: "recvonly"(默认) 仅接收, "sendonly"仅发送, "sendrecv"双向
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamConfig {
+    /// 视频编码格式: PS/H264/H265/JPEG, 默认"PS"
     #[serde(
         default = "default_video_codec",
         skip_serializing_if = "Option::is_none"
     )]
     pub video_codec: Option<String>,
 
+    /// 音频编码格式: PCMA/PCMU/AAC/NONE, 默认"PCMA"
     #[serde(
         default = "default_audio_codec",
         skip_serializing_if = "Option::is_none"
     )]
     pub audio_codec: Option<String>,
 
+    /// 视频RTP负载类型, 默认96
     #[serde(default = "default_video_pt", skip_serializing_if = "Option::is_none")]
     pub video_payload_type: Option<u8>,
 
+    /// 音频RTP负载类型, 默认8
     #[serde(default = "default_audio_pt", skip_serializing_if = "Option::is_none")]
     pub audio_payload_type: Option<u8>,
 
+    /// H.264/H.265的profile_level_id, 如"4D001F"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_level_id: Option<String>,
 
+    /// PS封装的packaging_mode, 默认"HIS"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub packaging_mode: Option<String>,
 
+    /// H.264的SPS/PPS参数, Base64编码
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sprop_parameter_sets: Option<String>,
 
+    /// 传输模式: recvonly/sendonly/sendrecv, 默认"recvonly"
     #[serde(
         default = "default_stream_mode",
         skip_serializing_if = "Option::is_none"
@@ -283,22 +320,13 @@ pub struct Device {
     pub has_stream: bool,
 
     #[serde(default)]
-    pub is_channel: bool,
-
-    #[serde(default)]
     pub device_type: DeviceType,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device_type_code: Option<String>,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub channel_id: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub channel_extended: Option<serde_json::Value>,
-
     #[serde(default)]
-    pub is_default: bool,
+    pub channel_count: i32,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_config: Option<StreamConfig>,
@@ -330,12 +358,9 @@ impl Device {
             extended: None,
             is_online: false,
             has_stream: false,
-            is_channel: false,
             device_type: DeviceType::Other,
             device_type_code: None,
-            channel_id: None,
-            channel_extended: None,
-            is_default: false,
+            channel_count: 0,
             stream_config: None,
         }
     }
@@ -388,6 +413,131 @@ impl Device {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Channel {
+    pub id: i64,
+
+    #[serde(serialize_with = "serialize_uppercase")]
+    pub device_tag: String,
+
+    #[serde(serialize_with = "serialize_uppercase")]
+    pub channel_tag: String,
+
+    pub name: String,
+    pub status: DeviceStatus,
+
+    pub device_type: DeviceType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_type_code: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_extended: Option<serde_json::Value>,
+
+    #[serde(default)]
+    pub is_default: bool,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_channel_tag: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub civil_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip_address: Option<String>,
+    #[serde(default)]
+    pub port: u16,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manufacturer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+
+    #[serde(default)]
+    pub parental: i32,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extended: Option<serde_json::Value>,
+
+    pub created_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+fn serialize_uppercase<S>(value: &str, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&value.to_uppercase())
+}
+
+impl Channel {
+    pub fn new(device_tag: String, channel_tag: String, name: String) -> Self {
+        Self {
+            id: 0,
+            device_tag,
+            channel_tag,
+            name,
+            status: DeviceStatus::Offline,
+            device_type: DeviceType::Other,
+            device_type_code: None,
+            channel_extended: None,
+            is_default: false,
+            parent_channel_tag: None,
+            civil_code: None,
+            address: None,
+            ip_address: None,
+            port: 0,
+            manufacturer: None,
+            model: None,
+            parental: 0,
+            extended: None,
+            created_at: Utc::now(),
+            updated_at: None,
+        }
+    }
+
+    pub fn is_online(&self) -> bool {
+        self.status == DeviceStatus::Online
+    }
+
+    pub fn is_directory(&self) -> bool {
+        self.parental > 0
+    }
+
+    pub fn get_device_type_code(&self) -> Option<u32> {
+        if self.channel_tag.len() >= 13 {
+            self.channel_tag[10..13].parse().ok()
+        } else {
+            None
+        }
+    }
+
+    pub fn is_voice_input_channel(&self) -> bool {
+        self.get_device_type_code() == Some(136)
+    }
+
+    pub fn is_voice_output_channel(&self) -> bool {
+        self.get_device_type_code() == Some(137)
+    }
+
+    pub fn is_audio_channel(&self) -> bool {
+        self.is_voice_input_channel() || self.is_voice_output_channel()
+    }
+
+    pub fn is_ipc(&self) -> bool {
+        self.device_type == DeviceType::IPC || self.device_type_code.as_deref() == Some("132")
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelWithDevice {
+    #[serde(flatten)]
+    pub channel: Channel,
+    pub device_name: Option<String>,
+    pub device_status: Option<DeviceStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayLinks {
     pub token: String,
     pub stream_id: String,
@@ -424,14 +574,8 @@ pub struct CreateDeviceRequest {
     pub is_public: Option<bool>,
     pub extended: Option<serde_json::Value>,
     #[serde(default)]
-    pub is_channel: Option<bool>,
-    #[serde(default)]
     pub device_type: Option<DeviceType>,
     pub device_type_code: Option<String>,
-    pub channel_id: Option<String>,
-    pub channel_extended: Option<serde_json::Value>,
-    #[serde(default)]
-    pub is_default: Option<bool>,
 }
 
 impl Default for CreateDeviceRequest {
@@ -454,12 +598,8 @@ impl Default for CreateDeviceRequest {
             region_code: None,
             is_public: Some(false),
             extended: None,
-            is_channel: Some(false),
             device_type: None,
             device_type_code: None,
-            channel_id: None,
-            channel_extended: None,
-            is_default: Some(false),
         }
     }
 }
@@ -485,12 +625,8 @@ pub struct UpdateDeviceRequest {
     pub is_public: Option<bool>,
     pub extended: Option<serde_json::Value>,
     pub status: Option<DeviceStatus>,
-    pub is_channel: Option<bool>,
     pub device_type: Option<DeviceType>,
     pub device_type_code: Option<String>,
-    pub channel_id: Option<String>,
-    pub channel_extended: Option<serde_json::Value>,
-    pub is_default: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

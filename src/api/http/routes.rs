@@ -21,6 +21,7 @@ use crate::api::http::handlers::{
     group_handler,
     onvif_handler,
     gb28181_ref_handler,
+    channel_handler,
 };
 
 async fn trace_layer(request: Request, next: Next) -> axum::response::Response {
@@ -66,22 +67,28 @@ fn protected_routes(state: Arc<FullState>) -> Router {
         .route("/api/v1/devices/{id}", delete(device_handler::delete_device_handler))
         .route("/api/v1/devices/{id}/play", post(device_handler::play_device_handler))
         .route("/api/v1/devices/{id}/playback", post(device_handler::playback_device_handler))
-        .route("/api/v1/devices/{id}/play-links", get(device_handler::get_play_links_handler))
         .route("/api/v1/devices/{id}/config", get(device_handler::get_device_config_handler))
         .route("/api/v1/devices/{id}/stop", post(device_handler::stop_device_handler))
         .route("/api/v1/devices/{id}/start", post(device_handler::start_device_handler))
+        .route("/api/v1/devices/{id}/channels", get(channel_handler::get_device_channels_handler))
+
+        // 通道管理
+        .route("/api/v1/channels", get(channel_handler::list_channels_handler))
+        .route("/api/v1/channels/{device_tag}/{channel_tag}", get(channel_handler::get_channel_handler))
+        .route("/api/v1/channels/{device_tag}/{channel_tag}/play-links", get(channel_handler::get_channel_play_links_handler))
+        .route("/api/v1/channels/{device_tag}/{channel_tag}/status", get(channel_handler::get_channel_status_handler))
+        .route("/api/v1/channels/{device_tag}/{channel_tag}/start", post(channel_handler::start_channel_stream_handler))
+        // PTZ 控制（通道级）
+        .route("/api/v1/channels/{device_tag}/{channel_tag}/ptz", post(ptz_handler::channel_ptz_control_handler))
+        .route("/api/v1/channels/{device_tag}/{channel_tag}/ptz/presets", get(ptz_handler::get_channel_ptz_presets_handler))
+        .route("/api/v1/channels/{device_tag}/{channel_tag}/ptz/presets", post(ptz_handler::create_channel_ptz_preset_handler))
+        .route("/api/v1/channels/{device_tag}/{channel_tag}/ptz/presets/{token}", delete(ptz_handler::delete_channel_ptz_preset_handler))
+        .route("/api/v1/channels/{device_tag}/{channel_tag}/ptz/presets/{token}", put(ptz_handler::rename_channel_ptz_preset_handler))
+        .route("/api/v1/channels/{device_tag}/{channel_tag}/ptz/status", get(ptz_handler::get_channel_ptz_status_handler))
 
         // 报警管理
         .route("/api/v1/alarms", get(alarm_handler::list_alarms_handler))
         .route("/api/v1/alarms/{id}/processed", put(alarm_handler::mark_alarm_processed_handler))
-
-        // PTZ 控制
-        .route("/api/v1/devices/{id}/ptz", post(ptz_handler::ptz_control_handler))
-        .route("/api/v1/devices/{id}/ptz/presets", get(ptz_handler::get_ptz_presets_handler))
-        .route("/api/v1/devices/{id}/ptz/presets", post(ptz_handler::create_ptz_preset_handler))
-        .route("/api/v1/devices/{id}/ptz/presets/{token}", delete(ptz_handler::delete_ptz_preset_handler))
-        .route("/api/v1/devices/{id}/ptz/presets/{token}", put(ptz_handler::rename_ptz_preset_handler))
-        .route("/api/v1/devices/{id}/ptz/status", get(ptz_handler::get_ptz_status_handler))
 
         // ONVIF 发现与探测
         .route("/api/v1/onvif/discover", post(onvif_handler::onvif_discover_handler))

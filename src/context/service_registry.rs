@@ -7,7 +7,7 @@ use crate::application::{
     DeviceService, StreamService, SessionService, RecordingService,
     MediaServerService, HookService, PlayerLayoutService,
     PlayService, WsBroadcaster, StreamRecoveryService,
-    zlmediakit_hook::ZlMediaKitHookHandler,
+    zlmediakit_hook::ZlMediaKitHookHandler, ChannelService,
 };
 use crate::domain::traits::{DeviceLookup, StreamManager, EventPublisher, CacheStore};
 use crate::protocol::traits::ProtocolDeps;
@@ -53,6 +53,9 @@ pub struct ServiceRegistry {
 
     /// 播放器布局服务
     pub player_layout_service: Arc<PlayerLayoutService>,
+
+    /// 通道服务
+    pub channel_service: Arc<ChannelService>,
 
     /// 播放服务
     pub play_service: Arc<PlayService>,
@@ -188,6 +191,11 @@ impl ServiceRegistry {
             infra.db.clone(),
         ));
 
+        // 通道服务
+        let channel_service = Arc::new(ChannelService::new(
+            infra.db.clone(),
+        ));
+
         // ── 第4层: 协议依赖 ──
         let register_fn: Arc<dyn Fn(String, AdapterEntry) + Send + Sync> =
             Arc::new(|key, entry| am_set(key, entry));
@@ -220,6 +228,7 @@ impl ServiceRegistry {
             hook_service,
             zlmediakit_hook_handler,
             player_layout_service,
+            channel_service,
             play_service,
             ws_broadcaster,
             protocol_deps,

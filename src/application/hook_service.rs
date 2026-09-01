@@ -701,20 +701,21 @@ impl HookService {
         };
 
         // 更新流观看人数
-        if let Err(e) = self.increment_stream_viewers(&stream.stream_key).await {
+        let stream_key = crate::domain::stream::make_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
+        if let Err(e) = self.increment_stream_viewers(&stream_key).await {
             tracing::warn!("[Hook] on_play: failed to increment viewers: {}", e);
         }
 
         // 创建会话
         let mut session = crate::domain::Session::new(
             crate::domain::SessionType::Play,
-            stream.device_id,
             0,
         );
         session.state = crate::domain::SessionState::Active;
         session.client_ip = client_ip.map(String::from);
-        session.media_server_id = Some(media_server_id.to_string());
-        session.stream_id = stream.stream_key.clone();
+        session.media_server_tag = Some(media_server_id.to_string());
+        session.device_tag = stream.device_tag.clone();
+        session.channel_tag = stream.channel_tag.clone();
         session.refresh_expiry(self.session_expiry_secs);
 
         if let Err(e) = self.repo.create_session(&session).await {
@@ -806,8 +807,8 @@ impl HookService {
         }
 
         if let Some(stream) = self.find_stream_by_stream_key(stream_id) {
-            if stream.device_id > 0 {
-                if let Some(device) = self.repo.devices_cache().get(&stream.device_id) {
+            if let Some(ref device_tag) = stream.device_tag {
+                if let Some(device) = self.repo.devices_cache().get(device_tag) {
                     let mut device = (*device).clone();
                     device.set_online();
                     if let Err(e) = self.repo.update_device(&device).await {
@@ -914,9 +915,9 @@ impl HookService {
 
     /// 根据 stream_key 查找流
     fn find_stream_by_stream_key(&self, stream_key: &str) -> Option<crate::domain::Stream> {
+        let cache_key = stream_key.replace('_', "/");
         self.repo.streams_cache()
-            .iter()
-            .find(|s| s.stream_key == stream_key)
+            .get(&cache_key)
             .map(|s| s.clone())
     }
 
@@ -973,28 +974,31 @@ impl HookService {
                 s.start();
             }
             self.repo.update_stream(&s).await?;
-            tracing::info!("[Hook] on_publish: updated push stream {} (device_id={})", stream_id, s.device_id);
+            tracing::info!("[Hook] on_publish: updated push stream {} (device_tag={})", stream_id, s.device_tag.as_deref().unwrap_or("unknown"));
         } else {
             let token = uuid::Uuid::new_v4().to_string();
+            let (device_tag, channel_tag) = crate::domain::parse_stream_key(stream_id)
+                .unwrap_or((stream_id.to_string(), stream_id.to_string()));
             let app = device_id
-                .and_then(|id| self.repo.devices_cache().get(&id))
+                .as_ref()
+                .and_then(|id| self.repo.devices_cache().get(id))
                 .map(|d| d.app.clone().unwrap_or_else(|| "live".to_string()))
                 .unwrap_or_else(|| "live".to_string());
             let mut stream = crate::domain::Stream::new(
-                device_id.unwrap_or(0),
                 media_server_id.to_string(),
-                stream_id.to_string(),
+                device_tag,
+                channel_tag,
                 app,
                 token,
             );
             stream.start();
             self.repo.create_stream(&stream).await?;
-            tracing::info!("[Hook] on_publish: registered push stream {} on server {} (device_id={})",
-                stream_id, media_server_id, stream.device_id);
+            tracing::info!("[Hook] on_publish: registered push stream {} on server {} (device_tag={})",
+                stream_id, media_server_id, device_id.as_deref().unwrap_or("unknown"));
         }
 
-        if let Some(did) = device_id {
-            if let Some(device) = self.repo.devices_cache().get(&did) {
+        if let Some(ref did) = device_id {
+            if let Some(device) = self.repo.devices_cache().get(did) {
                 let mut device = (*device).clone();
                 device.set_online();
                 self.repo.update_device(&device).await?;
@@ -1005,21 +1009,21 @@ impl HookService {
         Ok(())
     }
 
-    /// 根据推送流的 stream_id 查找关联的设备 ID
-    fn find_device_by_push_stream(&self, stream_id: &str) -> Option<i64> {
+    /// 根据推送流的 stream_id 查找关联的设备 tag
+    fn find_device_by_push_stream(&self, stream_id: &str) -> Option<String> {
         for entry in self.repo.devices_cache().iter() {
             let device = entry.value();
             for pu in &device.push_urls {
                 if !pu.url.is_empty() && (pu.url.contains(stream_id) || stream_id.contains(&device.device_tag.clone().unwrap_or_default())) {
-                    return Some(device.id);
+                    return device.device_tag.clone();
                 }
             }
         }
         
-        let cache = self.repo.streams_cache();
-        cache.iter()
-            .find(|s| stream_id.contains(&s.stream_key) && !s.stream_key.is_empty())
-            .map(|s| s.device_id)
+        let cache_key = stream_id.replace('_', "/");
+        self.repo.streams_cache()
+            .get(&cache_key)
+            .and_then(|s| s.device_tag.clone())
     }
 
     /// 根据流标识查找活跃会话
@@ -1032,7 +1036,7 @@ impl HookService {
         self.repo.sessions_cache()
             .iter()
             .filter(|s| {
-                s.stream_id == stream_id
+                s.stream_key() == stream_id
                     && s.state != SessionState::Terminated
                     && s.state != SessionState::Terminating
             })

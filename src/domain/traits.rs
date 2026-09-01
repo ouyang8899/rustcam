@@ -55,13 +55,14 @@ pub trait DeviceLookup: Send + Sync {
 #[async_trait]
 pub trait StreamManager: Send + Sync {
     async fn start_pull_stream(
-        &self, device_id: i64, rtsp_url: &str,
+        &self, device_tag: &str, channel_tag: &str, rtsp_url: &str,
     ) -> Result<StreamInfo, AppError>;
     async fn start_gb28181_stream(
-        &self, device_id: i64, stream_key: &str,
+        &self, device_tag: &str, channel_tag: &str, stream_key: &str,
     ) -> Result<StreamInfo, AppError>;
     async fn stop_stream(&self, app: &str, stream_key: &str) -> Result<(), AppError>;
-    async fn stop_streams_by_device(&self, device_id: i64) -> Result<(), AppError>;
+    async fn stop_streams_by_device(&self, device_tag: &str) -> Result<(), AppError>;
+    async fn stop_streams_by_channel(&self, device_tag: &str, channel_tag: &str) -> Result<(), AppError>;
     async fn generate_token(&self, device_id: &str) -> Result<String, AppError>;
     async fn validate_token(&self, token: &str) -> Option<String>;
     async fn build_play_links(

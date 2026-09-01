@@ -102,7 +102,7 @@ impl ProtocolDeps {
         struct TestStreamManager;
         #[async_trait::async_trait]
         impl StreamManager for TestStreamManager {
-            async fn start_pull_stream(&self, _: i64, _: &str) -> Result<StreamInfo, AppError> {
+            async fn start_pull_stream(&self, _: &str, _: &str, _: &str) -> Result<StreamInfo, AppError> {
                 Ok(StreamInfo {
                     stream_key: "test_stream".to_string(),
                     play_url: "http://localhost/test".to_string(),
@@ -116,11 +116,12 @@ impl ProtocolDeps {
                     media_server_name: "test".to_string(),
                 })
             }
-            async fn start_gb28181_stream(&self, _: i64, _: &str) -> Result<StreamInfo, AppError> {
+            async fn start_gb28181_stream(&self, _: &str, _: &str, _: &str) -> Result<StreamInfo, AppError> {
                 Err(AppError::Internal("not implemented".into()))
             }
             async fn stop_stream(&self, _: &str, _: &str) -> Result<(), AppError> { Ok(()) }
-            async fn stop_streams_by_device(&self, _: i64) -> Result<(), AppError> { Ok(()) }
+            async fn stop_streams_by_device(&self, _: &str) -> Result<(), AppError> { Ok(()) }
+            async fn stop_streams_by_channel(&self, _: &str, _: &str) -> Result<(), AppError> { Ok(()) }
             async fn generate_token(&self, _: &str) -> Result<String, AppError> { Ok("test_token".into()) }
             async fn validate_token(&self, _: &str) -> Option<String> { Some("test_device".into()) }
             async fn build_play_links(&self, device: &crate::domain::Device, token: &str, stream_id: &str) -> crate::domain::device::PlayLinks {

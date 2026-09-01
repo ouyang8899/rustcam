@@ -32,11 +32,15 @@ impl StreamService {
     /// 3. 绑定的服务器必须在线，否则返回错误
     pub async fn start_pull_stream(
         &self,
-        device_id: i64,
+        device_tag: &str,
+        channel_tag: &str,
         rtsp_url: &str,
     ) -> Result<StreamInfo> {
-        let device = self.infra.db.devices_cache().get(&device_id)
-            .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_id)))?;
+        let device = self.infra.db.devices_cache()
+            .iter()
+            .find(|r| r.value().device_tag.as_deref() == Some(device_tag))
+            .map(|r| r.value().clone())
+            .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
 
         let server_tag = if let Some(ref tag) = device.media_server_tag {
             if self.media.cluster.get_server(tag).is_none() {
@@ -66,21 +70,16 @@ impl StreamService {
 
         let app = device.app.clone().unwrap_or_else(|| "live".to_string());
         
-        let stream_key = {
-            let cache = self.infra.db.streams_cache();
-            cache.iter()
-                .find(|s| s.device_id == device_id)
-                .map(|s| s.stream_key.clone())
-                .unwrap_or_else(|| Uuid::new_v4().to_string())
-        };
+        let cache_key = format!("{}/{}", device_tag, channel_tag);
+        let stream_key = crate::domain::make_stream_key(device_tag, channel_tag);
 
         let existing_in_cache = {
             let cache = self.infra.db.streams_cache();
-            cache.iter().find(|s| s.app == app && s.stream_key == stream_key && s.device_id == device_id).map(|s| s.clone())
+            cache.iter().find(|r| r.key() == &cache_key).map(|r| r.value().clone())
         };
 
         if let Some(existing) = existing_in_cache {
-            tracing::info!("[StreamService] Stream {}/{} found in cache for device {}, syncing state", app, stream_key, device_id);
+            tracing::info!("[StreamService] Stream {}/{} found in cache for {}/{}, syncing state", app, stream_key, device_tag, channel_tag);
 
             let mut needs_update = false;
             let mut updated_stream = existing.clone();
@@ -88,11 +87,6 @@ impl StreamService {
             if existing.app != app {
                 tracing::info!("[StreamService] Stream app changed: {} -> {}", existing.app, app);
                 updated_stream.app = app.clone();
-                needs_update = true;
-            }
-            if existing.stream_key != stream_key {
-                tracing::info!("[StreamService] Stream stream_key changed: {} -> {}", existing.stream_key, stream_key);
-                updated_stream.stream_key = stream_key.clone();
                 needs_update = true;
             }
 
@@ -104,7 +98,7 @@ impl StreamService {
                 self.infra.db.update_stream(&updated_stream).await?;
             }
 
-            self.start_recording_for_device(device_id, &server_tag, &app, &stream_key).await;
+            self.start_recording_for_channel(device_tag, channel_tag, &server_tag, &app, &stream_key).await;
         } else {
             let on_media_server = match server.is_stream_online(&app, &stream_key).await {
                 Ok(true) => {
@@ -134,7 +128,7 @@ impl StreamService {
             }
             let existing_in_cache = {
                 let cache = self.infra.db.streams_cache();
-                cache.iter().find(|s| s.app == app && s.stream_key == stream_key && s.device_id == device_id).map(|s| s.clone())
+                cache.iter().find(|r| r.key() == &cache_key).map(|r| r.value().clone())
             };
             if let Some(mut c) = existing_in_cache{
                 tracing::info!("steam_key {} exist in streams!",stream_key);
@@ -144,15 +138,15 @@ impl StreamService {
                 }
             } else{
                 let token = Uuid::new_v4().to_string();
-                let mut stream = Stream::new(device_id, server_tag.clone(), stream_key.clone(), app.clone(), token);
+                let mut stream = Stream::new(server_tag.clone(), device_tag.to_string(), channel_tag.to_string(), app.clone(), token);
                 stream.start();
                 if let Err(e) = self.infra.db.create_stream(&stream).await {
                     tracing::warn!("[StreamService] create_stream failed: {}", e);
                 }
             }
             
-            self.sync_device_status(device_id, StreamState::Active).await;
-            self.start_recording_for_device(device_id, &server_tag, &app, &stream_key).await;
+            self.sync_device_status(device_tag, StreamState::Active).await;
+            self.start_recording_for_channel(device_tag, channel_tag, &server_tag, &app, &stream_key).await;
         }
 
         let play_url = server.get_play_url(&app, &stream_key, crate::adapter::media_server::Protocol::Rtsp).await
@@ -173,17 +167,18 @@ impl StreamService {
     }
 
     /// 同步流状态到 cache 和 DB，确保为 active
-    async fn sync_stream_to_active(&self, device_id: i64, server_tag: &str, stream_key: &str, app: &str) -> Result<()> {
+    async fn sync_stream_to_active(&self, device_tag: &str, channel_tag: &str, server_tag: &str, _stream_key: &str, app: &str) -> Result<()> {
+        let cache_key = format!("{}/{}", device_tag, channel_tag);
+        let stream_key = crate::domain::make_stream_key(device_tag, channel_tag);
         let cache = self.infra.db.streams_cache();
         
-        // 从 cache 中克隆数据并释放 Ref（使用大括号限制作用域，避免死锁）
         let stream_to_update = {
             let existing = cache.iter()
-                .find(|s| s.stream_key == stream_key && s.device_id == device_id);
+                .find(|r| r.key() == &cache_key);
             match existing {
-                Some(s) => {
-                    if s.state != crate::domain::StreamState::Active {
-                        let mut s = s.clone();
+                Some(r) => {
+                    if r.value().state != crate::domain::StreamState::Active {
+                        let mut s = r.value().clone();
                         s.start();
                         Some(s)
                     } else {
@@ -192,23 +187,21 @@ impl StreamService {
                 }
                 None => None,
             }
-        }; // existing Ref guard 在这里被 drop
+        };
 
         if let Some(s) = stream_to_update {
-            // cache 中有记录但状态不是 Active，更新它
             if let Err(e) = self.infra.db.update_stream(&s).await {
                 tracing::warn!("[StreamService] sync_stream_to_active: update_stream failed: {}", e);
             }
         } else {
-            // cache 中没有记录，媒体服务器上有流，需要创建新记录
             let token = uuid::Uuid::new_v4().to_string();
-            let stream = crate::domain::Stream::new(device_id, server_tag.to_string(), stream_key.to_string(), app.to_string(), token);
+            let stream = crate::domain::Stream::new(server_tag.to_string(), device_tag.to_string(), channel_tag.to_string(), app.to_string(), token);
             if let Err(e) = self.infra.db.create_stream(&stream).await {
                 tracing::warn!("[StreamService] sync_stream_to_active: create_stream failed: {}", e);
             }
         }
 
-        self.start_recording_for_device(device_id, server_tag, app, stream_key).await;
+        self.start_recording_for_channel(device_tag, channel_tag, server_tag, app, &stream_key).await;
         Ok(())
     }
 
@@ -217,13 +210,18 @@ impl StreamService {
     /// 核心原则：设备必须绑定媒体服务器，所有操作都基于绑定关系
     pub async fn start_gb28181_stream(
         &self,
-        device_id: i64,
+        device_tag: &str,
+        channel_tag: &str,
         stream_key: &str,
     ) -> Result<StreamInfo> {
-        self.stop_streams_by_device(device_id).await?;
+        tracing::info!("[StreamService] start_gb28181_stream called: device={}, channel={}, stream_key={}", device_tag, channel_tag, stream_key);
+        self.stop_streams_by_device(device_tag).await?;
 
-        let device = self.infra.db.devices_cache().get(&device_id)
-            .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_id)))?;
+        let device = self.infra.db.devices_cache()
+            .iter()
+            .find(|r| r.value().device_tag.as_deref() == Some(device_tag))
+            .map(|r| r.value().clone())
+            .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
         let app = device.app.clone().unwrap_or_else(|| "live".to_string());
 
         let server_tag = if let Some(ref tag) = device.media_server_tag {
@@ -248,23 +246,18 @@ impl StreamService {
         };
 
         let token = Uuid::new_v4().to_string();
-        let stream = Stream::new(device_id, server_tag.clone(), stream_key.to_string(), app.clone(), token.clone());
+        let media_server_stream_key = crate::domain::make_stream_key(device_tag, channel_tag);
+        let mut stream = Stream::new(server_tag.clone(), device_tag.to_string(), channel_tag.to_string(), app.clone(), token.clone());
         self.infra.db.create_stream(&stream).await?;
 
-        self.start_recording_for_device(device_id, &server_tag, &app, stream_key).await;
+        self.start_recording_for_channel(device_tag, channel_tag, &server_tag, &app, &media_server_stream_key).await;
 
-        let device = match self.infra.db.devices_cache().get(&device_id) {
-            Some(d) => d.clone(),
-            None => {
-                return Err(AppError::NotFound(format!("Device {} not found", device_id)));
-            }
-        };
         let play_links = self.media.play_service.build_play_links_with_server(
-            &device, &token, stream_key, Some(&server_tag), Some("rtp"),
+            &device, &token, &media_server_stream_key, Some(&server_tag), Some("rtp"),
         ).await;
 
         let stream_info = StreamInfo {
-            stream_key: stream_key.to_string(),
+            stream_key: media_server_stream_key,
             play_url: String::new(),
             rtsp_url: play_links.rtsp_signaling.clone().unwrap_or_default(),
             rtmp_url: String::new(),
@@ -286,10 +279,8 @@ impl StreamService {
     /// 使用 (app, stream_key) 唯一标识流
     pub async fn stop_stream(&self, app: &str, stream_key: &str) -> Result<()> {
         let (stream, server_tag) = {
-            let cache = self.infra.db.streams_cache();
-            let entry = cache.iter()
-                .find(|s| s.app == app && s.stream_key == stream_key)
-                .map(|s| s.clone());
+            let cache_key = stream_key.replace('_', "/");
+            let entry = self.infra.db.streams_cache().get(&cache_key).map(|s| s.clone());
             match entry {
                 Some(s) => (s.clone(), s.media_server_tag.clone()),
                 None => {
@@ -320,7 +311,9 @@ impl StreamService {
         stream.state = StreamState::Idle;
         self.infra.db.update_stream(&stream).await?;
         self.infra.redis.delete_stream_info(stream_key).await?;
-        self.sync_device_status(stream.device_id, StreamState::Idle).await;
+        if let Some(ref dt) = stream.device_tag {
+            self.sync_device_status(dt, StreamState::Idle).await;
+        }
 
         tracing::info!("[StreamService] Stream stopped: {}", stream_key);
         Ok(())
@@ -331,13 +324,15 @@ impl StreamService {
         let stream = self.get_stream(stream_id).await?
             .ok_or_else(|| AppError::NotFound(format!("Stream {} not found", stream_id)))?;
 
-        let device = self.infra.db.devices_cache().get(&stream.device_id)
-            .ok_or_else(|| AppError::NotFound(format!("Device {} not found", stream.device_id)))?
+        let device_tag = stream.device_tag.as_ref()
+            .ok_or_else(|| AppError::NotFound(format!("Stream has no device_tag")))?;
+        let device = self.infra.db.get_device_by_device_tag(device_tag)
+            .ok_or_else(|| AppError::NotFound(format!("Device with tag {} not found", device_tag)))?
             .clone();
 
         let tag = stream.media_server_tag.clone();
         let app = stream.app.clone();
-        let stream_key = stream.stream_key.clone();
+        let stream_key = crate::domain::stream::make_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
 
         let adapter = self.media.cluster.get_server(&tag)
             .ok_or_else(|| AppError::MediaServerError(
@@ -394,22 +389,27 @@ impl StreamService {
         updated_stream.last_error = None;
         self.infra.db.update_stream(&updated_stream).await?;
 
-        self.sync_device_status(stream.device_id, StreamState::Active).await;
+        if let Some(ref dt) = stream.device_tag {
+            self.sync_device_status(dt, StreamState::Active).await;
+        }
 
         tracing::info!("[StreamService] Stream restarted: {} on {}", stream_key, tag);
         Ok(stream_info)
     }
 
-    async fn sync_device_status(&self, device_id: i64, stream_state: StreamState) {
-        let mut device = match self.infra.db.devices_cache().get(&device_id) {
-            Some(d) => d.clone(),
+    async fn sync_device_status(&self, device_tag: &str, stream_state: StreamState) {
+        let mut device = match self.infra.db.devices_cache()
+            .iter()
+            .find(|r| r.value().device_tag.as_deref() == Some(device_tag))
+            .map(|r| r.value().clone()) {
+            Some(d) => d,
             None => return,
         };
 
         if device.status == DeviceStatus::Maintaining {
             tracing::debug!(
                 "[StreamService] Device {} is in Maintaining status, skipping sync",
-                device_id
+                device_tag
             );
             return;
         }
@@ -423,7 +423,7 @@ impl StreamService {
         if device.status != new_status {
             tracing::info!(
                 "[StreamService] Syncing device {} status: {} -> {} (stream state: {:?})",
-                device_id, device.status, new_status, stream_state
+                device_tag, device.status, new_status, stream_state
             );
             device.status = new_status;
             if let Err(e) = self.infra.db.update_device(&device).await {
@@ -435,27 +435,38 @@ impl StreamService {
     /// 停止设备的所有流
     ///
     /// 包括：设备自身的流 + 推送流（device_id=0但stream_key属于该设备）
-    pub async fn stop_streams_by_device(&self, device_id: i64) -> Result<()> {
-        let device_tag = self.infra.db.devices_cache()
-            .get(&device_id)
-            .and_then(|d| d.device_tag.clone());
-
-        let streams: Vec<Stream> = self.infra.db.list_streams()
-            .await
-            .into_iter()
-            .filter(|s| {
-                if s.device_id == device_id { return true; }
-                if s.device_id == 0 && device_tag.is_some() {
-                    let tag = device_tag.as_ref().unwrap();
-                    return s.stream_key.contains(tag);
-                }
-                false
-            })
+    pub async fn stop_streams_by_device(&self, device_tag: &str) -> Result<()> {
+        let cache_key_prefix = format!("{}/", device_tag);
+        let cache = self.infra.db.streams_cache();
+        let streams: Vec<Stream> = cache
+            .iter()
+            .filter(|r| r.key().starts_with(&cache_key_prefix))
+            .map(|r| r.value().clone())
             .collect();
 
         for stream in streams {
-            if let Err(e) = self.stop_stream(&stream.app, &stream.stream_key).await {
-                tracing::warn!("[StreamService] stop_streams_by_device: failed to stop {}: {}", stream.stream_key, e);
+            let stream_key = crate::domain::stream::make_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
+            if let Err(e) = self.stop_stream(&stream.app, &stream_key).await {
+                tracing::warn!("[StreamService] stop_streams_by_device: failed to stop {}: {}", stream_key, e);
+            }
+        }
+        Ok(())
+    }
+
+    /// 停止通道的流
+    pub async fn stop_streams_by_channel(&self, device_tag: &str, channel_tag: &str) -> Result<()> {
+        let cache_key = format!("{}/{}", device_tag, channel_tag);
+        let cache = self.infra.db.streams_cache();
+        let streams: Vec<Stream> = cache
+            .iter()
+            .filter(|r| r.key() == &cache_key)
+            .map(|r| r.value().clone())
+            .collect();
+
+        for stream in streams {
+            let stream_key = crate::domain::stream::make_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
+            if let Err(e) = self.stop_stream(&stream.app, &stream_key).await {
+                tracing::warn!("[StreamService] stop_streams_by_channel: failed to stop {}: {}", stream_key, e);
             }
         }
         Ok(())
@@ -465,7 +476,7 @@ impl StreamService {
     async fn terminate_sessions_for_stream(&self, stream_key: &str) {
         let session_ids: Vec<i64> = self.infra.db.sessions_cache()
             .iter()
-            .filter(|s| s.stream_id == stream_key)
+            .filter(|s| s.stream_key() == stream_key)
             .filter(|s| s.state != crate::domain::SessionState::Terminated)
             .filter(|s| s.state != crate::domain::SessionState::Terminating)
             .map(|s| s.id)
@@ -514,11 +525,23 @@ impl StreamService {
             .collect()
     }
 
-    /// 根据设备ID获取流列表
-    pub async fn get_streams_by_device(&self, device_id: i64) -> Vec<Stream> {
-        self.infra.db.list_streams().await
-            .into_iter()
-            .filter(|s| s.device_id == device_id)
+    /// 根据设备标签获取流列表
+    pub async fn get_streams_by_device(&self, device_tag: &str) -> Vec<Stream> {
+        let cache_key_prefix = format!("{}/", device_tag);
+        let cache = self.infra.db.streams_cache();
+        cache.iter()
+            .filter(|r| r.key().starts_with(&cache_key_prefix))
+            .map(|r| r.value().clone())
+            .collect()
+    }
+
+    /// 根据通道标签获取流列表
+    pub async fn get_streams_by_channel(&self, device_tag: &str, channel_tag: &str) -> Vec<Stream> {
+        let cache_key = format!("{}/{}", device_tag, channel_tag);
+        let cache = self.infra.db.streams_cache();
+        cache.iter()
+            .filter(|r| r.key() == &cache_key)
+            .map(|r| r.value().clone())
             .collect()
     }
 
@@ -560,9 +583,9 @@ impl StreamService {
 
     /// 根据 (app, stream_key) 获取流
     pub async fn get_stream_by_stream_key(&self, app: &str, stream_key: &str) -> Option<Stream> {
+        let cache_key = stream_key.replace('_', "/");
         self.infra.db.streams_cache()
-            .iter()
-            .find(|s| s.app == app && s.stream_key == stream_key)
+            .get(&cache_key)
             .map(|s| s.clone())
     }
 
@@ -580,12 +603,12 @@ impl StreamService {
         stream_key: &str,
         rtsp_url: &str,
     ) -> Result<StreamInfo> {
-        let stream_id = match self.infra.db.get_stream_id_by_key(stream_key) {
-            Some(id) => id,
+        let cache_key = match self.infra.db.get_stream_cache_key_by_stream_key(stream_key) {
+            Some(key) => key,
             None => return Err(AppError::NotFound(format!("Stream {} not found", stream_key))),
         };
 
-        let stream = match self.infra.db.streams_cache().get(&stream_id) {
+        let stream = match self.infra.db.streams_cache().get(&cache_key) {
             Some(s) => s.clone(),
             None => return Err(AppError::NotFound(format!("Stream {} not in cache", stream_key))),
         };
@@ -608,8 +631,12 @@ impl StreamService {
         updated_stream.start();
         self.infra.db.update_stream(&updated_stream).await?;
 
-        self.sync_device_status(stream.device_id, StreamState::Active).await;
-        self.start_recording_for_device(stream.device_id, &updated_stream.media_server_tag, &updated_stream.app, stream_key).await;
+        if let Some(ref dt) = stream.device_tag {
+            self.sync_device_status(dt, StreamState::Active).await;
+        }
+        if let (Some(ref dt), Some(ref ct)) = (&stream.device_tag, &stream.channel_tag) {
+            self.start_recording_for_channel(dt, ct, &updated_stream.media_server_tag, &updated_stream.app, stream_key).await;
+        }
         self.infra.redis.set_stream_info(stream_key, &stream_info).await?;
 
         tracing::info!("[StreamService] Stream {} restarted on {}", stream_key, updated_stream.media_server_tag);
@@ -623,12 +650,12 @@ impl StreamService {
         &self,
         stream_key: &str,
     ) -> Result<StreamInfo> {
-        let stream_id = match self.infra.db.get_stream_id_by_key(stream_key) {
-            Some(id) => id,
+        let cache_key = match self.infra.db.get_stream_cache_key_by_stream_key(stream_key) {
+            Some(key) => key,
             None => return Err(AppError::NotFound(format!("Stream {} not found", stream_key))),
         };
 
-        let stream = match self.infra.db.streams_cache().get(&stream_id) {
+        let stream = match self.infra.db.streams_cache().get(&cache_key) {
             Some(s) => s.clone(),
             None => return Err(AppError::NotFound(format!("Stream {} not in cache", stream_key))),
         };
@@ -644,10 +671,12 @@ impl StreamService {
             let _ = old_server.close_rtp_server(stream_key).await;
         }
 
-        let device = match self.infra.db.devices_cache().get(&stream.device_id) {
-            Some(d) => d.clone(),
+        let device_tag = stream.device_tag.as_ref()
+            .ok_or_else(|| AppError::NotFound(format!("Stream has no device_tag")))?;
+        let device = match self.infra.db.get_device_by_device_tag(device_tag) {
+            Some(d) => d,
             None => {
-                return Err(AppError::NotFound(format!("Device {} not found", stream.device_id)));
+                return Err(AppError::NotFound(format!("Device with tag {} not found", device_tag)));
             }
         };
         let token = Uuid::new_v4().to_string();
@@ -673,19 +702,26 @@ impl StreamService {
         updated_stream.start();
         self.infra.db.update_stream(&updated_stream).await?;
 
-        self.sync_device_status(stream.device_id, StreamState::Active).await;
-        self.start_recording_for_device(stream.device_id, &updated_stream.media_server_tag, &updated_stream.app, stream_key).await;
+        if let Some(ref dt) = stream.device_tag {
+            self.sync_device_status(dt, StreamState::Active).await;
+        }
+        if let (Some(ref dt), Some(ref ct)) = (&stream.device_tag, &stream.channel_tag) {
+            self.start_recording_for_channel(dt, ct, &updated_stream.media_server_tag, &updated_stream.app, stream_key).await;
+        }
         self.infra.redis.set_stream_info(stream_key, &stream_info).await?;
 
         tracing::info!("[StreamService] GB28181 stream {} restarted on {}", stream_key, updated_stream.media_server_tag);
         Ok(stream_info)
     }
 
-    async fn start_recording_for_device(&self, device_id: i64, media_server: &str, app: &str, stream_key: &str) {
-        let device = match self.infra.db.devices_cache().get(&device_id) {
-            Some(d) => d.clone(),
+    async fn start_recording_for_channel(&self, device_tag: &str, channel_tag: &str, media_server: &str, app: &str, stream_key: &str) {
+        let device = match self.infra.db.devices_cache()
+            .iter()
+            .find(|r| r.value().device_tag.as_deref() == Some(device_tag))
+            .map(|r| r.value().clone()) {
+            Some(d) => d,
             None => {
-                tracing::debug!("[StreamService] Device {} not found in cache, skipping recording", device_id);
+                tracing::debug!("[StreamService] Device {} not found in cache, skipping recording", device_tag);
                 return;
             }
         };
@@ -695,12 +731,16 @@ impl StreamService {
             return;
         }
 
-        if self.recording_service.get_active_recording_by_stream_key(stream_key).is_some() {
-            return;
+        match self.recording_service.get_active_recording_by_stream_key(stream_key).await {
+            Ok(Some(_)) => return,
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!("[StreamService] Failed to check active recording: {}", e);
+            }
         }
 
         match self.recording_service
-            .start_recording_for_stream(device_id, stream_key, media_server, &config)
+            .start_recording_for_stream(device_tag.to_string(), stream_key, media_server, &config)
             .await
         {
             Ok(Some(rec)) => {
@@ -721,23 +761,27 @@ impl StreamService {
 #[async_trait]
 impl StreamManager for StreamService {
     async fn start_pull_stream(
-        &self, device_id: i64, rtsp_url: &str,
+        &self, device_tag: &str, channel_tag: &str, rtsp_url: &str,
     ) -> Result<StreamInfo> {
-        self.start_pull_stream(device_id, rtsp_url).await
+        self.start_pull_stream(device_tag, channel_tag, rtsp_url).await
     }
 
     async fn start_gb28181_stream(
-        &self, device_id: i64, stream_key: &str,
+        &self, device_tag: &str, channel_tag: &str, stream_key: &str,
     ) -> Result<StreamInfo> {
-        self.start_gb28181_stream(device_id, stream_key).await
+        self.start_gb28181_stream(device_tag, channel_tag, stream_key).await
     }
 
     async fn stop_stream(&self, app: &str, stream_key: &str) -> Result<()> {
         self.stop_stream(app, stream_key).await
     }
 
-    async fn stop_streams_by_device(&self, device_id: i64) -> Result<()> {
-        self.stop_streams_by_device(device_id).await
+    async fn stop_streams_by_device(&self, device_tag: &str) -> Result<()> {
+        self.stop_streams_by_device(device_tag).await
+    }
+
+    async fn stop_streams_by_channel(&self, device_tag: &str, channel_tag: &str) -> Result<()> {
+        self.stop_streams_by_channel(device_tag, channel_tag).await
     }
 
     async fn generate_token(&self, device_id: &str) -> Result<String> {

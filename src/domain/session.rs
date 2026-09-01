@@ -49,15 +49,15 @@ impl fmt::Display for SessionState {
 pub struct Session {
     pub id: i64,
     pub session_type: SessionType,
-    pub device_id: i64,
+    pub device_tag: Option<String>,
+    pub channel_tag: Option<String>,
     pub user_id: i64,
     pub state: SessionState,
 
     pub client_ip: Option<String>,
     pub client_type: Option<String>,
 
-    pub media_server_id: Option<String>,
-    pub stream_id: String,
+    pub media_server_tag: Option<String>,
     pub protocol: Option<Protocol>,
 
     pub created_at: DateTime<Utc>,
@@ -69,18 +69,18 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(session_type: SessionType, device_id: i64, user_id: i64) -> Self {
+    pub fn new(session_type: SessionType, user_id: i64) -> Self {
         let now = Utc::now();
         Self {
             id: 0,
             session_type,
-            device_id,
+            device_tag: None,
+            channel_tag: None,
             user_id,
             state: SessionState::Initializing,
             client_ip: None,
             client_type: None,
-            media_server_id: None,
-            stream_id: String::new(),
+            media_server_tag: None,
             protocol: None,
             created_at: now,
             last_activity: now,
@@ -90,10 +90,17 @@ impl Session {
         }
     }
 
-    pub fn set_active(&mut self, media_server_id: String, stream_id: String) {
+    pub fn stream_key(&self) -> String {
+        match (&self.device_tag, &self.channel_tag) {
+            (Some(dt), Some(ct)) => format!("{}_{}", dt, ct),
+            (Some(dt), None) => dt.clone(),
+            _ => String::new(),
+        }
+    }
+
+    pub fn set_active(&mut self, media_server_tag: String) {
         self.state = SessionState::Active;
-        self.media_server_id = Some(media_server_id);
-        self.stream_id = stream_id;
+        self.media_server_tag = Some(media_server_tag);
         self.last_activity = Utc::now();
     }
 

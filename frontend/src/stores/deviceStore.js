@@ -46,59 +46,59 @@ export const useDeviceStore = defineStore('devices', {
       return device
     },
 
-    async deleteDevice(id) {
-      await api.deleteDevice(id)
-      this.devices = this.devices.filter(d => d.id !== id)
+    async deleteDevice(deviceTag) {
+      await api.deleteDevice(deviceTag)
+      this.devices = this.devices.filter(d => d.device_tag !== deviceTag)
       this.total--
       ElMessage.success('设备删除成功')
     },
 
-    async playDevice(id) {
-      const data = await api.playDevice(id)
+    async playDevice(deviceTag) {
+      const data = await api.playDevice(deviceTag)
       ElMessage.success('播放已启动')
       return data
     },
 
-    async stopDevice(id) {
-      await api.stopDevice(id)
+    async stopDevice(deviceTag) {
+      await api.stopDevice(deviceTag)
       ElMessage.success('播放已停止')
       return true
     },
 
-    async fetchDevice(id) {
+    async fetchDevice(deviceTag) {
       this.loading = true
       try {
-        return await api.getDevice(id)
+        return await api.getDevice(deviceTag)
       } finally {
         this.loading = false
       }
     },
 
-    async getPlayLinks(id) {
-      return await api.getPlayLinks(id)
+    async getPlayLinks(deviceTag) {
+      return await api.getPlayLinks(deviceTag)
     },
 
-    async fetchPtzPresets(id) {
-      return await api.getPtzPresets(id)
+    async fetchPtzPresets(deviceTag) {
+      return await api.getPtzPresets(deviceTag)
     },
 
-    async createPtzPreset(id, name) {
-      const preset = await api.createPtzPreset(id, name)
+    async createPtzPreset(deviceTag, name) {
+      const preset = await api.createPtzPreset(deviceTag, name)
       ElMessage.success('预制位已创建')
       return preset
     },
 
-    async deletePtzPreset(id, token) {
-      await api.deletePtzPreset(id, token)
+    async deletePtzPreset(deviceTag, token) {
+      await api.deletePtzPreset(deviceTag, token)
       ElMessage.success('预制位已删除')
     },
 
-    async getPtzStatus(id) {
-      return await api.getPtzStatus(id)
+    async getPtzStatus(deviceTag) {
+      return await api.getPtzStatus(deviceTag)
     },
 
-    async ptzControl(id, command, speed = 50, presetToken = null) {
-      await api.ptzControl(id, command, speed, presetToken)
+    async ptzControl(deviceTag, command, speed = 50, presetToken = null) {
+      await api.ptzControl(deviceTag, command, speed, presetToken)
       if (command === 'stop' || presetToken) {
         ElMessage.success(command === 'stop' ? '已停止' : '预制位已调用')
       }

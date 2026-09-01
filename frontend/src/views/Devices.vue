@@ -130,7 +130,7 @@
                   </el-table-column>
                   <el-table-column label="名称" min-width="180">
                     <template #default="{ row }">
-                      <el-link type="primary" @click="$router.push(`/devices/${row.id}`)">{{ row.name }}</el-link>
+                      <el-link type="primary" @click="$router.push(`/devices/${row.device_tag}`)">{{ row.name }}</el-link>
                     </template>
                   </el-table-column>
                   <el-table-column label="协议" width="100" align="center">
@@ -161,14 +161,15 @@
                   </el-table-column>
                   <el-table-column label="观看" prop="view_count" width="80" align="center" />
                   <el-table-column label="媒体服务器" prop="media_server_name" min-width="120" show-overflow-tooltip />
-                  <el-table-column label="操作" width="190" align="center">
+                  <el-table-column label="操作" width="220" align="center">
                     <template #default="{ row }">
                       <template v-if="row.has_stream">
                         <el-button size="small" disabled>播放</el-button>
                         <el-button size="small" type="primary" plain @click="router.push('/streams')">流</el-button>
                       </template>
                       <el-button v-else size="small" type="primary" @click="startStreamAndPlay(row)">播放</el-button>
-                      <el-button size="small" @click="router.push(`/devices/${row.id}`)">详情</el-button>
+                      <el-button size="small" @click="router.push(`/channels?device_tag=${row.device_tag}`)">通道</el-button>
+                      <el-button size="small" @click="router.push(`/devices/${row.device_tag}`)">详情</el-button>
                       <el-button size="small" @click="openEditModal(row)">编辑</el-button>
                       <el-button size="small" type="danger" plain @click="deleteDevice(row)">删除</el-button>
                     </template>
@@ -257,15 +258,6 @@
           <el-col :span="12">
             <el-form-item label="应用名称 (App)">
               <el-input v-model="form.app" placeholder="live" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item :label="streamKeyLabel + ' *'" required>
-              <el-input v-model="form.stream_key" :placeholder="streamKeyPlaceholder" autocomplete="off">
-                <template #append>
-                  <el-button @click="autoGenerateStreamKey" title="基于设备名称自动生成">生成</el-button>
-                </template>
-              </el-input>
             </el-form-item>
           </el-col>
         </el-row>
@@ -365,7 +357,7 @@
 
           <div class="sip-id-row sip-id-row-bottom">
             <el-form-item label="后缀" class="sip-field">
-              <el-input v-model="sipIdSuffix" :placeholder="`${sipIdSuffixMaxLength}位`" maxlength="6" />
+              <el-input v-model="sipIdSuffix" placeholder="6位" maxlength="6" />
             </el-form-item>
             <span class="sip-equals">=</span>
             <el-form-item label="SIP ID" class="sip-field sip-preview">
@@ -381,6 +373,14 @@
             <el-col :span="12">
               <el-form-item label="SIP 密码 *" required>
                 <el-input v-model="form.device_password" type="password" show-password placeholder="设备SIP认证密码" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="传输协议">
+                <el-select v-model="form.gb_transport" placeholder="选择协议" style="width: 100%">
+                  <el-option label="UDP (推荐)" value="UDP" />
+                  <el-option label="TCP" value="TCP" />
+                </el-select>
               </el-form-item>
             </el-col>
           </el-row>
@@ -485,9 +485,10 @@
           </el-col>
         </el-row>
 
-        <div v-if="form.protocol === 'Gb28181' || form.protocol === 'Onvif' || (form.protocol === 'Rtsp' && form.rtsp_mode === 'pull')">
+        <!-- GB28181 完整流配置 -->
+        <div v-if="form.protocol === 'Gb28181'">
           <el-divider>
-            <span style="font-size: 12px; color: #909399">流配置（可选）</span>
+            <span style="font-size: 12px; color: #909399">SIP INVITE 流配置</span>
             <el-switch v-model="form.enable_stream_config" size="small" style="margin-left: 8px" />
           </el-divider>
           <div v-if="form.enable_stream_config" style="background: #f5f7fa; padding: 16px; border-radius: 4px; margin-bottom: 16px">
@@ -495,55 +496,127 @@
               <el-col :span="6">
                 <el-form-item label="视频编码">
                   <el-select v-model="form.stream_config.video_codec" placeholder="选择编码" style="width: 100%">
-                    <el-option label="PS (MPEG-2)" value="PS" />
-                    <el-option label="H.264" value="H264" />
-                    <el-option label="H.265" value="H265" />
-                    <el-option label="MPEG-4" value="MPEG4" />
+                    <el-option label="PS (MPEG-PS, 海康大华)" value="PS" />
+                    <el-option label="H.264 (通用)" value="H264" />
+                    <el-option label="H.265 (新设备)" value="H265" />
+                    <el-option label="JPEG (MJPEG)" value="JPEG" />
                   </el-select>
                 </el-form-item>
               </el-col>
               <el-col :span="6">
                 <el-form-item label="音频编码">
                   <el-select v-model="form.stream_config.audio_codec" placeholder="选择编码" style="width: 100%">
-                    <el-option label="PCMA (G.711 A)" value="PCMA" />
-                    <el-option label="PCMU (G.711 U)" value="PCMU" />
+                    <el-option label="PCMA (G.711 A律)" value="PCMA" />
+                    <el-option label="PCMU (G.711 U律)" value="PCMU" />
                     <el-option label="AAC" value="AAC" />
-                    <el-option label="G.722" value="G722" />
+                    <el-option label="禁用" value="NONE" />
                   </el-select>
                 </el-form-item>
               </el-col>
               <el-col :span="6">
                 <el-form-item label="Profile/Level">
-                  <el-input v-model="form.stream_config.profile_level_id" placeholder="4D001F" />
+                  <el-input v-model="form.stream_config.profile_level_id" placeholder="4D001F">
+                    <template #append>
+                      <el-tooltip content="H.264/H.265的profile_level_id参数, 可从设备能力获取">
+                        <span style="cursor: help">?</span>
+                      </el-tooltip>
+                    </template>
+                  </el-input>
                 </el-form-item>
               </el-col>
               <el-col :span="6">
                 <el-form-item label="流模式">
                   <el-select v-model="form.stream_config.stream_mode" placeholder="选择模式" style="width: 100%">
-                    <el-option label="recvonly (接收)" value="recvonly" />
-                    <el-option label="sendonly (发送)" value="sendonly" />
+                    <el-option label="recvonly (仅接收)" value="recvonly" />
+                    <el-option label="sendonly (仅发送)" value="sendonly" />
                     <el-option label="sendrecv (双向)" value="sendrecv" />
                   </el-select>
                 </el-form-item>
               </el-col>
             </el-row>
             <el-row :gutter="12">
-              <el-col :span="8">
-                <el-form-item label="视频负载类型 (PT)">
-                  <el-input-number v-model="form.stream_config.video_payload_type" :min="0" :max="127" style="width: 100%" />
+              <el-col :span="6">
+                <el-form-item label="视频PT">
+                  <el-input-number v-model="form.stream_config.video_payload_type" :min="0" :max="127" style="width: 100%" placeholder="96" />
                 </el-form-item>
               </el-col>
-              <el-col :span="8">
-                <el-form-item label="音频负载类型 (PT)">
-                  <el-input-number v-model="form.stream_config.audio_payload_type" :min="0" :max="127" style="width: 100%" />
+              <el-col :span="6">
+                <el-form-item label="音频PT">
+                  <el-input-number v-model="form.stream_config.audio_payload_type" :min="0" :max="127" style="width: 100%" placeholder="8" />
                 </el-form-item>
               </el-col>
-              <el-col :span="8">
-                <el-form-item label="SPS/PPS (H.264/265)">
-                  <el-input v-model="form.stream_config.sprop_parameter_sets" placeholder="Base64，可留空" />
+              <el-col :span="6">
+                <el-form-item label="SPS/PPS">
+                  <el-input v-model="form.stream_config.sprop_parameter_sets" placeholder="Base64编码, 可留空">
+                    <template #append>
+                      <el-tooltip content="H.264/H.265的SPS/PPS参数, Base64编码, 通常可留空自动发现">
+                        <span style="cursor: help">?</span>
+                      </el-tooltip>
+                    </template>
+                  </el-input>
+                </el-form-item>
+              </el-col>
+              <el-col :span="6">
+                <el-form-item label="封装模式">
+                  <el-select v-model="form.stream_config.packaging_mode" placeholder="选择模式" style="width: 100%">
+                    <el-option label="HIS (96字节头)" value="HIS" />
+                    <el-option label="NALU (标准)" value="NALU" />
+                  </el-select>
                 </el-form-item>
               </el-col>
             </el-row>
+          </div>
+        </div>
+
+        <!-- ONVIF/RTSP 媒体配置 -->
+        <div v-if="form.protocol === 'Onvif' || (form.protocol === 'Rtsp' && form.rtsp_mode === 'pull')">
+          <el-divider>
+            <span style="font-size: 12px; color: #909399">媒体参数</span>
+            <el-switch v-model="form.enable_stream_config" size="small" style="margin-left: 8px" />
+          </el-divider>
+          <div v-if="form.enable_stream_config" style="background: #f5f7fa; padding: 16px; border-radius: 4px; margin-bottom: 16px">
+            <p style="margin: 0 0 12px 0; color: #909399; font-size: 12px;">ONVIF/RTSP 设备会自动获取媒体参数，如有兼容性问题可手动覆盖：</p>
+            <el-row :gutter="12">
+              <el-col :span="8">
+                <el-form-item label="视频编码">
+                  <el-select v-model="form.stream_config.video_codec" placeholder="自动" style="width: 100%">
+                    <el-option label="自动" value="" />
+                    <el-option label="H.264" value="H264" />
+                    <el-option label="H.265" value="H265" />
+                    <el-option label="MJPEG" value="JPEG" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="音频编码">
+                  <el-select v-model="form.stream_config.audio_codec" placeholder="自动" style="width: 100%">
+                    <el-option label="自动" value="" />
+                    <el-option label="AAC" value="AAC" />
+                    <el-option label="G.711" value="PCMA" />
+                    <el-option label="禁用" value="NONE" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="8">
+                <el-form-item label="流模式">
+                  <el-select v-model="form.stream_config.stream_mode" placeholder="自动" style="width: 100%">
+                    <el-option label="自动" value="" />
+                    <el-option label="recvonly (仅接收)" value="recvonly" />
+                    <el-option label="sendrecv (双向)" value="sendrecv" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+            </el-row>
+          </div>
+        </div>
+
+        <!-- RTMP 推送配置 -->
+        <div v-if="form.protocol === 'Rtmp'">
+          <el-divider>
+            <span style="font-size: 12px; color: #909399">RTMP 推送配置</span>
+          </el-divider>
+          <div style="background: #f5f7fa; padding: 12px 16px; border-radius: 4px; margin-bottom: 16px; color: #909399; font-size: 12px;">
+            <p style="margin: 0;">RTMP 为推送模式，设备主动推送流到媒体服务器。请配置推送地址和流名称。</p>
           </div>
         </div>
 
@@ -719,14 +792,7 @@ const gbRegionCascader = ref([])
 const sipGbCode = ref('00')  // 基层编码，默认00
 const sipIdSuffix = ref('')  // 后缀，最多6位数字
 
-watch(sipIdSuffix, (val) => {
-  const num = parseInt(val, 10)
-  if (isNaN(num) || num < 0) {
-    sipIdSuffix.value = ''
-  } else if (val.length > 6) {
-    sipIdSuffix.value = val.slice(0, 6)
-  }
-})
+
 
 watch(sipGbCode, (val) => {
   const num = parseInt(val, 10)
@@ -814,8 +880,9 @@ function flattenGroups(groups, result = []) {
 const flatGroupList = computed(() => flattenGroups(groupStore.groupTree))
 
 function onGbRegionChange(val) {
-  sipIdSuffix.value = ''
 }
+
+
 
 function onRegionAllClick() {
   selectedRegion.value = ''
@@ -824,24 +891,6 @@ function onRegionAllClick() {
 function onGroupAllClick() {
   selectedGroup.value = ''
 }
-
-const streamKeyLabel = computed(() => {
-  const proto = form.value?.protocol
-  if (proto === 'Gb28181') return '流标识 (stream_key)'
-  if (proto === 'Rtsp') return form.value.rtsp_mode === 'push' ? '推流标识 (stream_key)' : '拉流标识 (stream_key)'
-  if (proto === 'Rtmp') return '推流标识 (stream_key)'
-  if (proto === 'Onvif') return '拉流标识 (stream_key)'
-  return '流标识'
-})
-
-const streamKeyPlaceholder = computed(() => {
-  const proto = form.value?.protocol
-  if (proto === 'Gb28181') return '如: camera001（播放时的stream_id）'
-  if (proto === 'Rtsp') return '如: camera001'
-  if (proto === 'Rtmp') return '如: camera001'
-  if (proto === 'Onvif') return '如: camera001'
-  return '如: camera001'
-})
 
 const rtspPushServer = computed(() => {
   if (!form.value.media_server_name) return null
@@ -876,11 +925,6 @@ const rtmpPushPortActual = computed(() => {
   if (!server) return 1935
   return server.protocol_ports?.rtmp || 1935
 })
-
-function autoGenerateStreamKey() {
-  form.value.stream_key = crypto.randomUUID()
-  ElMessage.success('已生成流标识: ' + form.value.stream_key)
-}
 
 
 async function onvifDiscover() {
@@ -938,13 +982,15 @@ const filteredDevices = computed(() => {
 
 const defaultForm = () => ({
   name: '', protocol: 'Gb28181', host: '', port: 554, device_username: '', device_password: '',
-  media_server_name: '', stream_key: '', pull_urls: [], push_urls: [], playback_username: '', playback_password: '',
+  media_server_name: '', pull_urls: [], push_urls: [], playback_username: '', playback_password: '',
   device_tag: '', group_id: null, is_public: false,
   rtsp_mode: 'pull', app: 'live', rtsp_full_url: '',
   rtmp_mode: 'push',
   gb_device_type: '132',
   gb_industry_code: '00',
   gb_network_code: '0',
+  gb_transport: 'UDP',
+  sip_id_suffix: '',
   extended: {},
   enable_stream_config: false,
   stream_config: {
@@ -993,17 +1039,7 @@ watch(() => form.value.protocol, (newProto) => {
   }
 })
 
-watch(() => form.value.gb_device_type, () => {
-  sipIdSuffix.value = ''
-})
 
-watch(() => form.value.gb_industry_code, () => {
-  sipIdSuffix.value = ''
-})
-
-watch(() => form.value.gb_network_code, () => {
-  sipIdSuffix.value = ''
-})
 
 watch(() => form.value.rtsp_mode, (newMode) => {
   if (form.value.protocol !== 'Rtsp') return
@@ -1039,7 +1075,7 @@ onMounted(async () => {
 
   const editId = route.query.edit
   if (editId) {
-    const device = deviceStore.devices.find(d => String(d.id) === String(editId))
+    const device = deviceStore.devices.find(d => String(d.device_tag) === String(editId))
     if (device) openEditModal(device)
   }
 })
@@ -1258,70 +1294,72 @@ function openAddModal() {
   showModal.value = true
 }
 
-function openEditModal(device) {
+async function openEditModal(device) {
   isEdit.value = true; editingId.value = device.id
-  const ext = device.extended || {}
-  const devStreamConfig = device.stream_config || {}
-  form.value = {
-    name: device.name || '', protocol: device.protocol || 'Gb28181', host: device.host || '',
-    port: device.port || 554, device_username: device.device_username || '', device_password: device.device_password || '',
-    media_server_name: device.media_server_tag || '',
-    stream_key: ext.stream_key || '',
-    pull_urls: device.pull_urls ? device.pull_urls.map(u => ({ ...u })) : [],
-    push_urls: device.push_urls ? device.push_urls.map(u => ({ ...u })) : [],
-    playback_username: device.playback_username || '', playback_password: device.playback_password || '',
-    device_tag: '', group_id: device.group_id ?? null, is_public: device.is_public || false,
-    rtsp_mode: ext.rtsp_mode || device.rtsp_mode || 'pull',
-    app: device.app || 'live',
-    rtsp_full_url: ext.rtsp_full_url || device.rtsp_full_url || '',
-    rtmp_mode: ext.rtmp_mode || device.rtmp_mode || 'push',
-    extended: ext,
-    enable_stream_config: !!device.stream_config,
-    stream_config: {
-      video_codec: devStreamConfig.video_codec || 'PS',
-      audio_codec: devStreamConfig.audio_codec || 'PCMA',
-      video_payload_type: devStreamConfig.video_payload_type || 96,
-      audio_payload_type: devStreamConfig.audio_payload_type || 8,
-      profile_level_id: devStreamConfig.profile_level_id || '4D001F',
-      packaging_mode: devStreamConfig.packaging_mode || 'HIS',
-      sprop_parameter_sets: devStreamConfig.sprop_parameter_sets || '',
-      stream_mode: devStreamConfig.stream_mode || 'recvonly',
-    },
-    gb_industry_code: '',
-    gb_device_type: '',
-    gb_network_code: '',
-  }
-  const isGb28181 = device.protocol && device.protocol.toLowerCase().includes('gb')
-  if (isGb28181 && device.device_tag) {
-    const tag = device.device_tag || ''
-    // SIP ID 必须是20位，否则提示数据错误
-    if (tag.length !== 20) {
-      ElMessage.warning(`设备SIP ID格式错误: ${tag} (${tag.length}位)，应为20位`)
+  try {
+    const fullDevice = await deviceStore.fetchDevice(device.device_tag)
+    const ext = fullDevice.extended || {}
+    const devStreamConfig = ext.stream_config || {}
+    form.value = {
+      name: fullDevice.name || '', protocol: fullDevice.protocol || 'Gb28181', host: fullDevice.host || '',
+      port: fullDevice.port || 554, device_username: fullDevice.device_username || '', device_password: fullDevice.device_password || '',
+      media_server_name: fullDevice.media_server_tag || '',
+      pull_urls: fullDevice.pull_urls ? fullDevice.pull_urls.map(u => ({ ...u })) : [],
+      push_urls: fullDevice.push_urls ? fullDevice.push_urls.map(u => ({ ...u })) : [],
+      playback_username: fullDevice.playback_username || '', playback_password: fullDevice.playback_password || '',
+      device_tag: fullDevice.device_tag || '', group_id: fullDevice.group_id ?? null, is_public: fullDevice.is_public || false,
+      rtsp_mode: ext.rtsp_mode || fullDevice.rtsp_mode || 'pull',
+      app: fullDevice.app || 'live',
+      rtsp_full_url: ext.rtsp_full_url || fullDevice.rtsp_full_url || '',
+      rtmp_mode: ext.rtmp_mode || fullDevice.rtmp_mode || 'push',
+      extended: ext,
+      enable_stream_config: !!devStreamConfig,
+      stream_config: {
+        video_codec: devStreamConfig.video_codec || 'PS',
+        audio_codec: devStreamConfig.audio_codec || 'PCMA',
+        video_payload_type: devStreamConfig.video_payload_type || 96,
+        audio_payload_type: devStreamConfig.audio_payload_type || 8,
+        profile_level_id: devStreamConfig.profile_level_id || '4D001F',
+        packaging_mode: devStreamConfig.packaging_mode || 'HIS',
+        sprop_parameter_sets: devStreamConfig.sprop_parameter_sets || '',
+        stream_mode: devStreamConfig.stream_mode || 'recvonly',
+      },
+      gb_industry_code: '',
+      gb_device_type: '',
+      gb_network_code: '',
+      gb_transport: ext.gb_transport || 'UDP',
     }
-    const regionCode = device.region_code || (tag.length >= 6 ? tag.substring(0, 6) : '')
-    // 尝试找到完整的层级路径
-    const regionPath = findRegionPath(regionCode, regionStore.regionTree)
-    gbRegionCascader.value = regionPath || (regionCode ? [regionCode] : [])
-    // SIP ID: 行政区划(6) + 基层(2) + 行业(2) + 设备(3) + 网络(1) + 后缀(6) = 20位
-    sipGbCode.value = tag.length >= 8 ? tag.substring(6, 8) : '00'
-    form.value.gb_industry_code = tag.length >= 10 ? tag.substring(8, 10) : ''
-    form.value.gb_device_type = tag.length >= 13 ? tag.substring(10, 13) : ''
-    form.value.gb_network_code = tag.length >= 14 ? tag.substring(13, 14) : ''
-    sipIdSuffix.value = tag.length >= 20 ? tag.substring(14, 20) : ''
-  } else {
-    const regionCode = device.region_code || ''
-    const regionPath = findRegionPath(regionCode, regionStore.regionTree)
-    gbRegionCascader.value = regionPath || (regionCode ? [regionCode] : [])
-    sipGbCode.value = '00'
-    form.value.gb_industry_code = ''
-    form.value.gb_device_type = ''
-    form.value.gb_network_code = ''
-    sipIdSuffix.value = ''
+    const isGb28181 = fullDevice.protocol && fullDevice.protocol.toLowerCase().includes('gb')
+    if (isGb28181 && fullDevice.device_tag) {
+      const tag = fullDevice.device_tag || ''
+      if (tag.length !== 20) {
+        ElMessage.warning(`设备SIP ID格式错误: ${tag} (${tag.length}位)，应为20位`)
+      }
+      const regionCode = fullDevice.region_code || (tag.length >= 6 ? tag.substring(0, 6) : '')
+      const regionPath = findRegionPath(regionCode, regionStore.regionTree)
+      gbRegionCascader.value = regionPath || (regionCode ? [regionCode] : [])
+      sipGbCode.value = tag.length >= 8 ? tag.substring(6, 8) : '00'
+      form.value.gb_industry_code = tag.length >= 10 ? tag.substring(8, 10) : ''
+      form.value.gb_device_type = tag.length >= 13 ? tag.substring(10, 13) : ''
+      form.value.gb_network_code = tag.length >= 14 ? tag.substring(13, 14) : ''
+      sipIdSuffix.value = tag.length >= 20 ? tag.substring(14, 20) : ''
+    } else {
+      const regionCode = fullDevice.region_code || ''
+      const regionPath = findRegionPath(regionCode, regionStore.regionTree)
+      gbRegionCascader.value = regionPath || (regionCode ? [regionCode] : [])
+      sipGbCode.value = '00'
+      form.value.gb_industry_code = ''
+      form.value.gb_device_type = ''
+      form.value.gb_network_code = ''
+      sipIdSuffix.value = ''
+    }
+    if (fullDevice.protocol === 'Onvif' && fullDevice.host) {
+      nextTick(() => onvifFetchFormProfiles())
+    }
+    showModal.value = true
+  } catch (e) {
+    ElMessage.error('获取设备详情失败: ' + (e?.message || e))
   }
-  if (device.protocol === 'Onvif' && device.host) {
-    nextTick(() => onvifFetchFormProfiles())
-  }
-  showModal.value = true
 }
 
 function closeModal() { showModal.value = false }
@@ -1333,14 +1371,13 @@ function removePushUrl(index) { form.value.push_urls.splice(index, 1) }
 
 async function submitDevice() {
   if (!form.value.name.trim()) { ElMessage.error('请填写设备名称'); return }
-  if (form.value.protocol !== 'Gb28181' && !form.value.stream_key.trim()) { ElMessage.error('请填写流标识(stream_key)'); return }
   if (form.value.protocol === 'Gb28181') {
     if (!sipIdPrefix.value) { ElMessage.error('请选择所属地区'); return }
     if (!form.value.gb_industry_code) { ElMessage.error('请选择行业类型'); return }
     if (!form.value.gb_device_type) { ElMessage.error('请选择设备类型'); return }
     if (!form.value.gb_network_code) { ElMessage.error('请选择网络类型'); return }
-    if (!sipIdSuffix.value || sipIdSuffix.value.length !== sipIdSuffixMaxLength) {
-      ElMessage.error(`SIP ID 后缀必须填写 ${sipIdSuffixMaxLength} 位数字`)
+    if (!sipIdSuffix.value || sipIdSuffix.value.length !== 6) {
+      ElMessage.error('SIP ID 后缀必须填写 6 位数字')
       return
     }
     const previewLength = sipIdPreview.value.length
@@ -1354,13 +1391,12 @@ async function submitDevice() {
   if (form.value.protocol === 'Onvif' && !form.value.device_username) { ElMessage.error('请填写用户名'); return }
   if (form.value.protocol === 'Onvif' && !form.value.device_password) { ElMessage.error('请填写密码'); return }
   if (form.value.protocol === 'Rtsp' && form.value.rtsp_mode === 'pull' && !form.value.rtsp_full_url.trim()) { ElMessage.error('请填写RTSP全链接'); return }
-  if (form.value.protocol === 'Rtsp' && form.value.rtsp_mode === 'pull' && !form.value.stream_key.trim()) { ElMessage.error('请填写拉流标识'); return }
-  if (form.value.protocol === 'Rtsp' && form.value.rtsp_mode === 'push' && !form.value.stream_key.trim()) { ElMessage.error('请填写推流标识'); return }
-  if (form.value.protocol === 'Rtmp' && !form.value.stream_key.trim()) { ElMessage.error('请填写推流标识'); return }
 
-  const finalDeviceTag = form.value.protocol === 'Gb28181'
-    ? sipIdPreview.value
-    : form.value.device_tag || null
+  const finalDeviceTag = isEdit.value
+    ? (form.value.protocol === 'Gb28181' ? sipIdPreview.value : editingId.value)
+    : (form.value.protocol === 'Gb28181'
+      ? sipIdPreview.value
+      : form.value.device_tag || null)
 
   const payload = {
     name: form.value.name, protocol: form.value.protocol,
@@ -1376,9 +1412,13 @@ async function submitDevice() {
       rtsp_mode: form.value.protocol === 'Rtsp' ? form.value.rtsp_mode : undefined,
       rtsp_full_url: form.value.protocol === 'Rtsp' && form.value.rtsp_mode === 'pull' ? form.value.rtsp_full_url || null : null,
       rtmp_mode: form.value.protocol === 'Rtmp' ? form.value.rtmp_mode : undefined,
-      stream_key: form.value.stream_key || null,
+      gb_transport: form.value.protocol === 'Gb28181' ? form.value.gb_transport : undefined,
     },
-    stream_config: form.value.enable_stream_config ? {
+  }
+
+  // GB28181: 完整流配置
+  if (form.value.protocol === 'Gb28181' && form.value.enable_stream_config) {
+    payload.extended.stream_config = {
       video_codec: form.value.stream_config.video_codec || null,
       audio_codec: form.value.stream_config.audio_codec || null,
       video_payload_type: form.value.stream_config.video_payload_type,
@@ -1387,7 +1427,7 @@ async function submitDevice() {
       packaging_mode: form.value.stream_config.packaging_mode || null,
       sprop_parameter_sets: form.value.stream_config.sprop_parameter_sets || null,
       stream_mode: form.value.stream_config.stream_mode || null,
-    } : null,
+    }
   }
   if (isEdit.value) {
     await deviceStore.updateDevice(editingId.value, payload)
@@ -1412,7 +1452,7 @@ async function submitDevice() {
         playback_password: form.value.playback_password || null,
         device_tag: null, region_code: null, group_id: form.value.group_id || null, is_public: form.value.is_public || false,
         app: form.value.app || null,
-        extended: { stream_key: form.value.stream_key || null },
+        extended: {},
       })
     }
     ElMessage.success(`成功创建 ${1 + form.value.pull_urls.length - 1} 个设备`)
@@ -1612,13 +1652,13 @@ function addDiscoveredDevice(dev) {
 
 async function openPlayLinks(device) {
   selectedDevice.value = device
-  playLinks.value = await deviceStore.getPlayLinks(device.id)
+  playLinks.value = await deviceStore.getPlayLinks(device.device_tag)
   showPlayLinksModal.value = true
 }
 
 async function startStreamAndPlay(device) {
   try {
-    const result = await import('../api/devices.js').then(m => m.startDevice(device.id))
+    const result = await import('../api/devices.js').then(m => m.startDevice(device.device_tag))
     if (result?.message) {
       ElMessage.info(result.message)
     } else {
@@ -1635,7 +1675,7 @@ async function startStreamAndPlay(device) {
 async function deleteDevice(device) {
   try {
     await ElMessageBox.confirm(`确定删除设备 "${device.name}" 吗？`, '确认删除', { type: 'warning' })
-    await deviceStore.deleteDevice(device.id)
+    await deviceStore.deleteDevice(device.device_tag)
     await fetchDevices()
   } catch {}
 }

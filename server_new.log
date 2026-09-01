@@ -1,0 +1,1291 @@
+warning: version requirement `1.1.4+spec-1.1.0` for dependency `toml` includes semver metadata which will be ignored, removing the metadata is recommended to avoid confusion
+warning: unused import: `std::sync::Arc`
+ --> src\domain\traits.rs:2:5
+  |
+2 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `DeviceStatus` and `StreamState`
+ --> src\domain\traits.rs:3:29
+  |
+3 | use crate::domain::{Device, DeviceStatus, Protocol, Stream, StreamState, Session, SessionType, Recording};
+  |                             ^^^^^^^^^^^^                    ^^^^^^^^^^^
+
+warning: unused import: `Protocol as MediaProtocol`
+ --> src\domain\traits.rs:4:48
+  |
+4 | use crate::adapter::media_server::{StreamInfo, Protocol as MediaProtocol};
+  |                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `AppConfig` and `MediaPortsConfig`
+ --> src\context\media_context.rs:2:21
+  |
+2 | use crate::config::{AppConfig, MediaPortsConfig};
+  |                     ^^^^^^^^^  ^^^^^^^^^^^^^^^^
+
+warning: unused import: `chrono::Utc`
+ --> src\application\session_service.rs:3:5
+  |
+3 | use chrono::Utc;
+  |     ^^^^^^^^^^^
+
+warning: unused import: `chrono::Utc`
+ --> src\application\device_service.rs:4:5
+  |
+4 | use chrono::Utc;
+  |     ^^^^^^^^^^^
+
+warning: unused import: `Alarm`
+ --> src\application\device_service.rs:9:21
+  |
+9 | use crate::domain::{Alarm, CreateAlarmRequest, Device, DeviceStatus, DeviceType, Protocol, CreateDeviceRequest, UpdateDeviceRequest, ...
+  |                     ^^^^^
+
+warning: unused import: `uuid::Uuid`
+ --> src\application\hook_service.rs:4:5
+  |
+4 | use uuid::Uuid;
+  |     ^^^^^^^^^^
+
+warning: unused import: `AppError`
+ --> src\application\zlmediakit_hook.rs:8:20
+  |
+8 | use crate::error::{AppError, Result};
+  |                    ^^^^^^^^
+
+warning: unused import: `AppError`
+ --> src\application\play_service.rs:8:20
+  |
+8 | use crate::error::{AppError, Result};
+  |                    ^^^^^^^^
+
+warning: unused imports: `InfraContext` and `MediaContext`
+ --> src\application\recording_service.rs:3:22
+  |
+3 | use crate::context::{InfraContext, MediaContext};
+  |                      ^^^^^^^^^^^^  ^^^^^^^^^^^^
+
+warning: unused imports: `Level`, `debug`, `error`, and `info`
+ --> src\adapter\media_server\zlmediakit.rs:7:15
+  |
+7 | use tracing::{info, error,debug, Level};
+  |               ^^^^  ^^^^^ ^^^^^  ^^^^^
+
+warning: unused import: `tracing_log::LogTracer`
+ --> src\adapter\media_server\zlmediakit.rs:8:5
+  |
+8 | use tracing_log::LogTracer;
+  |     ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `tracing_subscriber::FmtSubscriber`
+ --> src\adapter\media_server\zlmediakit.rs:9:5
+  |
+9 | use tracing_subscriber::FmtSubscriber;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Serialize`
+ --> src\adapter\media_server\srs.rs:2:26
+  |
+2 | use serde::{Deserialize, Serialize};
+  |                          ^^^^^^^^^
+
+warning: unused import: `serde::Deserialize`
+ --> src\adapter\media_server\xiu.rs:2:5
+  |
+2 | use serde::Deserialize;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Level`, `debug`, `error`, and `info`
+ --> src\adapter\media_server\client.rs:6:15
+  |
+6 | use tracing::{info, error,debug, Level};
+  |               ^^^^  ^^^^^ ^^^^^  ^^^^^
+
+warning: unused import: `async_trait::async_trait`
+ --> src\infrastructure\mod.rs:1:5
+  |
+1 | use async_trait::async_trait;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `CacheStoreExt` and `CacheStore`
+ --> src\infrastructure\mod.rs:2:29
+  |
+2 | use crate::domain::traits::{CacheStore, CacheStoreExt};
+  |                             ^^^^^^^^^^  ^^^^^^^^^^^^^
+
+warning: unused imports: `ServerStatus` and `StreamInfo`
+ --> src\infrastructure\mod.rs:3:36
+  |
+3 | use crate::adapter::media_server::{ServerStatus, StreamInfo};
+  |                                    ^^^^^^^^^^^^  ^^^^^^^^^^
+
+warning: unused import: `crate::adapter::message_bus::RedisBus`
+ --> src\infrastructure\mod.rs:4:5
+  |
+4 | use crate::adapter::message_bus::RedisBus;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::error::AppError`
+ --> src\infrastructure\mod.rs:5:5
+  |
+5 | use crate::error::AppError;
+  |     ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+ --> src\infrastructure\mod.rs:6:5
+  |
+6 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `std::collections::HashMap`
+ --> src\infrastructure\event_bus.rs:2:5
+  |
+2 | use std::collections::HashMap;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `Mutex` and `RwLock`
+ --> src\infrastructure\event_bus.rs:5:30
+  |
+5 | use tokio::sync::{broadcast, Mutex, RwLock};
+  |                              ^^^^^  ^^^^^^
+
+warning: unused import: `db_repository::*`
+  --> src\infrastructure\mod.rs:13:9
+   |
+13 | pub use db_repository::*;
+   |         ^^^^^^^^^^^^^^^^
+
+warning: unused import: `CreateAlarmRequest`
+  --> src\api\http\handlers\alarm_handler.rs:10:35
+   |
+10 | use crate::domain::alarm::{Alarm, CreateAlarmRequest};
+   |                                   ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Extension`
+ --> src\api\http\handlers\device_handler.rs:3:35
+  |
+3 |     extract::{Path, State, Query, Extension},
+  |                                   ^^^^^^^^^
+
+warning: unused import: `DeviceWithChildren`
+  --> src\api\http\handlers\device_handler.rs:10:81
+   |
+10 | use crate::domain::{Device, CreateDeviceRequest, UpdateDeviceRequest, Protocol, DeviceWithChildren};
+   |                                                                                 ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::auth::CurrentUser`
+  --> src\api\http\handlers\device_handler.rs:11:5
+   |
+11 | use crate::auth::CurrentUser;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Serialize`
+ --> src\api\http\handlers\server_handler.rs:6:26
+  |
+6 | use serde::{Deserialize, Serialize};
+  |                          ^^^^^^^^^
+
+warning: unused imports: `Extension` and `Path`
+ --> src\api\http\handlers\region_handler.rs:3:15
+  |
+3 |     extract::{Path, State},  // ✅ Query 在这里
+  |               ^^^^
+4 |     Extension,
+  |     ^^^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+ --> src\api\http\mod.rs:4:5
+  |
+4 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `EncodingKey`
+ --> src\auth\jwt.rs:5:52
+  |
+5 | use jsonwebtoken::{decode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+  |                                                    ^^^^^^^^^^^
+
+warning: unused import: `MgmtApi`
+ --> src\auth\casbin.rs:2:33
+  |
+2 | use casbin::{Enforcer, CoreApi, MgmtApi};
+  |                                 ^^^^^^^
+
+warning: unused import: `std::sync::Arc`
+ --> src\auth\auth_db.rs:5:5
+  |
+5 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `AsyncWrite`
+ --> src\protocol\gb28181\adapter.rs:7:32
+  |
+7 | use tokio::io::{AsyncWriteExt, AsyncWrite};
+  |                                ^^^^^^^^^^
+
+warning: unused import: `EventHandler`
+  --> src\protocol\gb28181\adapter.rs:11:30
+   |
+11 | use crate::protocol::event::{EventHandler, SignalEvent, ProtocolType, TransportType, CatalogChannel, PtzCommand};
+   |                              ^^^^^^^^^^^^
+
+warning: unused import: `timeout`
+ --> src\protocol\gb28181\tcp_audio_pool.rs:5:19
+  |
+5 | use tokio::time::{timeout, Duration};
+  |                   ^^^^^^^
+
+warning: unused import: `tokio::sync::RwLock`
+  --> src\protocol\gb28181\mod.rs:13:5
+   |
+13 | use tokio::sync::RwLock;
+   |     ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::collections::HashMap`
+  --> src\protocol\gb28181\mod.rs:14:5
+   |
+14 | use std::collections::HashMap;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `extract_attribute`
+ --> src\protocol\onvif\device_client.rs:2:58
+  |
+2 | use crate::protocol::onvif::soap::{extract_element_text, extract_attribute};
+  |                                                          ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::net::SocketAddr`
+ --> src\protocol\onvif\discovery_server.rs:1:5
+  |
+1 | use std::net::SocketAddr;
+  |     ^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `OnvifCapabilities`, `OnvifDeviceInfo`, `OnvifProfile`, and `OnvifStreamUri`
+ --> src\protocol\onvif\probe_service.rs:3:5
+  |
+3 |     OnvifDeviceInfo, OnvifCapabilities, OnvifProfile, OnvifStreamUri,
+  |     ^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^  ^^^^^^^^^^^^^^
+
+warning: unused import: `PtzCommand`
+ --> src\protocol\rtsp\adapter.rs:3:57
+  |
+3 | use crate::protocol::event::{SignalEvent, ProtocolType, PtzCommand};
+  |                                                         ^^^^^^^^^^
+
+warning: unused import: `PtzCommand`
+  --> src\protocol\rtsp\server_adapter.rs:10:72
+   |
+10 | use crate::protocol::event::{SignalEvent, ProtocolType, TransportType, PtzCommand};
+   |                                                                        ^^^^^^^^^^
+
+warning: variable does not need to be mutable
+   --> src\application\device_service.rs:524:21
+    |
+524 |                 let mut ptz_client = crate::protocol::onvif::OnvifPtzService::new(
+    |                     ----^^^^^^^^^^
+    |                     |
+    |                     help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> src\application\device_service.rs:718:13
+    |
+718 |         let mut extended = req.extended.clone().unwrap_or(serde_json::Value::Object(Default::default()));
+    |             ----^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\application\device_service.rs:976:25
+    |
+976 |                     let mut ptz_client = crate::protocol::onvif::OnvifPtzService::new(
+    |                         ----^^^^^^^^^^
+    |                         |
+    |                         help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\application\device_service.rs:1036:25
+     |
+1036 |                     let mut ptz_client = crate::protocol::onvif::OnvifPtzService::new(
+     |                         ----^^^^^^^^^^
+     |                         |
+     |                         help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\application\device_service.rs:1099:25
+     |
+1099 |                     let mut ptz_client = crate::protocol::onvif::OnvifPtzService::new(
+     |                         ----^^^^^^^^^^
+     |                         |
+     |                         help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src\application\device_service.rs:1154:25
+     |
+1154 |                     let mut ptz_client = crate::protocol::onvif::OnvifPtzService::new(
+     |                         ----^^^^^^^^^^
+     |                         |
+     |                         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\protocol\onvif\device_client.rs:150:13
+    |
+150 |         let mut in_token = false;
+    |             ----^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> src\transport\tcp_server.rs:89:9
+   |
+89 |         mut stream: TcpStream,
+   |         ----^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: unused import: `crate::adapter::media_server::MediaServerAdapter`
+ --> src\application\media_server_service.rs:3:5
+  |
+3 | use crate::adapter::media_server::MediaServerAdapter;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `salt`
+  --> src\auth\auth_db.rs:61:13
+   |
+61 |         let salt = password_hash::phc::SaltString::generate();
+   |             ^^^^ help: if this is intentional, prefix it with an underscore: `_salt`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable `total_sessions` is assigned to, but never used
+   --> src\context\service_registry.rs:293:13
+    |
+293 |         let mut total_sessions = 0u32;
+    |             ^^^^^^^^^^^^^^^^^^
+    |
+    = note: consider using `_total_sessions` instead
+
+warning: value assigned to `total_sessions` is never read
+   --> src\context\service_registry.rs:306:13
+    |
+306 |             total_sessions += sessions;
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `media`
+  --> src\application\device_service.rs:94:9
+   |
+94 |         media: &MediaContext,
+   |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_media`
+
+warning: unused variable: `device_id`
+  --> src\application\device_service.rs:99:43
+   |
+99 |             SignalEvent::DeviceRegister { device_id, device_tag, name, manufacturer, model, protocol, stream_key } => {
+   |                                           ^^^^^^^^^ help: try ignoring the field: `device_id: _`
+
+warning: unused variable: `stream_key`
+  --> src\application\device_service.rs:99:103
+   |
+99 |             SignalEvent::DeviceRegister { device_id, device_tag, name, manufacturer, model, protocol, stream_key } => {
+   |                                                                                                       ^^^^^^^^^^ help: try ignoring the field: `stream_key: _`
+
+warning: unused variable: `device_id`
+   --> src\application\device_service.rs:136:41
+    |
+136 |             SignalEvent::DeviceOnline { device_id, device_tag } => {
+    |                                         ^^^^^^^^^ help: try ignoring the field: `device_id: _`
+
+warning: unused variable: `device_id`
+   --> src\application\device_service.rs:145:42
+    |
+145 |             SignalEvent::DeviceOffline { device_id, device_tag, reason } => {
+    |                                          ^^^^^^^^^ help: try ignoring the field: `device_id: _`
+
+warning: unused variable: `gb_username`
+   --> src\infrastructure\db_repository.rs:171:13
+    |
+171 |         let gb_username = device.extended.as_ref()
+    |             ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_gb_username`
+
+warning: unused variable: `gb_password`
+   --> src\infrastructure\db_repository.rs:175:13
+    |
+175 |         let gb_password = device.extended.as_ref()
+    |             ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_gb_password`
+
+warning: unused variable: `infra`
+   --> src\application\device_service.rs:415:9
+    |
+415 |         infra: &InfraContext,
+    |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_infra`
+
+warning: unused variable: `app`
+   --> src\application\stream_service.rs:684:84
+    |
+684 |     async fn start_recording_for_device(&self, device_id: i64, media_server: &str, app: &str, stream_key: &str) {
+    |                                                                                    ^^^ help: if this is intentional, prefix it with an underscore: `_app`
+
+warning: unused variable: `server`
+   --> src\application\stream_service.rs:637:13
+    |
+637 |         let server = self.media.cluster.get_server(server_tag)
+    |             ^^^^^^ help: if this is intentional, prefix it with an underscore: `_server`
+
+warning: unused variable: `port`
+    --> src\application\hook_service.rs:1048:9
+     |
+1048 |         port: Option<u32>,
+     |         ^^^^ help: if this is intentional, prefix it with an underscore: `_port`
+
+warning: unused variable: `params`
+    --> src\application\hook_service.rs:1049:9
+     |
+1049 |         params: Option<&str>,
+     |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_params`
+
+warning: unused variable: `port`
+    --> src\application\hook_service.rs:1064:9
+     |
+1064 |         port: Option<u16>,
+     |         ^^^^ help: if this is intentional, prefix it with an underscore: `_port`
+
+warning: unused variable: `passwd`
+    --> src\application\hook_service.rs:1107:9
+     |
+1107 |         passwd: Option<&str>,
+     |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_passwd`
+
+warning: unused variable: `origin_type`
+    --> src\application\hook_service.rs:1123:9
+     |
+1123 |         origin_type: Option<u8>,
+     |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_origin_type`
+
+warning: unused variable: `alive_second`
+    --> src\application\hook_service.rs:1127:9
+     |
+1127 |         alive_second: Option<u32>,
+     |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_alive_second`
+
+warning: unused variable: `bytes_speed`
+    --> src\application\hook_service.rs:1128:9
+     |
+1128 |         bytes_speed: Option<u64>,
+     |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_bytes_speed`
+
+warning: unused variable: `tracks`
+    --> src\application\hook_service.rs:1129:9
+     |
+1129 |         tracks: Option<&Vec<StreamTrackInfo>>,
+     |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_tracks`
+
+warning: unused variable: `config`
+    --> src\application\hook_service.rs:1198:9
+     |
+1198 |         config: &std::collections::HashMap<String, serde_json::Value>,
+     |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_config`
+
+warning: unused variable: `ip`
+   --> src\application\zlmediakit_hook.rs:732:74
+    |
+732 | ...rver_tag: &str, stream: &str, ip: Option<&String>, duration: Option<u32>, total_bytes: Option<u64>, player: Option<bool>) -> Hoo...
+    |                                  ^^ help: if this is intentional, prefix it with an underscore: `_ip`
+
+warning: unused variable: `ip`
+   --> src\application\zlmediakit_hook.rs:764:72
+    |
+764 | ...rver_tag: &str, stream: &str, ip: Option<&String>, user_name: Option<&str>, params: Option<&String>) -> HookResponse {
+    |                                  ^^ help: if this is intentional, prefix it with an underscore: `_ip`
+
+warning: unused variable: `ip`
+   --> src\application\zlmediakit_hook.rs:800:60
+    |
+800 |     async fn on_shell_login(&self, media_server_tag: &str, ip: Option<&String>, user_name: Option<&str>) -> HookResponse {
+    |                                                            ^^ help: if this is intentional, prefix it with an underscore: `_ip`
+
+warning: unused variable: `rtmp_host`
+   --> src\adapter\media_server\srs.rs:102:13
+    |
+102 |         let rtmp_host = self.host_with_port(Protocol::Rtmp);
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_rtmp_host`
+
+warning: unused variable: `rtmp_host`
+  --> src\adapter\media_server\xiu.rs:93:13
+   |
+93 |         let rtmp_host = self.host_with_port(Protocol::Rtmp);
+   |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_rtmp_host`
+
+warning: unused variable: `in_token`
+   --> src\protocol\onvif\device_client.rs:150:13
+    |
+150 |         let mut in_token = false;
+    |             ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_in_token`
+
+warning: variable `in_name` is assigned to, but never used
+   --> src\protocol\onvif\device_client.rs:151:13
+    |
+151 |         let mut in_name = false;
+    |             ^^^^^^^^^^^
+    |
+    = note: consider using `_in_name` instead
+
+warning: value assigned to `in_name` is never read
+   --> src\protocol\onvif\device_client.rs:167:17
+    |
+167 |                 in_name = true;
+    |                 ^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: unused variable: `device`
+   --> src\api\http\handlers\stream_handler.rs:118:9
+    |
+118 |     let device = registry.device_service.get_device(stream.device_id).await?
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_device`
+
+warning: unused variable: `salt`
+   --> src\auth\handlers.rs:144:9
+    |
+144 |     let salt = SaltString::generate();
+    |         ^^^^ help: if this is intentional, prefix it with an underscore: `_salt`
+
+warning: unused variable: `salt`
+   --> src\auth\handlers.rs:212:13
+    |
+212 |         let salt = SaltString::generate();
+    |             ^^^^ help: if this is intentional, prefix it with an underscore: `_salt`
+
+warning: unused variable: `start_time`
+  --> src\protocol\adapter.rs:39:58
+   |
+39 | ...lf, device_tag: &str, start_time: chrono::DateTime<chrono::Utc>, end_time: chrono::DateTime<chrono::Utc>) -> Result<()> {
+   |                          ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_start_time`
+
+warning: unused variable: `end_time`
+  --> src\protocol\adapter.rs:39:101
+   |
+39 | ...:DateTime<chrono::Utc>, end_time: chrono::DateTime<chrono::Utc>) -> Result<()> {
+   |                            ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_end_time`
+
+warning: unused variable: `device_tag`
+  --> src\protocol\adapter.rs:39:40
+   |
+39 |     async fn start_playback(&mut self, device_tag: &str, start_time: chrono::DateTime<chrono::Utc>, end_time: chrono::DateTime<chron...
+   |                                        ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_device_tag`
+
+warning: unused variable: `base_speed`
+   --> src\protocol\gb28181\adapter.rs:317:64
+    |
+317 |     fn encode_ptz_cmd_compound(pan: f64, tilt: f64, zoom: f64, base_speed: u8) -> String {
+    |                                                                ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_base_speed`
+
+warning: unused variable: `channel_id`
+   --> src\protocol\gb28181\adapter.rs:374:16
+    |
+374 |         &self, channel_id: &str, parent_device_id: &str, body: &str,
+    |                ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_channel_id`
+
+warning: unused variable: `device_tag`
+    --> src\protocol\gb28181\adapter.rs:1024:17
+     |
+1024 |             let device_tag = self.device_tag_str();
+     |                 ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_device_tag`
+
+warning: unused variable: `contact`
+    --> src\protocol\gb28181\adapter.rs:1285:13
+     |
+1285 |         let contact = headers.iter()
+     |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_contact`
+
+warning: unused variable: `device_ip`
+    --> src\protocol\gb28181\adapter.rs:2006:42
+     |
+2006 |     pub fn build_audio_invite_sdp(&self, device_ip: &str, audio_port: u16) -> String {
+     |                                          ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_device_ip`
+
+warning: unused variable: `platform_port`
+    --> src\protocol\gb28181\adapter.rs:2007:40
+     |
+2007 |         let (platform_id, platform_ip, platform_port) = crate::protocol::gb28181::get_gb28181_platform_config()
+     |                                        ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_platform_port`
+
+warning: unused variable: `device_ip`
+    --> src\protocol\gb28181\adapter.rs:2026:46
+     |
+2026 |     pub fn build_audio_invite_sdp_tcp(&self, device_ip: &str, tcp_port: u16) -> String {
+     |                                              ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_device_ip`
+
+warning: unused variable: `platform_port`
+    --> src\protocol\gb28181\adapter.rs:2027:40
+     |
+2027 |         let (platform_id, platform_ip, platform_port) = crate::protocol::gb28181::get_gb28181_platform_config()
+     |                                        ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_platform_port`
+
+warning: unused variable: `ctx`
+   --> src\protocol\rtsp\auth.rs:272:5
+    |
+272 |     ctx: &RtspAuthContext,
+    |     ^^^ help: if this is intentional, prefix it with an underscore: `_ctx`
+
+warning: method `sync_stream_to_active` is never used
+   --> src\application\stream_service.rs:176:14
+    |
+ 18 | impl StreamService {
+    | ------------------ method in this implementation
+...
+176 |     async fn sync_stream_to_active(&self, device_id: i64, server_tag: &str, stream_key: &str, app: &str) -> Result<()> {
+    |              ^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `cluster` is never read
+   --> src\application\hook_service.rs:346:5
+    |
+340 | pub struct HookService {
+    |            ----------- field in this struct
+...
+346 |     cluster: Arc<ClusterManager>,
+    |     ^^^^^^^
+
+warning: associated items `parse_params` and `increment_stream_viewers` are never used
+   --> src\application\zlmediakit_hook.rs:550:8
+    |
+500 | impl ZlMediaKitHookHandler {
+    | -------------------------- associated items in this implementation
+...
+550 |     fn parse_params(params: Option<&str>) -> HashMap<String, String> {
+    |        ^^^^^^^^^^^^
+...
+899 |     async fn increment_stream_viewers(&self, stream_key: &str) -> Result<()> {
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `cluster_manager` is never read
+  --> src\application\ws_service.rs:11:5
+   |
+ 7 | pub struct WsService {
+   |            --------- field in this struct
+...
+11 |     cluster_manager: Arc<ClusterManager>,
+   |     ^^^^^^^^^^^^^^^
+
+warning: field `code` is never read
+  --> src\adapter\media_server\zlmediakit.rs:49:26
+   |
+49 |         struct ApiResp { code: i32, data: Option<serde_json::Value> }
+   |                -------   ^^^^
+   |                |
+   |                field in this struct
+
+warning: field `code` is never read
+   --> src\adapter\media_server\zlmediakit.rs:149:23
+    |
+149 |         struct Resp { code: i32, data: Option<Vec<serde_json::Value>> }
+    |                ----   ^^^^
+    |                |
+    |                field in this struct
+
+warning: field `code` is never read
+   --> src\adapter\media_server\zlmediakit.rs:156:23
+    |
+156 |         struct Resp { code: i32, data: Option<Vec<serde_json::Value>> }
+    |                ----   ^^^^
+    |                |
+    |                field in this struct
+
+warning: field `code` is never read
+   --> src\adapter\media_server\zlmediakit.rs:320:23
+    |
+320 |         struct Resp { code: i32, port: Option<u16> }
+    |                ----   ^^^^
+    |                |
+    |                field in this struct
+
+warning: field `code` is never read
+   --> src\adapter\media_server\zlmediakit.rs:349:23
+    |
+349 |         struct Resp { code: i32, tracks: Option<Vec<serde_json::Value>> }
+    |                ----   ^^^^
+    |                |
+    |                field in this struct
+
+warning: field `code` is never read
+  --> src\adapter\media_server\srs.rs:36:23
+   |
+36 |         struct Resp { code: i32, data: Option<serde_json::Value> }
+   |                ----   ^^^^
+   |                |
+   |                field in this struct
+
+warning: method `post_empty` is never used
+  --> src\adapter\media_server\client.rs:76:18
+   |
+13 | impl MediaServerClient {
+   | ---------------------- method in this implementation
+...
+76 |     pub async fn post_empty<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
+   |                  ^^^^^^^^^^
+
+warning: variants `LeastConnections` and `Random` are never constructed
+  --> src\infrastructure\cluster.rs:16:5
+   |
+14 | pub enum ClusterStrategy {
+   |          --------------- variants in this enum
+15 |     RoundRobin,
+16 |     LeastConnections,
+   |     ^^^^^^^^^^^^^^^^
+17 |     Random,
+   |     ^^^^^^
+   |
+   = note: `ClusterStrategy` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: multiple associated items are never used
+    --> src\protocol\gb28181\adapter.rs:160:8
+     |
+ 112 | impl Gb28181Adapter {
+     | ------------------- associated items in this implementation
+...
+ 160 |     fn truncate_32(s: &str) -> String {
+     |        ^^^^^^^^^^^
+...
+ 164 |     fn is_valid_gb28181_device_id(id: &str) -> bool {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 172 |     fn parse_ssrc_from_sdp(sdp: &str) -> Option<u32> {
+     |        ^^^^^^^^^^^^^^^^^^^
+...
+ 183 |     fn parse_subject_device_id(subject: &str) -> Option<String> {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 304 |     fn best_direction(pan: f64, tilt: f64, zoom: f64) -> &'static str {
+     |        ^^^^^^^^^^^^^^
+...
+1469 |     fn device_id_str(&self) -> Option<String> {
+     |        ^^^^^^^^^^^^^
+...
+1473 |     fn has_timed_out(&self) -> bool {
+     |        ^^^^^^^^^^^^^
+
+warning: function `local_name` is never used
+  --> src\protocol\onvif\adapter.rs:20:4
+   |
+20 | fn local_name(name_bytes: &[u8]) -> &str {
+   |    ^^^^^^^^^^
+
+warning: field `device_id` is never read
+ --> src\protocol\rtsp\adapter.rs:9:5
+  |
+7 | pub struct RtspAdapter {
+  |            ----------- field in this struct
+8 |     remote_addr: Option<SocketAddr>,
+9 |     device_id: Option<String>,
+  |     ^^^^^^^^^
+
+warning: `rustcam-media` (lib) generated 115 warnings (run `cargo fix --lib -p rustcam-media` to apply 95 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.30s
+     Running `target\debug\rustcam-media.exe`
+[2m2026-08-30T09:25:23.315770Z[0m [32m INFO[0m ThreadId(01) [2msrc\main.rs[0m[2m:[0m[2m118:[0m Starting RustCam-Media v0.1.0
+[2m2026-08-30T09:25:23.317178Z[0m [32m INFO[0m ThreadId(01) [2msrc\main.rs[0m[2m:[0m[2m122:[0m Server: 0.0.0.0:8080
+[2m2026-08-30T09:25:23.317202Z[0m [32m INFO[0m ThreadId(01) [2msrc\main.rs[0m[2m:[0m[2m125:[0m Initializing services...
+[2m2026-08-30T09:25:23.317218Z[0m [32m INFO[0m ThreadId(01) [2msrc\context\service_registry.rs[0m[2m:[0m[2m70:[0m [ServiceRegistry] Building service registry...
+[2m2026-08-30T09:25:23.319752Z[0m [32m INFO[0m ThreadId(01) [2msrc\infrastructure\db_repository.rs[0m[2m:[0m[2m67:[0m [DB] debug_sql enabled - SQL will be logged at INFO level
+[2m2026-08-30T09:25:23.515013Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m115:[0m [rb] [7499759163300515841] => `SELECT id, name, url, api_key, server_type, weight, enabled, server_tag, protocol_ports, created_at, updated_at
+FROM servers
+WHERE server_tag = ?` ["default"]
+[2m2026-08-30T09:25:23.517062Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m150:[0m [rb] [7499759163300515841] <= len=1,rows=[{"id":3,"name":"zlmediakit-1","url":"http://127.0.0.1:80","api_key":"hX56LNGxVJrdvDd0N8Q7fRlL8VGreVcz","server_type":"zlmediakit","weight":100,"enabled":true,"server_tag":"default","protocol_ports":{"hls":80,"http":80,"rtmp":1935,"rtsp":445,"https":8443,"webrtc":80,"ws_flv":80,"rtp_tcp":6000,"http_flv":80},"created_at":"2026-06-29T13:14:28.662Z","updated_at":"2026-06-29T19:30:14.55Z"}]
+[2m2026-08-30T09:25:23.736992Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m115:[0m [rb] [7499759163300515843] => `SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, is_channel, device_type, device_type_code, channel_id, channel_extended, is_default
+FROM devices WHERE parent_device_tag IS NULL AND is_channel = false ORDER BY created_at DESC` []
+[2m2026-08-30T09:25:23.738758Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m150:[0m [rb] [7499759163300515843] <= len=3,rows=[{"id":3,"name":"第三方水电费收到","protocol":"GB28181","status":"offline","host":"","port":0,"rtsp_url":"b9bccdde-9bfa-44cc-963b-c907221cd022","device_tag":"12000000000000000000","parent_device_tag":null,"is_public":false,"created_at":"2026-05-29T00:06:51.221Z","device_password":"admin123","playback_username":null,"playback_password":null,"media_server_tag":"default","push_urls":[],"pull_urls":[],"region_code":"12","updated_at":"2026-05-29T05:36:44.431Z","ssrc":null,"gb_username":null,"gb_password":null,"extended":{"stream_key":"b9bccdde-9bfa-44cc-963b-c907221cd022","device_username":null},"group_id":null,"app":null,"is_channel":false,"device_type":"Other","device_type_code":null,"channel_id":null,"channel_extended":{},"is_default":false},{"id":2,"name":"2323234","protocol":"RTSP","status":"offline","host":"192.168.1.1","port":554,"rtsp_url":"4e56af1c-fa45-4c1d-b981-c04fa79a0812","device_tag":null,"parent_device_tag":null,"is_public":true,"created_at":"2026-05-28T22:40:52.525Z","device_password":"admin123","playback_username":"12","playback_password":"12","media_server_tag":"er","push_urls":[],"pull_urls":[],"region_code":null,"updated_at":"2026-05-29T06:47:33.587Z","ssrc":null,"gb_username":null,"gb_password":null,"extended":{"stream_key":"4e56af1c-fa45-4c1d-b981-c04fa79a0812","device_username":null},"group_id":null,"app":null,"is_channel":false,"device_type":"Other","device_type_code":null,"channel_id":null,"channel_extended":{},"is_default":false},{"id":1,"name":"桌面模拟器","protocol":"RTSP","status":"error","host":"192.168.1.1","port":554,"rtsp_url":"rtsp://192.168.137.1:554/live","device_tag":null,"parent_device_tag":null,"is_public":false,"created_at":"2026-05-28T22:31:13.027Z","device_password":"admin","playback_username":"12","playback_password":"12","media_server_tag":"default","push_urls":[],"pull_urls":[],"region_code":null,"updated_at":"2026-06-30T06:16:31.852Z","ssrc":null,"gb_username":null,"gb_password":null,"extended":{"rtsp_url":"rtsp://192.168.137.1:554/live","rtsp_mode":"pull","stream_key":"eb331bc2-1092-4b96-9991-5aa4c269f325","rtsp_full_url":"rtsp://192.168.137.1:554/live","device_username":"admin"},"group_id":null,"app":null,"is_channel":false,"device_type":"Other","device_type_code":null,"channel_id":null,"channel_extended":{},"is_default":false}]
+[2m2026-08-30T09:25:23.949455Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m115:[0m [rb] [7499759163300515845] => `SELECT id, name, url, api_key, server_type, weight, enabled, server_tag, protocol_ports, created_at, updated_at
+FROM servers
+ORDER BY id ASC` []
+[2m2026-08-30T09:25:23.950578Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m150:[0m [rb] [7499759163300515845] <= len=3,rows=[{"id":1,"name":"ffff","url":"http://192.168.1.100:8088","api_key":"123","server_type":"zlmediakit","weight":100,"enabled":true,"server_tag":"2345667","protocol_ports":{"hls":null,"http":null,"rtmp":null,"rtsp":null,"https":null,"webrtc":null,"ws_flv":null,"rtp_tcp":null,"http_flv":null},"created_at":"2026-05-28T07:31:05.030498Z","updated_at":"2026-06-11T08:08:57.655278Z"},{"id":2,"name":"er","url":"http://192.168.1.100:8083","api_key":"12","server_type":"zlmediakit","weight":100,"enabled":true,"server_tag":"23232323","protocol_ports":{"hls":23,"http":null,"rtmp":8333,"rtsp":554,"https":null,"webrtc":null,"ws_flv":null,"rtp_tcp":null,"http_flv":null},"created_at":"2026-05-28T07:33:18.995955Z","updated_at":"2026-06-29T14:10:59.105271Z"},{"id":3,"name":"zlmediakit-1","url":"http://127.0.0.1:80","api_key":"hX56LNGxVJrdvDd0N8Q7fRlL8VGreVcz","server_type":"zlmediakit","weight":100,"enabled":true,"server_tag":"default","protocol_ports":{"hls":80,"http":80,"rtmp":1935,"rtsp":445,"https":8443,"webrtc":80,"ws_flv":80,"rtp_tcp":6000,"http_flv":80},"created_at":"2026-06-29T13:14:28.662558Z","updated_at":"2026-06-29T19:30:14.550113Z"}]
+[2m2026-08-30T09:25:24.259692Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m115:[0m [rb] [7499759163300515847] => `SELECT id, session_type, device_id, user_id, state, client_ip, client_type, media_server_id, stream_id, protocol, created_at, last_activity, expires_at, bytes_sent, bytes_received FROM sessions ORDER BY created_at DESC` []
+[2m2026-08-30T09:25:24.260744Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m150:[0m [rb] [7499759163300515847] <= len=0,rows=[]
+[2m2026-08-30T09:25:24.456657Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m115:[0m [rb] [7499759163300515849] => `SELECT id, device_id, media_server_tag, stream_key, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams ORDER BY created_at DESC` []
+[2m2026-08-30T09:25:24.457930Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m150:[0m [rb] [7499759163300515849] <= len=1,rows=[{"id":44,"device_id":1,"media_server_tag":"default","stream_key":"eb331bc2-1092-4b96-9991-5aa4c269f325","app":"live","token":"e5ff70b8-7e3b-4e86-a49d-a460083dc09a","state":"Error","retry_count":20,"max_retries":20,"last_error":"Media server error: Media server error: ZLMediaKit addStreamProxy failed: code=-1, msg=connection refused","viewer_count":1,"bandwidth_in":0,"bandwidth_out":0,"last_keepalive_at":"2026-06-30T07:40:01.359Z","created_at":"2026-06-13T13:57:38.645Z"}]
+[2m2026-08-30T09:25:24.671249Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m115:[0m [rb] [7499759163300515851] => `SELECT id, device_id, stream_key, media_server_name, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename FROM recordings ORDER BY created_at DESC` []
+[2m2026-08-30T09:25:24.672443Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m150:[0m [rb] [7499759163300515851] <= len=0,rows=[]
+[2m2026-08-30T09:25:24.672528Z[0m [32m INFO[0m ThreadId(01) [2msrc\infrastructure\db_repository.rs[0m[2m:[0m[2m127:[0m [DB] Caches loaded: 3 devices, 3 servers, 0 sessions, 1 streams, 0 recordings
+[2m2026-08-30T09:25:24.672551Z[0m [32m INFO[0m ThreadId(01) [2msrc\context\infra_context.rs[0m[2m:[0m[2m60:[0m [InfraContext] Building from parts...
+[2m2026-08-30T09:25:24.672568Z[0m [32m INFO[0m ThreadId(01) [2msrc\adapter\message_bus\redis_bus.rs[0m[2m:[0m[2m22:[0m [Redis] Connecting to: redis://127.0.0.1:6379/
+[2m2026-08-30T09:25:24.673841Z[0m [32m INFO[0m ThreadId(01) [2msrc\context\infra_context.rs[0m[2m:[0m[2m74:[0m [InfraContext] Initialized: db=127.0.0.1:5435/rustcam?options=-c%20client_encoding=UTF8, redis=redis://127.0.0.1:6379/
+[2m2026-08-30T09:25:24.673919Z[0m [32m INFO[0m ThreadId(01) [2msrc\application\media_server_service.rs[0m[2m:[0m[2m123:[0m [MediaServerService] Loading 3 servers from DB cache
+[2m2026-08-30T09:25:24.674003Z[0m [32m INFO[0m ThreadId(01) [2msrc\application\media_server_service.rs[0m[2m:[0m[2m152:[0m [MediaServerService]   DB server: tag=default, name=zlmediakit-1
+[2m2026-08-30T09:25:24.674509Z[0m [32m INFO[0m ThreadId(01) [2msrc\infrastructure\cluster.rs[0m[2m:[0m[2m51:[0m Registered media server: zlmediakit-1 (tag=default, type=zlmediakit)
+[2m2026-08-30T09:25:24.674527Z[0m [32m INFO[0m ThreadId(01) [2msrc\application\media_server_service.rs[0m[2m:[0m[2m161:[0m [MediaServerService]   DB server default registered to cluster
+[2m2026-08-30T09:25:24.674551Z[0m [32m INFO[0m ThreadId(01) [2msrc\application\media_server_service.rs[0m[2m:[0m[2m152:[0m [MediaServerService]   DB server: tag=2345667, name=ffff
+[2m2026-08-30T09:25:24.674646Z[0m [32m INFO[0m ThreadId(01) [2msrc\infrastructure\cluster.rs[0m[2m:[0m[2m51:[0m Registered media server: ffff (tag=2345667, type=zlmediakit)
+[2m2026-08-30T09:25:24.674658Z[0m [32m INFO[0m ThreadId(01) [2msrc\application\media_server_service.rs[0m[2m:[0m[2m161:[0m [MediaServerService]   DB server 2345667 registered to cluster
+[2m2026-08-30T09:25:24.674680Z[0m [32m INFO[0m ThreadId(01) [2msrc\application\media_server_service.rs[0m[2m:[0m[2m152:[0m [MediaServerService]   DB server: tag=23232323, name=er
+[2m2026-08-30T09:25:24.674750Z[0m [32m INFO[0m ThreadId(01) [2msrc\infrastructure\cluster.rs[0m[2m:[0m[2m51:[0m Registered media server: er (tag=23232323, type=zlmediakit)
+[2m2026-08-30T09:25:24.674761Z[0m [32m INFO[0m ThreadId(01) [2msrc\application\media_server_service.rs[0m[2m:[0m[2m161:[0m [MediaServerService]   DB server 23232323 registered to cluster
+[2m2026-08-30T09:25:24.674781Z[0m [32m INFO[0m ThreadId(01) [2msrc\application\media_server_service.rs[0m[2m:[0m[2m165:[0m [MediaServerService] Total servers loaded: 3
+[2m2026-08-30T09:25:24.674840Z[0m [32m INFO[0m ThreadId(01) [2msrc\context\media_context.rs[0m[2m:[0m[2m76:[0m [MediaContext] Initialized: cluster_servers=3, zlm_url=127.0.0.1:80
+[2m2026-08-30T09:25:24.674889Z[0m [32m INFO[0m ThreadId(01) [2msrc\context\service_registry.rs[0m[2m:[0m[2m209:[0m [ServiceRegistry] All services initialized
+[2m2026-08-30T09:25:24.674909Z[0m [32m INFO[0m ThreadId(01) [2msrc\context\service_registry.rs[0m[2m:[0m[2m245:[0m [ServiceRegistry] Starting all services...
+[2m2026-08-30T09:25:24.674983Z[0m [32m INFO[0m ThreadId(01) [2msrc\application\session_service.rs[0m[2m:[0m[2m65:[0m [SessionService] Started
+[2m2026-08-30T09:25:24.675009Z[0m [32m INFO[0m ThreadId(01) [2msrc\application\stream_recovery_service.rs[0m[2m:[0m[2m39:[0m [StreamRecoveryService] Started (check_interval=30s, max_retries=20)
+[2m2026-08-30T09:25:24.675022Z[0m [32m INFO[0m ThreadId(13) [2msrc\application\device_service.rs[0m[2m:[0m[2m58:[0m [DeviceService] Started event listener
+[2m2026-08-30T09:25:24.675048Z[0m [32m INFO[0m ThreadId(01) [2msrc\application\ws_service.rs[0m[2m:[0m[2m44:[0m [WsService] Started periodic stats push
+[2m2026-08-30T09:25:24.675064Z[0m [32m INFO[0m ThreadId(01) [2msrc\context\service_registry.rs[0m[2m:[0m[2m251:[0m [ServiceRegistry] All services started
+[2m2026-08-30T09:25:24.675059Z[0m [32m INFO[0m ThreadId(14) [2msrc\application\session_service.rs[0m[2m:[0m[2m35:[0m [SessionService] Started event listener
+[2m2026-08-30T09:25:24.675076Z[0m [32m INFO[0m ThreadId(12) [2msrc\application\session_service.rs[0m[2m:[0m[2m58:[0m [SessionService] Started cleanup task
+[2m2026-08-30T09:25:24.675074Z[0m [32m INFO[0m ThreadId(01) [2msrc\main.rs[0m[2m:[0m[2m129:[0m All services started
+[2m2026-08-30T09:25:24.675147Z[0m [32m INFO[0m ThreadId(16) [2msrc\infrastructure\health_monitor.rs[0m[2m:[0m[2m43:[0m [HealthMonitor] Started (interval: 30s)
+[2m2026-08-30T09:25:24.675168Z[0m [32m INFO[0m ThreadId(01) [2msrc\main.rs[0m[2m:[0m[2m133:[0m Protocol adapters registered: [Gb28181, Onvif, Rtsp, WebRtc]
+[2m2026-08-30T09:25:24.675216Z[0m [32m INFO[0m ThreadId(16) [2msrc\infrastructure\health_monitor.rs[0m[2m:[0m[2m47:[0m [HealthMonitor] Triggering stream recovery for server 23232323
+[2m2026-08-30T09:25:24.675278Z[0m [32m INFO[0m ThreadId(16) [2msrc\infrastructure\health_monitor.rs[0m[2m:[0m[2m47:[0m [HealthMonitor] Triggering stream recovery for server default
+[2m2026-08-30T09:25:24.675305Z[0m [32m INFO[0m ThreadId(16) [2msrc\infrastructure\health_monitor.rs[0m[2m:[0m[2m47:[0m [HealthMonitor] Triggering stream recovery for server 2345667
+[2m2026-08-30T09:25:24.675701Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\pool.rs[0m[2m:[0m[2m686:[0m checkout waiting for idle connection: ("http", 127.0.0.1)
+[2m2026-08-30T09:25:24.675770Z[0m [34mDEBUG[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\reqwest-0.13.4\src\connect.rs[0m[2m:[0m[2m929:[0m starting new connection 'Some("127.0.0.1")'
+[2m2026-08-30T09:25:24.675812Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\connect\http.rs[0m[2m:[0m[2m481:[0m Http::connect; scheme=Some("http"), host=Some("127.0.0.1"), port=None
+[2m2026-08-30T09:25:24.675842Z[0m [34mDEBUG[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\connect\http.rs[0m[2m:[0m[2m767:[0m connecting to 127.0.0.1:80
+[2m2026-08-30T09:25:24.676193Z[0m [34mDEBUG[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\connect\http.rs[0m[2m:[0m[2m770:[0m connected to 127.0.0.1:80
+[2m2026-08-30T09:25:24.676301Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\client.rs[0m[2m:[0m[2m574:[0m http1 handshake complete, spawning background dispatcher task
+[2m2026-08-30T09:25:24.676334Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\client.rs[0m[2m:[0m[2m599:[0m waiting for connection to be ready
+[2m2026-08-30T09:25:24.676397Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\client.rs[0m[2m:[0m[2m609:[0m connection is ready
+[2m2026-08-30T09:25:24.676418Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\pool.rs[0m[2m:[0m[2m728:[0m checkout dropped for ("http", 127.0.0.1)
+[2m2026-08-30T09:25:24.676895Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\pool.rs[0m[2m:[0m[2m353:[0m put; add idle connection for ("http", 127.0.0.1)
+[2m2026-08-30T09:25:24.676936Z[0m [34mDEBUG[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\pool.rs[0m[2m:[0m[2m401:[0m pooling idle connection for ("http", 127.0.0.1)
+[2m2026-08-30T09:25:24.676962Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\reqwest-0.13.4\src\retry.rs[0m[2m:[0m[2m234:[0m shouldn't retry!
+[2m2026-08-30T09:25:24.677734Z[0m [34mDEBUG[0m ThreadId(02) [2msrc\infrastructure\health_monitor.rs[0m[2m:[0m[2m150:[0m [HealthMonitor] Updated server default (online)
+[2m2026-08-30T09:25:24.677861Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\pool.rs[0m[2m:[0m[2m686:[0m checkout waiting for idle connection: ("http", 192.168.1.100:8088)
+[2m2026-08-30T09:25:24.677899Z[0m [34mDEBUG[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\reqwest-0.13.4\src\connect.rs[0m[2m:[0m[2m929:[0m starting new connection 'Some("192.168.1.100")'
+[2m2026-08-30T09:25:24.677923Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\connect\http.rs[0m[2m:[0m[2m481:[0m Http::connect; scheme=Some("http"), host=Some("192.168.1.100"), port=Some(Port(8088))
+[2m2026-08-30T09:25:24.677942Z[0m [34mDEBUG[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\connect\http.rs[0m[2m:[0m[2m767:[0m connecting to 192.168.1.100:8088
+[2m2026-08-30T09:25:24.794442Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m115:[0m [rb] [7499759168996380672] => `CREATE TABLE IF NOT EXISTS permissions (id UUID PRIMARY KEY, name VARCHAR(255) NOT NULL UNIQUE, description TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())` []
+[2m2026-08-30T09:25:24.795385Z[0m [32m INFO[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbdc-pg-4.9.6\src\connection\stream.rs[0m[2m:[0m[2m160:[0m 关系 "permissions" 已经存在, 跳过
+[2m2026-08-30T09:25:24.795441Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m141:[0m [rb] [7499759168996380672] <= rows_affected={"rows_affected": 0, "last_insert_id": null}
+[2m2026-08-30T09:25:24.888754Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m115:[0m [rb] [7499759168996380673] => `CREATE TABLE IF NOT EXISTS roles (id UUID PRIMARY KEY, name VARCHAR(255) NOT NULL UNIQUE, description TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())` []
+[2m2026-08-30T09:25:24.888957Z[0m [32m INFO[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbdc-pg-4.9.6\src\connection\stream.rs[0m[2m:[0m[2m160:[0m 关系 "roles" 已经存在, 跳过
+[2m2026-08-30T09:25:24.888997Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m141:[0m [rb] [7499759168996380673] <= rows_affected={"rows_affected": 0, "last_insert_id": null}
+[2m2026-08-30T09:25:24.981693Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m115:[0m [rb] [7499759168996380674] => `CREATE TABLE IF NOT EXISTS users (id UUID PRIMARY KEY, username VARCHAR(255) NOT NULL UNIQUE, password_hash TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())` []
+[2m2026-08-30T09:25:24.983059Z[0m [32m INFO[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbdc-pg-4.9.6\src\connection\stream.rs[0m[2m:[0m[2m160:[0m 关系 "users" 已经存在, 跳过
+[2m2026-08-30T09:25:24.983128Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m141:[0m [rb] [7499759168996380674] <= rows_affected={"rows_affected": 0, "last_insert_id": null}
+[2m2026-08-30T09:25:25.080501Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m115:[0m [rb] [7499759168996380675] => `CREATE TABLE IF NOT EXISTS user_roles (user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE, PRIMARY KEY (user_id, role_id))` []
+[2m2026-08-30T09:25:25.080693Z[0m [32m INFO[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbdc-pg-4.9.6\src\connection\stream.rs[0m[2m:[0m[2m160:[0m 关系 "user_roles" 已经存在, 跳过
+[2m2026-08-30T09:25:25.080734Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m141:[0m [rb] [7499759168996380675] <= rows_affected={"rows_affected": 0, "last_insert_id": null}
+[2m2026-08-30T09:25:25.173502Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m115:[0m [rb] [7499759168996380676] => `CREATE TABLE IF NOT EXISTS role_permissions (role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE, permission_id UUID NOT NULL REFERENCES permissions(id) ON DELETE CASCADE, PRIMARY KEY (role_id, permission_id))` []
+[2m2026-08-30T09:25:25.174494Z[0m [32m INFO[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbdc-pg-4.9.6\src\connection\stream.rs[0m[2m:[0m[2m160:[0m 关系 "role_permissions" 已经存在, 跳过
+[2m2026-08-30T09:25:25.174551Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m141:[0m [rb] [7499759168996380676] <= rows_affected={"rows_affected": 0, "last_insert_id": null}
+[2m2026-08-30T09:25:25.174581Z[0m [32m INFO[0m ThreadId(01) [2msrc\auth\auth_db.rs[0m[2m:[0m[2m39:[0m [AuthDB] init_tables completed
+[2m2026-08-30T09:25:25.174597Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m115:[0m [rb] [0] => `SELECT COUNT(*) as c FROM users WHERE username = 'admin'` []
+[2m2026-08-30T09:25:25.269937Z[0m [34mDEBUG[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m150:[0m [rb] [0] <= len=1,rows=[{"c":1}]
+[2m2026-08-30T09:25:25.276900Z[0m [32m INFO[0m ThreadId(01) [2msrc\main.rs[0m[2m:[0m[2m146:[0m HTTP API server listening on 0.0.0.0:8080
+[2m2026-08-30T09:25:25.276985Z[0m [32m INFO[0m ThreadId(01) [2msrc\transport\tcp_server.rs[0m[2m:[0m[2m47:[0m [TcpServer] Bound to 0.0.0.0:5060
+[2m2026-08-30T09:25:25.276997Z[0m [32m INFO[0m ThreadId(01) [2msrc\main.rs[0m[2m:[0m[2m167:[0m TCP signaling server listening on 0.0.0.0:5060
+[2m2026-08-30T09:25:25.277047Z[0m [32m INFO[0m ThreadId(01) [2msrc\main.rs[0m[2m:[0m[2m190:[0m UDP server listening on 0.0.0.0:5061
+[2m2026-08-30T09:25:25.277083Z[0m [32m INFO[0m ThreadId(01) [2msrc\transport\tcp_server.rs[0m[2m:[0m[2m59:[0m [TcpServer] Listening on 0.0.0.0:5060
+[2m2026-08-30T09:25:25.277098Z[0m [32m INFO[0m ThreadId(01) [2msrc\transport\udp_server.rs[0m[2m:[0m[2m91:[0m [UdpServer] Listening on 0.0.0.0:5061
+[2m2026-08-30T09:25:25.281205Z[0m [34mDEBUG[0m ThreadId(02) [2msrc\main.rs[0m[2m:[0m[2m201:[0m [Cleanup] Nonce stores cleaned up
+[2m2026-08-30T09:25:25.299401Z[0m [35mTRACE[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.8.9\src\serve\mod.rs[0m[2m:[0m[2m369:[0m connection 127.0.0.1:9008 accepted
+[2m2026-08-30T09:25:25.300113Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\handshake.rs[0m[2m:[0m[2m50:[0m Setting context when skipping handshake
+[2m2026-08-30T09:25:25.300168Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:25.300192Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:25.300203Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:25.300287Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:25.300317Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:25.300329Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:25.300352Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:26.293106Z[0m [35mTRACE[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.8.9\src\serve\mod.rs[0m[2m:[0m[2m369:[0m connection 127.0.0.1:9011 accepted
+[2m2026-08-30T09:25:26.293834Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\handshake.rs[0m[2m:[0m[2m50:[0m Setting context when skipping handshake
+[2m2026-08-30T09:25:26.293894Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:26.293907Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:26.293918Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:26.293973Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:26.293984Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:26.293994Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:26.294012Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:26.480669Z[0m [35mTRACE[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.8.9\src\serve\mod.rs[0m[2m:[0m[2m369:[0m connection 127.0.0.1:9015 accepted
+[2m2026-08-30T09:25:26.481367Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\handshake.rs[0m[2m:[0m[2m50:[0m Setting context when skipping handshake
+[2m2026-08-30T09:25:26.481429Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:26.481443Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:26.481453Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:26.481508Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:26.481518Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:26.481529Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:26.481546Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:28.293143Z[0m [35mTRACE[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.8.9\src\serve\mod.rs[0m[2m:[0m[2m369:[0m connection 127.0.0.1:9024 accepted
+
+thread 'tokio-rt-worker' (19532) panicked at C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\jsonwebtoken-11.0.0\src\crypto\mod.rs:125:42:
+
+Could not automatically determine the process-level CryptoProvider from jsonwebtoken crate features.
+Call CryptoProvider::install_default() before this point to select a provider manually, or make sure exactly one of the 'rust_crypto' and 'aws_lc_rs' features is enabled.
+See the documentation of the CryptoProvider type for more information.
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+[2m2026-08-30T09:25:31.131066Z[0m [35mTRACE[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.8.9\src\serve\mod.rs[0m[2m:[0m[2m369:[0m connection 127.0.0.1:9029 accepted
+[2m2026-08-30T09:25:34.681002Z[0m [35mTRACE[0m ThreadId(15) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\pool.rs[0m[2m:[0m[2m728:[0m checkout dropped for ("http", 192.168.1.100:8088)
+[2m2026-08-30T09:25:34.681461Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:34.681515Z[0m [33m WARN[0m ThreadId(15) [2msrc\infrastructure\health_monitor.rs[0m[2m:[0m[2m109:[0m [HealthMonitor] Server 2345667 get_status failed: ZLMediaKit getStatistic failed: error sending request for url (http://192.168.1.100:8088/index/api/getStatistic?secret=123) (url: http://192.168.1.100:8088/index/api/getStatistic)
+[2m2026-08-30T09:25:34.681716Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:34.681581Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:34.681911Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:34.681854Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\mod.rs[0m[2m:[0m[2m768:[0m Sending frame: Frame { header: FrameHeader { is_final: true, rsv1: false, rsv2: false, rsv3: false, opcode: Data(Text), mask: None }, payload: b"{\"msg_type\":\"stats_update\",\"data\":{\"devices\":{\"online\":0,\"total\":3},\"sessions\":{\"active\":0}},\"timestamp\":\"2026-08-30T09:25:34.681218300+00:00\"}" }
+[2m2026-08-30T09:25:34.681778Z[0m [32m INFO[0m ThreadId(15) [2msrc\infrastructure\cluster.rs[0m[2m:[0m[2m58:[0m Unregistered media server: 2345667
+[2m2026-08-30T09:25:34.681975Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\frame\mod.rs[0m[2m:[0m[2m257:[0m writing frame 
+<FRAME>
+final: true
+reserved: false false false
+opcode: TEXT
+length: 147
+payload length: 143
+payload: 0x7b226d73675f74797065223a2273746174735f757064617465222c2264617461223a7b2264657669636573223a7b226f6e6c696e65223a302c22746f74616c223a337d2c2273657373696f6e73223a7b22616374697665223a307d7d2c2274696d657374616d70223a22323032362d30382d33305430393a32353a33342e3638313231383330302b30303a3030227d
+            
+[2m2026-08-30T09:25:34.681517Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:34.681981Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:34.682122Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\mod.rs[0m[2m:[0m[2m768:[0m Sending frame: Frame { header: FrameHeader { is_final: true, rsv1: false, rsv2: false, rsv3: false, opcode: Data(Text), mask: None }, payload: b"{\"msg_type\":\"stats_update\",\"data\":{\"devices\":{\"online\":0,\"total\":3},\"sessions\":{\"active\":0}},\"timestamp\":\"2026-08-30T09:25:34.681218300+00:00\"}" }
+[2m2026-08-30T09:25:34.682063Z[0m [33m WARN[0m ThreadId(15) [2msrc\infrastructure\health_monitor.rs[0m[2m:[0m[2m112:[0m [HealthMonitor] Server 2345667 unregistered from cluster (offline)
+[2m2026-08-30T09:25:34.682201Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:34.682202Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\frame\mod.rs[0m[2m:[0m[2m257:[0m writing frame 
+<FRAME>
+final: true
+reserved: false false false
+opcode: TEXT
+length: 147
+payload length: 143
+payload: 0x7b226d73675f74797065223a2273746174735f757064617465222c2264617461223a7b2264657669636573223a7b226f6e6c696e65223a302c22746f74616c223a337d2c2273657373696f6e73223a7b22616374697665223a307d7d2c2274696d657374616d70223a22323032362d30382d33305430393a32353a33342e3638313231383330302b30303a3030227d
+            
+[2m2026-08-30T09:25:34.682269Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:34.682077Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:34.682397Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m172:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:172 Write.write
+[2m2026-08-30T09:25:34.682442Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:34.682299Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:34.682337Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:34.682470Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m174:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:174 Write.with_context write -> poll_write
+[2m2026-08-30T09:25:34.682554Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m172:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:172 Write.write
+[2m2026-08-30T09:25:34.682647Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:34.682681Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m183:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:183 Write.flush
+[2m2026-08-30T09:25:34.682685Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\mod.rs[0m[2m:[0m[2m768:[0m Sending frame: Frame { header: FrameHeader { is_final: true, rsv1: false, rsv2: false, rsv3: false, opcode: Data(Text), mask: None }, payload: b"{\"msg_type\":\"stats_update\",\"data\":{\"devices\":{\"online\":0,\"total\":3},\"sessions\":{\"active\":0}},\"timestamp\":\"2026-08-30T09:25:34.681218300+00:00\"}" }
+[2m2026-08-30T09:25:34.682644Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:34.682752Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\frame\mod.rs[0m[2m:[0m[2m257:[0m writing frame 
+<FRAME>
+final: true
+reserved: false false false
+opcode: TEXT
+length: 147
+payload length: 143
+payload: 0x7b226d73675f74797065223a2273746174735f757064617465222c2264617461223a7b2264657669636573223a7b226f6e6c696e65223a302c22746f74616c223a337d2c2273657373696f6e73223a7b22616374697665223a307d7d2c2274696d657374616d70223a22323032362d30382d33305430393a32353a33342e3638313231383330302b30303a3030227d
+            
+[2m2026-08-30T09:25:34.682830Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:34.682823Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m174:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:174 Write.with_context write -> poll_write
+[2m2026-08-30T09:25:34.682858Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m172:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:172 Write.write
+[2m2026-08-30T09:25:34.682733Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:34.682954Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m183:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:183 Write.flush
+[2m2026-08-30T09:25:34.682986Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:34.682967Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m185:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:185 Write.with_context flush -> poll_flush
+[2m2026-08-30T09:25:34.682887Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:34.683013Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m185:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:185 Write.with_context flush -> poll_flush
+[2m2026-08-30T09:25:34.683112Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m174:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:174 Write.with_context write -> poll_write
+[2m2026-08-30T09:25:34.683074Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:34.683194Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:34.683227Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:34.683197Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:34.683246Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m183:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:183 Write.flush
+[2m2026-08-30T09:25:34.683271Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:34.683283Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:34.683291Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:34.683306Z[0m [33m WARN[0m ThreadId(16) [2msrc\infrastructure\health_monitor.rs[0m[2m:[0m[2m157:[0m [HealthMonitor] Server 2345667 marked offline
+[2m2026-08-30T09:25:34.683304Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:34.683318Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:34.683329Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m185:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:185 Write.with_context flush -> poll_flush
+[2m2026-08-30T09:25:34.683506Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:34.683532Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:34.683553Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:34.683561Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:34.683432Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:34.683587Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:34.683695Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:34.683720Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:34.683597Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:34.683800Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\pool.rs[0m[2m:[0m[2m686:[0m checkout waiting for idle connection: ("http", 192.168.1.100:8083)
+[2m2026-08-30T09:25:34.683817Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:34.683863Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:34.683875Z[0m [34mDEBUG[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\reqwest-0.13.4\src\connect.rs[0m[2m:[0m[2m929:[0m starting new connection 'Some("192.168.1.100")'
+[2m2026-08-30T09:25:34.683889Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:34.683913Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\connect\http.rs[0m[2m:[0m[2m481:[0m Http::connect; scheme=Some("http"), host=Some("192.168.1.100"), port=Some(Port(8083))
+[2m2026-08-30T09:25:34.683924Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:34.683962Z[0m [34mDEBUG[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\connect\http.rs[0m[2m:[0m[2m767:[0m connecting to 192.168.1.100:8083
+[2m2026-08-30T09:25:34.701137Z[0m [35mTRACE[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.8.9\src\serve\mod.rs[0m[2m:[0m[2m369:[0m connection 127.0.0.1:9036 accepted
+
+thread 'tokio-rt-worker' (28916) panicked at C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\jsonwebtoken-11.0.0\src\crypto\mod.rs:125:42:
+
+Could not automatically determine the process-level CryptoProvider from jsonwebtoken crate features.
+Call CryptoProvider::install_default() before this point to select a provider manually, or make sure exactly one of the 'rust_crypto' and 'aws_lc_rs' features is enabled.
+See the documentation of the CryptoProvider type for more information.
+
+[2m2026-08-30T09:25:34.701744Z[0m [35mTRACE[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.8.9\src\serve\mod.rs[0m[2m:[0m[2m369:[0m connection 127.0.0.1:9038 accepted
+
+thread 'tokio-rt-worker' (28916) panicked at C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\jsonwebtoken-11.0.0\src\crypto\mod.rs:125:42:
+
+Could not automatically determine the process-level CryptoProvider from jsonwebtoken crate features.
+Call CryptoProvider::install_default() before this point to select a provider manually, or make sure exactly one of the 'rust_crypto' and 'aws_lc_rs' features is enabled.
+See the documentation of the CryptoProvider type for more information.
+
+[2m2026-08-30T09:25:36.974791Z[0m [35mTRACE[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.8.9\src\serve\mod.rs[0m[2m:[0m[2m369:[0m connection 127.0.0.1:9041 accepted
+[2m2026-08-30T09:25:38.305574Z[0m [35mTRACE[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.8.9\src\serve\mod.rs[0m[2m:[0m[2m369:[0m connection 127.0.0.1:9044 accepted
+
+thread 'tokio-rt-worker' (19532) panicked at C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\jsonwebtoken-11.0.0\src\crypto\mod.rs:125:42:
+
+Could not automatically determine the process-level CryptoProvider from jsonwebtoken crate features.
+Call CryptoProvider::install_default() before this point to select a provider manually, or make sure exactly one of the 'rust_crypto' and 'aws_lc_rs' features is enabled.
+See the documentation of the CryptoProvider type for more information.
+
+[2m2026-08-30T09:25:40.696346Z[0m [35mTRACE[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.8.9\src\serve\mod.rs[0m[2m:[0m[2m369:[0m connection 127.0.0.1:9050 accepted
+[2m2026-08-30T09:25:40.712337Z[0m [34mDEBUG[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m115:[0m [rb] [0] => `SELECT id, username, password_hash, created_at, updated_at FROM users WHERE username = $1` ["admin"]
+[2m2026-08-30T09:25:40.807162Z[0m [34mDEBUG[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m150:[0m [rb] [0] <= len=1,rows=[{"id":"4c0346fe-099a-428a-894f-0e5a4d905880","username":"admin","password_hash":"$argon2id$v=19$m=65536,t=3,p=4$aZQkT6fCevGpeYXwaH1+Xg$1BUFWhU7B3PBQTDKs7KX6pVb+9kWP71idSreCGi5Q0Y","created_at":"2026-05-25T08:18:52.301Z","updated_at":"2026-05-25T08:18:52.301Z"}]
+[2m2026-08-30T09:25:42.294331Z[0m [34mDEBUG[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m115:[0m [rb] [0] => `SELECT r.name FROM roles r INNER JOIN user_roles ur ON r.id::uuid = ur.role_id::uuid WHERE ur.user_id = $1::uuid` ["4c0346fe-099a-428a-894f-0e5a4d905880"]
+[2m2026-08-30T09:25:42.389453Z[0m [34mDEBUG[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rbatis-4.9.7\src\plugin\intercept\intercept_log.rs[0m[2m:[0m[2m150:[0m [rb] [0] <= len=1,rows=[{"name":"Admin"}]
+[2m2026-08-30T09:25:44.678245Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:44.678269Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:44.678326Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\mod.rs[0m[2m:[0m[2m768:[0m Sending frame: Frame { header: FrameHeader { is_final: true, rsv1: false, rsv2: false, rsv3: false, opcode: Data(Text), mask: None }, payload: b"{\"msg_type\":\"stats_update\",\"data\":{\"devices\":{\"online\":0,\"total\":3},\"sessions\":{\"active\":0}},\"timestamp\":\"2026-08-30T09:25:44.678171700+00:00\"}" }
+[2m2026-08-30T09:25:44.678269Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:44.678307Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:44.678360Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\frame\mod.rs[0m[2m:[0m[2m257:[0m writing frame 
+<FRAME>
+final: true
+reserved: false false false
+opcode: TEXT
+length: 147
+payload length: 143
+payload: 0x7b226d73675f74797065223a2273746174735f757064617465222c2264617461223a7b2264657669636573223a7b226f6e6c696e65223a302c22746f74616c223a337d2c2273657373696f6e73223a7b22616374697665223a307d7d2c2274696d657374616d70223a22323032362d30382d33305430393a32353a34342e3637383137313730302b30303a3030227d
+            
+[2m2026-08-30T09:25:44.678419Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:44.678427Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:44.678465Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:44.678502Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m172:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:172 Write.write
+[2m2026-08-30T09:25:44.678471Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:44.678506Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:44.678539Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:44.678512Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:44.678553Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:44.678555Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:44.678565Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:44.678563Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m174:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:174 Write.with_context write -> poll_write
+[2m2026-08-30T09:25:44.678572Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:44.678588Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:44.678597Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:44.678613Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:44.678625Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\mod.rs[0m[2m:[0m[2m768:[0m Sending frame: Frame { header: FrameHeader { is_final: true, rsv1: false, rsv2: false, rsv3: false, opcode: Data(Text), mask: None }, payload: b"{\"msg_type\":\"stats_update\",\"data\":{\"devices\":{\"online\":0,\"total\":3},\"sessions\":{\"active\":0}},\"timestamp\":\"2026-08-30T09:25:44.678171700+00:00\"}" }
+[2m2026-08-30T09:25:44.678636Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:44.678655Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m183:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:183 Write.flush
+[2m2026-08-30T09:25:44.678645Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\frame\mod.rs[0m[2m:[0m[2m257:[0m writing frame 
+<FRAME>
+final: true
+reserved: false false false
+opcode: TEXT
+length: 147
+payload length: 143
+payload: 0x7b226d73675f74797065223a2273746174735f757064617465222c2264617461223a7b2264657669636573223a7b226f6e6c696e65223a302c22746f74616c223a337d2c2273657373696f6e73223a7b22616374697665223a307d7d2c2274696d657374616d70223a22323032362d30382d33305430393a32353a34342e3637383137313730302b30303a3030227d
+            
+[2m2026-08-30T09:25:44.678650Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\mod.rs[0m[2m:[0m[2m768:[0m Sending frame: Frame { header: FrameHeader { is_final: true, rsv1: false, rsv2: false, rsv3: false, opcode: Data(Text), mask: None }, payload: b"{\"msg_type\":\"stats_update\",\"data\":{\"devices\":{\"online\":0,\"total\":3},\"sessions\":{\"active\":0}},\"timestamp\":\"2026-08-30T09:25:44.678171700+00:00\"}" }
+[2m2026-08-30T09:25:44.678667Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:44.678674Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:44.678685Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m185:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:185 Write.with_context flush -> poll_flush
+[2m2026-08-30T09:25:44.678691Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m172:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:172 Write.write
+[2m2026-08-30T09:25:44.678677Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\frame\mod.rs[0m[2m:[0m[2m257:[0m writing frame 
+<FRAME>
+final: true
+reserved: false false false
+opcode: TEXT
+length: 147
+payload length: 143
+payload: 0x7b226d73675f74797065223a2273746174735f757064617465222c2264617461223a7b2264657669636573223a7b226f6e6c696e65223a302c22746f74616c223a337d2c2273657373696f6e73223a7b22616374697665223a307d7d2c2274696d657374616d70223a22323032362d30382d33305430393a32353a34342e3637383137313730302b30303a3030227d
+            
+[2m2026-08-30T09:25:44.678701Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:44.678707Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:44.678708Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:44.678712Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m174:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:174 Write.with_context write -> poll_write
+[2m2026-08-30T09:25:44.678718Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:44.678723Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m172:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:172 Write.write
+[2m2026-08-30T09:25:44.678732Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:44.678736Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:44.678750Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m174:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:174 Write.with_context write -> poll_write
+[2m2026-08-30T09:25:44.678754Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:44.678757Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m183:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:183 Write.flush
+[2m2026-08-30T09:25:44.678765Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:44.678770Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:44.678776Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:44.678782Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m185:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:185 Write.with_context flush -> poll_flush
+[2m2026-08-30T09:25:44.678789Z[0m [35mTRACE[0m ThreadId(12) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:44.678789Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m183:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:183 Write.flush
+[2m2026-08-30T09:25:44.678804Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:44.678831Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:44.678844Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:44.678850Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m185:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:185 Write.with_context flush -> poll_flush
+[2m2026-08-30T09:25:44.678856Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:44.678873Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:44.678873Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:44.678883Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:44.678887Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:44.678893Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:44.678899Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:44.678906Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:44.678917Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:44.678927Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:44.678938Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:44.678972Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:44.694133Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hyper-util-0.1.20\src\client\legacy\pool.rs[0m[2m:[0m[2m728:[0m checkout dropped for ("http", 192.168.1.100:8083)
+[2m2026-08-30T09:25:44.694332Z[0m [33m WARN[0m ThreadId(16) [2msrc\infrastructure\health_monitor.rs[0m[2m:[0m[2m109:[0m [HealthMonitor] Server 23232323 get_status failed: ZLMediaKit getStatistic failed: error sending request for url (http://192.168.1.100:8083/index/api/getStatistic?secret=12) (url: http://192.168.1.100:8083/index/api/getStatistic)
+[2m2026-08-30T09:25:44.694404Z[0m [32m INFO[0m ThreadId(16) [2msrc\infrastructure\cluster.rs[0m[2m:[0m[2m58:[0m Unregistered media server: 23232323
+[2m2026-08-30T09:25:44.694426Z[0m [33m WARN[0m ThreadId(16) [2msrc\infrastructure\health_monitor.rs[0m[2m:[0m[2m112:[0m [HealthMonitor] Server 23232323 unregistered from cluster (offline)
+[2m2026-08-30T09:25:44.695495Z[0m [33m WARN[0m ThreadId(16) [2msrc\infrastructure\health_monitor.rs[0m[2m:[0m[2m157:[0m [HealthMonitor] Server 23232323 marked offline
+[2m2026-08-30T09:25:44.695578Z[0m [34mDEBUG[0m ThreadId(16) [2msrc\infrastructure\health_monitor.rs[0m[2m:[0m[2m56:[0m [HealthMonitor] Sync completed in 20.0202424s
+[2m2026-08-30T09:25:44.698660Z[0m [35mTRACE[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.8.9\src\serve\mod.rs[0m[2m:[0m[2m369:[0m connection 127.0.0.1:9061 accepted
+[2m2026-08-30T09:25:44.698859Z[0m [35mTRACE[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.8.9\src\serve\mod.rs[0m[2m:[0m[2m369:[0m connection 127.0.0.1:9062 accepted
+
+thread 'tokio-rt-worker' (28916) panicked at C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\jsonwebtoken-11.0.0\src\crypto\mod.rs:125:42:
+
+Could not automatically determine the process-level CryptoProvider from jsonwebtoken crate features.
+Call CryptoProvider::install_default() before this point to select a provider manually, or make sure exactly one of the 'rust_crypto' and 'aws_lc_rs' features is enabled.
+See the documentation of the CryptoProvider type for more information.
+
+
+thread 'tokio-rt-worker' (19532) panicked at C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\jsonwebtoken-11.0.0\src\crypto\mod.rs:125:42:
+
+Could not automatically determine the process-level CryptoProvider from jsonwebtoken crate features.
+Call CryptoProvider::install_default() before this point to select a provider manually, or make sure exactly one of the 'rust_crypto' and 'aws_lc_rs' features is enabled.
+See the documentation of the CryptoProvider type for more information.
+
+[2m2026-08-30T09:25:47.539313Z[0m [35mTRACE[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.8.9\src\serve\mod.rs[0m[2m:[0m[2m369:[0m connection 127.0.0.1:9068 accepted
+
+thread 'tokio-rt-worker' (23488) panicked at C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\jsonwebtoken-11.0.0\src\crypto\mod.rs:125:42:
+
+Could not automatically determine the process-level CryptoProvider from jsonwebtoken crate features.
+Call CryptoProvider::install_default() before this point to select a provider manually, or make sure exactly one of the 'rust_crypto' and 'aws_lc_rs' features is enabled.
+See the documentation of the CryptoProvider type for more information.
+
+[2m2026-08-30T09:25:48.295868Z[0m [35mTRACE[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.8.9\src\serve\mod.rs[0m[2m:[0m[2m369:[0m connection 127.0.0.1:9075 accepted
+
+thread 'tokio-rt-worker' (23488) panicked at C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\jsonwebtoken-11.0.0\src\crypto\mod.rs:125:42:
+
+Could not automatically determine the process-level CryptoProvider from jsonwebtoken crate features.
+Call CryptoProvider::install_default() before this point to select a provider manually, or make sure exactly one of the 'rust_crypto' and 'aws_lc_rs' features is enabled.
+See the documentation of the CryptoProvider type for more information.
+
+[2m2026-08-30T09:25:54.686149Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:54.686149Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:54.686150Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:54.686193Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:54.686222Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:54.686232Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:54.686272Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:54.686259Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:54.686288Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:54.686304Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:54.686319Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:54.686311Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:54.686322Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:54.686331Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:54.686337Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:54.686343Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:54.686361Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:54.686359Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:54.686363Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:54.686381Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:54.686381Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:54.686399Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:54.686416Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:54.686416Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:54.686435Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\mod.rs[0m[2m:[0m[2m768:[0m Sending frame: Frame { header: FrameHeader { is_final: true, rsv1: false, rsv2: false, rsv3: false, opcode: Data(Text), mask: None }, payload: b"{\"msg_type\":\"stats_update\",\"data\":{\"devices\":{\"online\":0,\"total\":3},\"sessions\":{\"active\":0}},\"timestamp\":\"2026-08-30T09:25:54.686096400+00:00\"}" }
+[2m2026-08-30T09:25:54.686443Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\mod.rs[0m[2m:[0m[2m768:[0m Sending frame: Frame { header: FrameHeader { is_final: true, rsv1: false, rsv2: false, rsv3: false, opcode: Data(Text), mask: None }, payload: b"{\"msg_type\":\"stats_update\",\"data\":{\"devices\":{\"online\":0,\"total\":3},\"sessions\":{\"active\":0}},\"timestamp\":\"2026-08-30T09:25:54.686096400+00:00\"}" }
+[2m2026-08-30T09:25:54.686410Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\mod.rs[0m[2m:[0m[2m768:[0m Sending frame: Frame { header: FrameHeader { is_final: true, rsv1: false, rsv2: false, rsv3: false, opcode: Data(Text), mask: None }, payload: b"{\"msg_type\":\"stats_update\",\"data\":{\"devices\":{\"online\":0,\"total\":3},\"sessions\":{\"active\":0}},\"timestamp\":\"2026-08-30T09:25:54.686096400+00:00\"}" }
+[2m2026-08-30T09:25:54.686468Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\frame\mod.rs[0m[2m:[0m[2m257:[0m writing frame 
+<FRAME>
+final: true
+reserved: false false false
+opcode: TEXT
+length: 147
+payload length: 143
+payload: 0x7b226d73675f74797065223a2273746174735f757064617465222c2264617461223a7b2264657669636573223a7b226f6e6c696e65223a302c22746f74616c223a337d2c2273657373696f6e73223a7b22616374697665223a307d7d2c2274696d657374616d70223a22323032362d30382d33305430393a32353a35342e3638363039363430302b30303a3030227d
+            
+[2m2026-08-30T09:25:54.686474Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\frame\mod.rs[0m[2m:[0m[2m257:[0m writing frame 
+<FRAME>
+final: true
+reserved: false false false
+opcode: TEXT
+length: 147
+payload length: 143
+payload: 0x7b226d73675f74797065223a2273746174735f757064617465222c2264617461223a7b2264657669636573223a7b226f6e6c696e65223a302c22746f74616c223a337d2c2273657373696f6e73223a7b22616374697665223a307d7d2c2274696d657374616d70223a22323032362d30382d33305430393a32353a35342e3638363039363430302b30303a3030227d
+            
+[2m2026-08-30T09:25:54.686516Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:54.686520Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:54.686566Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m172:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:172 Write.write
+[2m2026-08-30T09:25:54.686575Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:54.686584Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m174:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:174 Write.with_context write -> poll_write
+[2m2026-08-30T09:25:54.686529Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m172:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:172 Write.write
+[2m2026-08-30T09:25:54.686634Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:54.686648Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m174:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:174 Write.with_context write -> poll_write
+[2m2026-08-30T09:25:54.686514Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tungstenite-0.29.0\src\protocol\frame\mod.rs[0m[2m:[0m[2m257:[0m writing frame 
+<FRAME>
+final: true
+reserved: false false false
+opcode: TEXT
+length: 147
+payload length: 143
+payload: 0x7b226d73675f74797065223a2273746174735f757064617465222c2264617461223a7b2264657669636573223a7b226f6e6c696e65223a302c22746f74616c223a337d2c2273657373696f6e73223a7b22616374697665223a307d7d2c2274696d657374616d70223a22323032362d30382d33305430393a32353a35342e3638363039363430302b30303a3030227d
+            
+[2m2026-08-30T09:25:54.686690Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m183:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:183 Write.flush
+[2m2026-08-30T09:25:54.686700Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:54.686702Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:54.686709Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m185:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:185 Write.with_context flush -> poll_flush
+[2m2026-08-30T09:25:54.686749Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:54.686761Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:54.686769Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:54.686785Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:54.686795Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:54.686804Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:54.686710Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m183:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:183 Write.flush
+[2m2026-08-30T09:25:54.686718Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m172:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:172 Write.write
+[2m2026-08-30T09:25:54.686816Z[0m [35mTRACE[0m ThreadId(16) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:54.686842Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:54.686876Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m185:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:185 Write.with_context flush -> poll_flush
+[2m2026-08-30T09:25:54.686895Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:54.686851Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:54.686926Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:54.686957Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:54.686953Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m174:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:174 Write.with_context write -> poll_write
+[2m2026-08-30T09:25:54.686976Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:54.686985Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:54.686994Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:54.687007Z[0m [35mTRACE[0m ThreadId(13) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:54.687004Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m183:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:183 Write.flush
+[2m2026-08-30T09:25:54.687018Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:54.687027Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m185:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:185 Write.with_context flush -> poll_flush
+[2m2026-08-30T09:25:54.687044Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m292:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:292 Stream.poll_next
+[2m2026-08-30T09:25:54.687053Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m243:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:243 WebSocketStream.with_context
+[2m2026-08-30T09:25:54.687067Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs[0m[2m:[0m[2m302:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\lib.rs:302 Stream.with_context poll_next -> read()
+[2m2026-08-30T09:25:54.687082Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m154:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:154 Read.read
+[2m2026-08-30T09:25:54.687092Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m131:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:131 AllowStd.with_context
+[2m2026-08-30T09:25:54.687101Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m157:[0m C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs:157 Read.with_context read -> poll_read
+[2m2026-08-30T09:25:54.687114Z[0m [35mTRACE[0m ThreadId(02) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-tungstenite-0.29.0\src\compat.rs[0m[2m:[0m[2m198:[0m WouldBlock
+[2m2026-08-30T09:25:54.705025Z[0m [35mTRACE[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.8.9\src\serve\mod.rs[0m[2m:[0m[2m369:[0m connection 127.0.0.1:9086 accepted
+[2m2026-08-30T09:25:54.705232Z[0m [35mTRACE[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.8.9\src\serve\mod.rs[0m[2m:[0m[2m369:[0m connection 127.0.0.1:9087 accepted
+
+thread 'tokio-rt-worker' (19532) panicked at C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\jsonwebtoken-11.0.0\src\crypto\mod.rs:125:42:
+
+Could not automatically determine the process-level CryptoProvider from jsonwebtoken crate features.
+Call CryptoProvider::install_default() before this point to select a provider manually, or make sure exactly one of the 'rust_crypto' and 'aws_lc_rs' features is enabled.
+See the documentation of the CryptoProvider type for more information.
+
+
+thread 'tokio-rt-worker' (21340) panicked at C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\jsonwebtoken-11.0.0\src\crypto\mod.rs:125:42:
+
+Could not automatically determine the process-level CryptoProvider from jsonwebtoken crate features.
+Call CryptoProvider::install_default() before this point to select a provider manually, or make sure exactly one of the 'rust_crypto' and 'aws_lc_rs' features is enabled.
+See the documentation of the CryptoProvider type for more information.
+
+[2m2026-08-30T09:25:58.304760Z[0m [35mTRACE[0m ThreadId(01) [2mC:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\axum-0.8.9\src\serve\mod.rs[0m[2m:[0m[2m369:[0m connection 127.0.0.1:9092 accepted
+
+thread 'tokio-rt-worker' (19532) panicked at C:\Users\zchs-dev-oy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\jsonwebtoken-11.0.0\src\crypto\mod.rs:125:42:
+
+Could not automatically determine the process-level CryptoProvider from jsonwebtoken crate features.
+Call CryptoProvider::install_default() before this point to select a provider manually, or make sure exactly one of the 'rust_crypto' and 'aws_lc_rs' features is enabled.
+See the documentation of the CryptoProvider type for more information.
+
+error: process didn't exit successfully: `target\debug\rustcam-media.exe` (exit code: 1)

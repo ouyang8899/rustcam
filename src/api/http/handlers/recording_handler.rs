@@ -23,7 +23,8 @@ impl PaginationQuery {
 
 #[derive(Debug, Deserialize)]
 pub struct CreateRecordingReq {
-    pub device_id: i64,
+    pub device_tag: String,
+    pub channel_tag: Option<String>,
     pub format: Option<String>,
     pub duration_secs: Option<u32>,
     pub max_file_size_mb: Option<u32>,
@@ -37,8 +38,8 @@ pub async fn list_recordings_handler(
     Query(q): Query<PaginationQuery>,
 ) -> Result<Json<ApiResponse<PaginatedResponse<Recording>>>, AppError> {
     let registry = &state.app.registry;
-    let recordings = registry.recording_service.list_recordings_paginated(q.limit(), q.offset()).await;
-    let total = registry.recording_service.count_recordings().await;
+    let recordings = registry.recording_service.list_recordings_paginated(q.limit(), q.offset()).await?;
+    let total = registry.recording_service.count_recordings().await?;
 
     Ok(Json(ApiResponse::success(PaginatedResponse {
         items: recordings,
@@ -61,8 +62,20 @@ pub async fn create_recording_handler(
         _ => RecordingFormat::Mp4,
     };
 
+    let device = registry.device_service.get_device_by_device_tag(&req.device_tag)?
+        .ok_or_else(|| AppError::NotFound(format!("Device {} not found", req.device_tag)))?;
+
+    let channel_tag = req.channel_tag.clone().unwrap_or_else(|| {
+        let cache = registry.infra.db.streams_cache();
+        cache.iter()
+            .find(|s| s.device_tag.as_ref() == Some(&req.device_tag))
+            .and_then(|s| s.channel_tag.clone())
+            .unwrap_or_else(|| "recording".to_string())
+    });
+
     let recording_req = CreateRecordingRequest {
-        device_id: req.device_id,
+        device_tag: req.device_tag.clone(),
+        channel_tag: channel_tag.clone(),
         format: Some(format),
         duration_secs: req.duration_secs,
         max_file_size_mb: req.max_file_size_mb,
@@ -70,20 +83,10 @@ pub async fn create_recording_handler(
         labels: req.labels,
     };
 
-    let device = registry.device_service.get_device(req.device_id).await?
-        .ok_or_else(|| AppError::NotFound(format!("Device {} not found", req.device_id)))?;
-
-    let stream_id = {
-        let cache = registry.infra.db.streams_cache();
-        cache.iter()
-            .find(|s| s.device_id == req.device_id)
-            .map(|s| s.stream_key.clone())
-            .unwrap_or_else(|| format!("recording/{}", device.id))
-    };
     let media_server = device.media_server_tag.clone().unwrap_or_else(|| "auto".to_string());
 
     let recording = registry.recording_service.create_recording(
-        recording_req, stream_id, media_server,
+        recording_req, channel_tag, media_server,
     ).await;
 
     Ok(Json(ApiResponse::success(recording)))
@@ -94,7 +97,7 @@ pub async fn get_recording_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<Recording>>, AppError> {
-    let recording = state.app.registry.recording_service.get_recording(id)
+    let recording = state.app.registry.recording_service.get_recording(id).await?
         .ok_or_else(|| AppError::NotFound(format!("Recording {} not found", id)))?;
     Ok(Json(ApiResponse::success(recording)))
 }
@@ -148,7 +151,8 @@ pub async fn delete_recording_handler(
 pub async fn recording_stats_handler(
     State(state): State<Arc<FullState>>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    Ok(Json(state.app.registry.recording_service.get_stats()))
+    let stats = state.app.registry.recording_service.get_stats().await?;
+    Ok(Json(stats))
 }
 
 /// GET /api/v1/recordings/:id/files
@@ -165,7 +169,7 @@ pub async fn all_recording_files_handler(
     State(state): State<Arc<FullState>>,
 ) -> Result<Json<ApiResponse<Vec<crate::adapter::media_server::RecordingFile>>>, AppError> {
     let registry = &state.app.registry;
-    let all_recordings = registry.recording_service.list_recordings_paginated(1000, 0).await;
+    let all_recordings = registry.recording_service.list_recordings_paginated(1000, 0).await?;
     let mut all_files = Vec::new();
     for rec in all_recordings {
         if let Ok(files) = registry.recording_service.list_recorded_files(rec.id).await {

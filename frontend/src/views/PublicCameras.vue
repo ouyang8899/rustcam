@@ -125,7 +125,7 @@ async function openPreview(camera) {
   previewLoading.value = true
   previewCamera.value = true
   try {
-    const links = await deviceStore.getPlayLinks(camera.id)
+    const links = await deviceStore.getPlayLinks(camera.device_tag)
     if (links) {
       previewStreamUrl.value = links.hls || links.web_flv || links.rtsp_signaling || null
       previewStreamType.value = links.hls ? 'hls' : (links.web_flv || links.flv ? 'flv' : 'auto')

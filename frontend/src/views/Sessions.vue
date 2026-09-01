@@ -31,7 +31,7 @@
                   <el-tag size="small">{{ sessionTypeLabel(row.session_type) }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="设备ID" prop="device_id" width="120" align="center" />
+              <el-table-column label="设备标识" prop="device_tag" width="120" align="center" />
               <el-table-column label="流标识" prop="stream_id" min-width="180" show-overflow-tooltip />
               <el-table-column label="用户ID" prop="user_id" width="100" align="center" />
               <el-table-column label="客户端IP" width="130" align="center">
@@ -89,7 +89,7 @@ const filteredSessions = computed(() => {
     const q = searchQuery.value.toLowerCase()
     const matchSearch = !q
       || String(s.id).includes(q)
-      || String(s.device_id).includes(q)
+      || (s.device_tag || '').includes(q)
       || (s.stream_id || '').toLowerCase().includes(q)
       || (s.client_ip || '').includes(q)
     const matchState = !stateFilter.value || s.state === stateFilter.value

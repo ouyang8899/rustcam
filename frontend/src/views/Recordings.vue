@@ -38,7 +38,7 @@
                 </template>
               </el-table-column>
               <el-table-column label="设备" width="160">
-                <template #default="{ row }"><span>{{ deviceName(row.device_id) }}</span></template>
+                <template #default="{ row }"><span>{{ deviceName(row.device_tag) }}</span></template>
               </el-table-column>
               <el-table-column label="流标识" prop="stream_key" show-overflow-tooltip />
               <el-table-column label="格式" prop="format" width="80" />
@@ -197,7 +197,7 @@ const statCards = computed(() => [
 const filteredRecordings = computed(() => {
   const q = searchQuery.value.toLowerCase()
   return recordings.value.filter(r => {
-    const matchSearch = !q || r.device_id?.toLowerCase().includes(q) || r.stream_key?.toLowerCase().includes(q)
+    const matchSearch = !q || (r.device_tag || '').toLowerCase().includes(q) || (r.channel_tag || '').toLowerCase().includes(q)
     const matchState = !stateFilter.value || r.state === stateFilter.value
     return matchSearch && matchState
   })
@@ -352,9 +352,9 @@ function formatDate(dateStr) {
   return new Date(dateStr).toLocaleString('zh-CN', { hour12: false })
 }
 
-function deviceName(id) {
-  const d = deviceStore.devices.find(d => d.id === id)
-  return d ? d.name : id
+function deviceName(deviceTag) {
+  const d = deviceStore.devices.find(d => d.device_tag === deviceTag)
+  return d ? d.name : deviceTag
 }
 </script>
 

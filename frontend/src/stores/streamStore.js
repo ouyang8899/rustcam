@@ -32,10 +32,10 @@ export const useStreamStore = defineStore('streams', {
       return await api.getStreamPlayUrl(id, protocol)
     },
 
-    async startStream(deviceId, rtspUrl) {
+    async startStream(deviceTag, rtspUrl) {
       this.loading = true
       try {
-        const body = { device_id: deviceId }
+        const body = { device_tag: deviceTag }
         if (rtspUrl !== undefined && rtspUrl !== null && rtspUrl !== '') {
           body.rtsp_url = rtspUrl
         }
@@ -65,8 +65,8 @@ export const useStreamStore = defineStore('streams', {
       }
     },
 
-    hasActiveStream(deviceId) {
-      return this.streams.some(s => s.device_id === deviceId && (s.state === 'Active' || s.state === 'Starting' || s.state === 'Recovering'))
+    hasActiveStream(deviceTag) {
+      return this.streams.some(s => s.device_tag === deviceTag && (s.state === 'Active' || s.state === 'Starting' || s.state === 'Recovering'))
     },
   },
 })

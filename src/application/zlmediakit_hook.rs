@@ -885,15 +885,15 @@ impl ZlMediaKitHookHandler {
     // ============== 辅助方法 ==============
 
     fn find_stream_by_stream_key(&self, stream_key: &str) -> Option<crate::domain::Stream> {
+        let cache_key = stream_key.replace('_', "/");
         self.repo.streams_cache()
-            .iter()
-            .find(|s| s.stream_key == stream_key)
+            .get(&cache_key)
             .map(|s| s.clone())
     }
 
     fn find_device_by_stream_key(&self, stream_key: &str) -> Option<crate::domain::Device> {
-        self.find_stream_by_stream_key(stream_key)
-            .and_then(|s| self.repo.devices_cache().get(&s.device_id).map(|d| d.clone()))
+        let tag = self.find_stream_by_stream_key(stream_key)?.device_tag?;
+        self.repo.devices_cache().get(&tag).map(|d| d.clone())
     }
 
     async fn increment_stream_viewers(&self, stream_key: &str) -> Result<()> {
@@ -942,16 +942,19 @@ impl ZlMediaKitHookHandler {
                 s.start();
             }
             self.repo.update_stream(&s).await?;
-            tracing::info!("[ZlMediaKit Hook] on_publish: updated push stream {} (device_id={})", stream_id, s.device_id);
+            tracing::info!("[ZlMediaKit Hook] on_publish: updated push stream {} (device_tag={})", stream_id, s.device_tag.as_deref().unwrap_or("unknown"));
         } else {
+            let (device_tag, channel_tag) = crate::domain::parse_stream_key(stream_id)
+                .unwrap_or((stream_id.to_string(), stream_id.to_string()));
             let app = device_id
-                .and_then(|id| self.repo.devices_cache().get(&id))
+                .as_ref()
+                .and_then(|id| self.repo.devices_cache().get(id))
                 .map(|d| d.app.clone().unwrap_or_else(|| "live".to_string()))
                 .unwrap_or_else(|| "live".to_string());
             let mut stream = crate::domain::Stream::new(
-                device_id.unwrap_or(0),
                 media_server_tag.to_string(),
-                stream_id.to_string(),
+                device_tag,
+                channel_tag,
                 app,
                 uuid::Uuid::new_v4().to_string(),
             );
@@ -960,8 +963,8 @@ impl ZlMediaKitHookHandler {
             tracing::info!("[ZlMediaKit Hook] on_publish: registered push stream {} on server {}", stream_id, media_server_tag);
         }
 
-        if let Some(did) = device_id {
-            if let Some(device) = self.repo.devices_cache().get(&did) {
+        if let Some(ref did) = device_id {
+            if let Some(device) = self.repo.devices_cache().get(did) {
                 let mut device = (*device).clone();
                 device.set_online();
                 self.repo.update_device(&device).await?;
@@ -972,20 +975,20 @@ impl ZlMediaKitHookHandler {
         Ok(())
     }
 
-    fn find_device_by_push_stream(&self, stream_id: &str) -> Option<i64> {
+    fn find_device_by_push_stream(&self, stream_id: &str) -> Option<String> {
         for entry in self.repo.devices_cache().iter() {
             let device = entry.value();
             for pu in &device.push_urls {
                 if !pu.url.is_empty() && (pu.url.contains(stream_id) || stream_id.contains(&device.device_tag.clone().unwrap_or_default())) {
-                    return Some(device.id);
+                    return device.device_tag.clone();
                 }
             }
         }
         
-        let cache = self.repo.streams_cache();
-        cache.iter()
-            .find(|s| stream_id.contains(&s.stream_key) && !s.stream_key.is_empty())
-            .map(|s| s.device_id)
+        let cache_key = stream_id.replace('_', "/");
+        self.repo.streams_cache()
+            .get(&cache_key)
+            .and_then(|s| s.device_tag.clone())
     }
 
     async fn find_sessions_by_stream(&self, stream_id: &str) -> Vec<crate::domain::Session> {
@@ -993,7 +996,7 @@ impl ZlMediaKitHookHandler {
         self.repo.sessions_cache()
             .iter()
             .filter(|s| {
-                s.stream_id == stream_id
+                s.stream_key() == stream_id
                     && s.state != SessionState::Terminated
                     && s.state != SessionState::Terminating
             })

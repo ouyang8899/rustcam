@@ -4,12 +4,12 @@
 
 <insert id="recording_insert">
 INSERT INTO recordings (
-    id, device_id, stream_key, media_server_name, state, format,
+    id, device_tag, channel_tag, media_server_name, state, format,
     output_path, file_size, duration_secs,
     created_at, started_at, stopped_at,
     error_message, labels, filename
 ) VALUES (
-    #{id}, #{device_id}, #{stream_key}, #{media_server_name}, #{state}, #{format},
+    #{id}, #{device_tag}, #{channel_tag}, #{media_server_name}, #{state}, #{format},
     #{output_path}, #{file_size}, #{duration_secs},
     #{created_at}, #{started_at}, #{stopped_at},
     #{error_message}, #{labels}, #{filename}
@@ -19,8 +19,8 @@ INSERT INTO recordings (
 <update id="recording_update">
 UPDATE recordings
 <set>
-<if test="device_id != null">device_id = #{device_id},</if>
-<if test="stream_key != null">stream_key = #{stream_key},</if>
+<if test="device_tag != null">device_tag = #{device_tag},</if>
+<if test="channel_tag != null">channel_tag = #{channel_tag},</if>
 <if test="media_server_name != null">media_server_name = #{media_server_name},</if>
 <if test="state != null">state = #{state},</if>
 <if test="format != null">format = #{format},</if>
@@ -37,7 +37,7 @@ WHERE id = #{id}
 </update>
 
 <select id="select_all">
-SELECT id, device_id, stream_key, media_server_name, state, format,
+SELECT id, device_tag, channel_tag, media_server_name, state, format,
        output_path, file_size, duration_secs,
        created_at, started_at, stopped_at,
        error_message, labels, filename
@@ -46,7 +46,7 @@ ORDER BY created_at DESC
 </select>
 
 <select id="select_by_id">
-SELECT id, device_id, stream_key, media_server_name, state, format,
+SELECT id, device_tag, channel_tag, media_server_name, state, format,
        output_path, file_size, duration_secs,
        created_at, started_at, stopped_at,
        error_message, labels, filename
@@ -54,13 +54,13 @@ FROM recordings
 WHERE id = #{id}
 </select>
 
-<select id="select_by_device_id">
-SELECT id, device_id, stream_key, media_server_name, state, format,
+<select id="select_by_device_tag">
+SELECT id, device_tag, channel_tag, media_server_name, state, format,
        output_path, file_size, duration_secs,
        created_at, started_at, stopped_at,
        error_message, labels, filename
 FROM recordings
-WHERE device_id = #{device_id}
+WHERE device_tag = #{device_tag}
 ORDER BY created_at DESC
 </select>
 

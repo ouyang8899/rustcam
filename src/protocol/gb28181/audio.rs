@@ -47,7 +47,11 @@ pub fn ulaw_to_linear(encoded: &[u8]) -> Vec<i16> {
 }
 
 fn linear_to_alaw_sample(sample: i16) -> u8 {
-    let s = sample.abs().min(32767);
+    let s = if sample == i16::MIN {
+        32767
+    } else {
+        sample.abs().min(32767)
+    };
     let sign = if sample < 0 { 0x80u8 } else { 0 };
 
     let seg: u8 = if s < 256 {

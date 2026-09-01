@@ -58,7 +58,7 @@
             <template #header><span>绑定信息</span></template>
             <el-empty v-if="Object.keys(bindings).length === 0" description="暂无绑定" :image-size="40" />
             <div v-for="(binding, slotId) in bindings" :key="slotId" class="binding-item">
-              <el-text truncated style="flex: 1">{{ binding.name || binding.deviceId }}</el-text>
+              <el-text truncated style="flex: 1">{{ binding.name || binding.deviceTag }}</el-text>
               <el-button size="small" type="danger" plain circle :icon="Close" @click="stopSlot(slotId)" />
             </div>
           </el-card>
@@ -119,12 +119,12 @@ function buildRegionTree() {
   for (const device of deviceStore.devices) {
     const region = map.get(device.region_code)
     if (region) {
-      region.children.push({ name: device.name, key: `device_${device.id}`, isDevice: true, device, children: [] })
+      region.children.push({ name: device.name, key: `device_${device.device_tag}`, isDevice: true, device, children: [] })
     }
   }
   calcDeviceCount(roots)
   const allDevices = deviceStore.devices.map(d => ({
-    name: d.name, key: `device_${d.id}`, isDevice: true, device: d, children: []
+    name: d.name, key: `device_${d.device_tag}`, isDevice: true, device: d, children: []
   }))
   return [{ name: '全部', key: 'all', children: allDevices }, ...roots]
 }
@@ -143,12 +143,12 @@ function buildGroupTree() {
   for (const device of deviceStore.devices) {
     const group = map.get(device.group_id)
     if (group) {
-      group.children.push({ name: device.name, key: `device_${device.id}`, isDevice: true, device, children: [] })
+      group.children.push({ name: device.name, key: `device_${device.device_tag}`, isDevice: true, device, children: [] })
     }
   }
   calcDeviceCount(roots)
   const allDevices = deviceStore.devices.map(d => ({
-    name: d.name, key: `device_${d.id}`, isDevice: true, device: d, children: []
+    name: d.name, key: `device_${d.device_tag}`, isDevice: true, device: d, children: []
   }))
   return [{ name: '全部', key: 'all', children: allDevices }, ...roots]
 }
@@ -173,15 +173,15 @@ let draggingDeviceId = null
 let draggingDevice = null
 let draggingRtspUrl = null
 
-async function getPlayLinks(deviceId) {
-  const res = await request.get(`/devices/${deviceId}/play-links`)
+async function getPlayLinks(deviceTag, channelTag) {
+  const res = await request.get(`/channels/${deviceTag}/${channelTag}/play-links`)
   return res.data.data || {}
 }
 
-async function getStreamRtspUrl(deviceId) {
-  const res = await request.get('/streams', { params: { device_id: deviceId } })
-  const streams = res.data.data?.items || []
-  const stream = streams.find(s => s.device_id === deviceId)
+async function getStreamRtspUrl(deviceTag) {
+  const res = await request.get(`/streams/by-device/${deviceTag}`)
+  const streams = res.data.data || []
+  const stream = streams.find(s => s.device_tag === deviceTag && s.state === 'Active')
   if (!stream) return null
   const urlRes = await request.get(`/streams/${stream.id}/play`, { params: { protocol: 'rtsp' } })
   return urlRes.data.data
@@ -251,16 +251,18 @@ async function onLayoutChange() {
 }
 
 async function onDragStart(event, device) {
-  draggingDeviceId = device.id; draggingDevice = device; draggingRtspUrl = null
-  const payload = JSON.stringify({ deviceId: device.id, name: device.name, rtspUrl: null })
+  const deviceTag = device.device_tag
+  draggingDeviceId = deviceTag; draggingDevice = device; draggingRtspUrl = null
+  const channelTag = deviceTag
+  const payload = JSON.stringify({ deviceTag, name: device.name, rtspUrl: null })
   event.dataTransfer.setData('application/json', payload); event.dataTransfer.effectAllowed = 'copy'
   try {
-    const links = await getPlayLinks(device.id)
-    let rtspUrl = links.rtsp_url || links.rtsp_media || null
-    if (!rtspUrl) rtspUrl = await getStreamRtspUrl(device.id)
+    const links = await getPlayLinks(deviceTag, channelTag)
+    let rtspUrl = links.rtsp_signaling || links.rtsp_media || null
+    if (!rtspUrl) rtspUrl = await getStreamRtspUrl(deviceTag)
     if (rtspUrl) {
       draggingRtspUrl = rtspUrl
-      event.dataTransfer.setData('application/json', JSON.stringify({ deviceId: device.id, name: device.name, rtspUrl }))
+      event.dataTransfer.setData('application/json', JSON.stringify({ deviceTag, name: device.name, rtspUrl }))
     }
   } catch (err) { console.warn('[PlayerWall] pre-fetch rtsp url failed:', err) }
 }
@@ -273,10 +275,10 @@ async function onDrop(event) {
   if (!playerWindow) { toast.error('请先选择布局'); return }
   const rawData = event.dataTransfer.getData('application/json')
   if (!rawData) return
-  let deviceId, deviceName, rtspUrl
+  let deviceTag, deviceName, rtspUrl
   try {
     const data = JSON.parse(rawData)
-    deviceId = data.deviceId; deviceName = data.name; rtspUrl = data.rtspUrl
+    deviceTag = data.deviceTag; deviceName = data.name; rtspUrl = data.rtspUrl
   } catch { toast.error('数据格式错误'); return }
   if (!rtspUrl) { toast.error('该设备无可用播放地址'); return }
 
@@ -291,8 +293,8 @@ async function onDrop(event) {
 
   try {
     playerWindow.selectLayoutItem(targetItemId)
-    const player = await playerWindow.playOnSelected(rtspUrl, { deviceId, name: deviceName })
-    bindings.value[targetItemId] = { deviceId, name: deviceName, playerId: player.id, rtspUrl, slotId: targetItemId }
+    const player = await playerWindow.playOnSelected(rtspUrl, { deviceTag, name: deviceName })
+    bindings.value[targetItemId] = { deviceTag, name: deviceName, playerId: player.id, rtspUrl, slotId: targetItemId }
   } catch (err) { toast.error('播放失败: ' + (err.message || String(err))) }
 }
 

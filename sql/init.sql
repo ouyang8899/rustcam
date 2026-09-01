@@ -107,9 +107,9 @@ CREATE INDEX IF NOT EXISTS idx_servers_enabled ON servers(enabled);
 -- ============================================
 CREATE TABLE IF NOT EXISTS streams (
     id BIGSERIAL PRIMARY KEY,
-    device_id BIGINT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    device_tag VARCHAR(255),
+    channel_tag VARCHAR(255),
     media_server_tag VARCHAR(255) NOT NULL DEFAULT '',
-    stream_key VARCHAR(255) NOT NULL DEFAULT '',
     app VARCHAR(255) NOT NULL DEFAULT '',
     token VARCHAR(255) NOT NULL DEFAULT '',
     state VARCHAR(50) NOT NULL DEFAULT 'Idle',
@@ -122,10 +122,9 @@ CREATE TABLE IF NOT EXISTS streams (
     last_keepalive_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_streams_device_id ON streams(device_id);
+CREATE INDEX IF NOT EXISTS idx_streams_device_tag ON streams(device_tag);
 CREATE INDEX IF NOT EXISTS idx_streams_state ON streams(state);
 CREATE INDEX IF NOT EXISTS idx_streams_token ON streams(token);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_streams_device_stream_key ON streams(device_id, stream_key);
 
 -- ============================================
 -- Sessions Table
@@ -133,22 +132,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_streams_device_stream_key ON streams(devic
 CREATE TABLE IF NOT EXISTS sessions (
     id BIGSERIAL PRIMARY KEY,
     session_type VARCHAR(50) NOT NULL,
-    device_id BIGINT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
     user_id BIGINT NOT NULL,
     state VARCHAR(50) NOT NULL DEFAULT 'initializing',
     client_ip VARCHAR(255),
     client_type VARCHAR(100),
-    media_server_id VARCHAR(255),
-    stream_id VARCHAR(255) NOT NULL DEFAULT '',
+    media_server_tag VARCHAR(255),
     protocol VARCHAR(50),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_activity TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMPTZ,
     bytes_sent BIGINT NOT NULL DEFAULT 0,
-    bytes_received BIGINT NOT NULL DEFAULT 0
+    bytes_received BIGINT NOT NULL DEFAULT 0,
+    device_tag VARCHAR(255),
+    channel_tag VARCHAR(255)
 );
-CREATE INDEX IF NOT EXISTS idx_sessions_device_id ON sessions(device_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_device_tag ON sessions(device_tag);
 CREATE INDEX IF NOT EXISTS idx_sessions_state ON sessions(state);
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 
@@ -157,8 +156,8 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 -- ============================================
 CREATE TABLE IF NOT EXISTS recordings (
     id BIGSERIAL PRIMARY KEY,
-    device_id BIGINT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-    stream_key VARCHAR(255) NOT NULL,
+    device_tag VARCHAR(255),
+    channel_tag VARCHAR(255),
     media_server_name VARCHAR(255) NOT NULL,
     state VARCHAR(50) NOT NULL DEFAULT 'Starting',
     format VARCHAR(50) NOT NULL DEFAULT 'MP4',
@@ -172,7 +171,7 @@ CREATE TABLE IF NOT EXISTS recordings (
     labels TEXT,
     filename TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_recordings_device_id ON recordings(device_id);
+CREATE INDEX IF NOT EXISTS idx_recordings_device_tag ON recordings(device_tag);
 CREATE INDEX IF NOT EXISTS idx_recordings_state ON recordings(state);
 CREATE INDEX IF NOT EXISTS idx_recordings_created_at ON recordings(created_at);
 

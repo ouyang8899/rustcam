@@ -85,14 +85,14 @@ async fn handle_socket(
 /// WebSocket audio talk handler (Browser -> Device)
 pub async fn audio_talk_handler(
     ws: WebSocketUpgrade,
-    Path(device_id): Path<i64>,
+    Path(device_tag): Path<String>,
     State(state): State<Arc<FullState>>,
 ) -> Result<axum::response::Response, AppError> {
-    tracing::info!("[AudioTalk] WebSocket connection request for device {}", device_id);
-    Ok(ws.on_upgrade(move |socket| handle_audio_talk(socket, device_id, state)))
+    tracing::info!("[AudioTalk] WebSocket connection request for device {}", device_tag);
+    Ok(ws.on_upgrade(move |socket| handle_audio_talk(socket, device_tag, state)))
 }
 
-async fn handle_audio_talk(socket: WebSocket, device_id: i64, state: Arc<FullState>) {
+async fn handle_audio_talk(socket: WebSocket, device_tag: String, state: Arc<FullState>) {
     let (mut sender, mut receiver) = socket.split();
 
     loop {
@@ -100,9 +100,9 @@ async fn handle_audio_talk(socket: WebSocket, device_id: i64, state: Arc<FullSta
             msg = receiver.next() => {
                 match msg {
                     Some(Ok(Message::Binary(data))) => {
-                        tracing::debug!("[AudioTalk] Received {} bytes from browser for device {}", data.len(), device_id);
+                        tracing::debug!("[AudioTalk] Received {} bytes from browser for device {}", data.len(), device_tag);
 
-                        if let Some(device) = state.app.registry.device_service.get_device(device_id).await.ok().flatten() {
+                        if let Some(device) = state.app.registry.device_service.get_device_by_device_tag(&device_tag).ok().flatten() {
                             if let Some(adapter_key) = device.device_tag.clone() {
                                 if let Some(adapter) = adapter_manager::get_adapter(&adapter_key) {
                                     let mut guard = adapter.lock().await;
@@ -127,7 +127,7 @@ async fn handle_audio_talk(socket: WebSocket, device_id: i64, state: Arc<FullSta
                         }
                     }
                     Some(Ok(Message::Close(_))) => {
-                        tracing::info!("[AudioTalk] Client closed connection for device {}", device_id);
+                        tracing::info!("[AudioTalk] Client closed connection for device {}", device_tag);
                         break;
                     }
                     Some(Err(e)) => {
@@ -135,7 +135,7 @@ async fn handle_audio_talk(socket: WebSocket, device_id: i64, state: Arc<FullSta
                         break;
                     }
                     None => {
-                        tracing::info!("[AudioTalk] Client disconnected for device {}", device_id);
+                        tracing::info!("[AudioTalk] Client disconnected for device {}", device_tag);
                         break;
                     }
                     _ => {}
@@ -144,5 +144,5 @@ async fn handle_audio_talk(socket: WebSocket, device_id: i64, state: Arc<FullSta
         }
     }
 
-    tracing::info!("[AudioTalk] Connection closed for device {}", device_id);
+    tracing::info!("[AudioTalk] Connection closed for device {}", device_tag);
 }

@@ -50,12 +50,28 @@ impl StreamState {
     }
 }
 
+pub fn make_stream_key(device_tag: &str, channel_tag: &str) -> String {
+    format!("{}_{}", device_tag, channel_tag)
+}
+
+pub fn parse_stream_key(stream_key: &str) -> Option<(String, String)> {
+    let parts: Vec<&str> = stream_key.split('_').collect();
+    if parts.len() >= 2 {
+        let channel_tag = parts.last().unwrap();
+        let device_tag = &stream_key[..stream_key.len() - channel_tag.len() - 1];
+        if !device_tag.is_empty() && !channel_tag.is_empty() {
+            return Some((device_tag.to_string(), channel_tag.to_string()));
+        }
+    }
+    None
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Stream {
     pub id: i64,
-    pub device_id: i64,
+    pub device_tag: Option<String>,
+    pub channel_tag: Option<String>,
     pub media_server_tag: String,
-    pub stream_key: String,
     pub app: String,
     pub token: String,
     pub state: StreamState,
@@ -74,17 +90,17 @@ pub struct Stream {
 
 impl Stream {
     pub fn new(
-        device_id: i64,
         media_server_tag: String,
-        stream_key: String,
+        device_tag: String,
+        channel_tag: String,
         app: String,
         token: String,
     ) -> Self {
         Self {
             id: 0,
-            device_id,
+            device_tag: Some(device_tag),
+            channel_tag: Some(channel_tag),
             media_server_tag,
-            stream_key,
             app,
             token,
             state: StreamState::Starting,
@@ -149,5 +165,10 @@ impl Stream {
     pub fn update_bandwidth(&mut self, bytes_in: u64, bytes_out: u64) {
         self.bandwidth_in = bytes_in;
         self.bandwidth_out = bytes_out;
+    }
+
+    pub fn set_channel(&mut self, device_tag: String, channel_tag: String) {
+        self.device_tag = Some(device_tag.clone());
+        self.channel_tag = Some(channel_tag.clone());
     }
 }

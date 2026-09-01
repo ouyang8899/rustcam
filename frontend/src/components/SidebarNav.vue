@@ -23,7 +23,7 @@
         node-key="path"
         :current-node-key="currentPath"
         :highlight-current="true"
-        :expand-on-click-node="false"
+        :expand-on-click-node="true"
         :default-expand-all="false"
         class="sidebar-menu-tree"
         @node-click="onTreeNodeClick"
@@ -124,8 +124,17 @@ let ws = null
 
 const navItems = [
   { path: '/', label: '监控台', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>' },
-  { path: '/devices', label: '设备管理', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' },
   {
+    path: '__devices__',
+    label: '设备管理',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
+    children: [
+      { path: '/devices', label: '设备列表' },
+      { path: '/channels', label: '通道列表' },
+    ]
+  },
+  {
+    path: '__streams__',
     label: '视频流',
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>',
     children: [
@@ -169,7 +178,8 @@ function onNavClick(path) {
 }
 
 function onTreeNodeClick(data) {
-  if (data.path && data.path !== 'admin') {
+  // Skip parent nodes (those with __ prefix) - they are just for grouping
+  if (data.path && !data.path.startsWith('__') && data.path !== 'admin') {
     emit('navigate', data.path)
   }
 }

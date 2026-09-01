@@ -55,8 +55,8 @@ impl fmt::Display for RecordingFormat {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Recording {
     pub id: i64,
-    pub device_id: i64,
-    pub stream_key: String,
+    pub device_tag: Option<String>,
+    pub channel_tag: Option<String>,
     pub media_server_name: String,
     pub state: RecordingState,
     pub format: RecordingFormat,
@@ -73,15 +73,15 @@ pub struct Recording {
 
 impl Recording {
     pub fn new(
-        device_id: i64,
-        stream_key: String,
+        device_tag: String,
+        channel_tag: String,
         media_server_name: String,
         format: RecordingFormat,
     ) -> Self {
         Self {
             id: 0,
-            device_id,
-            stream_key,
+            device_tag: Some(device_tag),
+            channel_tag: Some(channel_tag),
             media_server_name,
             state: RecordingState::Starting,
             format,
@@ -95,6 +95,12 @@ impl Recording {
             labels: Vec::new(),
             filename: None,
         }
+    }
+
+    pub fn stream_key(&self) -> String {
+        let device = self.device_tag.as_deref().unwrap_or("");
+        let channel = self.channel_tag.as_deref().unwrap_or("");
+        crate::domain::stream::make_stream_key(device, channel)
     }
 
     pub fn start(&mut self) {
@@ -144,7 +150,8 @@ impl Recording {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateRecordingRequest {
-    pub device_id: i64,
+    pub device_tag: String,
+    pub channel_tag: String,
     pub format: Option<RecordingFormat>,
     pub duration_secs: Option<u32>,
     pub max_file_size_mb: Option<u32>,
@@ -154,7 +161,7 @@ pub struct CreateRecordingRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingListQuery {
-    pub device_id: Option<i64>,
+    pub device_tag: Option<String>,
     pub state: Option<RecordingState>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,

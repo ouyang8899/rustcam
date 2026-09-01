@@ -29,6 +29,13 @@ pub fn get_gb28181_platform_config() -> &'static OnceCell<(String, String, Strin
     &GB28181_PLATFORM_CONFIG
 }
 
+pub fn detect_local_ip(remote_ip: &str) -> Option<String> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect(format!("{}:5060", remote_ip)).ok()?;
+    let local = socket.local_addr().ok()?;
+    Some(local.ip().to_string())
+}
+
 static TCP_AUDIO_SERVER_POOL: OnceCell<Arc<TcpAudioServerPool>> = OnceCell::new();
 
 pub fn init_tcp_audio_server_pool(config: TcpAudioServerConfig) {

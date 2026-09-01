@@ -42,7 +42,7 @@
               <code class="stream-key">{{ row.stream_key || row.id }}</code>
             </template>
           </el-table-column>
-          <el-table-column label="设备ID" prop="device_id" width="100" align="center" />
+          <el-table-column label="设备标识" prop="device_tag" width="120" align="center" />
           <el-table-column label="状态" width="110" align="center">
             <template #default="{ row }">
               <el-tag :type="stateType(row.state)" size="small">{{ stateLabel(row.state) }}</el-tag>
@@ -211,8 +211,8 @@ async function addStream() {
 
 async function confirmMaintenance(stream) {
   try {
-    await ElMessageBox.confirm(`确定让设备 "${stream.device_id}" 进入维护状态吗？`, '确认维护', { type: 'warning' })
-    await deviceStore.updateDevice(stream.device_id, { status: 'Maintaining' })
+    await ElMessageBox.confirm(`确定让设备 "${stream.device_tag}" 进入维护状态吗？`, '确认维护', { type: 'warning' })
+    await deviceStore.updateDevice(stream.device_tag, { status: 'Maintaining' })
   } catch {}
 }
 

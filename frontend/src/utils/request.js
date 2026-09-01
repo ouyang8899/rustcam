@@ -56,27 +56,9 @@ request.interceptors.response.use(
 
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true
-      const refreshToken = getRefreshToken()
-
-      if (refreshToken) {
-        try {
-          const res = await axios.post('/api/v1/auth/refresh', {
-            refresh_token: refreshToken,
-          })
-          if (res.data.code === 200) {
-            const data = res.data.data
-            setTokens(data.access_token, data.refresh_token)
-            originalRequest.headers.Authorization = `Bearer ${data.access_token}`
-            return request(originalRequest)
-          }
-        } catch (refreshError) {
-          clearTokens()
-          window.location.href = '/login'
-          return Promise.reject(refreshError)
-        }
-      }
-
       clearTokens()
+      
+      ElMessage.warning('登录已过期，请重新登录')
       window.location.href = '/login'
       return Promise.reject(error)
     }

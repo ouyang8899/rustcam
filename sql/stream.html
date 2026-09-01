@@ -1,18 +1,18 @@
 <mapper>
 <select id="select_by_id">
-SELECT id, device_id, media_server_tag, stream_key, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at
+SELECT id, device_tag, channel_tag, media_server_tag, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at
 FROM streams
 WHERE id = #{id}
 </select>
 
 <select id="select_all">
-SELECT id, device_id, media_server_tag, stream_key, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at
+SELECT id, device_tag, channel_tag, media_server_tag, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at
 FROM streams
 ORDER BY created_at DESC
 </select>
 
 <select id="stream_select_active_paginated">
-SELECT id, device_id, media_server_tag, stream_key, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at
+SELECT id, device_tag, channel_tag, media_server_tag, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at
 FROM streams
 WHERE state = 'active'
 ORDER BY created_at DESC
@@ -23,21 +23,14 @@ LIMIT #{limit} OFFSET #{offset}
 SELECT COUNT(*) FROM streams WHERE state = 'active'
 </select>
 
-<select id="select_by_device_id">
-SELECT id, device_id, media_server_tag, stream_key, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at
-FROM streams
-WHERE device_id = #{device_id}
-ORDER BY created_at DESC
-</select>
-
 <select id="select_by_stream_key">
-SELECT id, device_id, media_server_tag, stream_key, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at
+SELECT id, device_tag, channel_tag, media_server_tag, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at
 FROM streams
-WHERE stream_key = #{stream_key}
+WHERE device_tag = #{device_tag} AND channel_tag = #{channel_tag}
 </select>
 
 <select id="select_by_token">
-SELECT id, device_id, media_server_tag, stream_key, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at
+SELECT id, device_tag, channel_tag, media_server_tag, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at
 FROM streams
 WHERE token = #{token}
 </select>
@@ -45,9 +38,9 @@ WHERE token = #{token}
 <update id="stream_update">
 UPDATE streams
 <set>
-<if test="device_id != null">device_id = #{device_id},</if>
+<if test="device_tag != null">device_tag = #{device_tag},</if>
+<if test="channel_tag != null">channel_tag = #{channel_tag},</if>
 <if test="media_server_tag != null">media_server_tag = #{media_server_tag},</if>
-<if test="stream_key != null">stream_key = #{stream_key},</if>
 <if test="state != null">state = #{state},</if>
 <if test="retry_count != null">retry_count = #{retry_count},</if>
 <if test="max_retries != null">max_retries = #{max_retries},</if>
@@ -59,10 +52,6 @@ UPDATE streams
 </set>
 WHERE id = #{id}
 </update>
-
-<delete id="delete_by_device_id">
-DELETE FROM streams WHERE device_id = #{device_id}
-</delete>
 
 <delete id="delete_by_id">
 DELETE FROM streams WHERE id = #{id}

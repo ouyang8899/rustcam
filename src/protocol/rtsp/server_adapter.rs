@@ -774,6 +774,27 @@ impl RtspServerAdapter {
 
         self.handle_request(&method, &url, &headers, &body).await
     }
+    
+    async fn send_teardown(&self, stream_key: &str) -> Result<()> {
+        let cseq = self.cseq + 1;
+        let remote_host = self.remote_addr
+            .map(|addr| addr.ip().to_string())
+            .unwrap_or_else(|| "127.0.0.1".to_string());
+        
+        let teardown = format!(
+            "TEARDOWN rtsp://{}/{} RTSP/1.0\r\n\
+             CSeq: {}\r\n\
+             Session: {}\r\n\
+             User-Agent: RustCam-Media/2.0\r\n\r\n",
+            remote_host,
+            stream_key,
+            cseq,
+            self.session.as_deref().unwrap_or("")
+        );
+        
+        tracing::info!("[RTSP] Sending TEARDOWN for stream: {}", stream_key);
+        self.send_raw(teardown.as_bytes()).await
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -827,6 +848,8 @@ impl SignalAdapter for RtspServerAdapter {
             } else {
                 sess_id.clone()
             };
+
+            self.send_teardown(&stream_key).await?;
 
             self.deps.rtp_tunnel.unregister(&stream_key);
             remove_session(sess_id);

@@ -40,7 +40,7 @@ export async function restartStream(id) {
   return res.data
 }
 
-export async function getStreamsByDevice(deviceId) {
-  const res = await request.get(`/streams/by-device/${deviceId}`)
+export async function getStreamsByDevice(deviceTag) {
+  const res = await request.get(`/streams/by-device/${deviceTag}`)
   return res.data.data
 }

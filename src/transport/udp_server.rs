@@ -100,15 +100,25 @@ impl UdpServer {
                     let data = buf[..n].to_vec();
                     let addr_key = addr.to_string();
 
-                    let protocol = match self.registry.match_protocol(&data) {
-                        Some(p) => p,
-                        None => {
-                            tracing::warn!("[UdpServer] Unknown protocol from {}: {:?}", addr, &data[..data.len().min(100)]);
-                            continue;
-                        }
-                    };
+                    tracing::info!("[UdpServer] Received {} bytes from {}\n{}", n, addr_key, String::from_utf8_lossy(&data));
 
-                    let entry = self.get_or_create_adapter(&addr_key, &protocol).await;
+                    let entry = if let Some(existing) = self.adapters.get(&addr_key) {
+                        tracing::debug!("[UdpServer] Found existing adapter for {}", addr_key);
+                        existing.value().clone()
+                    } else {
+                        tracing::debug!("[UdpServer] No existing adapter for {}, matching protocol", addr_key);
+                        let protocol = match self.registry.match_protocol(&data) {
+                            Some(p) => {
+                                tracing::debug!("[UdpServer] Protocol matched: {:?} from data: {:?}", p, &data[..data.len().min(50)]);
+                                p
+                            },
+                            None => {
+                                tracing::warn!("[UdpServer] Unknown protocol from {}: {:?}", addr, &data[..data.len().min(100)]);
+                                continue;
+                            }
+                        };
+                        self.get_or_create_adapter(&addr_key, &protocol).await
+                    };
                     entry.last_active.store(chrono::Utc::now().timestamp(), std::sync::atomic::Ordering::Relaxed);
 
                     let adapter = entry.adapter.clone();
@@ -157,10 +167,11 @@ impl UdpServer {
         protocol: &ProtocolType,
     ) -> Arc<UdpAdapterEntry> {
         if let Some(entry) = self.adapters.get(addr_key) {
+            tracing::debug!("[UdpServer] get_or_create: found existing for {}", addr_key);
             return entry.value().clone();
         }
 
-        tracing::info!("[UdpServer] Creating new adapter for {}", addr_key);
+        tracing::info!("[UdpServer] Creating new adapter for {} with protocol {:?}", addr_key, protocol);
 
         let mut adapter = self.registry.create_adapter(protocol, self.deps.clone())
             .expect("No adapter for protocol");

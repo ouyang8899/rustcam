@@ -116,7 +116,7 @@
           <el-card shadow="never" style="margin-top: 16px">
             <template #header>
               <span>设备信息</span>
-              <el-button text size="small" style="float: right" @click="$router.push(`/devices/${device.id}`)">
+              <el-button text size="small" style="float: right" @click="$router.push(`/devices/${device.device_tag}`)">
                 查看详情
               </el-button>
             </template>

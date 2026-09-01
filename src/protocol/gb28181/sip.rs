@@ -19,16 +19,23 @@ impl SipVia {
         let mut parts = s.split_whitespace();
         let protocol = parts.next()?;
         let protocol_parts: Vec<&str> = protocol.split('/').collect();
-        if protocol_parts.len() != 2 {
-            return None;
-        }
-        let protocol_name = protocol_parts[0].to_string();
-        let protocol_version = protocol_parts[1].to_string();
-
-        let transport = parts.next()?.to_string();
+        // SIP Via format: SIP/2.0/UDP or SIP/2.0/TCP
+        let (protocol_name, protocol_version, transport) = match protocol_parts.len() {
+            3 => (
+                protocol_parts[0].to_string(),
+                protocol_parts[1].to_string(),
+                protocol_parts[2].to_string(),
+            ),
+            2 => (
+                protocol_parts[0].to_string(),
+                protocol_parts[1].to_string(),
+                "UDP".to_string(),
+            ),
+            _ => return None,
+        };
 
         let sent_by = parts.next()?;
-        let (host, port) = if let Some(pos) = sent_by.rfind(':') {
+        let (sent_by_host, port) = if let Some(pos) = sent_by.rfind(':') {
             let potential_port: &str = &sent_by[pos + 1..];
             if potential_port.parse::<u16>().is_ok() {
                 (&sent_by[..pos], Some(potential_port.parse().ok()?))
@@ -39,43 +46,33 @@ impl SipVia {
             (sent_by, None)
         };
 
+        // sent_by might contain semicolon parameters like ";branch=..."
+        let (final_sent_by, mut extension) = if let Some(semi_pos) = sent_by.find(';') {
+            let host_part = &sent_by[..semi_pos];
+            let params_part = &sent_by[semi_pos + 1..];
+            let mut ext = HashMap::new();
+            for param in params_part.split(';') {
+                if let Some((k, v)) = param.split_once('=') {
+                    ext.insert(k.trim().to_lowercase(), v.trim().to_string());
+                }
+            }
+            (host_part, ext)
+        } else {
+            (sent_by, HashMap::new())
+        };
+
         let mut via = Self {
             protocol_name,
             protocol_version,
             transport,
-            sent_by_host: host.to_string(),
+            sent_by_host: final_sent_by.to_string(),
             sent_by_port: port,
             ttl: None,
             maddr: None,
             received: None,
-            branch: None,
-            extension: HashMap::new(),
+            branch: extension.remove("branch"),
+            extension,
         };
-
-        let remaining: String = parts.collect::<Vec<_>>().join(" ");
-        for param in remaining.split(';') {
-            let param = param.trim();
-            if param.is_empty() {
-                continue;
-            }
-            if let Some((k, v)) = param.split_once('=') {
-                let k = k.trim().to_lowercase();
-                let v = v.trim();
-                match k.as_str() {
-                    "ttl" => via.ttl = v.parse().ok(),
-                    "maddr" => via.maddr = Some(v.to_string()),
-                    "received" => via.received = Some(v.to_string()),
-                    "branch" => via.branch = Some(v.to_string()),
-                    _ => {
-                        via.extension.insert(k, v.to_string());
-                    }
-                }
-            } else {
-                if param == "rport" {
-                    via.extension.insert("rport".to_string(), String::new());
-                }
-            }
-        }
 
         Some(via)
     }
@@ -656,6 +653,14 @@ impl SipMessage {
             "server" => self.headers.server = Some(value.to_string()),
             "allow" => self.headers.allow = Some(value.to_string()),
             "accept" => self.headers.accept = Some(value.to_string()),
+            "cseq" => {
+                if let Some(space_idx) = value.find(' ') {
+                    if let Ok(num) = value[..space_idx].parse::<u32>() {
+                        self.headers.cseq_num = Some(num);
+                        self.headers.cseq_method = Some(value[space_idx + 1..].trim().to_string());
+                    }
+                }
+            }
             _ => {
                 self.headers.others.insert(name_lower, value.to_string());
             }

@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use dashmap::DashMap;
 use crate::context::{InfraContext, MediaContext};
 use crate::domain::device::RecordingConfig;
 use crate::domain::recording::{
@@ -15,7 +14,6 @@ use crate::error::{AppError, Result};
 /// - InfraContext (仅 db)
 /// - MediaContext (仅 cluster)
 pub struct RecordingService {
-    recordings: Arc<DashMap<i64, Recording>>,
     repo: Arc<crate::infrastructure::DbRepository>,
     cluster: Arc<crate::infrastructure::cluster::ClusterManager>,
 }
@@ -25,9 +23,7 @@ impl RecordingService {
         repo: Arc<crate::infrastructure::DbRepository>,
         cluster: Arc<crate::infrastructure::cluster::ClusterManager>,
     ) -> Self {
-        let recordings = repo.recordings_cache().clone();
         Self {
-            recordings,
             repo,
             cluster,
         }
@@ -37,49 +33,47 @@ impl RecordingService {
     pub async fn create_recording(
         &self,
         req: CreateRecordingRequest,
-        stream_key: String,
+        channel_tag: String,
         media_server: String,
     ) -> Recording {
         let format = req.format.unwrap_or(RecordingFormat::Mp4);
-        let mut recording = Recording::new(req.device_id, stream_key, media_server, format);
+        let mut recording = Recording::new(req.device_tag.clone(), channel_tag, media_server, format);
 
         if let Some(labels) = req.labels {
             recording.labels = labels;
         }
 
-        self.recordings.insert(recording.id, recording.clone());
-
         if let Err(e) = self.repo.create_recording(&recording).await {
             tracing::error!("[RecordingService] Failed to persist recording {}: {}", recording.id, e);
         }
 
-        tracing::info!("[RecordingService] Created recording {} for device {}", recording.id, req.device_id);
+        tracing::info!("[RecordingService] Created recording {} for device {}", recording.id, req.device_tag);
         recording
     }
 
     /// 获取录制
-    pub fn get_recording(&self, id: i64) -> Option<Recording> {
-        self.recordings.get(&id).map(|r| r.clone())
+    pub async fn get_recording(&self, id: i64) -> Result<Option<Recording>> {
+        self.repo.get_recording(id).await
     }
 
     /// 开始录制
     pub async fn start_recording(&self, id: i64) -> Result<Recording> {
-        let mut recording = self.recordings.get_mut(&id)
+        let mut recording = self.repo.get_recording(id).await?
             .ok_or_else(|| AppError::NotFound(format!("Recording {} not found", id)))?;
 
         let format_str = Self::format_to_str(recording.format.clone());
 
-        let app = self.repo.streams_cache().iter()
-            .find(|s| s.stream_key == recording.stream_key)
+        let cache_key = format!("{}/{}", recording.device_tag.as_deref().unwrap_or(""), recording.channel_tag.as_deref().unwrap_or(""));
+        let app = self.repo.streams_cache().get(&cache_key)
             .map(|s| s.app.clone())
             .unwrap_or_else(|| "live".to_string());
 
         let rec_info = if let Some(adapter) = self.cluster.get_server(&recording.media_server_name) {
-            match adapter.start_recording(&app, &recording.stream_key, format_str, recording.output_path.as_deref()).await {
+            match adapter.start_recording(&app, &recording.stream_key(), format_str, recording.output_path.as_deref()).await {
                 Ok(info) => {
                     tracing::info!(
                         "[RecordingService] Media server started recording: {} -> {}",
-                        recording.stream_key, info.output_path
+                        recording.stream_key(), info.output_path
                     );
                     Some(info)
                 }
@@ -113,24 +107,24 @@ impl RecordingService {
             tracing::error!("[RecordingService] Failed to persist: {}", e);
         }
 
-        tracing::info!("[RecordingService] Started recording {} (id={})", recording.stream_key, id);
-        Ok(recording.clone())
+        tracing::info!("[RecordingService] Started recording {} (id={})", recording.stream_key(), id);
+        Ok(recording)
     }
 
     /// 停止录制
     pub async fn stop_recording(&self, id: i64) -> Result<Recording> {
-        let mut recording = self.recordings.get_mut(&id)
+        let mut recording = self.repo.get_recording(id).await?
             .ok_or_else(|| AppError::NotFound(format!("Recording {} not found", id)))?;
 
         let format_str = Self::format_to_str(recording.format.clone());
 
-        let app = self.repo.streams_cache().iter()
-            .find(|s| s.stream_key == recording.stream_key)
+        let cache_key = format!("{}/{}", recording.device_tag.as_deref().unwrap_or(""), recording.channel_tag.as_deref().unwrap_or(""));
+        let app = self.repo.streams_cache().get(&cache_key)
             .map(|s| s.app.clone())
             .unwrap_or_else(|| "live".to_string());
 
         if let Some(adapter) = self.cluster.get_server(&recording.media_server_name) {
-            if let Err(e) = adapter.stop_recording(&app, &recording.stream_key, format_str).await {
+            if let Err(e) = adapter.stop_recording(&app, &recording.stream_key(), format_str).await {
                 tracing::warn!("[RecordingService] Failed to stop recording on media server: {}", e);
             }
         }
@@ -141,12 +135,12 @@ impl RecordingService {
         }
 
         tracing::info!("[RecordingService] Stopped recording {}", id);
-        Ok(recording.clone())
+        Ok(recording)
     }
 
     /// 暂停录制
     pub async fn pause_recording(&self, id: i64) -> Result<Recording> {
-        let mut recording = self.recordings.get_mut(&id)
+        let mut recording = self.repo.get_recording(id).await?
             .ok_or_else(|| AppError::NotFound(format!("Recording {} not found", id)))?;
 
         recording.pause();
@@ -154,12 +148,12 @@ impl RecordingService {
             tracing::error!("[RecordingService] Failed to persist: {}", e);
         }
 
-        Ok(recording.clone())
+        Ok(recording)
     }
 
     /// 恢复录制
     pub async fn resume_recording(&self, id: i64) -> Result<Recording> {
-        let mut recording = self.recordings.get_mut(&id)
+        let mut recording = self.repo.get_recording(id).await?
             .ok_or_else(|| AppError::NotFound(format!("Recording {} not found", id)))?;
 
         recording.resume();
@@ -167,12 +161,12 @@ impl RecordingService {
             tracing::error!("[RecordingService] Failed to persist: {}", e);
         }
 
-        Ok(recording.clone())
+        Ok(recording)
     }
 
     /// 删除录制
     pub async fn delete_recording(&self, id: i64) -> Result<()> {
-        if self.recordings.remove(&id).is_none() {
+        if self.repo.get_recording(id).await?.is_none() {
             return Err(AppError::NotFound(format!("Recording {} not found", id)));
         }
 
@@ -186,7 +180,7 @@ impl RecordingService {
 
     /// 根据流标识停止录制
     pub async fn stop_recording_by_stream_key(&self, stream_key: &str) -> Result<()> {
-        if let Some(recording) = self.get_active_recording_by_stream_key(stream_key) {
+        if let Some(recording) = self.get_active_recording_by_stream_key(stream_key).await? {
             self.stop_recording(recording.id).await?;
             tracing::info!("[RecordingService] Auto-stopped recording for stream={}", stream_key);
         }
@@ -196,7 +190,7 @@ impl RecordingService {
     /// 为流自动开始录制
     pub async fn start_recording_for_stream(
         &self,
-        device_id: i64,
+        device_tag: String,
         stream_key: &str,
         media_server: &str,
         config: &RecordingConfig,
@@ -205,9 +199,14 @@ impl RecordingService {
             return Ok(None);
         }
 
+        let channel_tag = crate::domain::stream::parse_stream_key(stream_key)
+            .map(|(_, ch)| ch)
+            .unwrap_or_else(|| "recording".to_string());
+
         let format = config.format.clone().unwrap_or(RecordingFormat::Mp4);
         let req = CreateRecordingRequest {
-            device_id,
+            device_tag,
+            channel_tag: channel_tag.clone(),
             format: Some(format),
             duration_secs: config.max_duration_secs,
             max_file_size_mb: config.max_file_size_mb,
@@ -215,7 +214,7 @@ impl RecordingService {
             labels: config.labels.clone(),
         };
 
-        let recording = self.create_recording(req, stream_key.to_string(), media_server.to_string()).await;
+        let recording = self.create_recording(req, channel_tag, media_server.to_string()).await;
         let recording = self.start_recording(recording.id).await?;
 
         tracing::info!("[RecordingService] Auto-started recording {} for stream={}", recording.id, stream_key);
@@ -223,45 +222,42 @@ impl RecordingService {
     }
 
     /// 获取活跃录制
-    pub fn get_active_recording_by_stream_key(&self, stream_key: &str) -> Option<Recording> {
-        self.recordings.iter()
-            .find(|r| {
-                r.stream_key == stream_key
-                    && (r.state == RecordingState::Recording || r.state == RecordingState::Paused)
-            })
-            .map(|r| r.clone())
+    pub async fn get_active_recording_by_stream_key(&self, stream_key: &str) -> Result<Option<Recording>> {
+        self.repo.find_active_recording_by_stream_key(stream_key).await
     }
 
     /// 获取设备的所有录制
-    pub fn list_device_recordings(&self, device_id: i64) -> Vec<Recording> {
-        self.recordings.iter()
-            .filter(|r| r.device_id == device_id)
-            .map(|r| r.value().clone())
-            .collect()
+    pub async fn list_device_recordings(&self, device_tag: &str) -> Result<Vec<Recording>> {
+        self.repo.list_recordings_by_device(device_tag).await
+    }
+
+    /// 获取设备的所有录制（通过device_tag）
+    pub async fn list_device_recordings_by_device_tag(&self, device_tag: &str) -> Result<Vec<Recording>> {
+        self.repo.list_recordings_by_device_tag(device_tag).await
     }
 
     /// 分页获取录制
-    pub async fn list_recordings_paginated(&self, limit: usize, offset: usize) -> Vec<Recording> {
+    pub async fn list_recordings_paginated(&self, limit: usize, offset: usize) -> Result<Vec<Recording>> {
         self.repo.list_recordings_paginated(limit, offset).await
     }
 
     /// 获取录制总数
-    pub async fn count_recordings(&self) -> usize {
+    pub async fn count_recordings(&self) -> Result<usize> {
         self.repo.count_recordings().await
     }
 
     /// 获取录制文件列表
     pub async fn list_recorded_files(&self, id: i64) -> Result<Vec<crate::adapter::media_server::RecordingFile>> {
-        let recording = self.recordings.get(&id)
+        let recording = self.repo.get_recording(id).await?
             .ok_or_else(|| AppError::NotFound(format!("Recording {} not found", id)))?;
 
-        let app = self.repo.streams_cache().iter()
-            .find(|s| s.stream_key == recording.stream_key)
+        let cache_key = format!("{}/{}", recording.device_tag.as_deref().unwrap_or(""), recording.channel_tag.as_deref().unwrap_or(""));
+        let app = self.repo.streams_cache().get(&cache_key)
             .map(|s| s.app.clone())
             .unwrap_or_else(|| "live".to_string());
 
         if let Some(adapter) = self.cluster.get_server(&recording.media_server_name) {
-            match adapter.list_recordings(&app, &recording.stream_key).await {
+            match adapter.list_recordings(&app, &recording.stream_key()).await {
                 Ok(files) => return Ok(files),
                 Err(e) => tracing::warn!("[RecordingService] Failed to list recordings: {}", e),
             }
@@ -271,23 +267,24 @@ impl RecordingService {
     }
 
     /// 获取录制统计
-    pub fn get_stats(&self) -> serde_json::Value {
-        let total = self.recordings.len();
-        let recording = self.recordings.iter()
+    pub async fn get_stats(&self) -> Result<serde_json::Value> {
+        let recordings = self.repo.list_recordings_paginated(10000, 0).await?;
+        let total = recordings.len();
+        let recording_count = recordings.iter()
             .filter(|r| r.state == RecordingState::Recording)
             .count();
-        let completed = self.recordings.iter()
+        let completed = recordings.iter()
             .filter(|r| r.state == RecordingState::Completed)
             .count();
-        let total_size: u64 = self.recordings.iter().map(|r| r.file_size).sum();
+        let total_size: u64 = recordings.iter().map(|r| r.file_size).sum();
 
-        serde_json::json!({
+        Ok(serde_json::json!({
             "total": total,
-            "recording": recording,
+            "recording": recording_count,
             "completed": completed,
             "total_size_bytes": total_size,
             "total_size_mb": total_size as f64 / (1024.0 * 1024.0),
-        })
+        }))
     }
 
     pub async fn finalize_recording(
@@ -297,7 +294,7 @@ impl RecordingService {
         file_size: u64,
         duration_secs: u64,
     ) -> Result<()> {
-        if let Some(mut recording) = self.repo.find_active_recording_by_stream_key(stream_key) {
+        if let Some(mut recording) = self.repo.find_active_recording_by_stream_key(stream_key).await? {
             recording.filename = Some(filename);
             recording.file_size = file_size;
             recording.duration_secs = duration_secs;
@@ -305,7 +302,6 @@ impl RecordingService {
             if let Err(e) = self.repo.update_recording(&recording).await {
                 tracing::error!("[RecordingService] Failed to finalize recording {}: {}", recording.id, e);
             } else {
-                self.recordings.insert(recording.id, recording);
                 tracing::info!("[RecordingService] Finalized recording for stream={}", stream_key);
             }
         } else {
@@ -327,7 +323,6 @@ impl RecordingService {
 impl Clone for RecordingService {
     fn clone(&self) -> Self {
         Self {
-            recordings: self.recordings.clone(),
             repo: self.repo.clone(),
             cluster: self.cluster.clone(),
         }

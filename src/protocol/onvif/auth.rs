@@ -86,6 +86,41 @@ impl UsernameToken {
                 }
             }
         }
+
+        if tag_str.contains(':') {
+            let prefixed_open = format!("<{}", tag_str);
+            let prefixed_close = format!("</{}>", tag_str);
+            if let Some(start) = content.find(&prefixed_open) {
+                let after_open = &content[start..];
+                if let Some(gt) = after_open.find('>') {
+                    let value_start = start + gt + 1;
+                    if let Some(end) = content[value_start..].find(&prefixed_close) {
+                        let value = &content[value_start..value_start + end];
+                        let trimmed = value.trim();
+                        if !trimmed.is_empty() {
+                            return Some(trimmed.to_string());
+                        }
+                    }
+                }
+            }
+        } else {
+            let search_pattern = format!(":{}>", local);
+            if let Some(prefix_pos) = content.find(&search_pattern) {
+                let open_tag_start = content[..prefix_pos].rfind('<')?;
+                let close_tag_start = prefix_pos + search_pattern.len();
+                let value_start = close_tag_start;
+                let prefixed_close =
+                    format!("</{}:{}>", &content[open_tag_start + 1..prefix_pos], local);
+                if let Some(end) = content[value_start..].find(&prefixed_close) {
+                    let value = &content[value_start..value_start + end];
+                    let trimmed = value.trim();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed.to_string());
+                    }
+                }
+            }
+        }
+
         None
     }
 

@@ -19,10 +19,14 @@
             <el-icon><Monitor /></el-icon>
             <template #title><span>监控台</span></template>
           </el-menu-item>
-          <el-menu-item index="/devices">
-            <el-icon><VideoCamera /></el-icon>
-            <template #title><span>设备管理</span></template>
-          </el-menu-item>
+          <el-sub-menu index="/device-group">
+            <template #title>
+              <el-icon><VideoCamera /></el-icon>
+              <span>设备管理</span>
+            </template>
+            <el-menu-item index="/devices">设备列表</el-menu-item>
+            <el-menu-item index="/channels">通道列表</el-menu-item>
+          </el-sub-menu>
           <el-sub-menu index="/streams-group">
             <template #title>
               <el-icon><DataLine /></el-icon>

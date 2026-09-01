@@ -18,9 +18,19 @@ const routes = [
         component: () => import('../views/Devices.vue'),
       },
       {
-        path: 'devices/:id',
+        path: 'devices/:deviceTag',
         name: 'DeviceDetail',
         component: () => import('../views/DeviceDetail.vue'),
+      },
+      {
+        path: 'channels',
+        name: 'Channels',
+        component: () => import('../views/Channels.vue'),
+      },
+      {
+        path: 'channels/:deviceTag/:channelTag',
+        name: 'ChannelDetail',
+        component: () => import('../views/ChannelDetail.vue'),
       },
       {
         path: 'streams',

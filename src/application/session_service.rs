@@ -79,7 +79,7 @@ impl SessionService {
         match event {
             SignalEvent::StartPlay { device_id, session_id, .. } => {
                 tracing::info!("[SessionService] StartPlay: device={} session={}", device_id, session_id);
-                let session = Session::new(SessionType::Play, *device_id, 0i64);
+                let session = Session::new(SessionType::Play, 0i64);
                 infra.db.sessions_cache().insert(session.id, session.clone());
                 if let Err(e) = infra.db.create_session(&session).await {
                     tracing::error!("[SessionService] Failed to persist session: {}", e);
@@ -90,7 +90,7 @@ impl SessionService {
                 tracing::info!("[SessionService] StopPlay: session={}", session_id);
                 if let Some(session) = infra.db.sessions_cache()
                     .iter()
-                    .find(|s| s.stream_id == *session_id)
+                    .find(|s| s.stream_key() == *session_id)
                     .map(|s| s.clone())
                 {
                     infra.db.sessions_cache().remove(&session.id);
@@ -104,8 +104,8 @@ impl SessionService {
         Ok(())
     }
 
-    pub async fn create_session(&self, session_type: SessionType, device_id: i64, user_id: i64) -> Result<Session> {
-        let session = Session::new(session_type, device_id, user_id);
+    pub async fn create_session(&self, session_type: SessionType, user_id: i64) -> Result<Session> {
+        let session = Session::new(session_type, user_id);
         self.infra.db.sessions_cache().insert(session.id, session.clone());
         if let Err(e) = self.infra.db.create_session(&session).await {
             tracing::error!("[SessionService] Failed to persist session: {}", e);
@@ -120,23 +120,22 @@ impl SessionService {
         let server = self.media.cluster.select_server().await
             .ok_or_else(|| AppError::MediaServerError("No available media server".to_string()))?;
 
-        let device = self.infra.db.get_device(session.device_id).await?
-            .ok_or_else(|| AppError::NotFound(format!("Device {} not found", session.device_id)))?;
+        let device_tag = session.device_tag.as_ref()
+            .ok_or_else(|| AppError::NotFound("Session has no device_tag".to_string()))?;
+        let device = self.infra.db.get_device_by_device_tag(device_tag)
+            .ok_or_else(|| AppError::NotFound(format!("Device with tag {} not found", device_tag)))?;
         let app = device.app.unwrap_or_else(|| "live".to_string());
         
-        let stream_id = {
-            let cache = self.infra.db.streams_cache();
-            cache.iter()
-                .find(|s| s.device_id == session.device_id)
-                .map(|s| s.stream_key.clone())
-                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
-        };
-        let stream_info = server.add_stream_proxy(&app, &stream_id, rtsp_url).await?;
+        let stream_key = crate::domain::stream::make_stream_key(
+            session.device_tag.as_deref().unwrap_or(""),
+            session.channel_tag.as_deref().unwrap_or("")
+        );
+        let stream_info = server.add_stream_proxy(&app, &stream_key, rtsp_url).await?;
 
-        self.infra.redis.set_stream_info(&stream_id, &stream_info).await?;
+        self.infra.redis.set_stream_info(&stream_key, &stream_info).await?;
 
         let mut session = session;
-        session.set_active(server.name().to_string(), stream_id.clone());
+        session.set_active(server.name().to_string());
         self.infra.db.sessions_cache().insert(id, session);
 
         Ok(stream_info)
@@ -146,16 +145,17 @@ impl SessionService {
         let session = self.get_session(id)?
             .ok_or_else(|| AppError::SessionNotFound(id.to_string()))?;
 
-        if let (Some(server_id), stream_id) = (&session.media_server_id, &session.stream_id) {
-            if !stream_id.is_empty() {
+        let stream_key = session.stream_key();
+        if !stream_key.is_empty() {
+            if let Some(server_id) = &session.media_server_tag {
                 if let Some(server) = self.media.cluster.get_all_servers().iter().find(|s| s.name() == server_id) {
-                    if let Err(e) = server.remove_stream_proxy("live", stream_id).await {
+                    if let Err(e) = server.remove_stream_proxy("live", &stream_key).await {
                         tracing::warn!("[SessionService] Failed to remove stream: {}", e);
                     }
                 }
-                if let Err(e) = self.infra.redis.delete_stream_info(stream_id).await {
-                    tracing::warn!("[SessionService] Failed to delete stream info: {}", e);
-                }
+            }
+            if let Err(e) = self.infra.redis.delete_stream_info(&stream_key).await {
+                tracing::warn!("[SessionService] Failed to delete stream info: {}", e);
             }
         }
 
@@ -196,12 +196,13 @@ impl SessionService {
             if session.state == SessionState::Terminated { continue; }
             if session.is_expired() {
                 tracing::info!("[SessionService] Session {} expired", session.id);
-                if let (Some(server_id), Some(stream_id)) = (&session.media_server_id, Some(&session.stream_id)) {
-                    if !stream_id.is_empty() {
+                let stream_key = session.stream_key();
+                if !stream_key.is_empty() {
+                    if let Some(server_id) = &session.media_server_tag {
                         if let Some(server) = cluster.get_all_servers().iter().find(|s| s.name() == server_id) {
-                            let _ = server.remove_stream_proxy("live", stream_id).await;
+                            let _ = server.remove_stream_proxy("live", &stream_key).await;
                         }
-                        let _ = redis.delete_stream_info(stream_id).await;
+                        let _ = redis.delete_stream_info(&stream_key).await;
                     }
                 }
                 let mut s = session.clone();

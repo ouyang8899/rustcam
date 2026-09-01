@@ -2,7 +2,8 @@ use rbatis::html_sql;
 use rbatis::rbdc::datetime::DateTime as RbatisDateTime;
 use rbatis::sql;
 use crate::domain::server::{Server, ServerType};
-use crate::domain::{Device, Protocol, DeviceStatus, DeviceType, PushUrl, PullUrl, Recording, RecordingState, RecordingFormat, Stream, StreamState, StreamConfig};
+use crate::domain::{Device, Protocol, DeviceStatus, DeviceType, PushUrl, PullUrl, Recording, RecordingState, RecordingFormat, Stream, StreamState, StreamConfig, Channel};
+use crate::domain::stream::make_stream_key;
 use crate::domain::region::RegionRow;
 use crate::error::AppError;
 
@@ -33,12 +34,33 @@ pub struct DeviceRow {
     pub gb_password: Option<String>,
     pub extended: Option<serde_json::Value>,
     pub group_id: Option<i64>,
-    pub is_channel: Option<bool>,
     pub device_type: Option<String>,
     pub device_type_code: Option<String>,
-    pub channel_id: Option<String>,
+    pub channel_count: Option<i32>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ChannelRow {
+    pub id: i64,
+    pub device_tag: String,
+    pub channel_tag: String,
+    pub name: String,
+    pub status: String,
+    pub device_type: Option<String>,
+    pub device_type_code: Option<String>,
     pub channel_extended: Option<serde_json::Value>,
     pub is_default: Option<bool>,
+    pub parent_channel_tag: Option<String>,
+    pub civil_code: Option<String>,
+    pub address: Option<String>,
+    pub ip_address: Option<String>,
+    pub port: Option<i32>,
+    pub manufacturer: Option<String>,
+    pub model: Option<String>,
+    pub parental: Option<i32>,
+    pub extended: Option<serde_json::Value>,
+    pub created_at: RbatisDateTime,
+    pub updated_at: Option<RbatisDateTime>,
 }
 
 impl TryFrom<DeviceRow> for Device {
@@ -139,12 +161,9 @@ impl TryFrom<DeviceRow> for Device {
             extended: ext.into(),
             is_online: false,
             has_stream: false,
-            is_channel: row.is_channel.unwrap_or(false),
             device_type,
             device_type_code: row.device_type_code,
-            channel_id: row.channel_id,
-            channel_extended: row.channel_extended.clone(),
-            is_default: row.is_default.unwrap_or(false),
+            channel_count: row.channel_count.unwrap_or(0),
             stream_config: get_stream_config(),
         };
         Ok(device)
@@ -203,12 +222,8 @@ pub async fn device_insert(
     extended: Option<serde_json::Value>,
     group_id: Option<i64>,
     app: Option<&str>,
-    is_channel: Option<bool>,
     device_type: Option<&str>,
     device_type_code: Option<&str>,
-    channel_id: Option<&str>,
-    channel_extended: Option<serde_json::Value>,
-    is_default: Option<bool>,
 ) -> rbatis::Result<rbatis::rbdc::ExecResult> {
     impled!()
 }
@@ -240,12 +255,8 @@ pub async fn device_update(
     extended: Option<serde_json::Value>,
     group_id: Option<i64>,
     app: Option<&str>,
-    is_channel: Option<bool>,
     device_type: Option<&str>,
     device_type_code: Option<&str>,
-    channel_id: Option<&str>,
-    channel_extended: Option<serde_json::Value>,
-    is_default: Option<bool>,
 ) -> rbatis::Result<rbatis::rbdc::ExecResult> {
     impled!()
 }
@@ -254,6 +265,47 @@ pub async fn device_update(
 pub async fn device_delete_by_id(
     rb: &dyn rbatis::Executor,
     id: i64,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
+
+#[html_sql("sql/device.html")]
+pub async fn device_delete_by_device_tag(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
+
+#[html_sql("sql/device.html")]
+pub async fn device_update_by_device_tag(
+    rb: &dyn rbatis::Executor,
+    device_tag_query: &str,
+    name: Option<&str>,
+    protocol: Option<&str>,
+    status: Option<&str>,
+    host: Option<&str>,
+    port: Option<i32>,
+    rtsp_url: Option<&str>,
+    device_tag: Option<&str>,
+    parent_device_tag: Option<&str>,
+    is_public: Option<bool>,
+    device_password: Option<&str>,
+    playback_username: Option<&str>,
+    playback_password: Option<&str>,
+    media_server_tag: Option<&str>,
+    push_urls: Option<serde_json::Value>,
+    pull_urls: Option<serde_json::Value>,
+    region_code: Option<&str>,
+    updated_at: Option<RbatisDateTime>,
+    ssrc: Option<&str>,
+    gb_username: Option<&str>,
+    gb_password: Option<&str>,
+    extended: Option<serde_json::Value>,
+    group_id: Option<i64>,
+    app: Option<&str>,
+    device_type: Option<&str>,
+    device_type_code: Option<&str>,
 ) -> rbatis::Result<rbatis::rbdc::ExecResult> {
     impled!()
 }
@@ -451,13 +503,13 @@ pub async fn server_delete_by_id(
 pub struct SessionRow {
     pub id: i64,
     pub session_type: String,
-    pub device_id: i64,
+    pub device_tag: Option<String>,
+    pub channel_tag: Option<String>,
     pub user_id: String,
     pub state: String,
     pub client_ip: Option<String>,
     pub client_type: Option<String>,
-    pub media_server_id: Option<String>,
-    pub stream_id: String,
+    pub media_server_tag: Option<String>,
     pub protocol: Option<String>,
     pub created_at: RbatisDateTime,
     pub last_activity: RbatisDateTime,
@@ -466,14 +518,14 @@ pub struct SessionRow {
     pub bytes_received: i64,
 }
 
-#[sql("SELECT id, session_type, device_id, user_id, state, client_ip, client_type, media_server_id, stream_id, protocol, created_at, last_activity, expires_at, bytes_sent, bytes_received FROM sessions ORDER BY created_at DESC")]
+#[sql("SELECT id, session_type, device_tag, channel_tag, user_id, state, client_ip, client_type, media_server_tag, protocol, created_at, last_activity, expires_at, bytes_sent, bytes_received FROM sessions ORDER BY created_at DESC")]
 pub async fn session_select_all(
     rb: &dyn rbatis::Executor,
 ) -> rbatis::Result<Vec<SessionRow>> {
     impled!()
 }
 
-#[sql("SELECT id, session_type, device_id, user_id, state, client_ip, client_type, media_server_id, stream_id, protocol, created_at, last_activity, expires_at, bytes_sent, bytes_received FROM sessions WHERE id = $1")]
+#[sql("SELECT id, session_type, device_tag, channel_tag, user_id, state, client_ip, client_type, media_server_tag, protocol, created_at, last_activity, expires_at, bytes_sent, bytes_received FROM sessions WHERE id = $1")]
 pub async fn session_select_by_id(
     rb: &dyn rbatis::Executor,
     id: i64,
@@ -485,13 +537,13 @@ pub async fn session_select_by_id(
 pub async fn session_insert(
     rb: &dyn rbatis::Executor,
     session_type: Option<&str>,
-    device_id: Option<i64>,
+    device_tag: Option<&str>,
+    channel_tag: Option<&str>,
     user_id: Option<&str>,
     state: Option<&str>,
     client_ip: Option<&str>,
     client_type: Option<&str>,
-    media_server_id: Option<&str>,
-    stream_id: Option<&str>,
+    media_server_tag: Option<&str>,
     protocol: Option<&str>,
     created_at: Option<RbatisDateTime>,
     last_activity: Option<RbatisDateTime>,
@@ -506,13 +558,13 @@ pub async fn session_insert(
 pub async fn session_update(
     rb: &dyn rbatis::Executor,
     session_type: Option<&str>,
-    device_id: Option<i64>,
+    device_tag: Option<&str>,
+    channel_tag: Option<&str>,
     user_id: Option<&str>,
     state: Option<&str>,
     client_ip: Option<&str>,
     client_type: Option<&str>,
-    media_server_id: Option<&str>,
-    stream_id: Option<&str>,
+    media_server_tag: Option<&str>,
     protocol: Option<&str>,
     created_at: Option<RbatisDateTime>,
     last_activity: Option<RbatisDateTime>,
@@ -535,8 +587,8 @@ pub async fn session_delete_by_id(
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct RecordingRow {
     pub id: i64,
-    pub device_id: i64,
-    pub stream_key: String,
+    pub device_tag: Option<String>,
+    pub channel_tag: Option<String>,
     pub media_server_name: String,
     pub state: String,
     pub format: String,
@@ -587,8 +639,8 @@ impl TryFrom<RecordingRow> for Recording {
 
         Ok(Recording {
             id: row.id,
-            device_id: row.device_id,
-            stream_key: row.stream_key,
+            device_tag: row.device_tag,
+            channel_tag: row.channel_tag,
             media_server_name: row.media_server_name,
             state,
             format,
@@ -613,8 +665,8 @@ impl Recording {
 
         RecordingRow {
             id: self.id,
-            device_id: self.device_id,
-            stream_key: self.stream_key.clone(),
+            device_tag: self.device_tag.clone(),
+            channel_tag: self.channel_tag.clone(),
             media_server_name: self.media_server_name.clone(),
             state: state_str,
             format: format_str,
@@ -631,17 +683,41 @@ impl Recording {
     }
 }
 
-#[sql("SELECT id, device_id, stream_key, media_server_name, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename FROM recordings ORDER BY created_at DESC")]
+#[sql("SELECT id, device_tag, channel_tag, media_server_name, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename FROM recordings ORDER BY created_at DESC")]
 pub async fn recording_select_all(
     rb: &dyn rbatis::Executor,
 ) -> rbatis::Result<Vec<RecordingRow>> {
     impled!()
 }
 
-#[sql("SELECT id, device_id, stream_key, media_server_name, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename FROM recordings WHERE id = $1")]
+#[sql("SELECT id, device_tag, channel_tag, media_server_name, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename FROM recordings ORDER BY created_at DESC LIMIT $1 OFFSET $2")]
+pub async fn recording_select_paginated(
+    rb: &dyn rbatis::Executor,
+    limit: i64,
+    offset: i64,
+) -> rbatis::Result<Vec<RecordingRow>> {
+    impled!()
+}
+
+#[sql("SELECT COUNT(*) FROM recordings")]
+pub async fn recording_count_all(
+    rb: &dyn rbatis::Executor,
+) -> rbatis::Result<i64> {
+    impled!()
+}
+
+#[sql("SELECT id, device_tag, channel_tag, media_server_name, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename FROM recordings WHERE id = $1")]
 pub async fn recording_select_by_id(
     rb: &dyn rbatis::Executor,
     id: i64,
+) -> rbatis::Result<Vec<RecordingRow>> {
+    impled!()
+}
+
+#[sql("SELECT id, device_tag, channel_tag, media_server_name, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename FROM recordings WHERE device_tag = $1 ORDER BY created_at DESC")]
+pub async fn recording_select_by_device_tag(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
 ) -> rbatis::Result<Vec<RecordingRow>> {
     impled!()
 }
@@ -650,8 +726,8 @@ pub async fn recording_select_by_id(
 pub async fn recording_insert(
     rb: &dyn rbatis::Executor,
     id: i64,
-    device_id: i64,
-    stream_key: &str,
+    device_tag: Option<&str>,
+    channel_tag: Option<&str>,
     media_server_name: &str,
     state: &str,
     format: &str,
@@ -671,8 +747,8 @@ pub async fn recording_insert(
 #[html_sql("sql/recording.html")]
 pub async fn recording_update(
     rb: &dyn rbatis::Executor,
-    device_id: Option<i64>,
-    stream_key: Option<String>,
+    device_tag: Option<&str>,
+    channel_tag: Option<&str>,
     media_server_name: Option<String>,
     state: Option<String>,
     format: Option<String>,
@@ -700,9 +776,9 @@ pub async fn recording_delete_by_id(
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct StreamRow {
     pub id: i64,
-    pub device_id: i64,
+    pub device_tag: Option<String>,
+    pub channel_tag: Option<String>,
     pub media_server_tag: Option<String>,
-    pub stream_key: String,
     pub app: String,
     pub token: Option<String>,
     pub state: String,
@@ -738,9 +814,9 @@ impl TryFrom<StreamRow> for Stream {
 
         Ok(Stream {
             id: row.id,
-            device_id: row.device_id,
+            device_tag: row.device_tag,
+            channel_tag: row.channel_tag,
             media_server_tag: row.media_server_tag.unwrap_or_default(),
-            stream_key: row.stream_key,
             app: row.app,
             token: row.token.unwrap_or_default(),
             state,
@@ -760,9 +836,9 @@ impl Stream {
     pub fn to_row(&self) -> StreamRow {
         StreamRow {
             id: self.id,
-            device_id: self.device_id,
+            device_tag: self.device_tag.clone(),
+            channel_tag: self.channel_tag.clone(),
             media_server_tag: Some(self.media_server_tag.clone()),
-            stream_key: self.stream_key.clone(),
             app: self.app.clone(),
             token: Some(self.token.clone()),
             state: self.state.to_string(),
@@ -778,14 +854,14 @@ impl Stream {
     }
 }
 
-#[sql("SELECT id, device_id, media_server_tag, stream_key, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams ORDER BY created_at DESC")]
+#[sql("SELECT id, device_tag, channel_tag, media_server_tag, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams ORDER BY created_at DESC")]
 pub async fn stream_select_all(
     rb: &dyn rbatis::Executor,
 ) -> rbatis::Result<Vec<StreamRow>> {
     impled!()
 }
 
-#[sql("SELECT id, device_id, media_server_tag, stream_key, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams WHERE id = $1")]
+#[sql("SELECT id, device_tag, channel_tag, media_server_tag, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams WHERE id = $1")]
 pub async fn stream_select_by_id(
     rb: &dyn rbatis::Executor,
     id: i64,
@@ -793,7 +869,7 @@ pub async fn stream_select_by_id(
     impled!()
 }
 
-#[sql("SELECT id, device_id, media_server_tag, stream_key, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams WHERE token = $1")]
+#[sql("SELECT id, device_tag, channel_tag, media_server_tag, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams WHERE token = $1")]
 pub async fn stream_select_by_token(
     rb: &dyn rbatis::Executor,
     token: &str,
@@ -801,12 +877,12 @@ pub async fn stream_select_by_token(
     impled!()
 }
 
-#[sql("INSERT INTO streams (device_id, media_server_tag, stream_key, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id")]
+#[sql("INSERT INTO streams (device_tag, channel_tag, media_server_tag, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id")]
 pub async fn stream_insert(
     rb: &dyn rbatis::Executor,
-    device_id: i64,
-    media_server_id: Option<String>,
-    stream_key: &str,
+    device_tag: Option<&str>,
+    channel_tag: Option<&str>,
+    media_server_tag: Option<String>,
     app: &str,
     token: Option<&str>,
     state: &str,
@@ -825,9 +901,9 @@ pub async fn stream_insert(
 #[html_sql("sql/stream.html")]
 pub async fn stream_update(
     rb: &dyn rbatis::Executor,
-    device_id: Option<i64>,
+    device_tag: Option<&str>,
+    channel_tag: Option<&str>,
     media_server_tag: Option<String>,
-    stream_key: Option<&str>,
     state: Option<&str>,
     retry_count: Option<i32>,
     max_retries: Option<i32>,
@@ -841,10 +917,10 @@ pub async fn stream_update(
     impled!()
 }
 
-#[sql("DELETE FROM streams WHERE device_id = $1")]
-pub async fn stream_delete_by_device_id(
+#[sql("DELETE FROM streams WHERE device_tag = $1")]
+pub async fn stream_delete_by_device_tag(
     rb: &dyn rbatis::Executor,
-    device_id: i64,
+    device_tag: &str,
 ) -> rbatis::Result<rbatis::rbdc::ExecResult> {
     impled!()
 }
@@ -1193,3 +1269,128 @@ pub async fn gb_industry_code_select_all(rb: &dyn rbatis::Executor) -> rbatis::R
 
 #[sql("SELECT code, name, name_en, description, sort_order FROM gb_network_codes ORDER BY sort_order")]
 pub async fn gb_network_code_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<GbNetworkCodeRow>> { impled!() }
+
+impl TryFrom<ChannelRow> for Channel {
+    type Error = AppError;
+
+    fn try_from(row: ChannelRow) -> Result<Self, Self::Error> {
+        let status = match row.status.to_lowercase().as_str() {
+            "online" => DeviceStatus::Online,
+            "error" => DeviceStatus::Error,
+            "maintaining" => DeviceStatus::Maintaining,
+            _ => DeviceStatus::Offline,
+        };
+
+        let device_type = row.device_type.as_ref()
+            .map(|dt| match dt.as_str() {
+                "NVR" => DeviceType::NVR,
+                "IPC" => DeviceType::IPC,
+                "DVR" => DeviceType::DVR,
+                "Encoder" => DeviceType::Encoder,
+                "VideoServer" => DeviceType::VideoServer,
+                "Camera" => DeviceType::Camera,
+                "Platform" => DeviceType::Platform,
+                _ => DeviceType::Other,
+            })
+            .unwrap_or(DeviceType::Other);
+
+        let created_at = chrono::DateTime::from_timestamp(row.created_at.unix_timestamp(), 0)
+            .unwrap_or_else(chrono::Utc::now);
+
+        let updated_at = row.updated_at.and_then(|u| chrono::DateTime::from_timestamp(u.unix_timestamp(), 0));
+
+        Ok(Channel {
+            id: row.id,
+            device_tag: row.device_tag,
+            channel_tag: row.channel_tag,
+            name: row.name,
+            status,
+            device_type,
+            device_type_code: row.device_type_code,
+            channel_extended: row.channel_extended,
+            is_default: row.is_default.unwrap_or(false),
+            parent_channel_tag: row.parent_channel_tag,
+            civil_code: row.civil_code,
+            address: row.address,
+            ip_address: row.ip_address,
+            port: row.port.unwrap_or(0) as u16,
+            manufacturer: row.manufacturer,
+            model: row.model,
+            parental: row.parental.unwrap_or(0),
+            extended: row.extended,
+            created_at,
+            updated_at,
+        })
+    }
+}
+
+#[html_sql("sql/channel.html")]
+pub async fn channel_select_by_device_tag(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+) -> rbatis::Result<Vec<ChannelRow>> { impled!() }
+
+#[html_sql("sql/channel.html")]
+pub async fn channel_select_by_device_tag_and_channel_tag(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+    channel_tag: &str,
+) -> rbatis::Result<Vec<ChannelRow>> { impled!() }
+
+#[html_sql("sql/channel.html")]
+pub async fn channel_select_all(
+    rb: &dyn rbatis::Executor,
+) -> rbatis::Result<Vec<ChannelRow>> { impled!() }
+
+#[html_sql("sql/channel.html")]
+pub async fn channel_insert(
+    rb: &dyn rbatis::Executor,
+    device_tag: Option<&str>,
+    channel_tag: Option<&str>,
+    name: Option<&str>,
+    status: Option<&str>,
+    device_type: Option<&str>,
+    device_type_code: Option<&str>,
+    channel_extended: Option<serde_json::Value>,
+    is_default: Option<bool>,
+    parent_channel_tag: Option<&str>,
+    civil_code: Option<&str>,
+    address: Option<&str>,
+    ip_address: Option<&str>,
+    port: Option<i32>,
+    manufacturer: Option<&str>,
+    model: Option<&str>,
+    parental: Option<i32>,
+    extended: Option<serde_json::Value>,
+    created_at: Option<RbatisDateTime>,
+    updated_at: Option<RbatisDateTime>,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+#[html_sql("sql/channel.html")]
+pub async fn channel_update(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+    channel_tag: &str,
+    name: Option<&str>,
+    status: Option<&str>,
+    device_type: Option<&str>,
+    device_type_code: Option<&str>,
+    channel_extended: Option<serde_json::Value>,
+    is_default: Option<bool>,
+    parent_channel_tag: Option<&str>,
+    civil_code: Option<&str>,
+    address: Option<&str>,
+    ip_address: Option<&str>,
+    port: Option<i32>,
+    manufacturer: Option<&str>,
+    model: Option<&str>,
+    parental: Option<i32>,
+    extended: Option<serde_json::Value>,
+    updated_at: Option<RbatisDateTime>,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+#[html_sql("sql/channel.html")]
+pub async fn channel_delete_by_device_tag(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }

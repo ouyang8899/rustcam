@@ -57,9 +57,10 @@ pub struct SubSession {
 }
 
 #[derive(Clone)]
-pub struct Gb28181Adapter {
+ pub struct Gb28181Adapter {
     pub version: Gb28181Version,
     pub device_tag: Option<String>,
+    pub from_uri: Option<String>,
     pub device_id: Option<i64>,
     pub device_name: Option<String>,
     pub seq: Arc<AtomicU32>,
@@ -123,6 +124,7 @@ impl Gb28181Adapter {
         Self {
             version: Gb28181Version::default(),
             device_tag: None,
+            from_uri: None,
             device_id: None,
             device_name: None,
             seq: Arc::new(AtomicU32::new(0)),
@@ -226,7 +228,38 @@ impl Gb28181Adapter {
 
     fn parse_sip_uri(uri: &str) -> String {
         let uri = uri.trim();
-        uri.strip_prefix("sip:").unwrap_or(uri).split('@').next().unwrap_or(uri).to_string()
+        let uri = uri.strip_prefix('<').unwrap_or(uri).trim_end_matches('>').trim();
+        let uri = uri.strip_prefix("sip:").or_else(|| uri.strip_prefix("SIP:")).unwrap_or(uri);
+        uri.split('@').next().unwrap_or(uri).trim().to_string()
+    }
+
+    fn parse_sip_uri_with_domain(uri: &str) -> String {
+        let uri = uri.trim();
+        let uri = uri.strip_prefix('<').unwrap_or(uri).trim_end_matches('>').trim();
+        if uri.to_lowercase().starts_with("sip:") {
+            uri.to_string()
+        } else {
+            format!("sip:{}", uri)
+        }
+    }
+
+    fn parse_sip_uri_with_domain_only(uri: &str) -> String {
+        let uri = uri.trim();
+        let uri = uri.strip_prefix('<').unwrap_or(uri);
+        if let Some(angle_end) = uri.find('>') {
+            let uri_part = &uri[..angle_end];
+            if uri_part.to_lowercase().starts_with("sip:") {
+                return uri_part.to_string();
+            } else {
+                return format!("sip:{}", uri_part);
+            }
+        }
+        let uri = uri.split(';').next().unwrap_or(uri).trim();
+        if uri.to_lowercase().starts_with("sip:") {
+            uri.to_string()
+        } else {
+            format!("sip:{}", uri)
+        }
     }
 
     fn parse_tag_from_header(header_value: &str) -> Option<String> {
@@ -423,6 +456,17 @@ impl Gb28181Adapter {
             .map(|(id, domain, ip, port)| (id.as_str(), domain.as_str(), ip.as_str(), *port))
             .unwrap_or(("00000000000000000000", "0000000000", "0.0.0.0", 5060));
 
+        let local_ip = if platform_ip == "0.0.0.0" {
+            if let Some(peer) = self.udp_peer {
+                crate::protocol::gb28181::detect_local_ip(peer.ip().to_string().as_str())
+                    .unwrap_or_else(|| "0.0.0.0".to_string())
+            } else {
+                platform_ip.to_string()
+            }
+        } else {
+            platform_ip.to_string()
+        };
+
         let body = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <Query><CmdType>Catalog</CmdType><SN>{}</SN><DeviceID>{}</DeviceID>
@@ -434,13 +478,16 @@ impl Gb28181Adapter {
         let call_id = format!("cat-{}", ts);
         let from_uri = SipUri {
             user: Some(platform_id.to_string()),
-            host: format!("{}:{}", platform_ip, platform_port),
+            host: format!("{}:{}", local_ip, platform_port),
             port: None,
             params: HashMap::new(),
         };
+        let device_ip = self.udp_peer
+            .map(|p| p.ip().to_string())
+            .unwrap_or_else(|| local_ip.clone());
         let to_uri = SipUri {
             user: Some(device_tag.to_string()),
-            host: format!("{}:{}", platform_ip, platform_port),
+            host: format!("{}:{}", device_ip, platform_port),
             port: None,
             params: HashMap::new(),
         };
@@ -450,12 +497,14 @@ impl Gb28181Adapter {
             .with_param("tag", &format!("cat{}", ts));
         let to_name_addr = SipNameAddr::new(to_uri.clone());
 
+        let via_str = format!("SIP/2.0/UDP {}:{};branch=z9hG4bKcat{}", local_ip, platform_port, ts);
+        
         let msg = SipMessage::request(SipMethod::Message, to_uri)
-            .header("via", &format!("SIP/2.0/UDP {}:{};branch=z9hG4bKcat{}", platform_ip, platform_port, ts))
+            .header("via", &via_str)
             .header("from", &from_name_addr.to_string())
             .header("to", &to_name_addr.to_string())
             .header("call-id", &call_id)
-            .header("cseq", &format!("{} MESSAGE", sn))
+            .header("CSeq", &format!("{} MESSAGE", sn))
             .header("content-type", "Application/MANSCDP+xml")
             .header("user-agent", "RustCam-Media/2.0")
             .set_body(&body);
@@ -567,19 +616,20 @@ impl Gb28181Adapter {
         } else {
             String::new()
         };
+        let from_uri = self.from_uri.clone().unwrap_or_else(|| format!("sip:{}", self.device_tag_str()));
         format!(
             "SIP/2.0 {} {}\r\n\
              Via: {}\r\n\
-             From: <sip:{}>{}\r\n\
-             To: <sip:{}>{}\r\n\
+             From: <{}>{}\r\n\
+             To: <{}>{}\r\n\
              CSeq: {}\r\n\
              Call-ID: {}\r\n\
              {}User-Agent: RustCam-Media/2.0\r\n\
              Content-Length: 0\r\n\r\n",
             status_code, status_text,
             self.via_header(via_branch),
-            device, self.from_tag_param(),
-            device, self.to_tag_param(),
+            from_uri, self.from_tag_param(),
+            from_uri, self.to_tag_param(),
             cseq_line, self.call_id_str(),
             expires_line,
         )
@@ -587,40 +637,77 @@ impl Gb28181Adapter {
 
     fn build_401_response(&self, via_branch: &str, cseq_line: &str, realm: &str) -> String {
         let nonce = generate_nonce();
-        let device = self.device_tag_str();
+        let from_uri = self.from_uri.clone().unwrap_or_else(|| {
+            let device = self.device_tag_str();
+            if device.starts_with("sip:") || device.starts_with("SIP:") {
+                device
+            } else {
+                format!("sip:{}", device)
+            }
+        });
+        tracing::info!("[GB28181] build_401_response: from_uri='{}', from_tag='{}', to_tag='{}'", 
+            from_uri, self.from_tag.as_deref().unwrap_or(""), self.to_tag.as_deref().unwrap_or(""));
         let www_auth = format!(r#"Digest realm="{}", nonce="{}""#, realm, nonce);
-        format!(
+        let response = format!(
             "SIP/2.0 401 Unauthorized\r\n\
              Via: {}\r\n\
-             From: <sip:{}>{}\r\n\
-             To: <sip:{}>{}\r\n\
+             From: <{}>{}\r\n\
+             To: <{}>{}\r\n\
              CSeq: {}\r\n\
              Call-ID: {}\r\n\
              User-Agent: RustCam-Media/2.0\r\n\
              WWW-Authenticate: {}\r\n\
              Content-Length: 0\r\n\r\n",
             self.via_header(via_branch),
-            device, self.from_tag_param(),
-            device, self.to_tag_param(),
+            from_uri, self.from_tag_param(),
+            from_uri, self.to_tag_param(),
             cseq_line, self.call_id_str(), www_auth
-        )
+        );
+        tracing::info!("[GB28181] 401 response:\n{}", response);
+        response
     }
 
     fn build_403_response(&self, via_branch: &str, cseq_line: &str) -> String {
-        let device = self.device_tag_str();
+        let from_uri = self.from_uri.clone().unwrap_or_else(|| {
+            let device = self.device_tag_str();
+            if device.starts_with("sip:") || device.starts_with("SIP:") {
+                device
+            } else {
+                format!("sip:{}", device)
+            }
+        });
         format!(
             "SIP/2.0 403 Forbidden\r\n\
              Via: {}\r\n\
-             From: <sip:{}>{}\r\n\
-             To: <sip:{}>{}\r\n\
+             From: <{}>{}\r\n\
+             To: <{}>{}\r\n\
              CSeq: {}\r\n\
              Call-ID: {}\r\n\
              User-Agent: RustCam-Media/2.0\r\n\
              Content-Length: 0\r\n\r\n",
             self.via_header(via_branch),
-            device, self.from_tag_param(),
-            device, self.to_tag_param(),
+            from_uri, self.from_tag_param(),
+            from_uri, self.to_tag_param(),
             cseq_line, self.call_id_str()
+        )
+    }
+    
+    fn build_403_response_with_headers(&self, via_branch: &str, cseq_line: &str, from_hdr: &str, to_hdr: &str, call_id_hdr: &str) -> String {
+        let from_tag = Self::parse_tag_from_header(from_hdr).map(|t| format!(";tag={}", t)).unwrap_or_default();
+        let to_tag = Self::parse_tag_from_header(to_hdr).map(|t| format!(";tag={}", t)).unwrap_or_default();
+        format!(
+            "SIP/2.0 403 Forbidden\r\n\
+             Via: {}\r\n\
+             From: {}{}\r\n\
+             To: {}{}\r\n\
+             CSeq: {}\r\n\
+             Call-ID: {}\r\n\
+             User-Agent: RustCam-Media/2.0\r\n\
+             Content-Length: 0\r\n\r\n",
+            self.via_header(via_branch),
+            from_hdr, from_tag,
+            to_hdr, to_tag,
+            cseq_line, call_id_hdr
         )
     }
 
@@ -881,7 +968,7 @@ impl Gb28181Adapter {
         let tag = adapter.tag().to_string();
         match adapter.open_rtp_server(stream_key, 0, RtpTransport::Udp).await {
             Ok((port, ip)) => {
-                tracing::info!("[GB28181] RTP: stream={}, port={}, ip={}, server={}", stream_key, port, ip, tag);
+                tracing::info!("[GB28181] RTP allocated: stream={}, port={}, ip={}, server={}", stream_key, port, ip, tag);
                 Ok((port, ip, tag))
             }
             Err(e) => {
@@ -916,7 +1003,11 @@ impl Gb28181Adapter {
             .map(|v| Self::parse_sip_uri(&v))
             .unwrap_or_else(|| "unknown".to_string());
 
+        tracing::info!("[GB28181] handle_register: device_id={}", device_id);
         self.device_tag = Some(device_id.clone());
+        if let Some(from_hdr) = Self::get_header(headers, "From") {
+            self.from_uri = Some(Self::parse_sip_uri_with_domain_only(&from_hdr));
+        }
         if let Some(name) = Self::parse_xml_field(body, "DeviceName") {
             self.device_name = Some(name);
         }
@@ -951,23 +1042,38 @@ impl Gb28181Adapter {
             .map(|(_, v)| v.as_str());
 
         if auth_header.is_none() {
-            return (None, Some(self.build_401_response(&via_branch, &cseq, &device_id)));
+            let server_realm = super::get_gb28181_platform_config()
+                .get().map(|c| c.1.clone()).unwrap_or_else(|| device_id.clone());
+            tracing::info!("[GB28181] No Authorization header, sending 401 to {} with realm={}", device_id, server_realm);
+            return (None, Some(self.build_401_response(&via_branch, &cseq, &server_realm)));
         }
 
         let auth_params = match parse_sip_authorization(auth_header.unwrap()) {
             Some(p) => p,
-            None => return (None, Some(self.build_403_response(&via_branch, &cseq))),
+            None => {
+                tracing::warn!("[GB28181] Failed to parse Authorization header: {}", auth_header.unwrap());
+                return (None, Some(self.build_403_response(&via_branch, &cseq)));
+            }
         };
+        tracing::info!("[GB28181] Auth params: username={}, realm={}, nonce={}", auth_params.username, auth_params.realm, auth_params.nonce);
         if !verify_nonce(&auth_params.nonce) {
-            return (None, Some(self.build_401_response(&via_branch, &cseq, &device_id)));
+            let server_realm = super::get_gb28181_platform_config()
+                .get().map(|c| c.1.clone()).unwrap_or_else(|| device_id.clone());
+            tracing::warn!("[GB28181] Invalid nonce from {}, sending 401 with new nonce", device_id);
+            return (None, Some(self.build_401_response(&via_branch, &cseq, &server_realm)));
         }
 
         let device_opt = self.deps.device_lookup.find_by_tag(&device_id).await;
         let (username, password, internal_id, device_tag) = match device_opt {
             Some(d) => (d.device_tag.clone().unwrap_or_default(), d.device_password.clone().unwrap_or_default(), d.id, Some(d.device_tag.unwrap_or_default())),
-            None => return (None, Some(self.build_403_response(&via_branch, &cseq))),
+            None => {
+                tracing::warn!("[GB28181] Device not found: {}", device_id);
+                return (None, Some(self.build_403_response(&via_branch, &cseq)));
+            }
         };
+        tracing::info!("[GB28181] Device found: username={}, password={}", username, password);
         if auth_params.username != username {
+            tracing::warn!("[GB28181] Username mismatch: auth={} vs db={}", auth_params.username, username);
             return (None, Some(self.build_403_response(&via_branch, &cseq)));
         }
 
@@ -1021,7 +1127,7 @@ impl Gb28181Adapter {
     }
     
 
-    fn handle_message(
+    async fn handle_message(
         &mut self, headers: &[(String, String)], body: &str,
     ) -> (Option<SignalEvent>, Option<String>) {
         if self.call_id.is_none() {
@@ -1029,6 +1135,29 @@ impl Gb28181Adapter {
         }
         let via_branch = Self::parse_via_branch(headers);
         let cseq = Self::parse_cseq_line(headers);
+
+        if self.device_tag.is_none() || !self.is_registered {
+            let from_hdr = Self::get_header(headers, "From").unwrap_or_default();
+            let device_id_from_header = Self::parse_sip_uri(&from_hdr);
+            if !device_id_from_header.is_empty() {
+                if let Some(device) = self.deps.device_lookup.find_by_tag(&device_id_from_header).await {
+                    tracing::info!("[GB28181] Restoring registration for device {} in new adapter", device_id_from_header);
+                    self.device_tag = Some(device_id_from_header.clone());
+                    self.device_id = Some(device.id);
+                    self.is_registered = true;
+                    self.from_uri = Some(Self::parse_sip_uri_with_domain_only(&from_hdr));
+                    self.pending_catalog_query = true;
+                }
+            }
+            if !self.is_registered {
+                tracing::warn!("[GB28181] Device not registered, rejecting MESSAGE");
+                let from_hdr = Self::get_header(headers, "From").unwrap_or_default();
+                let to_hdr = Self::get_header(headers, "To").unwrap_or_default();
+                let call_id_hdr = Self::get_header(headers, "Call-ID").unwrap_or_default();
+                let resp = self.build_403_response_with_headers(&via_branch, &cseq, &from_hdr, &to_hdr, &call_id_hdr);
+                return (None, Some(resp));
+            }
+        }
 
         if body.contains("<CmdType>Alarm</CmdType>") || body.contains("<AlarmNotify>") || body.contains("<Alarm>") {
             let alarm_type = Self::parse_xml_field(body, "AlarmType").unwrap_or_else(|| "unknown".to_string());
@@ -1062,18 +1191,51 @@ impl Gb28181Adapter {
 
         if body.contains("<Response>") && body.contains("Catalog") {
             let channels = self.parse_catalog_response(body);
-            if !channels.is_empty() {
+            tracing::debug!("[GB28181] parse_catalog_response returned {} channels", channels.len());
+            for (i, ch) in channels.iter().enumerate() {
+                tracing::debug!("[GB28181]   channel[{}]: id={}, name={}, parental={}", i, ch.device_id, ch.name, ch.parental);
+            }
+            if channels.is_empty() {
+                tracing::info!("[GB28181] Catalog empty for device {} - IPC mode (device itself is the channel)", device_tag);
                 self.pending_catalog_query = false;
                 self.catalog_retry_count = 0;
+                let device_channel = CatalogChannel {
+                    device_id: device_tag.clone(),
+                    name: "Camera 01".to_string(),
+                    manufacturer: None,
+                    model: None,
+                    status: "ON".to_string(),
+                    parental: false,
+                    parent_id: Some(device_tag.clone()),
+                    civil_code: None,
+                    address: None,
+                    ip_address: None,
+                    port: None,
+                    owner: None,
+                    secrecy: None,
+                    device_type: None,
+                    ptz_type: None,
+                    info: None,
+                };
                 return (
                     Some(SignalEvent::CatalogResponse {
                         device_id: self.device_id_i64(),
                         device_tag: Some(device_tag.clone()),
-                        channels,
+                        channels: vec![device_channel],
                     }),
                     Some(self.build_sip_response_only_headers(200, "OK", &via_branch, &cseq)),
                 );
             }
+            self.pending_catalog_query = false;
+            self.catalog_retry_count = 0;
+            return (
+                Some(SignalEvent::CatalogResponse {
+                    device_id: self.device_id_i64(),
+                    device_tag: Some(device_tag.clone()),
+                    channels,
+                }),
+                Some(self.build_sip_response_only_headers(200, "OK", &via_branch, &cseq)),
+            );
         }
 
         if body.contains("Catalog") || body.contains("Query") {
@@ -1150,6 +1312,11 @@ impl Gb28181Adapter {
         let via_branch = Self::parse_via_branch(headers);
         let cseq = Self::parse_cseq_line(headers);
         let call_id = Self::get_header(headers, "Call-ID").unwrap_or_default();
+
+        if !self.is_registered {
+            tracing::warn!("[GB28181] BYE: device not registered, rejecting");
+            return (None, Some(self.build_403_response(&via_branch, &cseq)));
+        }
 
         let sub_session = {
             let sessions = self.sessions.read().await;
@@ -1354,11 +1521,10 @@ impl Gb28181Adapter {
         tracing::debug!("[GB28181] Sending ACK to {} (via NAT: {}:{})", ack_target, ack_target_host, ack_target_port);
         self.send(ack.as_bytes()).await.ok();
 
-        let device_id = self.deps.device_lookup.find_by_tag(&session.channel_id).await
-            .map(|d| d.id)
-            .unwrap_or(0);
+        let channel_tag = &session.channel_id;
+        let device_tag = self.device_tag_str();
         let start_result = self.deps.stream_manager
-            .start_gb28181_stream(device_id, &session.stream_key)
+            .start_gb28181_stream(&device_tag, channel_tag, &session.stream_key)
             .await;
 
         if start_result.is_ok() {
@@ -1396,6 +1562,11 @@ impl Gb28181Adapter {
     async fn handle_subscribe(&mut self, headers: &[(String, String)], body: &str) -> (Option<SignalEvent>, Option<String>) {
         let via_branch = Self::parse_via_branch(headers);
         let cseq = Self::parse_cseq_line(headers);
+
+        if !self.is_registered {
+            tracing::warn!("[GB28181] SUBSCRIBE: device not registered, rejecting");
+            return (None, Some(self.build_403_response(&via_branch, &cseq)));
+        }
 
         let event_type = if body.contains("Event") {
             Self::parse_xml_field(body, "Event").unwrap_or_else(|| "presence".to_string())
@@ -1574,7 +1745,7 @@ impl SignalAdapter for Gb28181Adapter {
             } else if first_line.starts_with("REGISTER") {
                 self.handle_register(&headers, &body).await
             } else if first_line.starts_with("MESSAGE") {
-                self.handle_message(&headers, &body)
+                self.handle_message(&headers, &body).await
             } else if first_line.starts_with("BYE") {
                 self.handle_bye(&headers).await
             } else if first_line.starts_with("ACK") {
@@ -1589,13 +1760,17 @@ impl SignalAdapter for Gb28181Adapter {
             };
 
             if let Some(resp) = &response {
-                let _ = self.send(resp.as_bytes()).await;
+                tracing::debug!("[GB28181] Sending response to {}: {}", self.udp_peer.map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string()), &resp[..resp.len().min(200)]);
+                if let Err(e) = self.send(resp.as_bytes()).await {
+                    tracing::error!("[GB28181] Failed to send response: {}", e);
+                }
             }
 
             if self.pending_catalog_query {
                 self.pending_catalog_query = false;
                 let query = self.build_catalog_query();
-                tracing::info!("[GB28181] Sending catalog query to {}", self.device_tag_str());
+                let query_str = String::from_utf8_lossy(&query);
+                tracing::info!("[GB28181] Sending catalog query to {}: {}", self.device_tag_str(), query_str);
                 let _ = self.send(&query).await;
             }
 
@@ -1615,18 +1790,24 @@ impl SignalAdapter for Gb28181Adapter {
         let device_tag = self.device_tag_str();
         if !device_tag.is_empty() {
             tracing::info!("[GB28181] Device {} disconnected, cleaning {} sessions", device_tag, self.sessions.read().await.len());
+            
+            let sessions: Vec<SubSession> = self.sessions.read().await.values().cloned().collect();
+            for session in &sessions {
+                if let Err(e) = self.send_bye_to_session(session).await {
+                    tracing::warn!("[GB28181] Failed to send BYE to {}:{}", session.device_host, e);
+                }
+            }
+
             if let Some(ref name) = self.event_handler_name {
                 registry().infra.event_bus.off(name);
             }
             let _ = self.deps.device_lookup.set_offline(&device_tag, Some("Connection closed")).await;
 
-            if let Some(device) = self.deps.device_lookup.find_by_tag(&device_tag).await {
-                if let Err(e) = self.deps.stream_manager.stop_streams_by_device(device.id).await {
-                    tracing::warn!("[GB28181] on_disconnected: failed to stop streams for device {}: {}", device.id, e);
-                }
+            if let Err(e) = self.deps.stream_manager.stop_streams_by_device(&device_tag).await {
+                tracing::warn!("[GB28181] on_disconnected: failed to stop streams for device {}: {}", device_tag, e);
             }
 
-            for session in self.sessions.read().await.values() {
+            for session in sessions {
                 self.deps.rtp_tunnel.unregister(&session.stream_key);
             }
             self.sessions.write().await.clear();
@@ -1647,9 +1828,15 @@ impl SignalAdapter for Gb28181Adapter {
         }
         if let Some(ref addr) = self.udp_peer {
             if let Some(sender) = super::get_udp_sender() {
-                sender.send_to(data, *addr).await
-                    .map_err(|e| AppError::Internal(format!("UDP send: {}", e)))?;
+                if let Err(e) = sender.send_to(data, *addr).await {
+                    tracing::error!("[GB28181] UDP send failed to {}: {}", addr, e);
+                    return Err(AppError::Internal(format!("UDP send: {}", e)));
+                }
+            } else {
+                tracing::warn!("[GB28181] UDP sender not initialized");
             }
+        } else {
+            tracing::warn!("[GB28181] UDP peer not set, cannot send response");
         }
         Ok(())
     }
@@ -1672,6 +1859,22 @@ impl SignalAdapter for Gb28181Adapter {
     async fn start(&mut self, device_tag: &str) -> Result<()> {
         let device = self.deps.device_lookup.find_by_tag(device_tag).await
             .ok_or_else(|| AppError::NotFound(format!("Device not found: {}", device_tag)))?;
+
+        if let Some(ext) = &device.extended {
+            if let Some(transport) = ext.get("gb_transport").and_then(|v| v.as_str()) {
+                let transport_str = match transport.to_uppercase().as_str() {
+                    "TCP" => {
+                        self.transport = TransportProtocol::Tcp;
+                        "TCP"
+                    },
+                    _ => {
+                        self.transport = TransportProtocol::Udp;
+                        "UDP"
+                    },
+                };
+                tracing::info!("[GB28181] Using transport {} for device {}", transport_str, device_tag);
+            }
+        }
 
         let stream_key = format!("gb_{}", device_tag);
         let (rtp_port, server_ip, media_server_name) = self.alloc_rtp_port(&stream_key, device.media_server_tag.as_deref()).await?;
@@ -2274,6 +2477,53 @@ a=rtpmap:8 PCMA/8000
         
         Ok(())
     }
+    
+    async fn send_bye_to_session(&self, session: &SubSession) -> Result<()> {
+        let (platform_id, platform_ip, platform_port) = crate::protocol::gb28181::get_gb28181_platform_config()
+            .get()
+            .map(|(id, _, ip, port)| (id.as_str(), ip.as_str(), *port))
+            .unwrap_or(("34020000000000000000", "0.0.0.0", 5060));
+
+        let device_tag = self.device_tag_str();
+        let via_transport = match session.transport {
+            TransportProtocol::Tcp => "TCP",
+            TransportProtocol::Udp => "UDP",
+        };
+        let sip_msg = format!(
+            "BYE sip:{}@{}:{} SIP/2.0\r\n\
+             Via: SIP/2.0/{} {}:{};branch=z9hG4bK{};rport\r\n\
+             From: <sip:{}@{}:{}>;tag={}\r\n\
+             To: <sip:{}@{}:{}>;tag={}\r\n\
+             Call-ID: {}\r\n\
+             CSeq: 2 BYE\r\n\
+             User-Agent: RustCam-Media/2.0\r\n\
+             Content-Length: 0\r\n\r\n",
+            device_tag, session.device_host, session.device_port,
+            via_transport, platform_ip, platform_port,
+            chrono::Utc::now().timestamp_millis(),
+            platform_id, platform_ip, platform_port, &session.from_tag,
+            device_tag, session.device_host, session.device_port,
+            session.to_tag.as_deref().unwrap_or(""),
+            &session.call_id
+        );
+
+        match session.transport {
+            TransportProtocol::Tcp => {
+                if let Some(ref write_arc) = self.write {
+                    let mut write = write_arc.write().await;
+                    write.write_all(sip_msg.as_bytes()).await.map_err(|e| AppError::Internal(e.to_string()))?;
+                    let _ = write.flush().await;
+                }
+            }
+            TransportProtocol::Udp => {
+                if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
+                    let addr = format!("{}:{}", session.device_host, session.device_port);
+                    sender.send_to(sip_msg.as_bytes(), &addr).await.map_err(|e| AppError::Internal(e.to_string()))?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 fn rand_ssrc() -> u32 {
@@ -2355,5 +2605,37 @@ mod tests {
         let result = Gb28181Adapter::build_ptz_xml_compound("34020000001110000001", 0.5, 0.5, 0.0, 50);
         assert!(result.contains("34020000001110000001"));
         assert!(result.contains("PTZCmd"));
+    }
+
+    #[tokio::test]
+    async fn test_build_catalog_query() {
+        use std::sync::Once;
+        static SETUP: Once = Once::new();
+        SETUP.call_once(|| {
+            crate::protocol::gb28181::set_gb28181_platform_config(
+                "31011500001000000001".to_string(),
+                "3101150000".to_string(),
+                "192.168.1.100".to_string(),
+                5060,
+            );
+        });
+
+        let deps = ProtocolDeps::for_test();
+        
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+        adapter.device_tag = Some("12010100001320000011".to_string());
+        adapter.udp_peer = Some("192.168.1.211:5060".parse().unwrap());
+
+        let query = adapter.build_catalog_query();
+        let query_str = String::from_utf8_lossy(&query);
+        
+        assert!(query_str.contains("MESSAGE sip:"), "Should contain MESSAGE sip:");
+        assert!(query_str.contains("12010100001320000011"), "Should contain device ID");
+        assert!(query_str.contains("CmdType>Catalog"), "Should contain Catalog command");
+        assert!(query_str.contains("Via:"), "Should contain Via header");
+        assert!(query_str.contains("CSeq:"), "Should contain CSeq header");
+        assert!(query_str.contains("From:"), "Should contain From header");
+        assert!(query_str.contains("To:"), "Should contain To header");
+        assert!(query_str.contains("Call-ID:"), "Should contain Call-ID header");
     }
 }

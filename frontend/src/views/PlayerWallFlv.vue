@@ -58,7 +58,7 @@
             <template #header><span>绑定信息</span></template>
             <el-empty v-if="Object.keys(bindings).length === 0" description="暂无绑定" :image-size="40" />
             <div v-for="(binding, slotId) in bindings" :key="slotId" class="binding-item">
-              <el-text truncated style="flex: 1">{{ binding.name || binding.deviceId }}</el-text>
+              <el-text truncated style="flex: 1">{{ binding.name || binding.deviceTag }}</el-text>
               <el-button size="small" type="danger" plain circle :icon="Close" @click="stopSlot(slotId)" />
             </div>
           </el-card>
@@ -308,12 +308,12 @@ function buildRegionTree() {
   for (const device of deviceStore.devices) {
     const region = map.get(device.region_code)
     if (region) {
-      region.children.push({ name: device.name, key: `device_${device.id}`, isDevice: true, device, children: [] })
+      region.children.push({ name: device.name, key: `device_${device.device_tag}`, isDevice: true, device, children: [] })
     }
   }
   calcDeviceCount(roots)
   const allDevices = deviceStore.devices.map(d => ({
-    name: d.name, key: `device_${d.id}`, isDevice: true, device: d, children: []
+    name: d.name, key: `device_${d.device_tag}`, isDevice: true, device: d, children: []
   }))
   return [{ name: '全部', key: 'all', children: allDevices }, ...roots]
 }
@@ -332,12 +332,12 @@ function buildGroupTree() {
   for (const device of deviceStore.devices) {
     const group = map.get(device.group_id)
     if (group) {
-      group.children.push({ name: device.name, key: `device_${device.id}`, isDevice: true, device, children: [] })
+      group.children.push({ name: device.name, key: `device_${device.device_tag}`, isDevice: true, device, children: [] })
     }
   }
   calcDeviceCount(roots)
   const allDevices = deviceStore.devices.map(d => ({
-    name: d.name, key: `device_${d.id}`, isDevice: true, device: d, children: []
+    name: d.name, key: `device_${d.device_tag}`, isDevice: true, device: d, children: []
   }))
   return [{ name: '全部', key: 'all', children: allDevices }, ...roots]
 }
@@ -409,15 +409,15 @@ function itemStyle(item) {
   }
 }
 
-async function getFlvUrl(deviceId) {
+async function getFlvUrl(deviceTag) {
   try {
-    const linksRes = await request.get(`/devices/${deviceId}/play-links`)
+    const linksRes = await request.get(`/channels/${deviceTag}/${deviceTag}/play-links`)
     const links = linksRes.data.data || {}
     if (links.web_flv) return links.web_flv
     if (links.flv) return links.flv
-    const streamsRes = await request.get('/streams', { params: { device_id: deviceId } })
-    const streams = streamsRes.data.data?.items || []
-    const stream = streams.find(s => s.device_id === deviceId)
+    const streamsRes = await request.get(`/streams/by-device/${deviceTag}`)
+    const streams = streamsRes.data.data || []
+    const stream = streams.find(s => s.device_tag === deviceTag && s.state === 'Active')
     if (!stream) return null
     const flvRes = await request.get(`/streams/${stream.id}/play`, { params: { protocol: 'wsflv' } })
     return flvRes.data.data
@@ -441,14 +441,15 @@ async function onLayoutChange() {
 }
 
 async function onDragStart(event, device) {
-  draggingDeviceId = device.id; draggingDevice = device; draggingFlvUrl = null
-  event.dataTransfer.setData('application/json', JSON.stringify({ deviceId: device.id, name: device.name, flvUrl: null }))
+  const deviceTag = device.device_tag
+  draggingDeviceId = deviceTag; draggingDevice = device; draggingFlvUrl = null
+  event.dataTransfer.setData('application/json', JSON.stringify({ deviceTag, name: device.name, flvUrl: null }))
   event.dataTransfer.effectAllowed = 'copy'
   try {
-    const flvUrl = await getFlvUrl(device.id)
+    const flvUrl = await getFlvUrl(deviceTag)
     if (flvUrl) {
       draggingFlvUrl = flvUrl
-      event.dataTransfer.setData('application/json', JSON.stringify({ deviceId: device.id, name: device.name, flvUrl }))
+      event.dataTransfer.setData('application/json', JSON.stringify({ deviceTag, name: device.name, flvUrl }))
     }
   } catch (err) { console.warn('[PlayerWallFlv] pre-fetch flv url failed:', err) }
 }
@@ -460,15 +461,15 @@ async function onCellDrop(event, slotId) {
   event.preventDefault()
   const rawData = event.dataTransfer.getData('application/json')
   if (!rawData) return
-  let deviceId, deviceName, flvUrl
+  let deviceTag, deviceName, flvUrl
   try {
     const data = JSON.parse(rawData)
-    deviceId = data.deviceId; deviceName = data.name; flvUrl = data.flvUrl
+    deviceTag = data.deviceTag; deviceName = data.name; flvUrl = data.flvUrl
   } catch { toast.error('数据格式错误'); return }
-  if (!flvUrl) flvUrl = await getFlvUrl(deviceId)
+  if (!flvUrl) flvUrl = await getFlvUrl(deviceTag)
   if (!flvUrl) { toast.error('该设备无可用 FLV 播放地址'); return }
   if (bindings.value[slotId]) toast.info('该格子已有播放，替换中...')
-  bindings.value[slotId] = { deviceId, name: deviceName, flvUrl, slotId }
+  bindings.value[slotId] = { deviceTag, name: deviceName, flvUrl, slotId }
 }
 
 async function onDrop(event) {
@@ -476,16 +477,16 @@ async function onDrop(event) {
   if (!layout.value || layoutItems.value.length === 0) return
   const rawData = event.dataTransfer.getData('application/json')
   if (!rawData) return
-  let deviceId, deviceName, flvUrl
+  let deviceTag, deviceName, flvUrl
   try {
     const data = JSON.parse(rawData)
-    deviceId = data.deviceId; deviceName = data.name; flvUrl = data.flvUrl
+    deviceTag = data.deviceTag; deviceName = data.name; flvUrl = data.flvUrl
   } catch { return }
-  if (!flvUrl) flvUrl = await getFlvUrl(deviceId)
+  if (!flvUrl) flvUrl = await getFlvUrl(deviceTag)
   if (!flvUrl) { toast.error('该设备无可用 FLV 播放地址'); return }
   const emptySlot = layoutItems.value.find(item => !bindings.value[item.id])
   const targetSlot = emptySlot || layoutItems.value[0]
-  bindings.value[targetSlot.id] = { deviceId, name: deviceName, flvUrl, slotId: targetSlot.id }
+  bindings.value[targetSlot.id] = { deviceTag, name: deviceName, flvUrl, slotId: targetSlot.id }
 }
 
 function stopSlot(slotId) { delete bindings.value[slotId] }
