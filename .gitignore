@@ -22,3 +22,9 @@ build.bat
 run.bat
 /document
 rustcam-plan.md
+/server.log
+/server_final.log
+/server_new.log
+/tests
+/camera-test.txt
+/build_log.txt
