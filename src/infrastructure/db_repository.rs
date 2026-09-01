@@ -507,11 +507,13 @@ impl DbRepository {
     }
 
     pub async fn get_channel(&self, device_tag: &str, channel_tag: &str) -> Result<Option<Channel>> {
+        tracing::debug!("[DB] get_channel: device_tag={}, channel_tag={}", device_tag, channel_tag);
         let rows = channel_select_by_device_tag_and_channel_tag(
             self.rb.acquire().await?.rb_ref(),
             device_tag,
             channel_tag,
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
+        tracing::debug!("[DB] get_channel result: {} rows", rows.len());
         Ok(rows.into_iter().filter_map(|r| Channel::try_from(r).ok()).next())
     }
 
