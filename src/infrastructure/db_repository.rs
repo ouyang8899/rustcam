@@ -466,7 +466,10 @@ impl DbRepository {
             channel.updated_at.map(|u| RbatisDateTime::from_timestamp_millis(u.timestamp_millis())),
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
 
-        Ok(result.last_insert_id.as_i64().unwrap_or(0))
+        let id = result.last_insert_id.as_i64().unwrap_or(0);
+        let key = format_cache_key(Some(&channel.device_tag), Some(&channel.channel_tag));
+        self.channels_cache.insert(key, channel.clone());
+        Ok(id)
     }
 
     pub async fn update_channel(&self, channel: &Channel) -> Result<()> {
@@ -496,6 +499,9 @@ impl DbRepository {
             Some(extended_json),
             Some(RbatisDateTime::from_timestamp_millis(chrono::Utc::now().timestamp_millis())),
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let key = format_cache_key(Some(&channel.device_tag), Some(&channel.channel_tag));
+        self.channels_cache.insert(key, channel.clone());
 
         Ok(())
     }
