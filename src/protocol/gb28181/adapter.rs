@@ -569,6 +569,10 @@ impl Gb28181Adapter {
             "right" => format!("80 01 04 40 00 {:02X} 00 {:02X} 00 00 00 00", spd, spd),
             "zoom_in" => format!("80 01 04 80 00 {:02X} 00 00 00 00 00 00", spd),
             "zoom_out" => format!("80 01 04 00 01 {:02X} 00 00 00 00 00 00", spd),
+            "focus_in" | "focus_near" => format!("80 01 47 00 00 {:02X} 00 00 00 00 00 00", spd),
+            "focus_out" | "focus_far" => format!("80 01 46 00 00 {:02X} 00 00 00 00 00 00", spd),
+            "iris_in" | "iris_open" => format!("80 01 49 00 00 {:02X} 00 00 00 00 00 00", spd),
+            "iris_out" | "iris_close" => format!("80 01 48 00 00 {:02X} 00 00 00 00 00 00", spd),
             "stop" => "80 01 04 00 00 00 00 00 00 00 00 00".to_string(),
             _ => "80 01 04 00 00 00 00 00 00 00 00 00".to_string(),
         }
@@ -2463,6 +2467,8 @@ impl SignalAdapter for Gb28181Adapter {
                     PtzCommand::ZoomOut => ("zoom_out", spd),
                     PtzCommand::FocusIn => ("focus_in", spd),
                     PtzCommand::FocusOut => ("focus_out", spd),
+                    PtzCommand::IrisIn => ("iris_in", spd),
+                    PtzCommand::IrisOut => ("iris_out", spd),
                     _ => return Ok(()),
                 };
 
@@ -3585,6 +3591,20 @@ mod tests {
         let result = Gb28181Adapter::build_ptz_xml("34020000001110000001", "zoom_out", 50);
         assert!(result.contains("<CmdType>PTZCmd</CmdType>"));
         assert!(result.contains("PTZCmd>80 01 04 00 01"));
+    }
+
+    #[test]
+    fn test_build_ptz_xml_iris_in() {
+        let result = Gb28181Adapter::build_ptz_xml("34020000001110000001", "iris_in", 50);
+        assert!(result.contains("<CmdType>PTZCmd</CmdType>"));
+        assert!(result.contains("PTZCmd>80 01 49"));
+    }
+
+    #[test]
+    fn test_build_ptz_xml_iris_out() {
+        let result = Gb28181Adapter::build_ptz_xml("34020000001110000001", "iris_out", 50);
+        assert!(result.contains("<CmdType>PTZCmd</CmdType>"));
+        assert!(result.contains("PTZCmd>80 01 48"));
     }
 
     #[test]

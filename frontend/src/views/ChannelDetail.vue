@@ -29,21 +29,65 @@
                 </div>
               </div>
             </template>
-            <div class="player-wrapper">
-              <VideoPlayer
-                v-if="currentStreamUrl && !loading"
-                :liveSrc="currentStreamUrl"
-                :type="selectedStreamType"
-                :isLive="true"
-                :autoplay="true"
-              />
-              <div v-else-if="loading" class="loading-state">
-                <el-icon class="is-loading"><Loading /></el-icon>
-                <span>加载中...</span>
+            <div class="player-with-ptz">
+              <div class="player-wrapper">
+                <VideoPlayer
+                  v-if="currentStreamUrl && !loading"
+                  :liveSrc="currentStreamUrl"
+                  :type="selectedStreamType"
+                  :isLive="true"
+                  :autoplay="true"
+                />
+                <div v-else-if="loading" class="loading-state">
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                  <span>加载中...</span>
+                </div>
+                <div v-else class="empty-state">
+                  <el-icon><VideoPlay /></el-icon>
+                  <span>暂无视频流</span>
+                </div>
               </div>
-              <div v-else class="empty-state">
-                <el-icon><VideoPlay /></el-icon>
-                <span>暂无视频流</span>
+
+              <div v-if="device && (device.protocol?.toLowerCase() === 'onvif' || device.protocol?.toLowerCase() === 'gb28181')" class="ptz-panel">
+                <div class="ptz-title">PTZ 控制</div>
+                <div class="ptz-control">
+                  <div class="ptz-grid">
+                    <button class="ptz-dir-btn ptz-dir-up" @mousedown="ptzControl('up', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">▲</button>
+                    <button class="ptz-dir-btn ptz-dir-lf" @mousedown="ptzControl('left', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">◀</button>
+                    <button class="ptz-stop-btn" @click="ptzControl('stop', 1)">●</button>
+                    <button class="ptz-dir-btn ptz-dir-rt" @mousedown="ptzControl('right', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">▶</button>
+                    <button class="ptz-dir-btn ptz-dir-dn" @mousedown="ptzControl('down', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">▼</button>
+                  </div>
+                  <div class="ptz-zoom">
+                    <button class="ptz-opt-btn" @mousedown="ptzControl('zoom_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">ZOOM+</button>
+                    <button class="ptz-opt-btn" @mousedown="ptzControl('zoom_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">ZOOM-</button>
+                  </div>
+                  <div class="ptz-focus">
+                    <button class="ptz-opt-btn" @mousedown="ptzControl('focus_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">FOCUS+</button>
+                    <button class="ptz-opt-btn" @mousedown="ptzControl('focus_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">FOCUS-</button>
+                  </div>
+                  <div class="ptz-iris">
+                    <button class="ptz-opt-btn" @mousedown="ptzControl('iris_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">IRIS+</button>
+                    <button class="ptz-opt-btn" @mousedown="ptzControl('iris_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">IRIS-</button>
+                  </div>
+                </div>
+
+                <div class="preset-section">
+                  <div class="preset-header">
+                    <span>预制位</span>
+                    <el-button size="small" type="primary" @click="showPresetDialog = true">保存</el-button>
+                  </div>
+                  <div v-if="presets.length === 0" class="empty-presets">暂无预制位</div>
+                  <div v-else class="preset-list">
+                    <div v-for="preset in presets" :key="preset.token" class="preset-item">
+                      <span class="preset-name">{{ preset.name }}</span>
+                      <div class="preset-actions">
+                        <el-button size="small" @click="gotoPreset(preset)">调用</el-button>
+                        <el-button size="small" type="danger" plain @click="removePreset(preset)">删</el-button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </el-card>
@@ -107,47 +151,6 @@
               <el-descriptions-item label="创建时间">{{ formatDate(channel.created_at) }}</el-descriptions-item>
             </el-descriptions>
           </el-card>
-
-          <el-card v-if="channel.device_type === 'ONVIF' || channel.device_type === 'GB28181'" shadow="never" style="margin-top: 12px">
-            <template #header><span>PTZ 云台控制</span></template>
-            <div class="ptz-control">
-              <div class="ptz-grid">
-                <button class="ptz-dir-btn ptz-dir-up" @mousedown="ptzControl('up', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">▲</button>
-                <button class="ptz-dir-btn ptz-dir-lf" @mousedown="ptzControl('left', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">◀</button>
-                <button class="ptz-stop-btn" @click="ptzControl('stop', 1)">●</button>
-                <button class="ptz-dir-btn ptz-dir-rt" @mousedown="ptzControl('right', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">▶</button>
-                <button class="ptz-dir-btn ptz-dir-dn" @mousedown="ptzControl('down', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">▼</button>
-              </div>
-              <div class="ptz-zoom">
-                <button class="ptz-opt-btn" @mousedown="ptzControl('zoom_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">ZOOM+</button>
-                <button class="ptz-opt-btn" @mousedown="ptzControl('zoom_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">ZOOM-</button>
-              </div>
-              <div class="ptz-speed">
-                <span>速度</span>
-                <el-slider v-model="ptzSpeed" :min="1" :max="100" show-stops style="width: 100px" />
-                <span>{{ ptzSpeed }}</span>
-              </div>
-            </div>
-          </el-card>
-
-          <el-card v-if="channel.device_type === 'ONVIF' || channel.device_type === 'GB28181'" shadow="never" style="margin-top: 12px">
-            <template #header>
-              <div class="card-header">
-                <span>预制位</span>
-                <el-button size="small" type="primary" @click="showPresetDialog = true">保存当前</el-button>
-              </div>
-            </template>
-            <div v-if="presets.length === 0" class="empty-presets">暂无预制位</div>
-            <div v-else class="preset-list">
-              <div v-for="preset in presets" :key="preset.token" class="preset-item">
-                <span class="preset-name">{{ preset.name }}</span>
-                <div class="preset-actions">
-                  <el-button size="small" @click="gotoPreset(preset)">调用</el-button>
-                  <el-button size="small" type="danger" plain @click="removePreset(preset)">删除</el-button>
-                </div>
-              </div>
-            </div>
-          </el-card>
         </div>
       </div>
     </div>
@@ -168,13 +171,16 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Refresh, VideoPlay, Loading } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useChannelStore } from '../stores/channelStore'
+import { useDeviceStore } from '../stores/deviceStore'
 import VideoPlayer from '../components/VideoPlayer.vue'
 
 const route = useRoute()
 const router = useRouter()
 const channelStore = useChannelStore()
+const deviceStore = useDeviceStore()
 
 const channel = ref(null)
+const device = ref(null)
 const playLinks = ref(null)
 const loading = ref(false)
 const selectedStreamType = ref('hls')
@@ -210,8 +216,15 @@ async function fetchData() {
     const { deviceTag, channelTag } = route.params
     channel.value = await channelStore.getChannel(deviceTag, channelTag)
     playLinks.value = await channelStore.getChannelPlayLinks(deviceTag, channelTag)
-    if (channel.value.device_type === 'ONVIF' || channel.value.device_type === 'GB28181') {
-      await fetchPresets()
+    
+    const dev = await deviceStore.fetchDevice(deviceTag)
+    device.value = dev || null
+    
+    if (device.value) {
+      const proto = (device.value.protocol || '').toLowerCase()
+      if (proto === 'onvif' || proto === 'gb28181') {
+        await fetchPresets()
+      }
     }
     updateDefaultStreamType()
   } catch (e) {
@@ -364,7 +377,6 @@ onMounted(() => {
 }
 
 .player-wrapper {
-  aspect-ratio: 16 / 9;
   background: #000;
   border-radius: 4px;
   overflow: hidden;
@@ -386,6 +398,109 @@ onMounted(() => {
 .empty-state .el-icon {
   font-size: 48px;
   color: #999;
+}
+
+.player-with-ptz {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.player-wrapper {
+  flex: 1;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.ptz-panel {
+  width: 180px;
+  flex-shrink: 0;
+  background: var(--el-fill-color-lighter);
+  border-radius: var(--radius-base);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ptz-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  text-align: center;
+}
+
+.ptz-panel .ptz-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ptz-panel .ptz-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 36px);
+  grid-template-rows: repeat(3, 36px);
+  gap: 4px;
+  justify-content: center;
+}
+
+.ptz-panel .ptz-dir-btn {
+  width: 36px;
+  height: 36px;
+}
+
+.ptz-panel .ptz-stop-btn {
+  width: 36px;
+  height: 36px;
+}
+
+.ptz-panel .ptz-zoom {
+  display: flex;
+  gap: 4px;
+}
+
+.ptz-panel .ptz-focus {
+  display: flex;
+  gap: 4px;
+}
+
+.ptz-panel .ptz-iris {
+  display: flex;
+  gap: 4px;
+}
+
+.preset-section {
+  border-top: 1px solid var(--el-border-color-lighter);
+  padding-top: 12px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.preset-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.preset-header span {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+}
+
+.ptz-panel .ptz-opt-btn {
+  flex: 1;
+  height: 24px;
+  font-size: 9px;
 }
 
 .links-card .links-list {
@@ -435,19 +550,20 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .ptz-grid {
   display: grid;
-  grid-template-columns: repeat(3, 38px);
-  grid-template-rows: repeat(3, 38px);
+  grid-template-columns: repeat(3, 36px);
+  grid-template-rows: repeat(3, 36px);
   gap: 4px;
+  justify-content: center;
 }
 
 .ptz-dir-btn {
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   border: 1px solid var(--el-border-color);
   background: var(--el-fill-color-light);
   border-radius: 6px;
@@ -455,7 +571,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 11px;
   transition: all 0.15s;
 }
 
@@ -468,12 +584,12 @@ onMounted(() => {
   background: var(--el-color-primary-light-9);
 }
 
-.ptz-dir-up { grid-column: 2; grid-row: 1; justify-self: center; }
-.ptz-dir-lf { grid-column: 1; grid-row: 2; justify-self: center; }
+.ptz-dir-up { grid-column: 2; grid-row: 1; justify-self: center; align-self: center; }
+.ptz-dir-lf { grid-column: 1; grid-row: 2; justify-self: center; align-self: center; }
 
 .ptz-stop-btn {
-  grid-column: 2; grid-row: 2; justify-self: center;
-  width: 34px; height: 34px;
+  grid-column: 2; grid-row: 2; justify-self: center; align-self: center;
+  width: 36px; height: 36px;
   border: 1px solid rgba(239, 68, 68, 0.3);
   background: rgba(239, 68, 68, 0.08);
   border-radius: 50%;
@@ -491,23 +607,23 @@ onMounted(() => {
   background: rgba(239, 68, 68, 0.15);
 }
 
-.ptz-dir-rt { grid-column: 3; grid-row: 2; justify-self: center; }
-.ptz-dir-dn { grid-column: 2; grid-row: 3; justify-self: center; }
+.ptz-dir-rt { grid-column: 3; grid-row: 2; justify-self: center; align-self: center; }
+.ptz-dir-dn { grid-column: 2; grid-row: 3; justify-self: center; align-self: center; }
 
 .ptz-zoom {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
 }
 
 .ptz-opt-btn {
   flex: 1;
-  height: 32px;
+  height: 26px;
   border: 1px solid var(--el-border-color);
   background: var(--el-fill-color-light);
   border-radius: 4px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
   transition: all 0.15s;
 }
@@ -515,58 +631,6 @@ onMounted(() => {
 .ptz-opt-btn:hover {
   border-color: var(--el-color-primary);
   color: var(--el-color-primary);
-}
-
-.ptz-speed {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  width: 100%;
-}
-
-.ptz-speed span:first-child {
-  width: 28px;
-}
-
-.ptz-speed span:last-child {
-  width: 28px;
-  text-align: right;
-}
-
-.empty-presets {
-  text-align: center;
-  padding: 24px;
-  color: var(--el-text-color-secondary);
-  font-size: 13px;
-}
-
-.preset-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.preset-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-}
-
-.preset-item:last-child {
-  border-bottom: none;
-}
-
-.preset-name {
-  font-size: 13px;
-  color: var(--el-text-color-primary);
-}
-
-.preset-actions {
-  display: flex;
-  gap: 4px;
 }
 
 @media (max-width: 1024px) {

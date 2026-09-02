@@ -472,7 +472,7 @@ impl DeviceService {
                 return Ok(Some(new_token));
             }
             PtzCommand::RemovePreset { preset_token } => { client.with_profile(profile_token).remove_preset(preset_token).await?; }
-            PtzCommand::FocusIn | PtzCommand::FocusOut => { return Err(AppError::BadRequest("Focus not supported for ONVIF".to_string())); }
+            PtzCommand::FocusIn | PtzCommand::FocusOut | PtzCommand::IrisIn | PtzCommand::IrisOut => { return Err(AppError::BadRequest("Focus/Iris not supported for ONVIF".to_string())); }
         }
         tracing::debug!("[PTZ] ONVIF sent: device={} cmd={:?}", device.id, command);
         Ok(None)
@@ -817,6 +817,7 @@ impl DeviceService {
         if let Some(name) = req.name { device.name = name; }
         if let Some(host) = req.host { device.host = host; }
         if let Some(port) = req.port { device.port = port; }
+        if let Some(protocol) = req.protocol { device.protocol = protocol; }
         if let Some(v) = req.device_username { device.device_username = Some(v); }
         if let Some(v) = req.device_password { device.device_password = Some(v); }
         if let Some(v) = req.push_urls { device.push_urls = v; }
@@ -940,13 +941,33 @@ impl DeviceService {
 
         if matches!(device.protocol, Protocol::Rtsp | Protocol::Rtmp) {
             if let Some(ref device_tag) = device.device_tag {
-                if let Ok(Some(mut channel)) = self.infra.db.get_channel(device_tag, device_tag).await {
-                    channel.name = device.name.clone();
-                    channel.status = device.status;
-                    channel.ip_address = Some(device.host.clone());
-                    channel.port = device.port;
-                    if let Err(e) = self.infra.db.update_channel(&channel).await {
-                        tracing::warn!("[DeviceService] Failed to update channel for device {}: {}", device_tag, e);
+                match self.infra.db.get_channel(device_tag, device_tag).await {
+                    Ok(Some(mut channel)) => {
+                        channel.name = device.name.clone();
+                        channel.status = device.status;
+                        channel.ip_address = Some(device.host.clone());
+                        channel.port = device.port;
+                        if let Err(e) = self.infra.db.update_channel(&channel).await {
+                            tracing::warn!("[DeviceService] Failed to update channel for device {}: {}", device_tag, e);
+                        }
+                    }
+                    Ok(None) => {
+                        let mut channel = Channel::new(
+                            device_tag.clone(),
+                            device_tag.clone(),
+                            device.name.clone(),
+                        );
+                        channel.ip_address = Some(device.host.clone());
+                        channel.port = device.port;
+                        channel.status = device.status;
+                        if let Err(e) = self.infra.db.create_channel(&channel).await {
+                            tracing::warn!("[DeviceService] Failed to create channel for device {}: {}", device_tag, e);
+                        } else {
+                            tracing::info!("[DeviceService] Created channel for device {} during update", device_tag);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("[DeviceService] Failed to get channel for device {}: {}", device_tag, e);
                     }
                 }
             }

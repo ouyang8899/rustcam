@@ -942,7 +942,7 @@ async function onvifDiscover() {
       form.value.device_username = p.username || form.value.device_username
       form.value.device_password = p.password || form.value.device_password
       if (p.stream_uri) {
-        form.value.pull_urls = [{ protocol: 'Rtsp', url: p.stream_uri, priority: 1 }]
+        form.value.pull_urls = [{ protocol: 'rtsp', url: p.stream_uri, priority: 1 }]
       }
       ElMessage.success(`发现 ${profiles.length} 个媒体通道`)
     } else {
@@ -1372,9 +1372,9 @@ async function openEditModal(device) {
 
 function closeModal() { showModal.value = false }
 
-function addPullUrl() { form.value.pull_urls.push({ protocol: 'Rtsp', url: '', priority: form.value.pull_urls.length + 1 }) }
+function addPullUrl() { form.value.pull_urls.push({ protocol: 'rtsp', url: '', priority: form.value.pull_urls.length + 1 }) }
 function removePullUrl(index) { form.value.pull_urls.splice(index, 1) }
-function addPushUrl() { form.value.push_urls.push({ protocol: 'Rtmp', url: '', priority: form.value.push_urls.length + 1 }) }
+function addPushUrl() { form.value.push_urls.push({ protocol: 'rtmp', url: '', priority: form.value.push_urls.length + 1 }) }
 function removePushUrl(index) { form.value.push_urls.splice(index, 1) }
 
 async function submitDevice() {
@@ -1400,25 +1400,25 @@ async function submitDevice() {
   if (form.value.protocol === 'Onvif' && !form.value.device_password) { ElMessage.error('请填写密码'); return }
   if (form.value.protocol === 'Rtsp' && form.value.rtsp_mode === 'pull' && !form.value.rtsp_full_url.trim()) { ElMessage.error('请填写RTSP全链接'); return }
 
-  const finalDeviceTag = isEdit.value
-    ? (form.value.protocol === 'Gb28181' ? sipIdPreview.value : editingId.value)
-    : (form.value.protocol === 'Gb28181' ? sipIdPreview.value : null)
+  const finalDeviceTag = form.value.protocol === 'Gb28181'
+    ? (isEdit.value ? sipIdPreview.value : sipIdPreview.value)
+    : null
 
   const payload = {
     name: form.value.name, protocol: form.value.protocol,
     device_username: form.value.device_username || null, device_password: form.value.device_password || null,
     media_server_tag: form.value.media_server_tag || null,
-    pull_urls: form.value.pull_urls.filter(u => u.url).length > 0 ? form.value.pull_urls : undefined,
-    push_urls: form.value.push_urls.filter(u => u.url).length > 0 ? form.value.push_urls : undefined,
+    pull_urls: form.value.pull_urls?.filter(u => u.url).length > 0 ? form.value.pull_urls : undefined,
+    push_urls: form.value.push_urls?.filter(u => u.url).length > 0 ? form.value.push_urls : undefined,
     playback_username: form.value.playback_username || null, playback_password: form.value.playback_password || null,
     device_tag: finalDeviceTag, region_code: sipIdPrefix.value || null, group_id: form.value.group_id || null, is_public: form.value.is_public,
     app: form.value.app || null,
     extended: {
       ...(form.value.extended || {}),
-      rtsp_mode: form.value.protocol === 'Rtsp' ? form.value.rtsp_mode : undefined,
-      rtsp_full_url: form.value.protocol === 'Rtsp' && form.value.rtsp_mode === 'pull' ? form.value.rtsp_full_url || null : null,
-      rtmp_mode: form.value.protocol === 'Rtmp' ? form.value.rtmp_mode : undefined,
-      gb_transport: form.value.protocol === 'Gb28181' ? form.value.gb_transport : undefined,
+      rtsp_mode: form.value.protocol === 'Rtsp' ? (form.value.rtsp_mode || null) : null,
+      rtsp_full_url: form.value.protocol === 'Rtsp' && form.value.rtsp_mode === 'pull' ? (form.value.rtsp_full_url || null) : null,
+      rtmp_mode: form.value.protocol === 'Rtmp' ? (form.value.rtmp_mode || null) : null,
+      gb_transport: form.value.protocol === 'Gb28181' ? (form.value.gb_transport || null) : null,
     },
   }
 
@@ -1453,7 +1453,7 @@ async function submitDevice() {
         device_password: form.value.device_password || null,
         media_server_tag: form.value.media_server_tag || null,
         rtsp_mode: 'pull', rtsp_full_url: url.url,
-        pull_urls: [{ protocol: 'Rtsp', url: url.url, priority: 1 }],
+        pull_urls: [{ protocol: 'rtsp', url: url.url, priority: 1 }],
         playback_username: form.value.playback_username || null,
         playback_password: form.value.playback_password || null,
         device_tag: null, region_code: sipIdPrefix.value || null, group_id: form.value.group_id || null, is_public: form.value.is_public || false,
@@ -1589,7 +1589,7 @@ async function confirmOnvifDevice() {
       device_username: onvifDiscoverUser.value || null,
       device_password: onvifDiscoverPwd.value || null,
       media_server_tag: form.value.media_server_tag || null,
-      pull_urls: onvifRtspUrls.value.map((r, i) => ({ protocol: 'Rtsp', url: r.url, priority: i + 1 })),
+      pull_urls: onvifRtspUrls.value.map((r, i) => ({ protocol: 'rtsp', url: r.url, priority: i + 1 })),
       playback_username: form.value.playback_username || null,
       playback_password: form.value.playback_password || null,
       device_tag: null, region_code: sipIdPrefix.value || null, group_id: form.value.group_id || null, is_public: form.value.is_public || false,
@@ -1608,7 +1608,7 @@ async function confirmOnvifDevice() {
           media_server_tag: form.value.media_server_tag || null,
           rtsp_mode: 'pull',
           rtsp_full_url: onvifRtspUrls.value[i].url,
-          pull_urls: [{ protocol: 'Rtsp', url: onvifRtspUrls.value[i].url, priority: 1 }],
+          pull_urls: [{ protocol: 'rtsp', url: onvifRtspUrls.value[i].url, priority: 1 }],
           playback_username: form.value.playback_username || null,
           playback_password: form.value.playback_password || null,
           device_tag: null, region_code: sipIdPrefix.value || null, group_id: form.value.group_id || null, is_public: form.value.is_public || false,

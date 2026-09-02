@@ -610,6 +610,7 @@ pub struct UpdateDeviceRequest {
     pub name: Option<String>,
     pub host: Option<String>,
     pub port: Option<u16>,
+    pub protocol: Option<Protocol>,
     pub device_username: Option<String>,
     pub device_password: Option<String>,
     pub push_urls: Option<Vec<PushUrl>>,

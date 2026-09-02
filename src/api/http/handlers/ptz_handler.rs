@@ -19,6 +19,8 @@ fn parse_simple_command(cmd: &str) -> Option<PtzCommand> {
         "zoom_out" | "zoomout" => Some(PtzCommand::ZoomOut),
         "focus_in" | "focusin" => Some(PtzCommand::FocusIn),
         "focus_out" | "focusout" => Some(PtzCommand::FocusOut),
+        "iris_in" | "irisin" | "iris_open" => Some(PtzCommand::IrisIn),
+        "iris_out" | "irisout" | "iris_close" => Some(PtzCommand::IrisOut),
         "stop" => Some(PtzCommand::Stop),
         _ => None,
     }

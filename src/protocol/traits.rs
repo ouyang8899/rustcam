@@ -117,7 +117,7 @@ impl ProtocolDeps {
                     media_server_name: "test".to_string(),
                 })
             }
-            async fn start_gb28181_stream(&self, _: &str, _: &str, _: &str, _: Option<&str>) -> Result<StreamInfo, AppError> {
+            async fn start_gb28181_stream(&self, _: &str, _: &str, _: &str) -> Result<StreamInfo, AppError> {
                 Err(AppError::Internal("not implemented".into()))
             }
             async fn stop_stream(&self, _: &str, _: &str) -> Result<(), AppError> { Ok(()) }

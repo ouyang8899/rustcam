@@ -321,6 +321,8 @@ pub enum PtzCommand {
     ZoomOut,
     FocusIn,
     FocusOut,
+    IrisIn,
+    IrisOut,
     Stop,
     ContinuousMove { pan: f64, tilt: f64, zoom: f64 },
     AbsoluteMove { pan: f64, tilt: f64, zoom: f64 },
