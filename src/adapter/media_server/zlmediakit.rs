@@ -119,7 +119,7 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
             force: true
         };
 
-        match self.client.post::<serde_json::Value, _>("/index/api/closeStreams", &req).await {
+        match self.client.post::<serde_json::Value, _>("/index/api/closeStream", &req).await {
             Ok(resp) => {
                 tracing::debug!("[ZLMediaKit] closeStreams response: {:?}", resp);
                 Ok(())
@@ -324,8 +324,13 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
             ("tcp_mode", &tcp_mode.to_string()),
             ("stream_id", &stream_id.to_string()),
         ];
+        tracing::info!("[ZLMediaKit] open_rtp_server: stream_id={}, requested_port={}, enable_tcp={}, tcp_mode={}",
+            stream_id, port, enable_tcp, tcp_mode);
         let resp: Resp = self.client.get_with_params("/index/api/openRtpServer", &params).await?;
-        Ok((resp.port.unwrap_or(port), base_host_from_config(&self.config)))
+        let actual_port = resp.port.unwrap_or(port);
+        tracing::info!("[ZLMediaKit] open_rtp_server result: stream_id={}, actual_port={}, code={}",
+            stream_id, actual_port, resp.code);
+        Ok((actual_port, base_host_from_config(&self.config)))
     }
 
     async fn close_rtp_server(&self, stream_id: &str) -> anyhow::Result<()> {

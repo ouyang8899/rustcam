@@ -192,8 +192,10 @@ fn public_routes(state: Arc<FullState>) -> Router {
         .route("/", get(root_handler))
         .route("/api/v1/health", get(health_handler))
         .route("/api/v1/metrics", get(metrics_handler))
-        // ZLMediaKit hook 事件路由：/hook/{event_name}
-        .route("/hook/{event_name}", get(hook_handler).post(hook_handler))
+        // 媒体服务器 Hook 路由：/hook/{server_type}/{event_name}
+        .route("/hook/{server_type}/{event_name}", get(hook_handler).post(hook_handler))
+        // 兼容：ZLMediaKit 直接发到 /hook/{event_name}
+        .route("/hook/{event_name}", get(legacy_hook_handler).post(legacy_hook_handler))
         // 兼容：所有事件发到同一个 URL
         .route("/hook", get(hook_handler).post(hook_handler))
         .route("/api/v1/auth/login", post(crate::auth::handlers::login))
@@ -237,29 +239,78 @@ async fn metrics_handler(
 
 async fn hook_handler(
     State(state): State<Arc<FullState>>,
-    Path(event_name): Path<String>,
-    Json(body): Json<serde_json::Value>,
+    Path((server_type, event_name)): Path<(String, String)>,
+    body: Option<Json<serde_json::Value>>,
 ) -> Json<serde_json::Value> {
-    tracing::debug!("[Hook] Received event={}, body={}", event_name, serde_json::to_string_pretty(&body).unwrap_or_default());
+    tracing::debug!("[Hook] Received server_type={}, event={}, body={}", server_type, event_name, body.as_ref().map(|b| serde_json::to_string_pretty(&b.0).unwrap_or_default()).unwrap_or_default());
 
-    // 构建完整事件 JSON（注入 event 字段）
     let mut map = serde_json::Map::new();
-    if let Some(obj) = body.as_object() {
-        for (k, v) in obj {
-            map.insert(k.clone(), v.clone());
+    if let Some(Json(body_obj)) = body {
+        if let Some(obj) = body_obj.as_object() {
+            for (k, v) in obj {
+                map.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    map.insert("event".to_string(), serde_json::Value::String(event_name.clone()));
+    map.insert("server_type".to_string(), serde_json::Value::String(server_type.clone()));
+    let event_json = serde_json::Value::Object(map);
+
+    match server_type.as_str() {
+        "zlmediakit" | "ZLMediaKit" | "zlmediakit-hook" => {
+            match serde_json::from_value::<crate::application::zlmediakit_hook::ZlMediaKitHookEvent>(event_json) {
+                Ok(event) => {
+                    tracing::info!("[{} Hook] Handling event={}", server_type, event_name);
+                    let response = state.app.registry.zlmediakit_hook_handler.handle(event).await;
+                    Json(serde_json::to_value(response).unwrap_or(serde_json::json!({ "code": 0, "msg": "ok" })))
+                }
+                Err(e) => {
+                    tracing::warn!("[Hook] Failed to parse zlmediakit event={}: {}", event_name, e);
+                    Json(serde_json::json!({ "code": 0, "msg": "ok" }))
+                }
+            }
+        }
+        "srs" | "SRS" => {
+            tracing::info!("[SRS Hook] Received event={} (not fully implemented)", event_name);
+            Json(serde_json::json!({ "code": 0, "msg": "ok" }))
+        }
+        "xiu" | "XIU" => {
+            tracing::info!("[XIU Hook] Received event={} (not fully implemented)", event_name);
+            Json(serde_json::json!({ "code": 0, "msg": "ok" }))
+        }
+        _ => {
+            tracing::warn!("[Hook] Unknown server_type={}", server_type);
+            Json(serde_json::json!({ "code": 0, "msg": "ok" }))
+        }
+    }
+}
+
+async fn legacy_hook_handler(
+    State(state): State<Arc<FullState>>,
+    Path(event_name): Path<String>,
+    body: Option<Json<serde_json::Value>>,
+) -> Json<serde_json::Value> {
+    tracing::debug!("[Hook] Received legacy event={}, body={}", event_name, body.as_ref().map(|b| serde_json::to_string_pretty(&b.0).unwrap_or_default()).unwrap_or_default());
+
+    let mut map = serde_json::Map::new();
+    if let Some(Json(body_obj)) = body {
+        if let Some(obj) = body_obj.as_object() {
+            for (k, v) in obj {
+                map.insert(k.clone(), v.clone());
+            }
         }
     }
     map.insert("event".to_string(), serde_json::Value::String(event_name.clone()));
     let event_json = serde_json::Value::Object(map);
 
-    // 解析事件
     match serde_json::from_value::<crate::application::zlmediakit_hook::ZlMediaKitHookEvent>(event_json) {
         Ok(event) => {
+            tracing::info!("[ZLMediaKit Hook] Handling legacy event={}", event_name);
             let response = state.app.registry.zlmediakit_hook_handler.handle(event).await;
             Json(serde_json::to_value(response).unwrap_or(serde_json::json!({ "code": 0, "msg": "ok" })))
         }
         Err(e) => {
-            tracing::warn!("[Hook] Failed to parse event={}: {}", event_name, e);
+            tracing::warn!("[Hook] Failed to parse legacy event={}: {}", event_name, e);
             Json(serde_json::json!({ "code": 0, "msg": "ok" }))
         }
     }

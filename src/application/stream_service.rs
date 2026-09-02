@@ -37,8 +37,7 @@ impl StreamService {
         rtsp_url: &str,
     ) -> Result<StreamInfo> {
         let device = self.infra.db.devices_cache()
-            .iter()
-            .find(|r| r.value().device_tag.as_deref() == Some(device_tag))
+            .get(device_tag)
             .map(|r| r.value().clone())
             .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
 
@@ -215,11 +214,9 @@ impl StreamService {
         stream_key: &str,
     ) -> Result<StreamInfo> {
         tracing::info!("[StreamService] start_gb28181_stream called: device={}, channel={}, stream_key={}", device_tag, channel_tag, stream_key);
-        self.stop_streams_by_device(device_tag).await?;
 
         let device = self.infra.db.devices_cache()
-            .iter()
-            .find(|r| r.value().device_tag.as_deref() == Some(device_tag))
+            .get(device_tag)
             .map(|r| r.value().clone())
             .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
         let app = device.app.clone().unwrap_or_else(|| "live".to_string());
@@ -399,8 +396,7 @@ impl StreamService {
 
     async fn sync_device_status(&self, device_tag: &str, stream_state: StreamState) {
         let mut device = match self.infra.db.devices_cache()
-            .iter()
-            .find(|r| r.value().device_tag.as_deref() == Some(device_tag))
+            .get(device_tag)
             .map(|r| r.value().clone()) {
             Some(d) => d,
             None => return,
@@ -716,8 +712,7 @@ impl StreamService {
 
     async fn start_recording_for_channel(&self, device_tag: &str, channel_tag: &str, media_server: &str, app: &str, stream_key: &str) {
         let device = match self.infra.db.devices_cache()
-            .iter()
-            .find(|r| r.value().device_tag.as_deref() == Some(device_tag))
+            .get(device_tag)
             .map(|r| r.value().clone()) {
             Some(d) => d,
             None => {

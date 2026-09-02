@@ -619,24 +619,20 @@ impl ZlMediaKitHookHandler {
         tracing::info!("[ZlMediaKit Hook] on_publish: server={}, stream={}, ip={:?}, params={:?}", 
             media_server_tag, stream, ip, params);
 
-        // 验证 secret
-        if self.validate_secret(params.map(|s| s.as_str())) {
-            tracing::debug!("[ZlMediaKit Hook] on_publish: admin access, skipping auth");
-            return HookResponse::allow();
-        }
-
         // 验证 media_server_tag
         if self.validate_media_server(media_server_tag).is_none() {
             tracing::warn!("[ZlMediaKit Hook] on_publish: unknown media_server_tag={}", media_server_tag);
             return HookResponse::deny("Unknown media server");
         }
 
-        // 注册推流
-        if let Err(e) = self.register_push_stream(media_server_tag, stream).await {
-            tracing::warn!("[ZlMediaKit Hook] on_publish: failed to register: {}", e);
-            return HookResponse::deny("Failed to register stream");
+        // 验证 secret（如果配置了的话）
+        let is_admin = self.validate_secret(params.map(|s| s.as_str()));
+        if is_admin {
+            tracing::debug!("[ZlMediaKit Hook] on_publish: admin access");
         }
 
+        // on_publish 只做认证，不操作 stream 状态
+        // stream 状态由 stream_service 管理，不应在 hook 中修改
         HookResponse::allow()
     }
 
