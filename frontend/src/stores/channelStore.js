@@ -33,6 +33,10 @@ export const useChannelStore = defineStore('channels', {
       }
     },
 
+    async getChannel(deviceTag, channelTag) {
+      return await api.getChannel(deviceTag, channelTag)
+    },
+
     async getChannelPlayLinks(deviceTag, channelTag, streamKey) {
       return await api.getChannelPlayLinks(deviceTag, channelTag, { stream_key: streamKey })
     },
