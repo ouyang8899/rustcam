@@ -2,12 +2,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "type": "lldb",
+            "type": "cppvsdbg",
             "request": "launch",
-            "name": "Debug",
+            "name": "Debug (MSVC)",
             "program": "${workspaceFolder}/target/debug/rustcam-media.exe",
             "args": [],
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "rust: cargo build"
         }
     ]
 }

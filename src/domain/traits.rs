@@ -17,6 +17,7 @@ pub trait DeviceLookup: Send + Sync {
     async fn get_device(&self, id: i64) -> Result<Option<Device>, AppError>;
     async fn set_online(&self, tag: &str) -> Result<(), AppError>;
     async fn set_offline(&self, tag: &str, reason: Option<&str>) -> Result<(), AppError>;
+    async fn update_device_host_port(&self, tag: &str, host: &str, port: u16) -> Result<(), AppError>;
     async fn log_ptz_control(
         &self,
         user_id: Option<uuid::Uuid>,

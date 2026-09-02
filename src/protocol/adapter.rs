@@ -34,6 +34,8 @@ pub trait SignalAdapter: Send + Sync {
 
     async fn set_udp_peer(&mut self, _addr: SocketAddr) -> Result<()> { Ok(()) }
 
+    async fn set_local_addr(&mut self, _addr: SocketAddr) -> Result<()> { Ok(()) }
+
     async fn start(&mut self, device_tag: &str) -> Result<()>;
 
     async fn start_playback(&mut self, device_tag: &str, start_time: chrono::DateTime<chrono::Utc>, end_time: chrono::DateTime<chrono::Utc>) -> Result<()> {
@@ -55,6 +57,10 @@ pub trait SignalAdapter: Send + Sync {
     async fn send_audio_to_device(&mut self, _device_tag: &str, _pcm_data: &[i16]) -> Result<()> {
         Ok(())
     }
+
+    fn needs_timeout_check(&self) -> bool { false }
+
+    async fn handle_registration_timeout(&mut self) {}
 }
 
 // ═══════════════════════════════════════════════════════════════

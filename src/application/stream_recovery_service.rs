@@ -697,6 +697,60 @@ impl StreamRecoveryService {
         url.to_string()
     }
 
+    pub async fn handle_stream_not_found(&self, stream_key: &str, media_server_tag: &str) -> bool {
+        let cache_key = stream_key.replace('_', "/");
+        if let Some(stream) = self.infra.db.streams_cache().get(&cache_key) {
+            let stream = stream.value();
+            if stream.media_server_tag != media_server_tag {
+                tracing::debug!("[StreamRecovery] Stream {} on different server, ignoring", stream_key);
+                return false;
+            }
+            
+            let device_tag = match stream.device_tag.as_deref() {
+                Some(tag) => tag,
+                None => {
+                    tracing::warn!("[StreamRecovery] Stream {} has no device_tag", stream_key);
+                    return false;
+                }
+            };
+            
+            let device = match self.infra.db.devices_cache().get(device_tag) {
+                Some(d) => d.value().clone(),
+                None => {
+                    tracing::warn!("[StreamRecovery] Device {} not found for stream {}", device_tag, stream_key);
+                    return false;
+                }
+            };
+            
+            let rtsp_url = device.extended
+                .as_ref()
+                .and_then(|e| e.get("rtsp_full_url"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            
+            if rtsp_url.is_empty() {
+                tracing::warn!("[StreamRecovery] Device {} has no rtsp_url", device_tag);
+                return false;
+            }
+            
+            tracing::info!("[StreamRecovery] Stream not found, triggering pull: device={}, stream={}", device_tag, stream_key);
+            
+            match self.stream_service.start_pull_stream(device_tag, device_tag, rtsp_url).await {
+                Ok(_) => {
+                    tracing::info!("[StreamRecovery] Successfully triggered pull for stream {}", stream_key);
+                    true
+                }
+                Err(e) => {
+                    tracing::error!("[StreamRecovery] Failed to pull stream {}: {}", stream_key, e);
+                    false
+                }
+            }
+        } else {
+            tracing::debug!("[StreamRecovery] Stream {} not in cache, ignoring", stream_key);
+            false
+        }
+    }
+
     fn backoff_duration(&self, retry_count: u8) -> chrono::Duration {
         let cfg = self.recovery_config();
         let secs = cfg.base_backoff_secs * 2u64.saturating_pow(retry_count as u32);

@@ -753,11 +753,16 @@ impl DeviceService {
             return Err(AppError::BadRequest("Device name cannot exceed 255 characters".to_string()));
         }
 
-        if let Some(ref tag) = req.device_tag {
+        let device_tag = if let Some(ref tag) = req.device_tag {
             if self.infra.db.get_device_by_device_tag(tag).is_some() {
                 return Err(AppError::BadRequest(format!("device_tag '{}' already exists", tag)));
             }
-        }
+            tag.clone()
+        } else if matches!(req.protocol, Protocol::Rtsp | Protocol::Rtmp) {
+            Self::generate_device_tag(&req.protocol, req.port.unwrap_or(0))
+        } else {
+            return Err(AppError::BadRequest("device_tag is required".to_string()));
+        };
 
         let mut device = Device::new(req.name.clone(), req.protocol);
         device.host = req.host.clone().unwrap_or_default();
@@ -770,7 +775,7 @@ impl DeviceService {
         device.playback_password = req.playback_password.clone();
         device.media_server_tag = req.media_server_tag.clone();
         device.app = req.app.clone();
-        device.device_tag = req.device_tag.clone();
+        device.device_tag = Some(device_tag);
         device.region_code = req.region_code.clone();
         device.is_public = req.is_public.unwrap_or(false);
 
@@ -1394,6 +1399,15 @@ impl DeviceLookup for DeviceService {
         Ok(())
     }
 
+    async fn update_device_host_port(&self, tag: &str, host: &str, port: u16) -> Result<()> {
+        if let Some(mut device) = self.infra.db.get_device_by_device_tag(tag) {
+            device.host = host.to_string();
+            device.port = port;
+            self.infra.db.update_device(&device).await?;
+        }
+        Ok(())
+    }
+
     async fn log_ptz_control(
         &self, user_id: Option<Uuid>, device_id: i64, command: &str,
         speed: u8, result: bool, error_message: Option<String>, call_id: Option<String>,
@@ -1436,5 +1450,17 @@ impl Clone for DeviceService {
             shutdown_tx: Arc::new(RwLock::new(None)),
             ptz_last_cmd: self.ptz_last_cmd.clone(),
         }
+    }
+}
+
+impl DeviceService {
+    fn generate_device_tag(protocol: &Protocol, port: u16) -> String {
+        let prefix = match protocol {
+            Protocol::Rtsp => "rtsp",
+            Protocol::Rtmp => "rtmp",
+            _ => "unknown",
+        };
+        let uuid = uuid::Uuid::new_v4().to_string().replace("-", "");
+        format!("{}_{}_{}", prefix, port, &uuid[..16])
     }
 }

@@ -14,7 +14,7 @@ use crate::error::Result;
 use crate::sql_mappers::{
     device_select_all, server_select_all, session_select_all, stream_select_all,
     recording_select_all, recording_select_paginated, recording_count_all, recording_select_by_id, recording_select_by_device_tag, device_insert, device_update, device_delete_by_id,
-    device_delete_by_device_tag, device_select_by_parent_device_tag,
+    device_delete_by_device_tag, device_select_by_parent_device_tag, device_select_paginated_tags,
     group_select_all, group_insert, group_update, group_delete,
     region_select_all, region_select_children,
     server_insert, server_update, server_delete_by_id, server_select_by_tag,
@@ -25,6 +25,7 @@ use crate::sql_mappers::{
     alarm_count_by_device, alarm_count_all, alarm_mark_processed,
     channel_insert, channel_update, channel_select_all,
     channel_select_by_device_tag, channel_select_by_device_tag_and_channel_tag,
+    channel_delete_by_device_tag, channel_delete_by_device_tag_and_channel_tag,
     ServerRow, GroupRow, SessionRow,
     layout_select_by_id, layout_select_all, layout_select_default,
     layout_insert, layout_update, layout_set_default, layout_delete,
@@ -40,6 +41,10 @@ pub struct DbRepository {
     pub sessions_cache: Arc<DashMap<i64, Session>>,
     /// 主缓存：key = "device_tag/channel_tag"
     pub streams_cache: Arc<DashMap<String, Stream>>,
+    /// 分组缓存：key = group_id, value = DeviceGroup (with device_count pre-computed)
+    pub groups_cache: Arc<DashMap<i64, DeviceGroup>>,
+    /// 地区缓存：key = region_code, value = Region (with device_count pre-computed)
+    pub regions_cache: Arc<DashMap<String, Region>>,
 }
 
 fn stream_key_to_cache_key(stream_key: &str) -> String {
@@ -72,6 +77,8 @@ impl DbRepository {
             servers_cache: Arc::new(DashMap::new()),
             sessions_cache: Arc::new(DashMap::new()),
             streams_cache: Arc::new(DashMap::new()),
+            groups_cache: Arc::new(DashMap::new()),
+            regions_cache: Arc::new(DashMap::new()),
         };
         repo.load_caches().await?;
         Ok(repo)
@@ -90,6 +97,8 @@ impl DbRepository {
             servers_cache: Arc::new(DashMap::new()),
             sessions_cache: Arc::new(DashMap::new()),
             streams_cache: Arc::new(DashMap::new()),
+            groups_cache: Arc::new(DashMap::new()),
+            regions_cache: Arc::new(DashMap::new()),
         };
         Ok(repo)
     }
@@ -142,15 +151,60 @@ impl DbRepository {
             }
         }
 
+        self.load_groups_cache().await;
+        self.load_regions_cache().await;
+
         tracing::info!(
-            "[DB] Caches loaded: {} devices, {} channels, {} servers, {} sessions, {} streams",
+            "[DB] Caches loaded: {} devices, {} channels, {} servers, {} sessions, {} streams, {} groups, {} regions",
             self.devices_cache.len(),
             self.channels_cache.len(),
             self.servers_cache.len(),
             self.sessions_cache.len(),
             self.streams_cache.len(),
+            self.groups_cache.len(),
+            self.regions_cache.len(),
         );
+        self.recalculate_device_stats();
         Ok(())
+    }
+
+    async fn load_groups_cache(&self) {
+        let conn = match self.rb.acquire().await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("load_groups_cache acquire: {}", e);
+                return;
+            }
+        };
+        match group_select_all(conn.rb_ref()).await {
+            Ok(rows) => {
+                for row in rows {
+                    if let Ok(group) = DeviceGroup::try_from(row) {
+                        self.groups_cache.insert(group.id, group);
+                    }
+                }
+            }
+            Err(e) => tracing::error!("load_groups_cache: {}", e),
+        }
+    }
+
+    async fn load_regions_cache(&self) {
+        let conn = match self.rb.acquire().await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("load_regions_cache acquire: {}", e);
+                return;
+            }
+        };
+        match region_select_all(conn.rb_ref()).await {
+            Ok(rows) => {
+                for row in rows {
+                    let region = row.to_region();
+                    self.regions_cache.insert(region.code.clone(), region);
+                }
+            }
+            Err(e) => tracing::error!("load_regions_cache: {}", e),
+        }
     }
 
     pub async fn reload_devices_cache(&self) -> anyhow::Result<usize> {
@@ -170,6 +224,50 @@ impl DbRepository {
         }
         tracing::info!("[DB] Devices cache reloaded: {} -> {}", old_len, count);
         Ok(count)
+    }
+
+    pub fn recalculate_device_stats(&self) {
+        let mut region_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        let mut group_counts: std::collections::HashMap<i64, u32> = std::collections::HashMap::new();
+
+        let region_codes: Vec<String> = self.regions_cache.iter().map(|r| r.key().clone()).collect();
+
+        for device in self.devices_cache.iter() {
+            let device = device.value();
+            if device.parent_device_tag.is_some() {
+                continue;
+            }
+
+            if let Some(ref device_region) = device.region_code {
+                if !device_region.is_empty() {
+                    for region_code in &region_codes {
+                        if device_region.starts_with(region_code) {
+                            *region_counts.entry(region_code.clone()).or_insert(0) += 1;
+                        }
+                    }
+                }
+            }
+
+            if let Some(group_id) = device.group_id {
+                *group_counts.entry(group_id).or_insert(0) += 1;
+            }
+        }
+
+        for (code, count) in region_counts {
+            if let Some(mut region) = self.regions_cache.get_mut(&code) {
+                region.device_count = count;
+            }
+        }
+
+        for (id, count) in group_counts {
+            if let Some(mut group) = self.groups_cache.get_mut(&id) {
+                group.device_count = count;
+            }
+        }
+
+        tracing::debug!(
+            "[DB] Device stats recalculated"
+        );
     }
 
     pub fn rb(&self) -> &RBatis {
@@ -242,7 +340,10 @@ impl DbRepository {
             device.device_type_code.as_deref(),
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
 
-        self.devices_cache.insert(device.device_tag.clone().unwrap_or_default(), device.clone());
+        if let Some(ref tag) = device.device_tag {
+            self.devices_cache.insert(tag.clone(), device.clone());
+        }
+        self.recalculate_device_stats();
         Ok(result.last_insert_id.as_i64().unwrap_or(0))
     }
 
@@ -287,24 +388,53 @@ impl DbRepository {
 
     pub async fn list_devices_paginated(&self, limit: usize, offset: usize, search: Option<&str>) -> Vec<Device> {
         let search_lower = search.map(|s| s.to_lowercase());
-        self.devices_cache.iter()
-            .filter(|d| {
-                if let Some(ref q) = search_lower {
-                    d.name.to_lowercase().contains(q)
-                        || d.host.to_lowercase().contains(q)
-                        || d.device_tag.as_ref().map(|t| t.to_lowercase().contains(q)).unwrap_or(false)
-                } else {
-                    true
-                }
-            })
-            .skip(offset)
-            .take(limit)
-            .map(|d| {
-                let mut device = d.clone();
-                if let Some(ref tag) = device.device_tag {
+
+        if search_lower.is_some() {
+            let mut devices: Vec<Device> = self.devices_cache.iter()
+                .filter(|d| {
+                    if let Some(ref q) = search_lower {
+                        d.name.to_lowercase().contains(q)
+                            || d.host.to_lowercase().contains(q)
+                            || d.device_tag.as_ref().map(|t| t.to_lowercase().contains(q)).unwrap_or(false)
+                    } else {
+                        true
+                    }
+                })
+                .map(|d| {
+                    let mut device = d.clone();
+                    if let Some(ref tag) = device.device_tag {
+                        device.has_stream = self.device_has_active_stream(tag);
+                    }
+                    device
+                })
+                .collect();
+            devices.sort_by(|a, b| b.id.cmp(&a.id));
+            return devices.into_iter().skip(offset).take(limit).collect();
+        }
+
+        let conn = match self.rb.acquire().await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("list_devices_paginated acquire: {}", e);
+                return Vec::new();
+            }
+        };
+        let rows = match device_select_paginated_tags(conn.rb_ref(), limit as i64, offset as i64).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("list_devices_paginated: {}", e);
+                return Vec::new();
+            }
+        };
+
+        rows.into_iter()
+            .filter_map(|row| {
+                let tag = row.device_tag.as_ref()?;
+                self.devices_cache.get(tag).map(|d| {
+                    let mut device = d.value().clone();
                     device.has_stream = self.device_has_active_stream(tag);
-                }
-                device
+                    device
+                })
             })
             .collect()
     }
@@ -410,7 +540,10 @@ impl DbRepository {
             device.device_type_code.as_deref(),
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
 
-        self.devices_cache.insert(device.device_tag.clone().unwrap_or_default(), device.clone());
+        if let Some(ref tag) = device.device_tag {
+            self.devices_cache.insert(tag.clone(), device.clone());
+        }
+        self.recalculate_device_stats();
         Ok(())
     }
 
@@ -418,6 +551,7 @@ impl DbRepository {
         device_delete_by_device_tag(self.rb.acquire().await?.rb_ref(), device_tag)
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         self.devices_cache.remove(device_tag);
+        self.recalculate_device_stats();
         Ok(())
     }
 
@@ -540,23 +674,18 @@ impl DbRepository {
         Ok(rows.into_iter().filter_map(|r| Channel::try_from(r).ok()).collect())
     }
 
+    pub async fn delete_channel(&self, device_tag: &str, channel_tag: &str) -> Result<()> {
+        channel_delete_by_device_tag_and_channel_tag(self.rb.acquire().await?.rb_ref(), device_tag, channel_tag)
+            .await.map_err(|e| AppError::Internal(e.to_string()))?;
+        let key = format_cache_key(Some(device_tag), Some(channel_tag));
+        self.channels_cache.remove(&key);
+        Ok(())
+    }
+
     // ─── Group methods ────────────────────────────────────────────────
 
     pub async fn list_groups(&self) -> Vec<DeviceGroup> {
-        let conn = match self.rb.acquire().await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("list_groups acquire: {}", e);
-                return Vec::new();
-            }
-        };
-        match group_select_all(conn.rb_ref()).await {
-            Ok(rows) => rows.into_iter().filter_map(|r| DeviceGroup::try_from(r).ok()).collect(),
-            Err(e) => {
-                tracing::error!("list_groups: {}", e);
-                Vec::new()
-            }
-        }
+        self.groups_cache.iter().map(|g| g.value().clone()).collect()
     }
 
     pub async fn create_group(&self, req: &CreateGroupRequest) -> Result<i64> {
@@ -587,99 +716,45 @@ impl DbRepository {
     }
 
     pub async fn get_group_tree(&self) -> Vec<DeviceGroupNode> {
-        let conn = match self.rb.acquire().await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("get_group_tree acquire: {}", e);
-                return Vec::new();
-            }
-        };
-        match group_select_all(conn.rb_ref()).await {
-            Ok(rows) => build_group_tree(rows),
-            Err(e) => {
-                tracing::error!("get_group_tree: {}", e);
-                Vec::new()
-            }
-        }
+        let groups: Vec<DeviceGroupNode> = self.groups_cache.iter()
+            .map(|g| DeviceGroupNode {
+                id: g.value().id,
+                name: g.value().name.clone(),
+                parent_id: g.value().parent_id,
+                sort_order: g.value().sort_order,
+                device_count: g.value().device_count,
+                children: Vec::new(),
+            })
+            .collect();
+        build_group_tree_from_nodes(groups)
     }
 
     // ─── Region methods ──────────────────────────────────────────────
 
     pub async fn list_regions(&self) -> Vec<Region> {
-        let conn = match self.rb.acquire().await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("list_regions acquire: {}", e);
-                return Vec::new();
-            }
-        };
-        match region_select_all(conn.rb_ref()).await {
-            Ok(rows) => rows.into_iter().map(|r| r.to_region()).collect(),
-            Err(e) => {
-                tracing::error!("list_regions: {}", e);
-                Vec::new()
-            }
-        }
+        self.regions_cache.iter().map(|r| r.value().clone()).collect()
     }
 
     pub async fn list_region_children(&self, parent_code: &str) -> Vec<Region> {
-        let conn = match self.rb.acquire().await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("list_region_children acquire: {}", e);
-                return Vec::new();
-            }
-        };
-        match region_select_children(conn.rb_ref(), parent_code).await {
-            Ok(rows) => rows.into_iter().map(|r| r.to_region()).collect(),
-            Err(e) => {
-                tracing::error!("list_region_children: {}", e);
-                Vec::new()
-            }
-        }
+        self.regions_cache.iter()
+            .filter(|r| r.value().parent_code.as_deref() == Some(parent_code))
+            .map(|r| r.value().clone())
+            .collect()
     }
 
     pub async fn get_region_tree(&self) -> Vec<RegionNode> {
-        let conn = match self.rb.acquire().await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("get_region_tree acquire: {}", e);
-                return Vec::new();
-            }
-        };
-        match region_select_all(conn.rb_ref()).await {
-            Ok(rows) => {
-                let nodes: Vec<RegionNode> = rows.into_iter()
-                    .map(|r| r.to_node())
-                    .collect();
-                fn build_children(nodes: &[RegionNode], parent_code: &str, visited: &mut std::collections::HashSet<String>) -> Vec<RegionNode> {
-                    let mut result = Vec::new();
-                    for n in nodes.iter() {
-                        if n.parent_code.as_deref() == Some(parent_code) && !visited.contains(&n.code) {
-                            visited.insert(n.code.clone());
-                            let mut node = n.clone();
-                            node.children = build_children(nodes, &n.code, visited);
-                            visited.remove(&n.code);
-                            result.push(node);
-                        }
-                    }
-                    result
-                }
-                let roots: Vec<RegionNode> = nodes.iter()
-                    .filter(|n| n.parent_code.is_none())
-                    .cloned()
-                    .map(|mut n| {
-                        n.children = build_children(&nodes, &n.code, &mut Default::default());
-                        n
-                    })
-                    .collect();
-                roots
-            }
-            Err(e) => {
-                tracing::error!("get_region_tree: {}", e);
-                Vec::new()
-            }
-        }
+        let nodes: Vec<RegionNode> = self.regions_cache.iter()
+            .map(|r| RegionNode {
+                code: r.value().code.clone(),
+                name: r.value().name.clone(),
+                level: r.value().level,
+                gb28181_code: r.value().gb28181_code.clone(),
+                parent_code: r.value().parent_code.clone(),
+                device_count: r.value().device_count,
+                children: Vec::new(),
+            })
+            .collect();
+        build_region_tree_from_nodes(nodes)
     }
 
     // ─── Server methods ───────────────────────────────────────────────
@@ -767,9 +842,8 @@ impl DbRepository {
         &self.sessions_cache
     }
 
-    pub async fn create_session(&self, session: &Session) -> Result<()> {
+pub async fn create_session(&self, session: &Session) -> Result<()> {
         let session_type_str = session.session_type.to_string();
-        let user_id_str = session.user_id.to_string();
         let state_str = session.state.to_string();
         let protocol_str = session.protocol.as_ref().map(|p| p.to_string());
         let expires_rb = session.expires_at.map(|dt| RbatisDateTime::from_timestamp_millis(dt.timestamp_millis()));
@@ -780,7 +854,7 @@ impl DbRepository {
             Some(&session_type_str),
             session.device_tag.as_deref(),
             session.channel_tag.as_deref(),
-            Some(&user_id_str),
+            Some(session.user_id),
             Some(&state_str),
             session.client_ip.as_deref(),
             session.client_type.as_deref(),
@@ -792,7 +866,6 @@ impl DbRepository {
             Some(session.bytes_sent as i64),
             Some(session.bytes_received as i64),
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
-        self.sessions_cache.insert(session.id, session.clone());
         Ok(())
     }
 
@@ -1152,11 +1225,19 @@ fn status_to_str(s: &DeviceStatus) -> &'static str {
     }
 }
 
-fn build_group_tree(rows: Vec<GroupRow>) -> Vec<DeviceGroupNode> {
+fn build_group_tree(rows: Vec<GroupRow>, group_stats: &std::collections::HashMap<String, u32>) -> Vec<DeviceGroupNode> {
     let nodes: Vec<DeviceGroupNode> = rows.iter()
-        .filter_map(|r| DeviceGroupNode::try_from(r.clone()).ok())
+        .filter_map(|r| {
+            let mut node = DeviceGroupNode::try_from(r.clone()).ok()?;
+            node.device_count = group_stats.get(&node.id.to_string()).copied().unwrap_or(0);
+            Some(node)
+        })
         .collect();
 
+    build_group_tree_from_nodes(nodes)
+}
+
+fn build_group_tree_from_nodes(nodes: Vec<DeviceGroupNode>) -> Vec<DeviceGroupNode> {
     fn build_children(nodes: &[DeviceGroupNode], parent_id: Option<i64>, visited: &mut std::collections::HashSet<i64>) -> Vec<DeviceGroupNode> {
         let mut result = Vec::new();
         for n in nodes.iter() {
@@ -1172,6 +1253,32 @@ fn build_group_tree(rows: Vec<GroupRow>) -> Vec<DeviceGroupNode> {
     }
 
     build_children(&nodes, None, &mut Default::default())
+}
+
+fn build_region_tree_from_nodes(nodes: Vec<RegionNode>) -> Vec<RegionNode> {
+    fn build_children(nodes: &[RegionNode], parent_code: &str, visited: &mut std::collections::HashSet<String>) -> Vec<RegionNode> {
+        let mut result = Vec::new();
+        for n in nodes.iter() {
+            if n.parent_code.as_deref() == Some(parent_code) && !visited.contains(&n.code) {
+                visited.insert(n.code.clone());
+                let mut node = n.clone();
+                node.children = build_children(nodes, &n.code, visited);
+                visited.remove(&n.code);
+                result.push(node);
+            }
+        }
+        result
+    }
+
+    let roots: Vec<RegionNode> = nodes.iter()
+        .filter(|n| n.parent_code.is_none())
+        .cloned()
+        .map(|mut n| {
+            n.children = build_children(&nodes, &n.code, &mut Default::default());
+            n
+        })
+        .collect();
+    roots
 }
 
 impl TryFrom<SessionRow> for Session {
@@ -1197,8 +1304,7 @@ impl TryFrom<SessionRow> for Session {
             other => return Err(AppError::Internal(format!("unknown session state: {other}"))),
         };
 
-        let user_id = row.user_id.parse::<i64>()
-            .map_err(|e| AppError::Internal(format!("invalid user_id: {e}")))?;
+        let user_id = row.user_id;
 
         let protocol = match row.protocol.as_ref() {
             Some(p) => Some(match p.as_str() {

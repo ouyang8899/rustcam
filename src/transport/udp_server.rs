@@ -179,6 +179,11 @@ impl UdpServer {
         let addr: std::net::SocketAddr = addr_key.parse().unwrap();
         let _ = adapter.set_udp_peer(addr).await;
         let _ = adapter.on_connected(addr).await;
+        
+        if let Ok(local_addr) = self.socket.local_addr() {
+            tracing::info!("[UdpServer] Setting local_addr to {} for adapter", local_addr);
+            let _ = adapter.set_local_addr(local_addr).await;
+        }
 
         let entry = Arc::new(UdpAdapterEntry {
             adapter: Arc::new(tokio::sync::Mutex::new(adapter)),
@@ -195,9 +200,21 @@ impl UdpServer {
         let event_bus = self.event_bus.clone();
 
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            let mut interval = tokio::time::interval(Duration::from_secs(10));
             loop {
                 interval.tick().await;
+
+                let keys: Vec<String> = adapters.iter().map(|e| e.key().clone()).collect();
+                for key in keys {
+                    if let Some(entry) = adapters.get(&key) {
+                        let mut guard = entry.value().adapter.lock().await;
+                        if guard.needs_timeout_check() {
+                            tracing::info!("[UdpServer] Adapter {} registration timeout, handling", key);
+                            guard.handle_registration_timeout().await;
+                        }
+                    }
+                }
+
                 let now = chrono::Utc::now().timestamp();
                 let expired: Vec<String> = adapters.iter()
                     .filter(|entry| {

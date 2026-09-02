@@ -68,6 +68,9 @@ async-trait = "0.1.92"
 # Regex for protocol matching
 regex = "1.13.1"
 
+# SIP parsing
+rsip = "0.4"
+
 # XML parsing
 quick-xml = "0.42.0"
 memchr = "2.8.3"

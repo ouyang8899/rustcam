@@ -6,13 +6,17 @@ FROM devices WHERE id = #{id}
 
 <select id="device_select_all">
 SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
-FROM devices ORDER BY created_at DESC
+FROM devices ORDER BY id DESC
 </select>
 
 <select id="device_select_all_paginated">
 SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
-FROM devices ORDER BY created_at DESC
+FROM devices ORDER BY id DESC
 LIMIT #{limit} OFFSET #{offset}
+</select>
+
+<select id="device_select_paginated_tags">
+SELECT id, device_tag FROM devices ORDER BY id DESC LIMIT #{limit} OFFSET #{offset}
 </select>
 
 <select id="device_count_top_level">
@@ -22,7 +26,7 @@ SELECT COUNT(*) FROM devices
 <select id="device_select_online_paginated">
 SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
 FROM devices WHERE status = 'online'
-ORDER BY created_at DESC
+ORDER BY id DESC
 LIMIT #{limit} OFFSET #{offset}
 </select>
 
@@ -42,7 +46,7 @@ FROM devices WHERE parent_device_tag = #{parent_device_tag} ORDER BY created_at
 
 <select id="device_select_by_status">
 SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
-FROM devices WHERE status = #{status} ORDER BY created_at DESC
+FROM devices WHERE status = #{status} ORDER BY id DESC
 </select>
 
 <insert id="device_insert">

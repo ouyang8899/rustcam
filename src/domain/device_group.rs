@@ -8,6 +8,8 @@ pub struct DeviceGroup {
     pub parent_id: Option<i64>,
     pub sort_order: i32,
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub device_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

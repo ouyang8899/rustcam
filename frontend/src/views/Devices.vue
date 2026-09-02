@@ -212,9 +212,9 @@
         </el-row>
 
         <el-form-item label="媒体服务器">
-          <el-select v-model="form.media_server_name" clearable style="width: 100%">
+          <el-select v-model="form.media_server_tag" clearable style="width: 100%">
             <el-option value="">自动选择</el-option>
-            <el-option v-for="s in mediaServerStore.servers" :key="s.name" :label="`${s.name} (${s.server_type})`" :value="s.name" />
+            <el-option v-for="s in mediaServerStore.servers" :key="s.server_tag" :label="`${s.name} (${s.server_type})`" :value="s.server_tag" />
           </el-select>
         </el-form-item>
 
@@ -257,7 +257,11 @@
         <el-row :gutter="12">
           <el-col :span="12">
             <el-form-item label="应用名称 (App)">
-              <el-input v-model="form.app" placeholder="live" />
+              <el-input 
+                v-model="form.app" 
+                :placeholder="form.protocol === 'Gb28181' ? 'rtp' : 'live'"
+                :disabled="form.protocol === 'Gb28181'"
+              />
             </el-form-item>
           </el-col>
         </el-row>
@@ -429,7 +433,7 @@
             <el-form-item v-if="rtspPushAddress && form.stream_key" label="推送地址预览">
               <el-input :model-value="`${rtspPushAddress.replace(/\/$/, '')}:${rtspPushPort}/${form.app}/${form.stream_key}`" disabled placeholder="请先在基础设置中选择媒体服务器" />
             </el-form-item>
-            <el-form-item v-if="!form.media_server_name && form.rtsp_mode === 'push'" label="&nbsp;">
+            <el-form-item v-if="!form.media_server_tag && form.rtsp_mode === 'push'" label="&nbsp;">
               <el-alert type="info" :closable="false" show-icon>
                 请在「基础设置」中选择媒体服务器，推送地址将自动生成
               </el-alert>
@@ -464,7 +468,7 @@
           <el-form-item v-if="rtmpPushAddress && form.stream_key" label="推送地址预览">
             <el-input :model-value="`${rtmpPushAddress.replace(/\/$/, '')}:${rtmpPushPortActual}/${form.stream_key}`" disabled placeholder="请先在基础设置中选择媒体服务器" />
           </el-form-item>
-          <el-form-item v-if="!form.media_server_name" label="&nbsp;">
+          <el-form-item v-if="!form.media_server_tag" label="&nbsp;">
             <el-alert type="info" :closable="false" show-icon>
               请在「基础设置」中选择媒体服务器，推送地址将自动生成
             </el-alert>
@@ -893,8 +897,8 @@ function onGroupAllClick() {
 }
 
 const rtspPushServer = computed(() => {
-  if (!form.value.media_server_name) return null
-  return mediaServerStore.servers.find(s => s.name === form.value.media_server_name) || null
+  if (!form.value.media_server_tag) return null
+  return mediaServerStore.servers.find(s => s.server_tag === form.value.media_server_tag) || null
 })
 
 const rtspPushAddress = computed(() => {
@@ -910,8 +914,8 @@ const rtspPushPort = computed(() => {
 })
 
 const rtmpPushServer = computed(() => {
-  if (!form.value.media_server_name) return null
-  return mediaServerStore.servers.find(s => s.name === form.value.media_server_name) || null
+  if (!form.value.media_server_tag) return null
+  return mediaServerStore.servers.find(s => s.server_tag === form.value.media_server_tag) || null
 })
 
 const rtmpPushAddress = computed(() => {
@@ -982,7 +986,7 @@ const filteredDevices = computed(() => {
 
 const defaultForm = () => ({
   name: '', protocol: 'Gb28181', host: '', port: 554, device_username: '', device_password: '',
-  media_server_name: '', pull_urls: [], push_urls: [], playback_username: '', playback_password: '',
+  media_server_tag: '', pull_urls: [], push_urls: [], playback_username: '', playback_password: '',
   device_tag: '', group_id: null, is_public: false,
   rtsp_mode: 'pull', app: 'live', rtsp_full_url: '',
   rtmp_mode: 'push',
@@ -1031,11 +1035,15 @@ const form = ref(defaultForm())
 watch(() => form.value.protocol, (newProto) => {
   if (newProto !== 'Rtsp') {
     form.value.rtsp_mode = 'pull'
-    form.value.app = 'live'
     form.value.rtsp_full_url = ''
   }
   if (newProto !== 'Rtmp') {
     form.value.rtmp_mode = 'push'
+  }
+  if (newProto === 'Gb28181') {
+    form.value.app = 'rtp'
+  } else if (newProto !== 'Rtsp') {
+    form.value.app = 'live'
   }
 })
 
@@ -1303,7 +1311,7 @@ async function openEditModal(device) {
     form.value = {
       name: fullDevice.name || '', protocol: fullDevice.protocol || 'Gb28181', host: fullDevice.host || '',
       port: fullDevice.port || 554, device_username: fullDevice.device_username || '', device_password: fullDevice.device_password || '',
-      media_server_name: fullDevice.media_server_tag || '',
+      media_server_tag: fullDevice.media_server_tag || '',
       pull_urls: fullDevice.pull_urls ? fullDevice.pull_urls.map(u => ({ ...u })) : [],
       push_urls: fullDevice.push_urls ? fullDevice.push_urls.map(u => ({ ...u })) : [],
       playback_username: fullDevice.playback_username || '', playback_password: fullDevice.playback_password || '',
@@ -1394,18 +1402,16 @@ async function submitDevice() {
 
   const finalDeviceTag = isEdit.value
     ? (form.value.protocol === 'Gb28181' ? sipIdPreview.value : editingId.value)
-    : (form.value.protocol === 'Gb28181'
-      ? sipIdPreview.value
-      : form.value.device_tag || null)
+    : (form.value.protocol === 'Gb28181' ? sipIdPreview.value : null)
 
   const payload = {
     name: form.value.name, protocol: form.value.protocol,
     device_username: form.value.device_username || null, device_password: form.value.device_password || null,
-    media_server_tag: form.value.media_server_name || null,
+    media_server_tag: form.value.media_server_tag || null,
     pull_urls: form.value.pull_urls.filter(u => u.url).length > 0 ? form.value.pull_urls : undefined,
     push_urls: form.value.push_urls.filter(u => u.url).length > 0 ? form.value.push_urls : undefined,
     playback_username: form.value.playback_username || null, playback_password: form.value.playback_password || null,
-    device_tag: finalDeviceTag, region_code: form.value.protocol === 'Gb28181' ? sipIdPrefix.value || null : null, group_id: form.value.group_id || null, is_public: form.value.is_public,
+    device_tag: finalDeviceTag, region_code: sipIdPrefix.value || null, group_id: form.value.group_id || null, is_public: form.value.is_public,
     app: form.value.app || null,
     extended: {
       ...(form.value.extended || {}),
@@ -1445,12 +1451,12 @@ async function submitDevice() {
         name: `${form.value.name} - 通道${i + 1}`, protocol: 'Rtsp',
         device_username: form.value.device_username || null,
         device_password: form.value.device_password || null,
-        media_server_tag: form.value.media_server_name || null,
+        media_server_tag: form.value.media_server_tag || null,
         rtsp_mode: 'pull', rtsp_full_url: url.url,
         pull_urls: [{ protocol: 'Rtsp', url: url.url, priority: 1 }],
         playback_username: form.value.playback_username || null,
         playback_password: form.value.playback_password || null,
-        device_tag: null, region_code: null, group_id: form.value.group_id || null, is_public: form.value.is_public || false,
+        device_tag: null, region_code: sipIdPrefix.value || null, group_id: form.value.group_id || null, is_public: form.value.is_public || false,
         app: form.value.app || null,
         extended: {},
       })
@@ -1582,11 +1588,11 @@ async function confirmOnvifDevice() {
       name: parentName, protocol: 'Onvif',
       device_username: onvifDiscoverUser.value || null,
       device_password: onvifDiscoverPwd.value || null,
-      media_server_tag: form.value.media_server_name || null,
+      media_server_tag: form.value.media_server_tag || null,
       pull_urls: onvifRtspUrls.value.map((r, i) => ({ protocol: 'Rtsp', url: r.url, priority: i + 1 })),
       playback_username: form.value.playback_username || null,
       playback_password: form.value.playback_password || null,
-      device_tag: null, region_code: null, group_id: form.value.group_id || null, is_public: form.value.is_public || false,
+      device_tag: null, region_code: sipIdPrefix.value || null, group_id: form.value.group_id || null, is_public: form.value.is_public || false,
       app: form.value.app || null,
       extended: { stream_key: form.value.stream_key || null },
     }
@@ -1599,13 +1605,13 @@ async function confirmOnvifDevice() {
           name: `${parentName} - ${childName}`, protocol: 'Rtsp',
           device_username: onvifDiscoverUser.value || null,
           device_password: onvifDiscoverPwd.value || null,
-          media_server_tag: form.value.media_server_name || null,
+          media_server_tag: form.value.media_server_tag || null,
           rtsp_mode: 'pull',
           rtsp_full_url: onvifRtspUrls.value[i].url,
           pull_urls: [{ protocol: 'Rtsp', url: onvifRtspUrls.value[i].url, priority: 1 }],
           playback_username: form.value.playback_username || null,
           playback_password: form.value.playback_password || null,
-          device_tag: null, region_code: null, group_id: form.value.group_id || null, is_public: form.value.is_public || false,
+          device_tag: null, region_code: sipIdPrefix.value || null, group_id: form.value.group_id || null, is_public: form.value.is_public || false,
           app: form.value.app || null,
           extended: { stream_key: form.value.stream_key || null },
         })

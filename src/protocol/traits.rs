@@ -92,6 +92,7 @@ impl ProtocolDeps {
             async fn get_device(&self, _: i64) -> Result<Option<crate::domain::Device>, AppError> { Ok(None) }
             async fn set_online(&self, _: &str) -> Result<(), AppError> { Ok(()) }
             async fn set_offline(&self, _: &str, _: Option<&str>) -> Result<(), AppError> { Ok(()) }
+            async fn update_device_host_port(&self, _: &str, _: &str, _: u16) -> Result<(), AppError> { Ok(()) }
             async fn log_ptz_control(&self, _: Option<uuid::Uuid>, _: i64, _: &str, _: u8, _: bool, _: Option<String>, _: Option<String>) -> Result<(), AppError> { Ok(()) }
             async fn log_ptz_result(&self, _: i64, _: Option<&str>, _: Option<u16>, _: &str, _: Option<String>) -> Result<(), AppError> { Ok(()) }
             fn broadcast_ptz_result(&self, _: i64, _: &str, _: &str, _: &str, _: Option<u16>, _: Option<&str>) {}
@@ -116,7 +117,7 @@ impl ProtocolDeps {
                     media_server_name: "test".to_string(),
                 })
             }
-            async fn start_gb28181_stream(&self, _: &str, _: &str, _: &str) -> Result<StreamInfo, AppError> {
+            async fn start_gb28181_stream(&self, _: &str, _: &str, _: &str, _: Option<&str>) -> Result<StreamInfo, AppError> {
                 Err(AppError::Internal("not implemented".into()))
             }
             async fn stop_stream(&self, _: &str, _: &str) -> Result<(), AppError> { Ok(()) }

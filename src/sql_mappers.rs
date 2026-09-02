@@ -40,6 +40,12 @@ pub struct DeviceRow {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
+pub struct DeviceTagRow {
+    pub id: i64,
+    pub device_tag: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct ChannelRow {
     pub id: i64,
     pub device_tag: String,
@@ -368,6 +374,15 @@ pub async fn device_select_all_paginated(
 }
 
 #[html_sql("sql/device.html")]
+pub async fn device_select_paginated_tags(
+    rb: &dyn rbatis::Executor,
+    limit: i64,
+    offset: i64,
+) -> rbatis::Result<Vec<DeviceTagRow>> {
+    impled!()
+}
+
+#[html_sql("sql/device.html")]
 pub async fn device_count_top_level(
     rb: &dyn rbatis::Executor,
 ) -> rbatis::Result<i64> {
@@ -505,7 +520,7 @@ pub struct SessionRow {
     pub session_type: String,
     pub device_tag: Option<String>,
     pub channel_tag: Option<String>,
-    pub user_id: String,
+    pub user_id: i64,
     pub state: String,
     pub client_ip: Option<String>,
     pub client_type: Option<String>,
@@ -539,7 +554,7 @@ pub async fn session_insert(
     session_type: Option<&str>,
     device_tag: Option<&str>,
     channel_tag: Option<&str>,
-    user_id: Option<&str>,
+    user_id: Option<i64>,
     state: Option<&str>,
     client_ip: Option<&str>,
     client_type: Option<&str>,
@@ -998,6 +1013,7 @@ impl TryFrom<GroupRow> for crate::domain::device_group::DeviceGroup {
             sort_order: row.sort_order.unwrap_or(0),
             created_at: chrono::DateTime::from_timestamp(row.created_at.unix_timestamp(), 0)
                 .unwrap_or_else(chrono::Utc::now),
+            device_count: row.device_count.unwrap_or(0) as u32,
         })
     }
 }
@@ -1393,4 +1409,11 @@ pub async fn channel_update(
 pub async fn channel_delete_by_device_tag(
     rb: &dyn rbatis::Executor,
     device_tag: &str,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+#[html_sql("sql/channel.html")]
+pub async fn channel_delete_by_device_tag_and_channel_tag(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+    channel_tag: &str,
 ) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }

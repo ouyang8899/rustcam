@@ -87,4 +87,8 @@ WHERE device_tag = #{device_tag} AND channel_tag = #{channel_tag}
 <delete id="channel_delete_by_device_tag">
 DELETE FROM channels WHERE device_tag = #{device_tag}
 </delete>
+
+<delete id="channel_delete_by_device_tag_and_channel_tag">
+DELETE FROM channels WHERE device_tag = #{device_tag} AND channel_tag = #{channel_tag}
+</delete>
 </mapper>

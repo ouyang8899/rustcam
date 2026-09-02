@@ -32,10 +32,13 @@ export const useStreamStore = defineStore('streams', {
       return await api.getStreamPlayUrl(id, protocol)
     },
 
-    async startStream(deviceTag, rtspUrl) {
+    async startStream(deviceTag, channelTag, rtspUrl) {
       this.loading = true
       try {
         const body = { device_tag: deviceTag }
+        if (channelTag !== undefined && channelTag !== null) {
+          body.channel_tag = channelTag
+        }
         if (rtspUrl !== undefined && rtspUrl !== null && rtspUrl !== '') {
           body.rtsp_url = rtspUrl
         }

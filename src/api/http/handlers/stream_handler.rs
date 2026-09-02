@@ -38,6 +38,7 @@ impl DeviceStreamsQuery {
 #[serde(default)]
 pub struct StartStreamRequest {
     pub device_tag: String,
+    pub channel_tag: Option<String>,
     pub rtsp_url: Option<String>,
 }
 
@@ -90,7 +91,8 @@ pub async fn start_stream_handler(
     Json(req): Json<StartStreamRequest>,
 ) -> Result<Json<ApiResponse<StreamInfo>>, AppError> {
     let registry = &state.app.registry;
-    let stream_info = registry.stream_service.start_pull_stream(&req.device_tag, &req.device_tag, &req.rtsp_url.unwrap_or_default()).await?;
+    let channel_tag = req.channel_tag.as_deref().unwrap_or(&req.device_tag);
+    let stream_info = registry.stream_service.start_pull_stream(&req.device_tag, channel_tag, &req.rtsp_url.unwrap_or_default()).await?;
     Ok(Json(ApiResponse::success(stream_info)))
 }
 

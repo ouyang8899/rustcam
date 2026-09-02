@@ -337,6 +337,22 @@ async function startPull() {
   if (!rtspUrl) return
   pullLoading.value = true; pullError.value = ''
   try {
+    const streams = await streamsApi.getStreamsByDevice(device.value.device_tag)
+    const existingStream = streams.length > 0 ? streams[0] : null
+    if (existingStream) {
+      try {
+        const online = await streamsApi.isStreamOnline(existingStream.id)
+        if (online) {
+          activeStream.value = existingStream
+          showPullModal.value = false
+          pullForm.value = { rtspUrl: '' }
+          ElMessage.info('流已在运行，可直接播放')
+          return
+        }
+      } catch (e) {
+        console.error('Failed to check stream online status:', e)
+      }
+    }
     const streamInfo = await streamStore.startStream(device.value.device_tag, rtspUrl)
     if (streamInfo) activeStream.value = streamInfo
     showPullModal.value = false; pullForm.value = { rtspUrl: '' }

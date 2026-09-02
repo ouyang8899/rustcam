@@ -53,6 +53,7 @@ request.interceptors.response.use(
   },
   async (error) => {
     const originalRequest = error.config
+    const responseData = error.response?.data
 
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true
@@ -60,6 +61,10 @@ request.interceptors.response.use(
       
       ElMessage.warning('登录已过期，请重新登录')
       window.location.href = '/login'
+      return Promise.reject(error)
+    }
+
+    if (responseData?.code && responseData?.message) {
       return Promise.reject(error)
     }
 

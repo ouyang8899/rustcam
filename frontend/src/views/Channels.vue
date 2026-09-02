@@ -144,10 +144,7 @@ function clearDeviceFilter() {
 
 async function startChannelStream(channel) {
   try {
-    await streamStore.startStream({
-      device_tag: channel.device_tag,
-      channel_tag: channel.channel_tag,
-    })
+    await streamStore.startStream(channel.device_tag, channel.channel_tag)
     ElMessage.success('已开始播放')
     router.push('/streams')
   } catch (e) {
