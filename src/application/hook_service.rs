@@ -827,18 +827,43 @@ impl HookService {
         media_server_id: &str,
         stream_id: &str,
         client_ip: Option<&str>,
-        _app: Option<&str>,
-        _params: Option<&str>,
+        app: Option<&str>,
+        params: Option<&str>,
     ) {
+        let params_map: std::collections::HashMap<String, String> = params
+            .map(|p| {
+                p.split('&')
+                    .filter_map(|pair| {
+                        let mut parts = pair.split('=');
+                        match (parts.next(), parts.next()) {
+                            (Some(k), Some(v)) => Some((k.to_string(), v.to_string())),
+                            _ => None,
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let protocol = params_map.get("protocol").map(|s| s.to_lowercase()).unwrap_or_default();
+        let is_rtmp = protocol == "rtmp" || protocol.is_empty();
+        let device_tag = params_map.get("device_tag").cloned();
+        let channel_tag = params_map.get("channel_tag").cloned();
+
         tracing::info!(
-            "[Hook] on_publish: server={}, stream={}, ip={:?}",
+            "[Hook] on_publish: server={}, stream={}, ip={:?}, protocol={}, is_rtmp={}, device_tag={:?}, channel_tag={:?}",
             media_server_id,
             stream_id,
-            client_ip
+            client_ip,
+            protocol,
+            is_rtmp,
+            device_tag,
+            channel_tag
         );
 
-        if let Err(e) = self.register_push_stream(media_server_id, stream_id).await {
-            tracing::warn!("[Hook] on_publish: failed to register push stream: {}", e);
+        if is_rtmp {
+            if let Err(e) = self.register_push_stream(media_server_id, stream_id, device_tag.as_deref(), channel_tag.as_deref()).await {
+                tracing::warn!("[Hook] on_publish: failed to register push stream: {}", e);
+            }
         }
     }
 
@@ -964,8 +989,19 @@ impl HookService {
     /// 注册推送流（RTMP/RTSP push）
     ///
     /// 尝试从 stream_id 匹配设备（stream_key 或 push_urls），若匹配则关联 device_id。
-    async fn register_push_stream(&self, media_server_id: &str, stream_id: &str) -> Result<()> {
-        let device_id = self.find_device_by_push_stream(stream_id);
+    async fn register_push_stream(&self, media_server_id: &str, stream_id: &str, device_tag_from_params: Option<&str>, channel_tag_from_params: Option<&str>) -> Result<()> {
+        let device_id = if let Some(dt) = device_tag_from_params {
+            Some(dt.to_string())
+        } else {
+            self.find_device_by_push_stream(stream_id)
+        };
+
+        let (final_device_tag, final_channel_tag) = if let (Some(dt), Some(ct)) = (device_tag_from_params, channel_tag_from_params) {
+            (dt.to_string(), ct.to_string())
+        } else {
+            crate::domain::parse_stream_key(stream_id)
+                .unwrap_or_else(|| (stream_id.to_string(), stream_id.to_string()))
+        };
 
         if let Some(s) = self.find_stream_by_stream_key(stream_id) {
             let mut s = s;
@@ -977,8 +1013,6 @@ impl HookService {
             tracing::info!("[Hook] on_publish: updated push stream {} (device_tag={})", stream_id, s.device_tag.as_deref().unwrap_or("unknown"));
         } else {
             let token = uuid::Uuid::new_v4().to_string();
-            let (device_tag, channel_tag) = crate::domain::parse_stream_key(stream_id)
-                .unwrap_or((stream_id.to_string(), stream_id.to_string()));
             let app = device_id
                 .as_ref()
                 .and_then(|id| self.repo.devices_cache().get(id))
@@ -986,15 +1020,15 @@ impl HookService {
                 .unwrap_or_else(|| "live".to_string());
             let mut stream = crate::domain::Stream::new(
                 media_server_id.to_string(),
-                device_tag,
-                channel_tag,
+                final_device_tag.clone(),
+                final_channel_tag.clone(),
                 app,
                 token,
             );
             stream.start();
             self.repo.create_stream(&stream).await?;
             tracing::info!("[Hook] on_publish: registered push stream {} on server {} (device_tag={})",
-                stream_id, media_server_id, device_id.as_deref().unwrap_or("unknown"));
+                stream_id, media_server_id, final_device_tag);
         }
 
         if let Some(ref did) = device_id {
@@ -1011,19 +1045,43 @@ impl HookService {
 
     /// 根据推送流的 stream_id 查找关联的设备 tag
     fn find_device_by_push_stream(&self, stream_id: &str) -> Option<String> {
+        let (device_tag_from_stream, _channel_tag_from_stream) = crate::domain::parse_stream_key(stream_id)
+            .or_else(|| {
+                if let Some(idx) = stream_id.rfind('/') {
+                    let dt = stream_id[..idx].to_string();
+                    let ct = stream_id[idx + 1..].to_string();
+                    if !dt.is_empty() && !ct.is_empty() {
+                        return Some((dt, ct));
+                    }
+                }
+                None
+            })
+            .unwrap_or_else(|| (stream_id.to_string(), stream_id.to_string()));
+
+        let device_tag_str = device_tag_from_stream.clone();
+
+        if self.repo.devices_cache().get(&device_tag_str).is_some() {
+            return Some(device_tag_str);
+        }
+
+        let cache_key = stream_id.replace('_', "/");
+        if let Some(s) = self.repo.streams_cache().get(&cache_key) {
+            return s.device_tag.clone();
+        }
+
         for entry in self.repo.devices_cache().iter() {
-            let device = entry.value();
-            for pu in &device.push_urls {
-                if !pu.url.is_empty() && (pu.url.contains(stream_id) || stream_id.contains(&device.device_tag.clone().unwrap_or_default())) {
-                    return device.device_tag.clone();
+            let dt_str = entry.key().clone();
+            if stream_id.contains(&dt_str) && !dt_str.is_empty() {
+                return Some(dt_str);
+            }
+            for pu in &entry.push_urls {
+                if !pu.url.is_empty() && pu.url.contains(stream_id) {
+                    return Some(dt_str);
                 }
             }
         }
-        
-        let cache_key = stream_id.replace('_', "/");
-        self.repo.streams_cache()
-            .get(&cache_key)
-            .and_then(|s| s.device_tag.clone())
+
+        None
     }
 
     /// 根据流标识查找活跃会话
