@@ -1,6 +1,14 @@
 use crate::protocol::onvif::auth::UsernameToken;
-use crate::protocol::onvif::soap::{extract_element_text, extract_attribute};
+use crate::protocol::onvif::soap::extract_element_text;
 use std::time::Duration;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AuthMethod {
+    Anonymous,
+    HttpDigest,
+    WsSecurityDigest,
+    WsSecurityText,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct OnvifDeviceInfo {
@@ -15,6 +23,9 @@ pub struct OnvifDeviceInfo {
 pub struct OnvifProfile {
     pub token: String,
     pub name: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub encoding: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -43,6 +54,7 @@ pub struct OnvifDeviceClient {
     x_addr: String,
     username: Option<String>,
     password: Option<String>,
+    auth_method: Option<AuthMethod>,
 }
 
 impl OnvifDeviceClient {
@@ -51,6 +63,7 @@ impl OnvifDeviceClient {
             x_addr: x_addr.to_string(),
             username: None,
             password: None,
+            auth_method: None,
         }
     }
 
@@ -60,7 +73,16 @@ impl OnvifDeviceClient {
         self
     }
 
-    /// 构建带 WS-Security 认证的 SOAP 信封
+    fn build_soap_envelope_no_auth(&self, body: &str) -> String {
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+<s:Body>{}</s:Body>
+</s:Envelope>"#,
+            body
+        )
+    }
+
     fn build_soap_envelope(&self, body: &str) -> String {
         if let (Some(u), Some(p)) = (&self.username, &self.password) {
             let (nonce, created, digest) = UsernameToken::build_digest(u, p);
@@ -72,7 +94,7 @@ impl OnvifDeviceClient {
     <wsse:UsernameToken>
       <wsse:Username>{}</wsse:Username>
       <wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">{}</wsse:Password>
-      <wsse:Nonce EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary">{}</wsse:Nonce>
+      <wsse:Nonce EncodingType="http://docs.oasis-open.org/wss/200401-wss-soap-message-security-1.0#Base64Binary">{}</wsse:Nonce>
       <wsu:Created>{}</wsu:Created>
     </wsse:UsernameToken>
   </wsse:Security>
@@ -82,21 +104,79 @@ impl OnvifDeviceClient {
                 u, digest, nonce, created, body
             )
         } else {
-            format!(
-                r#"<?xml version="1.0" encoding="UTF-8"?>
-<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
-<s:Body>{}</s:Body>
-</s:Envelope>"#,
-                body
-            )
+            self.build_soap_envelope_no_auth(body)
         }
     }
 
-    /// 发送 SOAP 请求
-    async fn send_soap(&self, body: &str) -> anyhow::Result<String> {
-        let envelope = self.build_soap_envelope(body);
+    fn build_soap_envelope_text(&self, body: &str) -> String {
+        if let (Some(u), Some(p)) = (&self.username, &self.password) {
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" xmlns:wsu="http://docs.oasis-open.org/wss/200401-wss-wssecurity-utility-1.0.xsd">
+<s:Header>
+  <wsse:Security s:mustUnderstand="true">
+    <wsse:UsernameToken>
+      <wsse:Username>{}</wsse:Username>
+      <wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText">{}</wsse:Password>
+    </wsse:UsernameToken>
+  </wsse:Security>
+</s:Header>
+<s:Body>{}</s:Body>
+</s:Envelope>"#,
+                u, p, body
+            )
+        } else {
+            self.build_soap_envelope_no_auth(body)
+        }
+    }
 
-        let client = reqwest::Client::builder()
+    fn extract_digest_param(header: &str, param: &str) -> Option<String> {
+        let search = format!("{}=\"", param);
+        let start = header.find(&search)? + search.len();
+        let rest = &header[start..];
+        let end = rest.find('"').unwrap_or(rest.len());
+        Some(rest[..end].to_string())
+    }
+
+    fn build_http_digest_authorization(&self, method: &str, uri: &str, realm: &str, nonce: &str) -> String {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+
+        let username = self.username.as_deref().unwrap_or("");
+        let password = self.password.as_deref().unwrap_or("");
+
+        let mut cnonce_bytes = [0u8; 16];
+        getrandom::getrandom(&mut cnonce_bytes).expect("failed to get random bytes");
+        let cnonce = STANDARD.encode(cnonce_bytes);
+
+        let ha1 = format!("{}:{}:{}", username, realm, password);
+        let ha2 = format!("{}:{}", method, uri);
+
+        let ha1_md5 = format!("{:x}", md5::compute(ha1.as_bytes()));
+        let ha2_md5 = format!("{:x}", md5::compute(ha2.as_bytes()));
+
+        let response = format!("{}:{}:00000001:{}:auth:{}", ha1_md5, nonce, cnonce, ha2_md5);
+        let response_md5 = format!("{:x}", md5::compute(response.as_bytes()));
+
+        let auth_header = format!(
+            r#"Digest username="{}", realm="{}", nonce="{}", uri="{}", qop=auth, nc=00000001, cnonce="{}", response="{}""#,
+            username, realm, nonce, uri, cnonce, response_md5
+        );
+
+        tracing::info!("[ONVIF Auth] Digest auth header:\n  username={}\n  realm={}\n  uri={}\n  ha1={}\n  ha2={}\n  cnonce={}\n  response={}",
+            username, realm, uri, ha1_md5, ha2_md5, cnonce, response_md5);
+        tracing::debug!("[ONVIF Auth] Full Auth header: {}", auth_header);
+
+        auth_header
+    }
+
+    /// 发现设备支持的认证方式
+    async fn discover_auth(&mut self) -> anyhow::Result<AuthMethod> {
+        let body = r#"<GetDeviceInformation xmlns="http://www.onvif.org/ver10/device/wsdl"/>"#;
+        let envelope = self.build_soap_envelope_no_auth(body);
+
+        tracing::info!("[ONVIF Auth] Discovering auth method for {}", self.x_addr);
+
+        let mut client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()?;
 
@@ -107,93 +187,313 @@ impl OnvifDeviceClient {
             .send()
             .await?;
 
-        if !resp.status().is_success() {
-            return Err(anyhow::anyhow!(
-                "HTTP {} from {}",
-                resp.status(),
-                self.x_addr
-            ));
+        let status = resp.status();
+
+        if status == reqwest::StatusCode::OK {
+            tracing::info!("[ONVIF Auth] Device supports anonymous access");
+            return Ok(AuthMethod::Anonymous);
         }
 
-        Ok(resp.text().await?)
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            if let Some(www_auth) = resp.headers().get("www-authenticate") {
+                if let Ok(www_auth_str) = www_auth.to_str() {
+                    tracing::debug!("[ONVIF Auth] WWW-Authenticate: {}", www_auth_str);
+                    if www_auth_str.contains("Digest") {
+                        tracing::info!("[ONVIF Auth] Device requires HTTP Digest auth");
+                        return Ok(AuthMethod::HttpDigest);
+                    }
+                }
+            }
+        }
+
+        if status == reqwest::StatusCode::BAD_REQUEST {
+            let body = resp.text().await?;
+            if body.contains("NotAuthorized") || body.contains("ter:NotAuthorized") {
+                tracing::info!("[ONVIF Auth] Device requires WS-Security auth");
+                return Ok(AuthMethod::WsSecurityDigest);
+            }
+        }
+
+        tracing::warn!("[ONVIF Auth] Unknown auth method, status={}, trying WS-Security", status);
+        Ok(AuthMethod::WsSecurityDigest)
     }
 
-    // ═══════════════════════════════════════════════════════════
-    // 设备信息
-    // ═══════════════════════════════════════════════════════════
+    async fn send_soap_internal(&mut self, body: &str) -> anyhow::Result<String> {
+        if self.auth_method.is_none() {
+            self.auth_method = Some(self.discover_auth().await?);
+        }
 
-    pub async fn get_device_info(&self) -> anyhow::Result<OnvifDeviceInfo> {
+        let mut current_auth_method = self.auth_method.clone().unwrap_or(AuthMethod::WsSecurityDigest);
+        let mut retry_with_text = false;
+
+        loop {
+            match current_auth_method {
+                AuthMethod::Anonymous => {
+                    tracing::info!("[ONVIF SOAP] >>> REQUEST (anonymous) to {}:\n{}", self.x_addr, body);
+                    let mut client = reqwest::Client::builder()
+                        .timeout(Duration::from_secs(10))
+                        .build()?;
+                    let resp = client
+                        .post(&self.x_addr)
+                        .header("Content-Type", "application/soap+xml; charset=utf-8")
+                        .body(body.to_string())
+                        .send()
+                        .await?;
+                    return self.handle_response(resp).await;
+                }
+
+                AuthMethod::HttpDigest => {
+                    let envelope = self.build_soap_envelope_no_auth(body);
+                    tracing::info!("[ONVIF SOAP] >>> REQUEST (HTTP Digest) to {}:\n{}", self.x_addr, envelope);
+
+                    let mut client = reqwest::Client::builder()
+                        .timeout(Duration::from_secs(10))
+                        .build()?;
+                    let resp = client
+                        .post(&self.x_addr)
+                        .header("Content-Type", "application/soap+xml; charset=utf-8")
+                        .body(envelope.clone())
+                        .send()
+                        .await?;
+                    let status = resp.status();
+
+                    if status == reqwest::StatusCode::UNAUTHORIZED {
+                        let headers = resp.headers().clone();
+                        let resp_text = resp.text().await?;
+                        if let Some(www_auth) = headers.get("www-authenticate") {
+                            if let Ok(www_auth_str) = www_auth.to_str() {
+                                let realm = Self::extract_digest_param(www_auth_str, "realm")
+                                    .unwrap_or_else(|| "IP Camera".to_string());
+                                let nonce = Self::extract_digest_param(www_auth_str, "nonce")
+                                    .unwrap_or_default();
+
+                                tracing::info!("[ONVIF Auth] Got 401 with nonce, computing digest response");
+
+                                let uri = if let Some(path) = self.x_addr.split("://").nth(1) {
+                                    format!("/{}", path.split('/').skip(1).collect::<Vec<_>>().join("/"))
+                                } else {
+                                    "/onvif/device_service".to_string()
+                                };
+                                tracing::info!("[ONVIF Auth] URI for digest: {}", uri);
+                                let auth_header = self.build_http_digest_authorization("POST", &uri, &realm, &nonce);
+
+                                tracing::info!("[ONVIF SOAP] >>> REQUEST (HTTP Digest retry) to {}\nHeaders:\n  Content-Type: application/soap+xml; charset=utf-8\n  Authorization: {}\nBody:\n{}", 
+                                    self.x_addr, auth_header, envelope);
+                                let mut client2 = reqwest::Client::builder()
+                                    .timeout(Duration::from_secs(10))
+                                    .build()?;
+                                let resp = client2
+                                    .post(&self.x_addr)
+                                    .header("Content-Type", "application/soap+xml; charset=utf-8")
+                                    .header("Authorization", &auth_header)
+                                    .body(envelope)
+                                    .send()
+                                    .await?;
+
+                                return self.handle_response(resp).await;
+                            }
+                        }
+                        return Err(anyhow::anyhow!("HTTP Digest auth failed: {}", resp_text));
+                    }
+
+                    return self.handle_response(resp).await;
+                }
+
+                AuthMethod::WsSecurityDigest => {
+                    let envelope = self.build_soap_envelope(body);
+                    tracing::info!("[ONVIF SOAP] >>> REQUEST (WS-Security Digest) to {}:\n{}", self.x_addr, envelope);
+
+                    let mut client = reqwest::Client::builder()
+                        .timeout(Duration::from_secs(10))
+                        .build()?;
+                    let resp = client
+                        .post(&self.x_addr)
+                        .header("Content-Type", "application/soap+xml; charset=utf-8")
+                        .body(envelope)
+                        .send()
+                        .await?;
+
+                    let status = resp.status();
+                    if status == reqwest::StatusCode::BAD_REQUEST {
+                        let error_body = resp.text().await?;
+                        tracing::warn!("[ONVIF Auth] WS-Security Digest failed (400), trying PasswordText");
+                        current_auth_method = AuthMethod::WsSecurityText;
+                        continue;
+                    }
+                    return self.handle_response(resp).await;
+                }
+
+                AuthMethod::WsSecurityText => {
+                    let envelope = self.build_soap_envelope_text(body);
+                    tracing::info!("[ONVIF SOAP] >>> REQUEST (WS-Security Text) to {}:\n{}", self.x_addr, envelope);
+
+                    let mut client = reqwest::Client::builder()
+                        .timeout(Duration::from_secs(10))
+                        .build()?;
+                    let resp = client
+                        .post(&self.x_addr)
+                        .header("Content-Type", "application/soap+xml; charset=utf-8")
+                        .body(envelope)
+                        .send()
+                        .await?;
+
+                    return self.handle_response(resp).await;
+                }
+            }
+        }
+    }
+
+    async fn handle_response(&self, resp: reqwest::Response) -> anyhow::Result<String> {
+        let status = resp.status();
+
+        if !status.is_success() {
+            let err_body = resp.text().await?;
+            let err = format!("HTTP {} from {}:\n{}", status, self.x_addr, err_body);
+            tracing::error!("[ONVIF SOAP] <<< ERROR: {}", err);
+            return Err(anyhow::anyhow!(err));
+        }
+
+        let response_text = resp.text().await?;
+        tracing::info!("[ONVIF SOAP] <<< RESPONSE from {} ({} bytes):\n{}", self.x_addr, response_text.len(), response_text);
+        Ok(response_text)
+    }
+
+    pub async fn get_device_info(&mut self) -> anyhow::Result<OnvifDeviceInfo> {
+        tracing::info!("[ONVIF Client] Calling GetDeviceInformation on {}", self.x_addr);
         let body = r#"<GetDeviceInformation xmlns="http://www.onvif.org/ver10/device/wsdl"/>"#;
-        let xml = self.send_soap(body).await?;
+        let xml = self.send_soap_internal(body).await?;
 
-        Ok(OnvifDeviceInfo {
+        let result = OnvifDeviceInfo {
             manufacturer: extract_element_text(xml.as_bytes(), "Manufacturer"),
             model: extract_element_text(xml.as_bytes(), "Model"),
             firmware_version: extract_element_text(xml.as_bytes(), "FirmwareVersion"),
             serial_number: extract_element_text(xml.as_bytes(), "SerialNumber"),
             hardware_id: extract_element_text(xml.as_bytes(), "HardwareId"),
-        })
+        };
+        tracing::info!("[ONVIF Client] GetDeviceInformation result: manufacturer={:?}, model={:?}, sn={:?}",
+            result.manufacturer, result.model, result.serial_number);
+        Ok(result)
     }
 
-    // ═══════════════════════════════════════════════════════════
-    // 获取 Profiles
-    // ═══════════════════════════════════════════════════════════
-
-    pub async fn get_profiles(&self) -> anyhow::Result<Vec<OnvifProfile>> {
+    pub async fn get_profiles(&mut self) -> anyhow::Result<Vec<OnvifProfile>> {
+        tracing::info!("[ONVIF Client] Calling GetProfiles on {}", self.x_addr);
         let body = r#"<GetProfiles xmlns="http://www.onvif.org/ver10/media/wsdl"/>"#;
-        let xml = self.send_soap(body).await?;
+        let xml = self.send_soap_internal(body).await?;
+
+        let bytes = xml.as_bytes();
+        let mut reader = quick_xml::Reader::from_reader(bytes);
+        reader.config_mut().trim_text(true);
 
         let mut profiles = Vec::new();
-        let mut current_token = String::new();
-        let mut current_name = String::new();
-        let mut in_profile = false;
-        let mut in_token = false;
-        let mut in_name = false;
+        let mut current_profile: Option<OnvifProfile> = None;
+        let mut in_video_encoder = false;
+        let mut in_audio_encoder = false;
+        let mut in_resolution = false;
+        let mut current_element = String::new();
 
-        for line in xml.lines() {
-            let line = line.trim();
+        loop {
+            use quick_xml::events::Event;
+            match reader.read_event() {
+                Ok(Event::Start(ref e)) => {
+                    current_element = e.name().local_name().into_inner().to_string();
+                    let name = &current_element;
 
-            if line.contains("<Profiles") && line.contains("token=") {
-                in_profile = true;
-                if let Some(start) = line.find("token=\"") {
-                    let rest = &line[start + 7..];
-                    if let Some(end) = rest.find('"') {
-                        current_token = rest[..end].to_string();
+                    if name == "Profiles" {
+                        let mut token = None;
+                        for attr in e.attributes().flatten() {
+                            let key = attr.key.into_inner();
+                            if key == "token" {
+                                token = Some(attr.value.to_string());
+                                break;
+                            }
+                        }
+                        if let Some(t) = token {
+                            current_profile = Some(OnvifProfile {
+                                token: t,
+                                name: String::new(),
+                                width: None,
+                                height: None,
+                                encoding: None,
+                            });
+                        }
+                    } else if name == "VideoEncoderConfiguration" {
+                        in_video_encoder = true;
+                    } else if name == "AudioEncoderConfiguration" {
+                        in_audio_encoder = true;
+                    } else if name == "Resolution" {
+                        in_resolution = true;
+                    } else if name == "Name" {
+                        if let Some(ref mut p) = current_profile {
+                            if p.name.is_empty() && !in_video_encoder && !in_audio_encoder {
+                                // Will be set on next Text event
+                            }
+                        }
                     }
                 }
-            }
-
-            if in_profile && line.contains("<Name>") {
-                in_name = true;
-                if let Some(start) = line.find("<Name>") {
-                    let rest = &line[start + 6..];
-                    if let Some(end) = rest.find("</Name>") {
-                        current_name = rest[..end].to_string();
+                Ok(Event::Text(ref e)) => {
+                    if let Some(ref mut p) = current_profile {
+                        let text = (&*e).to_string();
+                        let trimmed = text.trim();
+                        if !trimmed.is_empty() {
+                            match current_element.as_str() {
+                                "Name" if p.name.is_empty() && !in_video_encoder && !in_audio_encoder => {
+                                    p.name = trimmed.to_string();
+                                }
+                                "Encoding" if in_video_encoder && !in_resolution => {
+                                    p.encoding = Some(trimmed.to_string());
+                                }
+                                "Width" if in_resolution => {
+                                    if let Ok(w) = trimmed.parse() {
+                                        p.width = Some(w);
+                                    }
+                                }
+                                "Height" if in_resolution => {
+                                    if let Ok(h) = trimmed.parse() {
+                                        p.height = Some(h);
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
                     }
                 }
-            }
+                Ok(Event::End(ref e)) => {
+                    let name = e.name().local_name().into_inner();
 
-            if line.contains("</Profiles>") && in_profile {
-                if !current_token.is_empty() {
-                    profiles.push(OnvifProfile {
-                        token: current_token.clone(),
-                        name: current_name.clone(),
-                    });
+                    if name == "Profiles" {
+                        if let Some(p) = current_profile.take() {
+                            tracing::info!("[ONVIF] Found profile: name={}, token={}, {}x{}, encoding={:?}",
+                                p.name, p.token, p.width.unwrap_or(0), p.height.unwrap_or(0), p.encoding);
+                            profiles.push(p);
+                        }
+                    } else if name == "VideoEncoderConfiguration" {
+                        in_video_encoder = false;
+                    } else if name == "AudioEncoderConfiguration" {
+                        in_audio_encoder = false;
+                    } else if name == "Resolution" {
+                        in_resolution = false;
+                    }
+                    current_element.clear();
                 }
-                current_token.clear();
-                current_name.clear();
-                in_profile = false;
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    tracing::warn!("[ONVIF] XML parsing error: {:?}", e);
+                    break;
+                }
+                _ => {}
             }
         }
 
+        tracing::info!("[ONVIF Client] GetProfiles result: {} profiles found", profiles.len());
+        for p in &profiles {
+            tracing::info!("[ONVIF Client] Profile: name={}, {}x{}, encoding={:?}",
+                p.name, p.width.unwrap_or(0), p.height.unwrap_or(0), p.encoding);
+        }
         Ok(profiles)
     }
 
-    // ═══════════════════════════════════════════════════════════
-    // 获取流 URI（RTSP 地址）
-    // ═══════════════════════════════════════════════════════════
-
-    pub async fn get_stream_uri(&self, profile_token: &str) -> anyhow::Result<OnvifStreamUri> {
+    pub async fn get_stream_uri(&mut self, profile_token: &str) -> anyhow::Result<OnvifStreamUri> {
+        tracing::info!("[ONVIF Client] Calling GetStreamUri for profile {} on {}", profile_token, self.x_addr);
         let body = format!(
             r#"<GetStreamUri xmlns="http://www.onvif.org/ver10/media/wsdl">
   <StreamSetup>
@@ -206,11 +506,13 @@ impl OnvifDeviceClient {
 </GetStreamUri>"#,
             profile_token
         );
-        let xml = self.send_soap(&body).await?;
+        let xml = self.send_soap_internal(&body).await?;
 
         let uri = extract_element_text(xml.as_bytes(), "Uri")
             .unwrap_or_default();
-
+        
+        tracing::info!("[ONVIF Client] GetStreamUri Uri: {}, len={}", uri, uri.len());
+        
         Ok(OnvifStreamUri {
             uri,
             invalid_after_connect: false,
@@ -219,63 +521,134 @@ impl OnvifDeviceClient {
         })
     }
 
-    // ═══════════════════════════════════════════════════════════
-    // 便捷方法：获取第一个 Profile 的 RTSP 地址
-    // ═══════════════════════════════════════════════════════════
-
-    pub async fn get_first_rtsp_url(&self) -> anyhow::Result<String> {
+    pub async fn get_first_rtsp_url(&mut self) -> anyhow::Result<String> {
         let profiles = self.get_profiles().await?;
         if profiles.is_empty() {
             return Err(anyhow::anyhow!("No profiles found"));
         }
-
         let stream_uri = self.get_stream_uri(&profiles[0].token).await?;
         Ok(stream_uri.uri)
     }
 
-    pub async fn get_capabilities(&self) -> anyhow::Result<OnvifCapabilities> {
+    pub async fn get_capabilities(&mut self) -> anyhow::Result<OnvifCapabilities> {
         let body = r#"<GetCapabilities xmlns="http://www.onvif.org/ver10/device/wsdl"/>"#;
-        let xml = self.send_soap(body).await?;
+        tracing::info!("[ONVIF Client] Calling GetCapabilities on {}", self.x_addr);
+        let xml = self.send_soap_internal(body).await?;
 
         let caps = OnvifCapabilities {
-            media: Self::extract_capability_url(&xml, "Media", "XAddr"),
-            ptz: Self::extract_capability_url(&xml, "PTZ", "XAddr"),
-            events: Self::extract_capability_url(&xml, "Events", "XAddr"),
-            imaging: Self::extract_capability_url(&xml, "Imaging", "XAddr"),
+            media: Self::extract_capability_url(&xml, "Media"),
+            ptz: Self::extract_capability_url(&xml, "PTZ"),
+            events: Self::extract_capability_url(&xml, "Events"),
+            imaging: Self::extract_capability_url(&xml, "Imaging"),
         };
 
+        tracing::info!("[ONVIF Client] GetCapabilities result: media={:?}, ptz={:?}, events={:?}",
+            caps.media.is_some(), caps.ptz.is_some(), caps.events.is_some());
         Ok(caps)
     }
 
-    pub async fn get_services(&self) -> anyhow::Result<Vec<OnvifServiceEndpoint>> {
+    pub async fn get_services(&mut self) -> anyhow::Result<Vec<OnvifServiceEndpoint>> {
+        tracing::info!("[ONVIF Client] Calling GetServices on {}", self.x_addr);
         let body = r#"<GetServices xmlns="http://www.onvif.org/ver10/device/wsdl"><IncludeCapability>false</IncludeCapability></GetServices>"#;
-        let xml = self.send_soap(body).await?;
-        Ok(Self::parse_service_endpoints(&xml))
+        let xml = self.send_soap_internal(body).await?;
+        let result = Self::parse_service_endpoints(&xml);
+        tracing::info!("[ONVIF Client] GetServices result: {} services", result.len());
+        Ok(result)
     }
 
-    pub async fn get_capabilities_with_fallback(&self) -> anyhow::Result<OnvifCapabilities> {
+    pub async fn get_capabilities_with_fallback(&mut self) -> anyhow::Result<OnvifCapabilities> {
+        tracing::info!("[ONVIF Client] get_capabilities_with_fallback on {}", self.x_addr);
         if let Ok(services) = self.get_services().await {
             if !services.is_empty() {
                 let mut caps = OnvifCapabilities::default();
-                for svc in services {
+                for svc in &services {
                     let ns = svc.namespace.to_lowercase();
-                    let url = svc.xaddr;
+                    let url = &svc.xaddr;
                     if ns.contains("media") && caps.media.is_none() {
-                        caps.media = Some(url);
+                        caps.media = Some(url.clone());
                     } else if ns.contains("ptz") && caps.ptz.is_none() {
-                        caps.ptz = Some(url);
+                        caps.ptz = Some(url.clone());
                     } else if ns.contains("events") && caps.events.is_none() {
-                        caps.events = Some(url);
+                        caps.events = Some(url.clone());
                     } else if ns.contains("imaging") && caps.imaging.is_none() {
-                        caps.imaging = Some(url);
+                        caps.imaging = Some(url.clone());
                     }
                 }
                 if caps.media.is_some() || caps.ptz.is_some() || caps.events.is_some() || caps.imaging.is_some() {
+                    tracing::info!("[ONVIF Client] get_capabilities_with_fallback: using services, media={:?}", caps.media.is_some());
                     return Ok(caps);
                 }
             }
         }
+        tracing::info!("[ONVIF Client] get_capabilities_with_fallback: falling back to GetCapabilities");
         self.get_capabilities().await
+    }
+
+    pub async fn get_all_stream_uris(&mut self) -> anyhow::Result<Vec<(OnvifProfile, OnvifStreamUri)>> {
+        let profiles = self.get_profiles().await?;
+        let mut results = Vec::new();
+        for profile in profiles {
+            match self.get_stream_uri(&profile.token).await {
+                Ok(uri) => results.push((profile, uri)),
+                Err(e) => tracing::warn!("[ONVIF] Failed to get stream URI for profile {}: {}", profile.token, e),
+            }
+        }
+        Ok(results)
+    }
+
+    pub async fn is_online(&mut self) -> bool {
+        self.get_device_info().await.is_ok()
+    }
+
+    fn extract_capability_url(xml: &str, category: &str) -> Option<String> {
+        let bytes = xml.as_bytes();
+        let mut reader = quick_xml::Reader::from_reader(bytes);
+        reader.config_mut().trim_text(true);
+        let mut in_category = false;
+        let mut depth = 0;
+
+        loop {
+            use quick_xml::events::Event;
+            match reader.read_event() {
+                Ok(Event::Start(ref e)) => {
+                    let name = e.name().local_name().into_inner();
+                    if name == category {
+                        in_category = true;
+                        depth = 1;
+                        continue;
+                    }
+                    if in_category {
+                        depth += 1;
+                        if name == "XAddr" {
+                            let mut text = String::new();
+                            loop {
+                                match reader.read_event() {
+                                    Ok(Event::Text(ref e)) => text.push_str(&*e),
+                                    Ok(Event::End(ref e)) => {
+                                        let en = e.name().local_name().into_inner();
+                                        if en == "XAddr" { break; }
+                                    }
+                                    Ok(Event::Eof) | Err(_) => break,
+                                    _ => {}
+                                }
+                            }
+                            if !text.trim().is_empty() {
+                                return Some(text.trim().to_string());
+                            }
+                        }
+                    }
+                }
+                Ok(Event::End(_)) => {
+                    if in_category {
+                        depth -= 1;
+                        if depth == 0 { in_category = false; }
+                    }
+                }
+                Ok(Event::Eof) | Err(_) => break,
+                _ => {}
+            }
+        }
+        None
     }
 
     fn parse_service_endpoints(xml: &str) -> Vec<OnvifServiceEndpoint> {
@@ -335,75 +708,5 @@ impl OnvifDeviceClient {
             }
         }
         endpoints
-    }
-
-    fn extract_capability_url(xml: &str, category: &str, _attr: &str) -> Option<String> {
-        let bytes = xml.as_bytes();
-        let mut reader = quick_xml::Reader::from_reader(bytes);
-        reader.config_mut().trim_text(true);
-        let mut in_category = false;
-        let mut depth = 0;
-
-        loop {
-            use quick_xml::events::Event;
-            match reader.read_event() {
-                Ok(Event::Start(ref e)) => {
-                    let name = e.name().local_name().into_inner();
-                    if name == category {
-                        in_category = true;
-                        depth = 1;
-                        continue;
-                    }
-                    if in_category {
-                        depth += 1;
-                        if name == "XAddr" {
-                            let mut text = String::new();
-                            loop {
-                                match reader.read_event() {
-                                    Ok(Event::Text(ref e)) => text.push_str(&*e),
-                                    Ok(Event::End(ref e)) => {
-                                        let en = e.name().local_name().into_inner();
-                                        if en == "XAddr" { break; }
-                                    }
-                                    Ok(Event::Eof) | Err(_) => break,
-                                    _ => {}
-                                }
-                            }
-                            if !text.trim().is_empty() {
-                                return Some(text.trim().to_string());
-                            }
-                        }
-                    }
-                }
-                Ok(Event::End(_)) => {
-                    if in_category {
-                        depth -= 1;
-                        if depth == 0 { in_category = false; }
-                    }
-                }
-                Ok(Event::Eof) | Err(_) => break,
-                _ => {}
-            }
-        }
-
-        None
-    }
-
-    /// 获取所有 Profile 的 RTSP 流地址
-    pub async fn get_all_stream_uris(&self) -> anyhow::Result<Vec<(OnvifProfile, OnvifStreamUri)>> {
-        let profiles = self.get_profiles().await?;
-        let mut results = Vec::new();
-        for profile in profiles {
-            match self.get_stream_uri(&profile.token).await {
-                Ok(uri) => results.push((profile, uri)),
-                Err(e) => tracing::warn!("[ONVIF] Failed to get stream URI for profile {}: {}", profile.token, e),
-            }
-        }
-        Ok(results)
-    }
-
-    /// 检查设备是否在线（通过 GetDeviceInformation）
-    pub async fn is_online(&self) -> bool {
-        self.get_device_info().await.is_ok()
     }
 }

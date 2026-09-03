@@ -7,6 +7,8 @@ use crate::auth::config::JwtConfig;
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct LogConfig {
     pub level: String,
+    #[serde(default = "default_log_dir")]
+    pub dir: String,
     #[serde(default)]
     pub sql: bool,
     #[serde(default)]
@@ -15,10 +17,15 @@ pub struct LogConfig {
     pub media_server: bool,
 }
 
+fn default_log_dir() -> String {
+    "./logs".to_string()
+}
+
 impl Default for LogConfig {
     fn default() -> Self {
         Self {
             level: "info".to_string(),
+            dir: default_log_dir(),
             sql: false,
             http: false,
             media_server: false,

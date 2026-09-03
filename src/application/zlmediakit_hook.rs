@@ -804,16 +804,29 @@ impl ZlMediaKitHookHandler {
 
         if !regist {
             if let Some(s) = self.find_stream_by_stream_key(stream) {
+                let device_tag = s.device_tag.clone();
+                let channel_tag = s.channel_tag.clone();
                 let mut s = s;
                 s.stopped();
                 if let Err(e) = self.repo.update_stream(&s).await {
                     tracing::warn!("[ZlMediaKit Hook] on_stream_changed: failed to stop stream: {}", e);
+                }
+                if let Some(ref dt) = device_tag {
+                    if let Ok(Some(mut channel)) = self.repo.get_channel(dt, channel_tag.as_deref().unwrap_or(dt)).await {
+                        channel.status = crate::domain::DeviceStatus::Offline;
+                        if let Err(e) = self.repo.update_channel(&channel).await {
+                            tracing::warn!("[ZlMediaKit Hook] on_stream_changed: failed to update channel status: {}", e);
+                        }
+                    }
+                    self.sync_device_status_by_channels(dt).await;
                 }
             }
             return HookResponse::allow();
         }
 
         if let Some(s) = self.find_stream_by_stream_key(stream) {
+            let device_tag = s.device_tag.clone();
+            let channel_tag = s.channel_tag.clone();
             let mut s = s;
             s.update_keepalive();
             if s.state != crate::domain::StreamState::Active {
@@ -821,6 +834,15 @@ impl ZlMediaKitHookHandler {
             }
             if let Err(e) = self.repo.update_stream(&s).await {
                 tracing::warn!("[ZlMediaKit Hook] on_stream_changed: failed to update stream: {}", e);
+            }
+            if let Some(ref dt) = device_tag {
+                if let Ok(Some(mut channel)) = self.repo.get_channel(dt, channel_tag.as_deref().unwrap_or(dt)).await {
+                    channel.status = crate::domain::DeviceStatus::Online;
+                    if let Err(e) = self.repo.update_channel(&channel).await {
+                        tracing::warn!("[ZlMediaKit Hook] on_stream_changed: failed to update channel status: {}", e);
+                    }
+                }
+                self.sync_device_status_by_channels(dt).await;
             }
         }
 
@@ -926,6 +948,31 @@ impl ZlMediaKitHookHandler {
             self.repo.update_stream(&s).await?;
         }
         Ok(())
+    }
+
+    async fn sync_device_status_by_channels(&self, device_tag: &str) {
+        let channels = self.repo.channels_cache()
+            .iter()
+            .filter(|c| c.key().starts_with(&format!("{}/", device_tag)))
+            .map(|c| c.value().clone())
+            .collect::<Vec<_>>();
+        
+        let any_online = channels.iter().any(|c| c.status == crate::domain::DeviceStatus::Online);
+        let new_device_status = if any_online { 
+            crate::domain::DeviceStatus::Online 
+        } else { 
+            crate::domain::DeviceStatus::Offline 
+        };
+
+        if let Some(mut device) = self.repo.devices_cache().get(device_tag).map(|d| d.value().clone()) {
+            if device.status != new_device_status {
+                tracing::info!("[ZlMediaKit Hook] sync_device_status: device={} status={:?}", device_tag, new_device_status);
+                device.status = new_device_status;
+                if let Err(e) = self.repo.update_device(&device).await {
+                    tracing::warn!("[ZlMediaKit Hook] sync_device_status: failed to update device: {}", e);
+                }
+            }
+        }
     }
 
     async fn register_push_stream(&self, media_server_tag: &str, stream_id: &str) -> Result<()> {

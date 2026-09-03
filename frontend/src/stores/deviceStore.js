@@ -38,10 +38,17 @@ export const useDeviceStore = defineStore('devices', {
       return device
     },
 
-    async updateDevice(id, data) {
-      const device = await api.updateDevice(id, data)
-      const index = this.devices.findIndex(d => d.id === id)
-      if (index !== -1) this.devices[index] = device
+    async updateDevice(id, data, deviceTag = null) {
+      let device
+      if (deviceTag) {
+        device = await api.updateDeviceByTag(deviceTag, data)
+        const index = this.devices.findIndex(d => d.device_tag === deviceTag)
+        if (index !== -1) this.devices[index] = device
+      } else {
+        device = await api.updateDevice(id, data)
+        const index = this.devices.findIndex(d => d.id === id)
+        if (index !== -1) this.devices[index] = device
+      }
       ElMessage.success('设备更新成功')
       return device
     },

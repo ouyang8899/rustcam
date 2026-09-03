@@ -57,8 +57,30 @@ request.interceptors.response.use(
 
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true
+
+      const isLoginRequest = originalRequest.url?.includes('/auth/login')
+      if (isLoginRequest) {
+        clearTokens()
+        ElMessage.error('用户名或密码错误')
+        return Promise.reject(error)
+      }
+
+      const refreshToken = getRefreshToken()
+      if (refreshToken) {
+        try {
+          const res = await axios.post('/api/v1/auth/refresh', { refresh_token: refreshToken })
+          if (res.data.code === 200) {
+            const { access_token, refresh_token } = res.data.data
+            setTokens(access_token, refresh_token)
+            originalRequest.headers.Authorization = `Bearer ${access_token}`
+            return request(originalRequest)
+          }
+        } catch (refreshError) {
+          console.error('[Auth] Refresh token failed:', refreshError)
+        }
+      }
+
       clearTokens()
-      
       ElMessage.warning('登录已过期，请重新登录')
       window.location.href = '/login'
       return Promise.reject(error)

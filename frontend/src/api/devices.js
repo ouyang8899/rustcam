@@ -25,6 +25,11 @@ export async function updateDevice(id, data) {
   return res.data.data
 }
 
+export async function updateDeviceByTag(deviceTag, data) {
+  const res = await request.put(`/devices/by-tag/${deviceTag}`, data)
+  return res.data.data
+}
+
 export async function deleteDevice(deviceTag) {
   const res = await request.delete(`/devices/${deviceTag}`)
   return res.data

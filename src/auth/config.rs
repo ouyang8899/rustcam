@@ -10,9 +10,10 @@ pub struct JwtConfig {
 impl Default for JwtConfig {
     fn default() -> Self {
         Self {
-            secret: std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev-secret-change-in-production".to_string()),
-            access_token_expire_minutes: 15,
-            refresh_token_expire_days: 7,
+            secret: std::env::var("JWT_SECRET")
+                .unwrap_or_else(|_| "dev-secret-change-in-production".to_string()),
+            access_token_expire_minutes: 60,
+            refresh_token_expire_days: 30,
         }
     }
 }

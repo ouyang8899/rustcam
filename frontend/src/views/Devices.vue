@@ -392,6 +392,10 @@
 
         <div v-if="form.protocol === 'Onvif'">
           <el-divider>ONVIF</el-divider>
+          <div style="margin-bottom: 12px">
+            <el-button type="primary" @click="openOnvifDiscoverModal">发现 ONVIF 设备</el-button>
+            <span style="margin-left: 12px; color: #909399; font-size: 12px">通过局域网搜索自动发现设备</span>
+          </div>
           <el-row :gutter="12">
             <el-col :span="24">
               <el-form-item label="设备地址 (XAddr)">
@@ -411,9 +415,10 @@
               </el-form-item>
             </el-col>
           </el-row>
-          <div v-if="form.pull_urls.length > 0">
+          <div v-if="form.protocol === 'Onvif' || form.pull_urls.length > 0">
             <el-divider content-position="left">
-              已发现 RTSP 通道
+              <span v-if="form.pull_urls.length > 0">已发现 RTSP 通道</span>
+              <span v-else>通道发现</span>
               <el-button type="primary" link size="small" :loading="onvifFetchingProfiles" @click="onvifFetchFormProfiles" style="margin-left: 8px">重新获取</el-button>
             </el-divider>
             <el-tag v-for="url in form.pull_urls" :key="url.url" type="info" style="margin-right: 8px; margin-bottom: 4px">{{ url.url }}</el-tag>
@@ -646,32 +651,14 @@
       <el-empty v-else description="暂无播放链接" />
     </el-dialog>
 
-      <el-dialog v-model="showDiscoverModal" title="发现(ONVIF)设备" width="640px" draggable destroy-on-close>
-      <el-divider content-position="left">单播发现（指定 IP）</el-divider>
-      <el-row :gutter="12" style="margin-bottom: 12px">
-        <el-col :span="16">
-          <el-input v-model="onvifManualIp" placeholder="输入设备 IP 地址，如 192.168.1.100" clearable @keyup.enter="onvifDiscoverManual" />
-        </el-col>
-        <el-col :span="8">
-          <el-button type="primary" :loading="onvifDiscovering" @click="onvifDiscoverManual">单播发现</el-button>
-        </el-col>
-      </el-row>
-
-      <el-divider content-position="left">多播发现（局域网搜索）</el-divider>
-      <div style="margin-bottom: 8px">
-        <el-button type="info" plain :loading="discovering" @click="discoverDevices">开始多播搜索</el-button>
-      </div>
-
-      <el-skeleton animated :rows="4" :loading="discovering || onvifDiscovering">
-        <el-table :data="discoveredDevices" empty-text="未发现设备" highlight-current-row @row-click="(row) => onvifSelectedDevice = row">
+      <el-dialog v-model="showDiscoverModal" title="发现(ONVIF)设备" width="780px" draggable destroy-on-close @opened="onDiscoverDialogOpened">
+      <el-skeleton animated :rows="4" :loading="discovering">
+        <el-table :data="discoveredDevices" empty-text="未发现设备，请确保设备已启动且网络可达" highlight-current-row @row-click="(row) => onvifSelectedDevice = row">
           <el-table-column label="名称" show-overflow-tooltip>
             <template #default="{ row }">{{ row.name || row.manufacturer || row.model || 'Unknown Device' }}</template>
           </el-table-column>
           <el-table-column label="地址" show-overflow-tooltip>
             <template #default="{ row }">{{ row.address || row.x_addr }}</template>
-          </el-table-column>
-          <el-table-column label="来源" width="70" align="center">
-            <template #default="{ row }">{{ row._from === 'manual' ? '单播' : '多播' }}</template>
           </el-table-column>
           <el-table-column label="厂商/型号" width="120">
             <template #default="{ row }">{{ [row.manufacturer, row.model].filter(Boolean).join(' ') || '-' }}</template>
@@ -694,21 +681,48 @@
           </el-col>
         </el-row>
         <el-button type="primary" :loading="onvifFetchingProfiles" @click="onvifFetchProfiles" style="margin-bottom: 12px">
-          获取能力（媒体通道/RTSP链接）
+          获取设备能力（RTSP/PTZ/音频）
         </el-button>
 
-        <template v-if="onvifRtspUrls.length > 0">
-          <el-divider content-position="left">发现 RTSP 链接（{{ onvifRtspUrls.length }} 个通道）</el-divider>
-          <el-table :data="onvifRtspUrls" size="small" max-height="240">
-            <el-table-column label="通道名称" prop="name" show-overflow-tooltip />
-            <el-table-column label="RTSP 链接" prop="url" show-overflow-tooltip />
+        <template v-if="onvifStreams.length > 0">
+          <el-divider content-position="left">视频通道选择（{{ onvifSelectedStreams.length }}/{{ onvifStreams.length }}）</el-divider>
+          <el-table :data="onvifStreams" empty-text="无" max-height="200" @selection-change="(rows) => onvifSelectedStreams = rows">
+            <el-table-column type="selection" width="50" />
+            <el-table-column label="名称" prop="name" show-overflow-tooltip />
+            <el-table-column label="分辨率" width="120">
+              <template #default="{ row }">{{ row.width }}x{{ row.height }}</template>
+            </el-table-column>
+            <el-table-column label="编码" prop="encoding" width="80" />
+            <el-table-column label="RTSP URL" show-overflow-tooltip>
+              <template #default="{ row }">
+                <code style="font-size: 11px">{{ row.rtsp_url }}</code>
+              </template>
+            </el-table-column>
           </el-table>
+          <div style="margin-top: 8px; color: #909399; font-size: 12px">
+            <el-checkbox v-model="onvifSelectAllStreams">全选</el-checkbox>
+            <span style="margin-left: 16px">将为您创建 {{ onvifSelectedStreams.length }} 个设备通道</span>
+          </div>
+        </template>
+        <template v-else-if="onvifFetchingProfiles === false && onvifSelectedDevice">
+          <el-divider content-position="left">RTSP 连接（设备不支持自动发现，请手动输入）</el-divider>
+          <el-form-item label="RTSP URL">
+            <el-input v-model="onvifCapabilities.rtsp_url" placeholder="rtsp://192.168.1.100:554/live" style="margin-bottom: 8px" />
+          </el-form-item>
+        </template>
+        <template v-if="onvifCapabilities.ptz">
+          <el-divider content-position="left">PTZ 支持</el-divider>
+          <el-tag type="warning" style="margin-right: 8px">支持云台控制</el-tag>
+        </template>
+        <template v-if="onvifCapabilities.audio">
+          <el-divider content-position="left">音频支持</el-divider>
+          <el-tag type="info" style="margin-right: 8px">支持音频</el-tag>
         </template>
       </template>
       <template #footer>
         <el-button @click="closeDiscoverModal">取消</el-button>
-        <el-button type="primary" :disabled="!onvifSelectedDevice || onvifRtspUrls.length === 0" :loading="submitting" @click="confirmOnvifDevice">
-          确认添加（将创建1个ONVIF设备 + {{ onvifRtspUrls.length }}个RTSP子设备）
+        <el-button type="primary" :disabled="!onvifSelectedDevice || onvifSelectedStreams.length === 0" :loading="submitting" @click="confirmOnvifDevice">
+          确认添加 {{ onvifSelectedStreams.length > 1 ? `(${onvifSelectedStreams.length}个通道)` : '' }}
         </el-button>
       </template>
     </el-dialog>
@@ -792,6 +806,17 @@ const onvifRtspUrls = ref([])
 const onvifFetchingProfiles = ref(false)
 const submitting = ref(false)
 const onvifDiscovering = ref(false)
+const onvifCapabilities = ref({
+  rtsp_url: '',
+  ptz: false,
+  audio: false,
+})
+const onvifStreams = ref([])
+const onvifSelectedStreams = ref([])
+const onvifSelectAllStreams = computed({
+  get: () => onvifStreams.value.length > 0 && onvifSelectedStreams.value.length === onvifStreams.value.length,
+  set: (val) => { onvifSelectedStreams.value = val ? [...onvifStreams.value] : [] }
+})
 const gbRegionCascader = ref([])
 const sipGbCode = ref('00')  // 基层编码，默认00
 const sipIdSuffix = ref('')  // 后缀，最多6位数字
@@ -1361,9 +1386,6 @@ async function openEditModal(device) {
       form.value.gb_network_code = ''
       sipIdSuffix.value = ''
     }
-    if (fullDevice.protocol === 'Onvif' && fullDevice.host) {
-      nextTick(() => onvifFetchFormProfiles())
-    }
     showModal.value = true
   } catch (e) {
     ElMessage.error('获取设备详情失败: ' + (e?.message || e))
@@ -1406,6 +1428,7 @@ async function submitDevice() {
 
   const payload = {
     name: form.value.name, protocol: form.value.protocol,
+    host: form.value.host || null, port: form.value.port || null,
     device_username: form.value.device_username || null, device_password: form.value.device_password || null,
     media_server_tag: form.value.media_server_tag || null,
     pull_urls: form.value.pull_urls?.filter(u => u.url).length > 0 ? form.value.pull_urls : undefined,
@@ -1436,32 +1459,31 @@ async function submitDevice() {
     }
   }
   if (isEdit.value) {
-    await deviceStore.updateDevice(editingId.value, payload)
+    const deviceTag = form.value.protocol === 'Onvif' ? form.value.device_tag : null
+    await deviceStore.updateDevice(editingId.value, payload, deviceTag)
     await fetchDevices(); closeModal()
     return
   }
   if (form.value.protocol === 'Onvif' && form.value.pull_urls.filter(u => u.url).length > 1) {
-    const parentPayload = { ...payload }
-    parentPayload.pull_urls = [form.value.pull_urls[0]]
-    const parent = await deviceStore.createDevice(parentPayload)
-    const parentId = parent?.id || parent?.data?.id
-    for (let i = 1; i < form.value.pull_urls.length; i++) {
-      const url = form.value.pull_urls[i]
-      await deviceStore.createDevice({
-        name: `${form.value.name} - 通道${i + 1}`, protocol: 'Rtsp',
-        device_username: form.value.device_username || null,
-        device_password: form.value.device_password || null,
-        media_server_tag: form.value.media_server_tag || null,
-        rtsp_mode: 'pull', rtsp_full_url: url.url,
-        pull_urls: [{ protocol: 'rtsp', url: url.url, priority: 1 }],
-        playback_username: form.value.playback_username || null,
-        playback_password: form.value.playback_password || null,
-        device_tag: null, region_code: sipIdPrefix.value || null, group_id: form.value.group_id || null, is_public: form.value.is_public || false,
-        app: form.value.app || null,
-        extended: {},
-      })
-    }
-    ElMessage.success(`成功创建 ${1 + form.value.pull_urls.length - 1} 个设备`)
+    const streams = form.value.pull_urls.map((url, i) => ({
+      token: form.value.extended?.profile_token?.[i] || `stream_${i}`,
+      name: `${form.value.name} - 通道${i + 1}`,
+      rtsp_url: url.url,
+    }))
+    const res = await request.post('/onvif/devices', {
+      urn: null,
+      x_addr: form.value.host,
+      name: form.value.name,
+      manufacturer: null,
+      model: null,
+      username: form.value.device_username,
+      password: form.value.device_password,
+      capabilities: { media: null, ptz: null, events: null, imaging: null },
+      types: [],
+      scopes: [],
+      streams,
+    })
+    ElMessage.success(`成功创建 ${streams.length} 个 ONVIF 通道`)
     await fetchDevices(); closeModal()
     return
   }
@@ -1527,6 +1549,9 @@ function closeDiscoverModal() {
   onvifDiscoverUser.value = ''
   onvifManualIp.value = ''
   onvifDiscoverPwd.value = ''
+  onvifCapabilities.value = { rtsp_url: '', ptz: false, audio: false }
+  onvifStreams.value = []
+  onvifSelectedStreams.value = []
 }
 
 async function onvifFetchProfiles() {
@@ -1535,7 +1560,9 @@ async function onvifFetchProfiles() {
   const address = dev.address || dev.x_addr || ''
   if (!address) { ElMessage.warning('设备地址为空'); return }
   onvifFetchingProfiles.value = true
-  onvifRtspUrls.value = []
+  onvifCapabilities.value = { rtsp_url: '', ptz: false, audio: false }
+  onvifStreams.value = []
+  onvifSelectedStreams.value = []
   try {
     const capsRes = await request.post('/onvif/capabilities', {
       x_addr: address,
@@ -1556,17 +1583,28 @@ async function onvifFetchProfiles() {
       profiles: profiles.map(p => p.token),
     })
     const streams = streamRes.data?.data?.streams || []
-    onvifRtspUrls.value = profiles.map((p, i) => {
+    onvifStreams.value = profiles.map((p, i) => {
       const stream = streams.find(s => s.token === p.token) || streams[i] || {}
       return {
-        name: p.name || `通道${i + 1}`,
-        url: stream.rtsp_url || '',
+        token: p.token,
+        name: p.name || `通道 ${i + 1}`,
+        width: p.width || stream.width || 0,
+        height: p.height || stream.height || 0,
+        encoding: p.encoding || stream.encoding || '',
+        rtsp_url: stream.rtsp_url || '',
       }
-    }).filter(r => r.url)
-    if (onvifRtspUrls.value.length === 0) {
-      ElMessage.warning('未发现 RTSP 链接，请检查用户名和密码')
+    }).filter(s => s.rtsp_url)
+    if (onvifStreams.value.length > 0) {
+      onvifSelectAllStreams.value = true
+      ElMessage.success(`已获取 ${onvifStreams.value.length} 个视频通道`)
     } else {
-      ElMessage.success(`发现 ${onvifRtspUrls.value.length} 个 RTSP 通道`)
+      ElMessage.warning('未发现 RTSP 链接，请检查用户名和密码')
+    }
+    const firstStream = streams.find(s => s.rtsp_url) || streams[0] || {}
+    onvifCapabilities.value = {
+      rtsp_url: firstStream.rtsp_url || '',
+      ptz: !!(capsData?.capabilities?.ptz),
+      audio: !!(capsData?.capabilities?.events),
     }
   } catch (e) {
     ElMessage.error('获取能力失败: ' + (e?.message || e))
@@ -1575,57 +1613,46 @@ async function onvifFetchProfiles() {
   }
 }
 
+function onDiscoverDialogOpened() {
+  discoveredDevices.value = []
+  onvifSelectedDevice.value = null
+  onvifCapabilities.value = { rtsp_url: '', ptz: false, audio: false }
+  discoverDevices()
+}
+
 async function confirmOnvifDevice() {
   const dev = onvifSelectedDevice.value
-  if (!dev || onvifRtspUrls.value.length === 0) return
-  submitting.value = true
-  try {
-    const address = dev.address || dev.x_addr || ''
-    const manufacturer = dev.manufacturer || ''
-    const model = dev.model || ''
-    const parentName = form.value.name?.trim() || dev.name || `${manufacturer} ${model}`.trim() || 'ONVIF 设备'
-    const parentPayload = {
-      name: parentName, protocol: 'Onvif',
-      device_username: onvifDiscoverUser.value || null,
-      device_password: onvifDiscoverPwd.value || null,
-      media_server_tag: form.value.media_server_tag || null,
-      pull_urls: onvifRtspUrls.value.map((r, i) => ({ protocol: 'rtsp', url: r.url, priority: i + 1 })),
-      playback_username: form.value.playback_username || null,
-      playback_password: form.value.playback_password || null,
-      device_tag: null, region_code: sipIdPrefix.value || null, group_id: form.value.group_id || null, is_public: form.value.is_public || false,
-      app: form.value.app || null,
-      extended: { stream_key: form.value.stream_key || null },
-    }
-    const parent = await deviceStore.createDevice(parentPayload)
-    const parentId = parent?.id || parent?.data?.id
-    if (parentId && onvifRtspUrls.value.length > 1) {
-      for (let i = 1; i < onvifRtspUrls.value.length; i++) {
-        const childName = onvifRtspUrls.value[i].name || `通道${i + 1}`
-        await deviceStore.createDevice({
-          name: `${parentName} - ${childName}`, protocol: 'Rtsp',
-          device_username: onvifDiscoverUser.value || null,
-          device_password: onvifDiscoverPwd.value || null,
-          media_server_tag: form.value.media_server_tag || null,
-          rtsp_mode: 'pull',
-          rtsp_full_url: onvifRtspUrls.value[i].url,
-          pull_urls: [{ protocol: 'rtsp', url: onvifRtspUrls.value[i].url, priority: 1 }],
-          playback_username: form.value.playback_username || null,
-          playback_password: form.value.playback_password || null,
-          device_tag: null, region_code: sipIdPrefix.value || null, group_id: form.value.group_id || null, is_public: form.value.is_public || false,
-          app: form.value.app || null,
-          extended: { stream_key: form.value.stream_key || null },
-        })
-      }
-    }
-    ElMessage.success(`成功创建 ${1 + Math.max(0, onvifRtspUrls.value.length - 1)} 个设备`)
-    closeDiscoverModal()
-    closeModal()
-    await fetchDevices()
-  } catch (e) {
-    ElMessage.error('创建设备失败: ' + (e?.message || e))
-  } finally {
-    submitting.value = false
+  if (!dev || onvifSelectedStreams.value.length === 0) return
+  const address = dev.address || dev.x_addr || ''
+  const manufacturer = dev.manufacturer || ''
+  const model = dev.model || ''
+  const baseName = dev.name || `${manufacturer} ${model}`.trim() || 'ONVIF 设备'
+  const caps = onvifCapabilities.value
+  form.value.name = baseName
+  form.value.host = address
+  form.value.port = 80
+  form.value.protocol = 'Onvif'
+  form.value.device_username = onvifDiscoverUser.value || ''
+  form.value.device_password = onvifDiscoverPwd.value || ''
+  form.value.pull_urls = onvifSelectedStreams.value.map((stream, i) => ({
+    protocol: 'rtsp',
+    url: stream.rtsp_url,
+    priority: 1,
+  }))
+  form.value.extended = {
+    ...(form.value.extended || {}),
+    stream_key: form.value.stream_key || null,
+    profile_token: onvifSelectedStreams.value.map(s => s.token),
+    width: onvifSelectedStreams.value.map(s => s.width),
+    height: onvifSelectedStreams.value.map(s => s.height),
+    encoding: onvifSelectedStreams.value.map(s => s.encoding),
+    ptz_support: caps.ptz,
+    audio_support: caps.audio,
   }
+  closeDiscoverModal()
+  showModal.value = true
+  isEdit.value = false
+  editingId.value = null
 }
 
 function addDiscoveredDevice(dev) {

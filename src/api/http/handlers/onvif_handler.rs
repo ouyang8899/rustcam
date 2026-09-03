@@ -73,8 +73,16 @@ pub async fn onvif_capabilities_handler(
     State(_state): State<Arc<FullState>>,
     Json(req): Json<OnvifCapabilitiesRequest>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
+    tracing::info!("[ONVIF] get_capabilities: x_addr={}, username={}", req.x_addr, req.username);
     let caps = OnvifProbeService::get_capabilities(&req.x_addr, &req.username, &req.password).await
-        .map_err(|e| AppError::BadRequest(format!("Failed to get capabilities: {}", e)))?;
+        .map_err(|e| {
+            tracing::error!("[ONVIF] get_capabilities failed: x_addr={}, error={}", req.x_addr, e);
+            AppError::BadRequest(format!("Failed to get capabilities: {}", e))
+        })?;
+
+    tracing::info!("[ONVIF] get_capabilities success: x_addr={}, profiles_count={}", req.x_addr, caps.profiles.len());
+    let profiles_json = serde_json::to_string_pretty(&caps.profiles).unwrap_or_default();
+    tracing::info!("[ONVIF] Returning profiles JSON: {}", profiles_json);
 
     let result = serde_json::json!({
         "device_info": {
@@ -100,6 +108,8 @@ pub async fn onvif_stream_uris_handler(
     State(_state): State<Arc<FullState>>,
     Json(req): Json<OnvifStreamUriRequest>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
+    tracing::info!("[ONVIF] get_stream_uris: x_addr={}, media_x_addr={:?}, profiles={:?}", 
+        req.x_addr, req.media_x_addr, req.profiles);
     let result = OnvifProbeService::get_stream_uris(
         req.media_x_addr.as_deref(),
         &req.x_addr,
@@ -107,7 +117,12 @@ pub async fn onvif_stream_uris_handler(
         &req.password,
         &req.profiles,
     ).await
-        .map_err(|e| AppError::BadRequest(format!("Failed to get stream URIs: {}", e)))?;
+        .map_err(|e| {
+            tracing::error!("[ONVIF] get_stream_uris failed: x_addr={}, error={}", req.x_addr, e);
+            AppError::BadRequest(format!("Failed to get stream URIs: {}", e))
+        })?;
+
+    tracing::info!("[ONVIF] get_stream_uris success: streams_count={}", result.streams.len());
 
     let streams: Vec<serde_json::Value> = result.streams.into_iter().map(|s| serde_json::json!({
         "token": s.token,

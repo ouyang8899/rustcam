@@ -341,10 +341,20 @@ impl DbRepository {
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
 
         if let Some(ref tag) = device.device_tag {
-            self.devices_cache.insert(tag.clone(), device.clone());
+            if let Ok(Some(db_device)) = self.fetch_device_by_tag(tag).await {
+                self.devices_cache.insert(tag.clone(), db_device.clone());
+                self.recalculate_device_stats();
+                return Ok(db_device.id);
+            }
         }
         self.recalculate_device_stats();
-        Ok(result.last_insert_id.as_i64().unwrap_or(0))
+        Err(AppError::Internal("Failed to retrieve created device".to_string()))
+    }
+
+    pub async fn fetch_device_by_tag(&self, device_tag: &str) -> Result<Option<Device>> {
+        let rows: Vec<crate::sql_mappers::DeviceRow> = crate::sql_mappers::device_select_by_device_tag(self.rb.acquire().await?.rb_ref(), device_tag).await
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        Ok(rows.into_iter().next().and_then(|r| Device::try_from(r).ok()))
     }
 
     pub async fn get_device(&self, device_tag: &str) -> Result<Option<Device>> {

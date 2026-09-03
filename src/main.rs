@@ -3,7 +3,8 @@ use tokio::signal;
 use tokio::net::TcpListener;
 use tracing::{info, error, Level};
 use tracing_log::LogTracer;
-use tracing_subscriber::FmtSubscriber;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
 use rustcam_media::context::{init_registry, ServiceRegistry};
 use rustcam_media::config::AppConfig;
@@ -89,7 +90,7 @@ fn create_adapter_registry(_deps: ProtocolDeps) -> AdapterRegistry {
 }
 
 /// 初始化日志系统
-fn init_tracing(level: &str) {
+fn init_tracing(level: &str, log_dir: &str) {
     let log_level = match level.to_lowercase().as_str() {
         "trace" => Level::TRACE,
         "debug" => Level::DEBUG,
@@ -99,18 +100,44 @@ fn init_tracing(level: &str) {
         _ => Level::INFO,
     };
 
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(log_level)
-        .with_target(false)
-        .with_thread_ids(true)
-        .with_file(true)
-        .with_line_number(true)
-        .finish();
+    // 创建日志目录
+    std::fs::create_dir_all(log_dir).ok();
+
+    // 文件日志 - 每小时滚动一次
+    let file_appender = RollingFileAppender::new(
+        Rotation::HOURLY,
+        log_dir,
+        "rustcam.log",
+    );
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    // 构建 subscriber
+    let subscriber = tracing_subscriber::registry()
+        .with(EnvFilter::from_default_env().add_directive(log_level.into()))
+        .with(
+            fmt::layer()
+                .with_target(false)
+                .with_thread_ids(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_writer(std::io::stdout)
+        )
+        .with(
+            fmt::layer()
+                .with_target(false)
+                .with_thread_ids(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_writer(non_blocking)
+        );
 
     tracing::subscriber::set_global_default(subscriber)
         .expect("Failed to set tracing subscriber");
 
     LogTracer::init().expect("Failed to init LogTracer");
+
+    // 保存 guard 让它一直存活
+    std::mem::forget(_guard);
 }
 
 /// 编译时检查 FullState 是否满足 trait bounds
@@ -131,8 +158,9 @@ async fn main() -> anyhow::Result<()> {
     let config = AppConfig::load()?;
 
     // 2. 初始化日志系统
-    init_tracing(&config.log.level);
+    init_tracing(&config.log.level, &config.log.dir);
     info!("Starting RustCam-Media v{}", env!("CARGO_PKG_VERSION"));
+    info!("Log directory: {}", config.log.dir);
     info!("Server: {}:{}", config.server.host, config.server.port);
 
     // 3. 创建 ServiceRegistry

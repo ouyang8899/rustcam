@@ -1,6 +1,5 @@
 use crate::protocol::onvif::{
     OnvifDiscoveryClient, OnvifDeviceClient, OnvifDiscoveredDevice,
-    OnvifDeviceInfo, OnvifCapabilities, OnvifProfile, OnvifStreamUri,
 };
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -48,6 +47,9 @@ pub struct CapabilityUrls {
 pub struct ProfileInfo {
     pub token: String,
     pub name: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub encoding: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -59,6 +61,9 @@ pub struct StreamResult {
 pub struct StreamInfo {
     pub token: String,
     pub name: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub encoding: Option<String>,
     pub rtsp_url: String,
 }
 
@@ -76,12 +81,23 @@ impl OnvifProbeService {
     }
 
     pub async fn get_capabilities(x_addr: &str, username: &str, password: &str) -> anyhow::Result<CapabilitiesResult> {
-        let client = OnvifDeviceClient::new(x_addr)
+        tracing::debug!("[ONVIF Probe] get_capabilities: x_addr={}, username={}", x_addr, username);
+        let mut client = OnvifDeviceClient::new(x_addr)
             .with_credentials(username, password);
 
-        let device_info = client.get_device_info().await?;
-        let caps = client.get_capabilities_with_fallback().await?;
-        let profiles = client.get_profiles().await?;
+        let device_info = client.get_device_info().await
+            .map_err(|e| { tracing::error!("[ONVIF] get_device_info failed: x_addr={}, error={}", x_addr, e); e })?;
+        tracing::debug!("[ONVIF Probe] get_device_info success: manufacturer={:?}, model={:?}", 
+            device_info.manufacturer, device_info.model);
+        
+        let caps = client.get_capabilities_with_fallback().await
+            .map_err(|e| { tracing::error!("[ONVIF] get_capabilities_with_fallback failed: x_addr={}, error={}", x_addr, e); e })?;
+        tracing::debug!("[ONVIF Probe] get_capabilities_with_fallback success: media={:?}, ptz={:?}", 
+            caps.media.is_some(), caps.ptz.is_some());
+        
+        let profiles = client.get_profiles().await
+            .map_err(|e| { tracing::error!("[ONVIF] get_profiles failed: x_addr={}, error={}", x_addr, e); e })?;
+        tracing::debug!("[ONVIF Probe] get_profiles success: count={}", profiles.len());
 
         Ok(CapabilitiesResult {
             device_info: DeviceInfo {
@@ -100,12 +116,15 @@ impl OnvifProbeService {
             profiles: profiles.into_iter().map(|p| ProfileInfo {
                 token: p.token,
                 name: p.name,
+                width: p.width,
+                height: p.height,
+                encoding: p.encoding,
             }).collect(),
         })
     }
 
     pub async fn check_online(x_addr: &str, username: &str, password: &str) -> bool {
-        let client = OnvifDeviceClient::new(x_addr)
+        let mut client = OnvifDeviceClient::new(x_addr)
             .with_credentials(username, password);
         client.is_online().await
     }
@@ -117,24 +136,51 @@ impl OnvifProbeService {
         password: &str,
         profile_tokens: &[String],
     ) -> anyhow::Result<StreamResult> {
-        let url = media_x_addr.unwrap_or(x_addr);
-        let client = OnvifDeviceClient::new(url)
+        let mut client = OnvifDeviceClient::new(x_addr)
             .with_credentials(username, password);
 
-        let profiles = client.get_profiles().await?;
+        let mut media_url: String;
+        match client.get_services().await {
+            Ok(services) => {
+                media_url = services.iter()
+                    .find(|s| s.namespace.to_lowercase().contains("media"))
+                    .map(|s| s.xaddr.clone())
+                    .unwrap_or_else(|| media_x_addr.map(String::from).unwrap_or_else(|| x_addr.to_string()));
+                tracing::info!("[ONVIF Probe] get_stream_uris: using GetServices media_url={}", media_url);
+            }
+            Err(e) => {
+                tracing::warn!("[ONVIF] get_services failed, using provided media_x_addr: {}", e);
+                media_url = media_x_addr.map(String::from).unwrap_or_else(|| x_addr.to_string());
+            }
+        }
+
+        tracing::debug!("[ONVIF Probe] get_stream_uris: url={}, username={}, tokens={:?}", media_url, username, profile_tokens);
+        let mut media_client = OnvifDeviceClient::new(&media_url)
+            .with_credentials(username, password);
+
+        let profiles = media_client.get_profiles().await
+            .map_err(|e| { tracing::error!("[ONVIF] get_profiles failed: url={}, error={}", media_url, e); e })?;
+        tracing::debug!("[ONVIF Probe] get_profiles success: count={}", profiles.len());
+        
         let mut streams = Vec::new();
         for token in profile_tokens {
-            match client.get_stream_uri(token).await {
+            match media_client.get_stream_uri(token).await {
                 Ok(uri) => {
-                    let profile_name = profiles
+                    let profile_info = profiles
                         .iter()
-                        .find(|p| p.token == *token)
+                        .find(|p| p.token == *token);
+
+                    let profile_name = profile_info
                         .map(|p| p.name.clone())
                         .unwrap_or_else(|| token.clone());
 
+                    tracing::info!("[ONVIF Probe] got stream URI: token={}, name={}, rtsp_url={}", token, profile_name, uri.uri);
                     streams.push(StreamInfo {
                         token: token.clone(),
                         name: profile_name,
+                        width: profile_info.and_then(|p| p.width),
+                        height: profile_info.and_then(|p| p.height),
+                        encoding: profile_info.and_then(|p| p.encoding.clone()),
                         rtsp_url: uri.uri,
                     });
                 }

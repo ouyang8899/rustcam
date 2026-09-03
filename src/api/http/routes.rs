@@ -64,6 +64,7 @@ fn protected_routes(state: Arc<FullState>) -> Router {
         .route("/api/v1/devices", post(device_handler::create_device_handler))
         .route("/api/v1/devices/{id}", get(device_handler::get_device_handler))
         .route("/api/v1/devices/{id}", put(device_handler::update_device_handler))
+        .route("/api/v1/devices/by-tag/{device_tag}", put(device_handler::update_device_by_tag_handler))
         .route("/api/v1/devices/{id}", delete(device_handler::delete_device_handler))
         .route("/api/v1/devices/{id}/play", post(device_handler::play_device_handler))
         .route("/api/v1/devices/{id}/playback", post(device_handler::playback_device_handler))

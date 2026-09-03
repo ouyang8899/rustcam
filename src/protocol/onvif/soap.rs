@@ -1,5 +1,4 @@
-use quick_xml::events::Event;
-use quick_xml::Reader;
+use roxmltree::Document;
 
 pub fn build_soap_response(body: &str) -> String {
     format!(
@@ -21,7 +20,7 @@ pub fn build_soap_fault(fault_code: &str, fault_subcode: &str, fault_reason: &st
     ))
 }
 
-fn local_name(name: &str) -> &str {
+pub fn local_name(name: &str) -> &str {
     if let Some(idx) = name.find(':') {
         &name[idx + 1..]
     } else {
@@ -29,102 +28,103 @@ fn local_name(name: &str) -> &str {
     }
 }
 
-/// 从 SOAP 请求中提取操作名
 pub fn extract_action(soap_body: &[u8]) -> Option<String> {
-    let mut reader = Reader::from_reader(soap_body);
-    reader.config_mut().trim_text(true);
+    let xml_str = String::from_utf8_lossy(soap_body).into_owned();
+    let doc = Document::parse(&xml_str).ok()?;
+    let root = doc.root_element();
 
-    loop {
-        match reader.read_event() {
-            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                let name = e.name().into_inner();
-                if name.ends_with(":Envelope")
-                    || name == "Envelope"
-                    || name.ends_with(":Body")
-                    || name == "Body"
-                {
-                    continue;
+    for node in root.children() {
+        if node.is_element() {
+            let name = node.tag_name().name();
+            if name == "Body" {
+                for child in node.children() {
+                    if child.is_element() {
+                        return Some(child.tag_name().name().to_string());
+                    }
                 }
-                return Some(local_name(name).to_string());
             }
-            Ok(Event::Eof) => break,
-            Err(_) => break,
-            _ => {}
         }
     }
     None
 }
 
-/// 提取指定元素的文本内容
 pub fn extract_element_text(soap_body: &[u8], element: &str) -> Option<String> {
-    let mut reader = Reader::from_reader(soap_body);
-    reader.config_mut().trim_text(true);
-    let mut capture = false;
-    let mut result = String::new();
+    let xml_str = String::from_utf8_lossy(soap_body).into_owned();
+    let doc = Document::parse(&xml_str).ok()?;
+    let root = doc.root_element();
 
-    loop {
-        match reader.read_event() {
-            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                let name = local_name(e.name().into_inner());
-                if name == element {
-                    capture = true;
-                }
+    fn find_element<'a, 'input: 'a>(
+        node: roxmltree::Node<'a, 'input>,
+        element: &str,
+    ) -> Option<roxmltree::Node<'a, 'input>> {
+        if node.is_element() && local_name(node.tag_name().name()) == element {
+            return Some(node);
+        }
+        for child in node.children() {
+            if let Some(found) = find_element(child, element) {
+                return Some(found);
             }
-            Ok(Event::Text(ref e)) if capture => {
-                result.push_str(&e.to_string());
-            }
-            Ok(Event::End(ref e)) => {
-                let name = local_name(e.name().into_inner());
-                if name == element {
-                    break;
-                }
-            }
-            Ok(Event::Eof) => break,
-            Err(_) => break,
-            _ => {}
+        }
+        None
+    }
+
+    let target = find_element(root, element)?;
+
+    let mut result = String::new();
+    for child in target.children() {
+        if child.is_text() {
+            result.push_str(child.text().unwrap_or(""));
         }
     }
 
     if result.is_empty() {
         None
     } else {
-        Some(result.trim().to_string())
+        Some(result)
     }
 }
 
-/// 提取指定元素的属性值
 pub fn extract_attribute(soap_body: &[u8], parent: &str, attr: &str) -> Option<String> {
-    let mut reader = Reader::from_reader(soap_body);
-    reader.config_mut().trim_text(true);
-    let mut in_parent = false;
+    let xml_str = String::from_utf8_lossy(soap_body).into_owned();
+    let doc = Document::parse(&xml_str).ok()?;
+    let root = doc.root_element();
 
-    loop {
-        match reader.read_event() {
-            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                let name = local_name(e.name().into_inner());
+    fn find_element<'a, 'input: 'a>(
+        node: roxmltree::Node<'a, 'input>,
+        element: &str,
+    ) -> Option<roxmltree::Node<'a, 'input>> {
+        if node.is_element() && local_name(node.tag_name().name()) == element {
+            return Some(node);
+        }
+        for child in node.children() {
+            if let Some(found) = find_element(child, element) {
+                return Some(found);
+            }
+        }
+        None
+    }
 
-                if name == parent {
-                    in_parent = true;
-                }
+    let target = find_element(root, parent)?;
+    for a in target.attributes() {
+        if a.name() == attr {
+            return Some(a.value().to_string());
+        }
+    }
+    None
+}
 
-                if in_parent {
-                    for a in e.attributes().flatten() {
-                        let key = a.key.into_inner();
-                        if key == attr {
-                            return Some(a.value.to_string());
-                        }
-                    }
+pub fn extract_services_xaddr(soap_body: &[u8]) -> Option<String> {
+    let xml_str = String::from_utf8_lossy(soap_body).into_owned();
+    let doc = Document::parse(&xml_str).ok()?;
+    let root = doc.root_element();
+
+    for node in root.descendants() {
+        if node.is_element() && local_name(node.tag_name().name()) == "Service" {
+            if let Some(ns) = node.attribute("Namespace") {
+                if ns.contains("media") {
+                    return node.attribute("XAddr").map(|s| s.to_string());
                 }
             }
-            Ok(Event::End(ref e)) => {
-                let name = local_name(e.name().into_inner());
-                if name == parent {
-                    in_parent = false;
-                }
-            }
-            Ok(Event::Eof) => break,
-            Err(_) => break,
-            _ => {}
         }
     }
     None
@@ -140,6 +140,47 @@ mod tests {
 <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
 <s:Body><GetDeviceInformation xmlns="http://www.onvif.org/ver10/device/wsdl"/></s:Body>
 </s:Envelope>"#;
+
         assert_eq!(extract_action(body).unwrap(), "GetDeviceInformation");
+    }
+
+    #[test]
+    fn test_extract_uri_with_ampersand() {
+        let body = br#"<?xml version="1.0" encoding="UTF-8"?>
+<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope" xmlns:tt="http://www.onvif.org/ver10/schema" xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
+<env:Body><trt:GetStreamUriResponse><trt:MediaUri><tt:Uri>rtsp://192.168.1.211:554/Streaming/Channels/101?transportmode=unicast&amp;profile=Profile_1</tt:Uri>
+<tt:InvalidAfterConnect>false</tt:InvalidAfterConnect>
+<tt:Timeout>PT60S</tt:Timeout>
+</trt:MediaUri>
+</trt:GetStreamUriResponse>
+</env:Body>
+</env:Envelope>"#;
+
+        let uri = extract_element_text(body, "Uri");
+        println!("Extracted URI: {:?}", uri);
+
+        assert!(uri.is_some(), "URI should be extracted");
+        let uri_str = uri.unwrap();
+        println!("Final URI string: {}", uri_str);
+
+        assert!(
+            uri_str.contains("transportmode=unicast&profile=Profile_1"),
+            "URI should contain '&' but got: {}",
+            uri_str
+        );
+    }
+
+    #[test]
+    fn test_extract_simple_text() {
+        let body = br#"<root><Name>mainStream</Name></root>"#;
+        let name = extract_element_text(body, "Name");
+        assert_eq!(name, Some("mainStream".to_string()));
+    }
+
+    #[test]
+    fn test_local_name() {
+        assert_eq!(local_name("tt:Uri"), "Uri");
+        assert_eq!(local_name("Uri"), "Uri");
+        assert_eq!(local_name("env:Body"), "Body");
     }
 }

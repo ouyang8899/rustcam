@@ -576,6 +576,8 @@ pub struct CreateDeviceRequest {
     #[serde(default)]
     pub device_type: Option<DeviceType>,
     pub device_type_code: Option<String>,
+    #[serde(default)]
+    pub rtsp_url: Option<String>,
 }
 
 impl Default for CreateDeviceRequest {
@@ -600,6 +602,7 @@ impl Default for CreateDeviceRequest {
             extended: None,
             device_type: None,
             device_type_code: None,
+            rtsp_url: None,
         }
     }
 }
@@ -628,6 +631,7 @@ pub struct UpdateDeviceRequest {
     pub status: Option<DeviceStatus>,
     pub device_type: Option<DeviceType>,
     pub device_type_code: Option<String>,
+    pub rtsp_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

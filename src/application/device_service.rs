@@ -758,7 +758,7 @@ impl DeviceService {
                 return Err(AppError::BadRequest(format!("device_tag '{}' already exists", tag)));
             }
             tag.clone()
-        } else if matches!(req.protocol, Protocol::Rtsp | Protocol::Rtmp) {
+        } else if matches!(req.protocol, Protocol::Rtsp | Protocol::Rtmp | Protocol::Onvif) {
             Self::generate_device_tag(&req.protocol, req.port.unwrap_or(0))
         } else {
             return Err(AppError::BadRequest("device_tag is required".to_string()));
@@ -781,6 +781,11 @@ impl DeviceService {
 
         // 处理 extended 字段
         let mut extended = req.extended.clone().unwrap_or(serde_json::Value::Object(Default::default()));
+        if let Some(rtsp_url) = req.rtsp_url {
+            extended.as_object_mut().map(|obj| {
+                obj.insert("rtsp_full_url".to_string(), serde_json::json!(rtsp_url));
+            });
+        }
         device.extended = Some(extended);
 
         self.infra.db.create_device(&device).await?;
@@ -936,6 +941,13 @@ impl DeviceService {
                 }
             }
         }
+        if let Some(rtsp_url) = req.rtsp_url {
+            let mut existing = device.extended.clone().unwrap_or(serde_json::Value::Object(Default::default()));
+            if let Some(obj) = existing.as_object_mut() {
+                obj.insert("rtsp_full_url".to_string(), serde_json::json!(rtsp_url));
+            }
+            device.extended = Some(existing);
+        }
 
         self.infra.db.update_device(&device).await?;
 
@@ -984,6 +996,12 @@ impl DeviceService {
         }
 
         Ok(device)
+    }
+
+    pub async fn update_device_by_tag(&self, device_tag: &str, req: UpdateDeviceRequest) -> Result<Device> {
+        let device = self.infra.db.get_device_by_device_tag(device_tag)
+            .ok_or_else(|| AppError::NotFound(format!("Device with tag '{}' not found", device_tag)))?;
+        self.update_device(device.id, req).await
     }
 
     pub async fn sync_device_status_from_stream(&self, device_id: i64, stream_state: StreamState) -> Result<()> {
@@ -1479,6 +1497,7 @@ impl DeviceService {
         let prefix = match protocol {
             Protocol::Rtsp => "rtsp",
             Protocol::Rtmp => "rtmp",
+            Protocol::Onvif => "onvif",
             _ => "unknown",
         };
         let uuid = uuid::Uuid::new_v4().to_string().replace("-", "");

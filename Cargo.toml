@@ -33,6 +33,7 @@ anyhow = "1.0.104"
 thiserror = "2.0.20"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 tracing-log = "0.2"
 uuid = { version = "1.26.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
@@ -73,6 +74,7 @@ rsip = "0.4"
 
 # XML parsing
 quick-xml = "0.42.0"
+roxmltree = "0.20"
 memchr = "2.8.3"
 sha1 = "0.11.0"
 base64 = "0.23.1"

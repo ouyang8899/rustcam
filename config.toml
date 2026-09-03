@@ -5,7 +5,7 @@ edition = "2021"
 
 [server]
 host = "0.0.0.0"
-port = 8080
+port = 8081
 tls_enabled = false
 
 [database]
@@ -70,8 +70,8 @@ tcp_audio_max_servers = 10
 
 [jwt]
 secret = "change-me-in-production"
-access_token_expire_minutes = 15
-refresh_token_expire_days = 7
+access_token_expire_minutes = 60
+refresh_token_expire_days = 30
 
 [log]
 level = "debug"

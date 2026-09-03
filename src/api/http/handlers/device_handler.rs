@@ -117,6 +117,16 @@ pub async fn update_device_handler(
     Ok(Json(ApiResponse::success(updated)))
 }
 
+/// PUT /api/v1/devices/by-tag/:device_tag
+pub async fn update_device_by_tag_handler(
+    State(state): State<Arc<FullState>>,
+    Path(device_tag): Path<String>,
+    Json(req): Json<UpdateDeviceRequest>,
+) -> Result<Json<ApiResponse<Device>>, AppError> {
+    let updated = state.app.registry.device_service.update_device_by_tag(&device_tag, req).await?;
+    Ok(Json(ApiResponse::success(updated)))
+}
+
 /// DELETE /api/v1/devices/:device_tag
 pub async fn delete_device_handler(
     State(state): State<Arc<FullState>>,
