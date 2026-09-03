@@ -191,448 +191,87 @@
       </el-row>
     </div>
 
-    <el-dialog v-model="showModal" :title="isEdit ? '编辑设备' : '添加设备'" width="640px" draggable destroy-on-close>
-      <el-form label-position="top">
-        <el-row :gutter="12">
-          <el-col :span="12">
-            <el-form-item label="设备名称 *" required>
-              <el-input v-model="form.name" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="设备类型">
-              <el-select v-model="form.protocol" style="width: 100%">
-                <el-option value="Gb28181" label="GB28181" />
-                <el-option value="Rtsp" label="RTSP" />
-                <el-option value="Onvif" label="ONVIF" />
-                <el-option value="Rtmp" label="RTMP" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-form-item label="媒体服务器">
-          <el-select v-model="form.media_server_tag" clearable style="width: 100%">
-            <el-option value="">自动选择</el-option>
-            <el-option v-for="s in mediaServerStore.servers" :key="s.server_tag" :label="`${s.name} (${s.server_type})`" :value="s.server_tag" />
-          </el-select>
-        </el-form-item>
-
-          <el-row :gutter="12">
-            <el-col :span="12">
-              <el-form-item :label="form.protocol === 'Gb28181' ? '所属地区 *' : '所属地区'" :required="form.protocol === 'Gb28181'">
-                <el-cascader
-                  v-model="gbRegionCascader"
-                  :options="regionStore.regionTree"
-                  :props="{ value: 'gb28181_code', label: 'name', children: 'children' }"
-                  :placeholder="form.protocol === 'Gb28181' ? '选择行政区划' : '选择行政区划（可选）'"
-                  :clearable="form.protocol !== 'Gb28181'"
-                  style="width: 100%"
-                  @change="onGbRegionChange"
-                />
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="自定义分组">
-                <el-select
-                  v-model="form.group_id"
-                  placeholder="选择分组（可选）"
-                  clearable
-                  style="width: 100%"
-                >
-                  <template v-for="group in groupStore.groupTree" :key="group.id">
-                    <el-option :label="group.name" :value="group.id" />
-                    <template v-for="child in (group.children || [])" :key="child.id">
-                      <el-option :label="'  ├─ ' + child.name" :value="child.id" />
-                      <template v-for="grandchild in (child.children || [])" :key="grandchild.id">
-                        <el-option :label="'    └─ ' + grandchild.name" :value="grandchild.id" />
-                      </template>
-                    </template>
-                  </template>
-                </el-select>
-              </el-form-item>
-            </el-col>
-        </el-row>
-
-        <el-row :gutter="12">
-          <el-col :span="12">
-            <el-form-item label="应用名称 (App)">
-              <el-input 
-                v-model="form.app" 
-                :placeholder="form.protocol === 'Gb28181' ? 'rtp' : 'live'"
-                :disabled="form.protocol === 'Gb28181'"
+    <el-dialog v-model="showModal" :title="isEdit ? '编辑设备' : '添加设备'" width="800px" draggable destroy-on-close>
+      <!-- 添加模式显示 tabs，编辑模式直接显示对应表单 -->
+      <template v-if="!isEdit">
+        <el-tabs v-model="activeDeviceTab" tab-position="top">
+          <el-tab-pane label="GB28181" name="gb28181">
+            <Gb28181DeviceForm 
+              ref="gbFormRef"
+              :media-server-options="mediaServerStore.servers"
+              :region-tree="regionStore.regionTree"
+              :group-tree="groupStore.groupTree"
+              :industry-options="gbIndustryCodeOptions"
+              :device-type-options="gbDeviceTypeOptions"
+              :network-options="gbNetworkCodeOptions"
               />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <div v-if="form.protocol === 'Gb28181'">
-          <el-divider>GB28181</el-divider>
-
-          <el-tabs v-model="gb28181Tab">
-            <el-tab-pane label="行业类型 *" name="industry">
-              <div class="tag-selector">
-                <el-tag
-                  v-for="opt in gbIndustryCodeOptions"
-                  :key="opt.value"
-                  :type="form.gb_industry_code === opt.value ? 'primary' : 'info'"
-                  class="tag-item selectable"
-                  @click="form.gb_industry_code = opt.value"
-                >
-                  {{ opt.label }}
-                </el-tag>
-              </div>
             </el-tab-pane>
-            <el-tab-pane label="设备类型 *" name="device_type">
-              <div class="tag-selector">
-                <template v-for="opt in gbDeviceTypeOptions" :key="opt.value || opt.label">
-                  <div v-if="opt.type === 'header'" class="tag-category-header">{{ opt.label }}</div>
-                  <el-tag
-                    v-else
-                    :type="form.gb_device_type === opt.value ? 'primary' : 'info'"
-                    class="tag-item selectable"
-                    @click="form.gb_device_type = opt.value"
-                  >
-                    {{ opt.label }}
-                  </el-tag>
-                </template>
-              </div>
-            </el-tab-pane>
-            <el-tab-pane label="网络类型 *" name="network">
-              <div class="tag-selector">
-                <el-tag
-                  v-for="opt in gbNetworkCodeOptions"
-                  :key="opt.value"
-                  :type="form.gb_network_code === opt.value ? 'primary' : 'info'"
-                  class="tag-item selectable"
-                  @click="form.gb_network_code = opt.value"
-                >
-                  {{ opt.label }}
-                </el-tag>
-              </div>
-            </el-tab-pane>
-          </el-tabs>
-
-          <div class="gb28181-selected-row">
-            <el-tag 
-              class="selection-tag" 
-              :type="form.gb_industry_code ? 'success' : 'info'"
-              @click="gb28181Tab = 'industry'"
-            >
-              {{ getIndustryCodeLabel(form.gb_industry_code) || '未选行业' }}
-            </el-tag>
-            <el-tag 
-              class="selection-tag" 
-              :type="form.gb_device_type ? 'success' : 'info'"
-              @click="gb28181Tab = 'device_type'"
-            >
-              {{ getDeviceTypeLabel(form.gb_device_type) || '未选设备' }}
-            </el-tag>
-            <el-tag 
-              class="selection-tag" 
-              :type="form.gb_network_code ? 'success' : 'info'"
-              @click="gb28181Tab = 'network'"
-            >
-              {{ getNetworkCodeLabel(form.gb_network_code) || '未选网络' }}
-            </el-tag>
-          </div>
-
-          <div class="sip-id-row">
-            <el-form-item label="行政区划" class="sip-field">
-              <el-input :model-value="sipIdPrefix" disabled placeholder="6位" />
-            </el-form-item>
-            <span class="sip-plus">+</span>
-            <el-form-item label="基层" class="sip-field">
-              <el-input v-model="sipGbCode" placeholder="2位" maxlength="2" @input="sipGbCode = sipGbCode.replace(/\D/g, '')" />
-            </el-form-item>
-            <span class="sip-plus">+</span>
-            <el-form-item label="行业" class="sip-field">
-              <el-input :model-value="form.gb_industry_code" disabled placeholder="2位" />
-            </el-form-item>
-            <span class="sip-plus">+</span>
-            <el-form-item label="设备" class="sip-field">
-              <el-input :model-value="form.gb_device_type" disabled placeholder="3位" />
-            </el-form-item>
-            <span class="sip-plus">+</span>
-            <el-form-item label="网络" class="sip-field">
-              <el-input :model-value="form.gb_network_code" disabled placeholder="1位" />
-            </el-form-item>
-          </div>
-
-          <div class="sip-id-row sip-id-row-bottom">
-            <el-form-item label="后缀" class="sip-field">
-              <el-input v-model="sipIdSuffix" placeholder="6位" maxlength="6" />
-            </el-form-item>
-            <span class="sip-equals">=</span>
-            <el-form-item label="SIP ID" class="sip-field sip-preview">
-              <el-input :model-value="sipIdPreview" disabled placeholder="20位">
-                <template #append>
-                  <span style="min-width: 40px">{{ sipIdPreview.length }}/20</span>
-                </template>
-              </el-input>
-            </el-form-item>
-          </div>
-
-          <el-row :gutter="12">
-            <el-col :span="12">
-              <el-form-item label="SIP 密码 *" required>
-                <el-input v-model="form.device_password" type="password" show-password placeholder="设备SIP认证密码" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="传输协议">
-                <el-select v-model="form.gb_transport" placeholder="选择协议" style="width: 100%">
-                  <el-option label="UDP (推荐)" value="UDP" />
-                  <el-option label="TCP" value="TCP" />
-                </el-select>
-              </el-form-item>
-            </el-col>
-          </el-row>
-        </div>
-
-        <div v-if="form.protocol === 'Onvif'">
-          <el-divider>ONVIF</el-divider>
-          <div style="margin-bottom: 12px">
-            <el-button type="primary" @click="openOnvifDiscoverModal">发现 ONVIF 设备</el-button>
-            <span style="margin-left: 12px; color: #909399; font-size: 12px">通过局域网搜索自动发现设备</span>
-          </div>
-          <el-row :gutter="12">
-            <el-col :span="24">
-              <el-form-item label="设备地址 (XAddr)">
-                <el-input v-model="form.host" placeholder="http://192.168.1.100:80/onvif/device_service" />
-              </el-form-item>
-            </el-col>
-          </el-row>
-          <el-row :gutter="12">
-            <el-col :span="12">
-              <el-form-item label="用户名 *">
-                <el-input v-model="form.device_username" placeholder="admin" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="密码 *">
-                <el-input v-model="form.device_password" type="password" show-password />
-              </el-form-item>
-            </el-col>
-          </el-row>
-          <div v-if="form.protocol === 'Onvif' || form.pull_urls.length > 0">
-            <el-divider content-position="left">
-              <span v-if="form.pull_urls.length > 0">已发现 RTSP 通道</span>
-              <span v-else>通道发现</span>
-              <el-button type="primary" link size="small" :loading="onvifFetchingProfiles" @click="onvifFetchFormProfiles" style="margin-left: 8px">重新获取</el-button>
-            </el-divider>
-            <el-tag v-for="url in form.pull_urls" :key="url.url" type="info" style="margin-right: 8px; margin-bottom: 4px">{{ url.url }}</el-tag>
-          </div>
-        </div>
-
-        <div v-if="form.protocol === 'Rtsp'">
-          <el-divider>RTSP</el-divider>
-          <el-form-item label="传输模式">
-            <el-radio-group v-model="form.rtsp_mode">
-              <el-radio value="pull">拉取（从设备拉流）</el-radio>
-              <el-radio value="push">推送（向媒体服务器推流）</el-radio>
-            </el-radio-group>
-          </el-form-item>
-
-          <div v-if="form.rtsp_mode === 'push'">
-            <el-form-item v-if="rtspPushAddress && form.stream_key" label="推送地址预览">
-              <el-input :model-value="`${rtspPushAddress.replace(/\/$/, '')}:${rtspPushPort}/${form.app}/${form.stream_key}`" disabled placeholder="请先在基础设置中选择媒体服务器" />
-            </el-form-item>
-            <el-form-item v-if="!form.media_server_tag && form.rtsp_mode === 'push'" label="&nbsp;">
-              <el-alert type="info" :closable="false" show-icon>
-                请在「基础设置」中选择媒体服务器，推送地址将自动生成
-              </el-alert>
-            </el-form-item>
-          </div>
-
-          <div v-if="form.rtsp_mode === 'pull'">
-            <el-row :gutter="12">
-              <el-col :span="24">
-                <el-form-item label="RTSP 全链接 *" required>
-                  <el-input v-model="form.rtsp_full_url" placeholder="rtsp://192.168.1.100:554/live/stream1" />
-                </el-form-item>
-              </el-col>
-            </el-row>
-            <el-row :gutter="12">
-              <el-col :span="12">
-                <el-form-item label="用户名">
-                  <el-input v-model="form.device_username" placeholder="admin" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="密码">
-                  <el-input v-model="form.device_password" type="password" show-password />
-                </el-form-item>
-              </el-col>
-            </el-row>
-          </div>
-        </div>
-
-        <div v-if="form.protocol === 'Rtmp'">
-          <el-divider>RTMP</el-divider>
-          <el-form-item v-if="rtmpPushAddress && form.stream_key" label="推送地址预览">
-            <el-input :model-value="`${rtmpPushAddress.replace(/\/$/, '')}:${rtmpPushPortActual}/${form.stream_key}`" disabled placeholder="请先在基础设置中选择媒体服务器" />
-          </el-form-item>
-          <el-form-item v-if="!form.media_server_tag" label="&nbsp;">
-            <el-alert type="info" :closable="false" show-icon>
-              请在「基础设置」中选择媒体服务器，推送地址将自动生成
-            </el-alert>
-          </el-form-item>
-        </div>
-
-        <el-divider>播放认证</el-divider>
-        <el-row :gutter="12">
-          <el-col :span="12">
-            <el-form-item label="播放用户名">
-              <el-input v-model="form.playback_username" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="播放密码">
-              <el-input v-model="form.playback_password" type="password" show-password />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <!-- GB28181 完整流配置 -->
-        <div v-if="form.protocol === 'Gb28181'">
-          <el-divider>
-            <span style="font-size: 12px; color: #909399">SIP INVITE 流配置</span>
-            <el-switch v-model="form.enable_stream_config" size="small" style="margin-left: 8px" />
-          </el-divider>
-          <div v-if="form.enable_stream_config" style="background: #f5f7fa; padding: 16px; border-radius: 4px; margin-bottom: 16px">
-            <el-row :gutter="12">
-              <el-col :span="6">
-                <el-form-item label="视频编码">
-                  <el-select v-model="form.stream_config.video_codec" placeholder="选择编码" style="width: 100%">
-                    <el-option label="PS (MPEG-PS, 海康大华)" value="PS" />
-                    <el-option label="H.264 (通用)" value="H264" />
-                    <el-option label="H.265 (新设备)" value="H265" />
-                    <el-option label="JPEG (MJPEG)" value="JPEG" />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-              <el-col :span="6">
-                <el-form-item label="音频编码">
-                  <el-select v-model="form.stream_config.audio_codec" placeholder="选择编码" style="width: 100%">
-                    <el-option label="PCMA (G.711 A律)" value="PCMA" />
-                    <el-option label="PCMU (G.711 U律)" value="PCMU" />
-                    <el-option label="AAC" value="AAC" />
-                    <el-option label="禁用" value="NONE" />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-              <el-col :span="6">
-                <el-form-item label="Profile/Level">
-                  <el-input v-model="form.stream_config.profile_level_id" placeholder="4D001F">
-                    <template #append>
-                      <el-tooltip content="H.264/H.265的profile_level_id参数, 可从设备能力获取">
-                        <span style="cursor: help">?</span>
-                      </el-tooltip>
-                    </template>
-                  </el-input>
-                </el-form-item>
-              </el-col>
-              <el-col :span="6">
-                <el-form-item label="流模式">
-                  <el-select v-model="form.stream_config.stream_mode" placeholder="选择模式" style="width: 100%">
-                    <el-option label="recvonly (仅接收)" value="recvonly" />
-                    <el-option label="sendonly (仅发送)" value="sendonly" />
-                    <el-option label="sendrecv (双向)" value="sendrecv" />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-            </el-row>
-            <el-row :gutter="12">
-              <el-col :span="6">
-                <el-form-item label="视频PT">
-                  <el-input-number v-model="form.stream_config.video_payload_type" :min="0" :max="127" style="width: 100%" placeholder="96" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="6">
-                <el-form-item label="音频PT">
-                  <el-input-number v-model="form.stream_config.audio_payload_type" :min="0" :max="127" style="width: 100%" placeholder="8" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="6">
-                <el-form-item label="SPS/PPS">
-                  <el-input v-model="form.stream_config.sprop_parameter_sets" placeholder="Base64编码, 可留空">
-                    <template #append>
-                      <el-tooltip content="H.264/H.265的SPS/PPS参数, Base64编码, 通常可留空自动发现">
-                        <span style="cursor: help">?</span>
-                      </el-tooltip>
-                    </template>
-                  </el-input>
-                </el-form-item>
-              </el-col>
-              <el-col :span="6">
-                <el-form-item label="封装模式">
-                  <el-select v-model="form.stream_config.packaging_mode" placeholder="选择模式" style="width: 100%">
-                    <el-option label="HIS (96字节头)" value="HIS" />
-                    <el-option label="NALU (标准)" value="NALU" />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-            </el-row>
-          </div>
-        </div>
-
-        <!-- ONVIF/RTSP 媒体配置 -->
-        <div v-if="form.protocol === 'Onvif' || (form.protocol === 'Rtsp' && form.rtsp_mode === 'pull')">
-          <el-divider>
-            <span style="font-size: 12px; color: #909399">媒体参数</span>
-            <el-switch v-model="form.enable_stream_config" size="small" style="margin-left: 8px" />
-          </el-divider>
-          <div v-if="form.enable_stream_config" style="background: #f5f7fa; padding: 16px; border-radius: 4px; margin-bottom: 16px">
-            <p style="margin: 0 0 12px 0; color: #909399; font-size: 12px;">ONVIF/RTSP 设备会自动获取媒体参数，如有兼容性问题可手动覆盖：</p>
-            <el-row :gutter="12">
-              <el-col :span="8">
-                <el-form-item label="视频编码">
-                  <el-select v-model="form.stream_config.video_codec" placeholder="自动" style="width: 100%">
-                    <el-option label="自动" value="" />
-                    <el-option label="H.264" value="H264" />
-                    <el-option label="H.265" value="H265" />
-                    <el-option label="MJPEG" value="JPEG" />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-              <el-col :span="8">
-                <el-form-item label="音频编码">
-                  <el-select v-model="form.stream_config.audio_codec" placeholder="自动" style="width: 100%">
-                    <el-option label="自动" value="" />
-                    <el-option label="AAC" value="AAC" />
-                    <el-option label="G.711" value="PCMA" />
-                    <el-option label="禁用" value="NONE" />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-              <el-col :span="8">
-                <el-form-item label="流模式">
-                  <el-select v-model="form.stream_config.stream_mode" placeholder="自动" style="width: 100%">
-                    <el-option label="自动" value="" />
-                    <el-option label="recvonly (仅接收)" value="recvonly" />
-                    <el-option label="sendrecv (双向)" value="sendrecv" />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-            </el-row>
-          </div>
-        </div>
-
-        <!-- RTMP 推送配置 -->
-        <div v-if="form.protocol === 'Rtmp'">
-          <el-divider>
-            <span style="font-size: 12px; color: #909399">RTMP 推送配置</span>
-          </el-divider>
-          <div style="background: #f5f7fa; padding: 12px 16px; border-radius: 4px; margin-bottom: 16px; color: #909399; font-size: 12px;">
-            <p style="margin: 0;">RTMP 为推送模式，设备主动推送流到媒体服务器。请配置推送地址和流名称。</p>
-          </div>
-        </div>
-
-        <el-form-item>
-          <el-checkbox v-model="form.is_public">公开设备（无需登录可观看）</el-checkbox>
-        </el-form-item>
-      </el-form>
+            <el-tab-pane label="RTSP" name="rtsp">
+            <RtspDeviceForm 
+              ref="rtspFormRef"
+              v-model="form"
+              :media-server-options="mediaServerStore.servers"
+              :region-tree="regionStore.regionTree"
+              :group-tree="groupStore.groupTree"
+              :push-address="rtspPushAddress"
+              :push-port="rtspPushPort"
+            />
+          </el-tab-pane>
+          <el-tab-pane label="ONVIF" name="onvif">
+            <OnvifDeviceForm 
+              ref="onvifFormRef"
+              v-model="form"
+              :media-server-options="mediaServerStore.servers"
+              :region-tree="regionStore.regionTree"
+              :group-tree="groupStore.groupTree"
+            />
+          </el-tab-pane>
+          <el-tab-pane label="RTMP" name="rtmp">
+            <RtmpDeviceForm 
+              ref="rtmpFormRef"
+              v-model="form"
+              :media-server-options="mediaServerStore.servers"
+              :region-tree="regionStore.regionTree"
+              :group-tree="groupStore.groupTree"
+              :push-address="rtmpPushAddress"
+              :push-port="rtmpPushPortActual"
+            />
+          </el-tab-pane>
+        </el-tabs>
+      </template>
+      <template v-else>
+        <Gb28181DeviceForm v-if="form.protocol === 'Gb28181'" :key="editingId" ref="gbFormRef"
+          :media-server-options="mediaServerStore.servers"
+          :region-tree="regionStore.regionTree"
+          :group-tree="groupStore.groupTree"
+          :industry-options="gbIndustryCodeOptions"
+          :device-type-options="gbDeviceTypeOptions"
+          :network-options="gbNetworkCodeOptions"
+          :device-tag="form.device_tag"
+        />
+        <RtspDeviceForm v-else-if="form.protocol === 'Rtsp'" :key="editingId" ref="rtspFormRef"
+          :media-server-options="mediaServerStore.servers"
+          :region-tree="regionStore.regionTree"
+          :group-tree="groupStore.groupTree"
+          :push-address="rtspPushAddress"
+          :push-port="rtspPushPort"
+          :device-tag="form.device_tag"
+        />
+        <OnvifDeviceForm v-else-if="form.protocol === 'Onvif'" :key="editingId" ref="onvifFormRef"
+          :media-server-options="mediaServerStore.servers"
+          :region-tree="regionStore.regionTree"
+          :group-tree="groupStore.groupTree"
+          :device-tag="form.device_tag"
+        />
+        <RtmpDeviceForm v-else-if="form.protocol === 'Rtmp'" :key="editingId" ref="rtmpFormRef"
+          :media-server-options="mediaServerStore.servers"
+          :region-tree="regionStore.regionTree"
+          :group-tree="groupStore.groupTree"
+          :push-address="rtmpPushAddress"
+          :push-port="rtmpPushPortActual"
+          :device-tag="form.device_tag"
+        />
+      </template>
       <template #footer>
         <el-button @click="closeModal">取消</el-button>
         <el-button type="primary" @click="submitDevice">{{ isEdit ? '保存修改' : '确认添加' }}</el-button>
@@ -649,82 +288,6 @@
         </el-descriptions-item>
       </el-descriptions>
       <el-empty v-else description="暂无播放链接" />
-    </el-dialog>
-
-      <el-dialog v-model="showDiscoverModal" title="发现(ONVIF)设备" width="780px" draggable destroy-on-close @opened="onDiscoverDialogOpened">
-      <el-skeleton animated :rows="4" :loading="discovering">
-        <el-table :data="discoveredDevices" empty-text="未发现设备，请确保设备已启动且网络可达" highlight-current-row @row-click="(row) => onvifSelectedDevice = row">
-          <el-table-column label="名称" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.name || row.manufacturer || row.model || 'Unknown Device' }}</template>
-          </el-table-column>
-          <el-table-column label="地址" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.address || row.x_addr }}</template>
-          </el-table-column>
-          <el-table-column label="厂商/型号" width="120">
-            <template #default="{ row }">{{ [row.manufacturer, row.model].filter(Boolean).join(' ') || '-' }}</template>
-          </el-table-column>
-        </el-table>
-      </el-skeleton>
-
-      <template v-if="onvifSelectedDevice">
-        <el-divider content-position="left">设备认证</el-divider>
-        <el-row :gutter="12">
-          <el-col :span="12">
-            <el-form-item label="用户名">
-              <el-input v-model="onvifDiscoverUser" placeholder="admin" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="密码">
-              <el-input v-model="onvifDiscoverPwd" type="password" show-password placeholder="password" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-button type="primary" :loading="onvifFetchingProfiles" @click="onvifFetchProfiles" style="margin-bottom: 12px">
-          获取设备能力（RTSP/PTZ/音频）
-        </el-button>
-
-        <template v-if="onvifStreams.length > 0">
-          <el-divider content-position="left">视频通道选择（{{ onvifSelectedStreams.length }}/{{ onvifStreams.length }}）</el-divider>
-          <el-table :data="onvifStreams" empty-text="无" max-height="200" @selection-change="(rows) => onvifSelectedStreams = rows">
-            <el-table-column type="selection" width="50" />
-            <el-table-column label="名称" prop="name" show-overflow-tooltip />
-            <el-table-column label="分辨率" width="120">
-              <template #default="{ row }">{{ row.width }}x{{ row.height }}</template>
-            </el-table-column>
-            <el-table-column label="编码" prop="encoding" width="80" />
-            <el-table-column label="RTSP URL" show-overflow-tooltip>
-              <template #default="{ row }">
-                <code style="font-size: 11px">{{ row.rtsp_url }}</code>
-              </template>
-            </el-table-column>
-          </el-table>
-          <div style="margin-top: 8px; color: #909399; font-size: 12px">
-            <el-checkbox v-model="onvifSelectAllStreams">全选</el-checkbox>
-            <span style="margin-left: 16px">将为您创建 {{ onvifSelectedStreams.length }} 个设备通道</span>
-          </div>
-        </template>
-        <template v-else-if="onvifFetchingProfiles === false && onvifSelectedDevice">
-          <el-divider content-position="left">RTSP 连接（设备不支持自动发现，请手动输入）</el-divider>
-          <el-form-item label="RTSP URL">
-            <el-input v-model="onvifCapabilities.rtsp_url" placeholder="rtsp://192.168.1.100:554/live" style="margin-bottom: 8px" />
-          </el-form-item>
-        </template>
-        <template v-if="onvifCapabilities.ptz">
-          <el-divider content-position="left">PTZ 支持</el-divider>
-          <el-tag type="warning" style="margin-right: 8px">支持云台控制</el-tag>
-        </template>
-        <template v-if="onvifCapabilities.audio">
-          <el-divider content-position="left">音频支持</el-divider>
-          <el-tag type="info" style="margin-right: 8px">支持音频</el-tag>
-        </template>
-      </template>
-      <template #footer>
-        <el-button @click="closeDiscoverModal">取消</el-button>
-        <el-button type="primary" :disabled="!onvifSelectedDevice || onvifSelectedStreams.length === 0" :loading="submitting" @click="confirmOnvifDevice">
-          确认添加 {{ onvifSelectedStreams.length > 1 ? `(${onvifSelectedStreams.length}个通道)` : '' }}
-        </el-button>
-      </template>
     </el-dialog>
 
     <el-affix position="bottom" :offset="20" v-if="copied">
@@ -748,6 +311,10 @@ import { request } from '../utils/request'
 import { useToast } from '../composables/useToast'
 import StatusDot from '../components/common/StatusDot.vue'
 import DataCard from '../components/common/DataCard.vue'
+import RtspDeviceForm from './device-forms/RtspDeviceForm.vue'
+import Gb28181DeviceForm from './device-forms/Gb28181DeviceForm.vue'
+import OnvifDeviceForm from './device-forms/OnvifDeviceForm.vue'
+import RtmpDeviceForm from './device-forms/RtmpDeviceForm.vue'
 
 const deviceStore = useDeviceStore()
 const mediaServerStore = useMediaServerStore()
@@ -795,33 +362,13 @@ const showPlayLinksModal = ref(false)
 const selectedDevice = ref(null)
 const playLinks = ref(null)
 const copied = ref(false)
-const discovering = ref(false)
-const showDiscoverModal = ref(false)
-const discoveredDevices = ref([])
-const onvifSelectedDevice = ref(null)
-const onvifManualIp = ref('')
-const onvifDiscoverUser = ref('')
-const onvifDiscoverPwd = ref('')
-const onvifRtspUrls = ref([])
-const onvifFetchingProfiles = ref(false)
-const submitting = ref(false)
-const onvifDiscovering = ref(false)
-const onvifCapabilities = ref({
-  rtsp_url: '',
-  ptz: false,
-  audio: false,
-})
-const onvifStreams = ref([])
-const onvifSelectedStreams = ref([])
-const onvifSelectAllStreams = computed({
-  get: () => onvifStreams.value.length > 0 && onvifSelectedStreams.value.length === onvifStreams.value.length,
-  set: (val) => { onvifSelectedStreams.value = val ? [...onvifStreams.value] : [] }
-})
 const gbRegionCascader = ref([])
 const sipGbCode = ref('00')  // 基层编码，默认00
 const sipIdSuffix = ref('')  // 后缀，最多6位数字
-
-
+const gbFormRef = ref(null)
+const rtspFormRef = ref(null)
+const onvifFormRef = ref(null)
+const rtmpFormRef = ref(null)
 
 watch(sipGbCode, (val) => {
   const num = parseInt(val, 10)
@@ -956,30 +503,6 @@ const rtmpPushPortActual = computed(() => {
 })
 
 
-async function onvifDiscover() {
-  if (!form.value.host.trim()) { ElMessage.warning('请先填写设备地址'); return }
-  onvifDiscovering.value = true
-  try {
-    const res = await request.post('/onvif/discover', { xaddr: form.value.host })
-    const profiles = res.data?.data?.profiles || []
-    if (profiles.length > 0) {
-      const p = profiles[0]
-      form.value.device_username = p.username || form.value.device_username
-      form.value.device_password = p.password || form.value.device_password
-      if (p.stream_uri) {
-        form.value.pull_urls = [{ protocol: 'rtsp', url: p.stream_uri, priority: 1 }]
-      }
-      ElMessage.success(`发现 ${profiles.length} 个媒体通道`)
-    } else {
-      ElMessage.warning('未发现媒体通道，请检查地址和认证信息')
-    }
-  } catch (e) {
-    ElMessage.error('发现失败: ' + (e?.message || e))
-  } finally {
-    onvifDiscovering.value = false
-  }
-}
-
 const availablePlayLinks = computed(() => {
   if (!playLinks.value) return []
   return [
@@ -1055,6 +578,34 @@ const getIndustryCodeLabel = (code) => {
 const sipIdIndustryCode = computed(() => form.value.gb_industry_code || '')
 const sipIdNetworkCode = computed(() => form.value.gb_network_code || '')
 
+const activeProtocolTab = ref('Gb28181')
+const activeDeviceTab = computed({
+  get: () => {
+    switch (form.value.protocol) {
+      case 'Gb28181': return 'gb28181'
+      case 'Rtsp': return 'rtsp'
+      case 'Onvif': return 'onvif'
+      case 'Rtmp': return 'rtmp'
+      default: return 'gb28181'
+    }
+  },
+  set: (val) => {
+    const protoMap = { gb28181: 'Gb28181', rtsp: 'Rtsp', onvif: 'Onvif', rtmp: 'Rtmp' }
+    form.value.protocol = protoMap[val] || 'Gb28181'
+  }
+})
+
+function onProtocolTabChange(tab) {
+  const protoMap = { Gb28181: 'gb28181', Rtsp: 'rtsp', Onvif: 'onvif', Rtmp: 'rtmp' }
+  activeDeviceTab.value = protoMap[tab] || 'gb28181'
+  form.value.protocol = tab
+}
+
+const protocolLabel = computed(() => {
+  const map = { Gb28181: 'GB28181', Rtsp: 'RTSP', Onvif: 'ONVIF', Rtmp: 'RTMP' }
+  return map[form.value.protocol] || form.value.protocol
+})
+
 const form = ref(defaultForm())
 
 watch(() => form.value.protocol, (newProto) => {
@@ -1112,81 +663,6 @@ onMounted(async () => {
     if (device) openEditModal(device)
   }
 })
-
-watch(() => form.value.host, async (newHost) => {
-  if (form.value.protocol !== 'Onvif' || !newHost?.trim()) return
-  if (!form.value.device_username || !form.value.device_password) return
-  onvifFetchingProfiles.value = true
-  form.value.pull_urls = []
-  try {
-    const capsRes = await request.post('/onvif/capabilities', {
-      x_addr: newHost,
-      username: form.value.device_username,
-      password: form.value.device_password,
-    })
-    const capsData = capsRes.data?.data
-    const profiles = capsData?.profiles || []
-    if (profiles.length === 0) return
-    const streamRes = await request.post('/onvif/stream-uris', {
-      x_addr: newHost,
-      media_x_addr: capsData?.capabilities?.media?.x_addr || null,
-      username: form.value.device_username,
-      password: form.value.device_password,
-      profiles: profiles.map(p => p.token),
-    })
-    const streams = streamRes.data?.data?.streams || []
-    form.value.pull_urls = profiles.map((p, i) => {
-      const stream = streams.find(s => s.token === p.token) || streams[i] || {}
-      return { protocol: 'Rtsp', url: stream.rtsp_url || '', priority: i + 1 }
-    }).filter(r => r.url)
-    if (form.value.pull_urls.length > 0) {
-      ElMessage.success(`发现 ${form.value.pull_urls.length} 个 RTSP 通道`)
-    }
-  } catch (e) {
-    // silent fail for auto-fetch
-  } finally {
-    onvifFetchingProfiles.value = false
-  }
-})
-
-async function onvifFetchFormProfiles() {
-  const host = form.value.host?.trim()
-  if (!host) { ElMessage.warning('请填写设备地址'); return }
-  if (!form.value.device_username || !form.value.device_password) { ElMessage.warning('请填写用户名和密码'); return }
-  onvifFetchingProfiles.value = true
-  form.value.pull_urls = []
-  try {
-    const capsRes = await request.post('/onvif/capabilities', {
-      x_addr: host,
-      username: form.value.device_username,
-      password: form.value.device_password,
-    })
-    const capsData = capsRes.data?.data
-    const profiles = capsData?.profiles || []
-    if (profiles.length === 0) { ElMessage.warning('未发现媒体通道'); return }
-    const streamRes = await request.post('/onvif/stream-uris', {
-      x_addr: host,
-      media_x_addr: capsData?.capabilities?.media?.x_addr || null,
-      username: form.value.device_username,
-      password: form.value.device_password,
-      profiles: profiles.map(p => p.token),
-    })
-    const streams = streamRes.data?.data?.streams || []
-    form.value.pull_urls = profiles.map((p, i) => {
-      const stream = streams.find(s => s.token === p.token) || streams[i] || {}
-      return { protocol: 'Rtsp', url: stream.rtsp_url || '', priority: i + 1 }
-    }).filter(r => r.url)
-    if (form.value.pull_urls.length > 0) {
-      ElMessage.success(`发现 ${form.value.pull_urls.length} 个 RTSP 通道`)
-    } else {
-      ElMessage.warning('未发现 RTSP 链接')
-    }
-  } catch (e) {
-    ElMessage.error('获取通道失败: ' + (e?.message || e))
-  } finally {
-    onvifFetchingProfiles.value = false
-  }
-}
 
 async function fetchDevices() {
   await deviceStore.fetchDevices(deviceStore.limit, deviceStore.offset)
@@ -1331,60 +807,9 @@ async function openEditModal(device) {
   isEdit.value = true; editingId.value = device.id
   try {
     const fullDevice = await deviceStore.fetchDevice(device.device_tag)
-    const ext = fullDevice.extended || {}
-    const devStreamConfig = ext.stream_config || {}
     form.value = {
-      name: fullDevice.name || '', protocol: fullDevice.protocol || 'Gb28181', host: fullDevice.host || '',
-      port: fullDevice.port || 554, device_username: fullDevice.device_username || '', device_password: fullDevice.device_password || '',
-      media_server_tag: fullDevice.media_server_tag || '',
-      pull_urls: fullDevice.pull_urls ? fullDevice.pull_urls.map(u => ({ ...u })) : [],
-      push_urls: fullDevice.push_urls ? fullDevice.push_urls.map(u => ({ ...u })) : [],
-      playback_username: fullDevice.playback_username || '', playback_password: fullDevice.playback_password || '',
-      device_tag: fullDevice.device_tag || '', group_id: fullDevice.group_id ?? null, is_public: fullDevice.is_public || false,
-      rtsp_mode: ext.rtsp_mode || fullDevice.rtsp_mode || 'pull',
-      app: fullDevice.app || 'live',
-      rtsp_full_url: ext.rtsp_full_url || fullDevice.rtsp_full_url || '',
-      rtmp_mode: ext.rtmp_mode || fullDevice.rtmp_mode || 'push',
-      extended: ext,
-      enable_stream_config: !!devStreamConfig,
-      stream_config: {
-        video_codec: devStreamConfig.video_codec || 'PS',
-        audio_codec: devStreamConfig.audio_codec || 'PCMA',
-        video_payload_type: devStreamConfig.video_payload_type || 96,
-        audio_payload_type: devStreamConfig.audio_payload_type || 8,
-        profile_level_id: devStreamConfig.profile_level_id || '4D001F',
-        packaging_mode: devStreamConfig.packaging_mode || 'HIS',
-        sprop_parameter_sets: devStreamConfig.sprop_parameter_sets || '',
-        stream_mode: devStreamConfig.stream_mode || 'recvonly',
-      },
-      gb_industry_code: '',
-      gb_device_type: '',
-      gb_network_code: '',
-      gb_transport: ext.gb_transport || 'UDP',
-    }
-    const isGb28181 = fullDevice.protocol && fullDevice.protocol.toLowerCase().includes('gb')
-    if (isGb28181 && fullDevice.device_tag) {
-      const tag = fullDevice.device_tag || ''
-      if (tag.length !== 20) {
-        ElMessage.warning(`设备SIP ID格式错误: ${tag} (${tag.length}位)，应为20位`)
-      }
-      const regionCode = fullDevice.region_code || (tag.length >= 6 ? tag.substring(0, 6) : '')
-      const regionPath = findRegionPath(regionCode, regionStore.regionTree)
-      gbRegionCascader.value = regionPath || (regionCode ? [regionCode] : [])
-      sipGbCode.value = tag.length >= 8 ? tag.substring(6, 8) : '00'
-      form.value.gb_industry_code = tag.length >= 10 ? tag.substring(8, 10) : ''
-      form.value.gb_device_type = tag.length >= 13 ? tag.substring(10, 13) : ''
-      form.value.gb_network_code = tag.length >= 14 ? tag.substring(13, 14) : ''
-      sipIdSuffix.value = tag.length >= 20 ? tag.substring(14, 20) : ''
-    } else {
-      const regionCode = fullDevice.region_code || ''
-      const regionPath = findRegionPath(regionCode, regionStore.regionTree)
-      gbRegionCascader.value = regionPath || (regionCode ? [regionCode] : [])
-      sipGbCode.value = '00'
-      form.value.gb_industry_code = ''
-      form.value.gb_device_type = ''
-      form.value.gb_network_code = ''
-      sipIdSuffix.value = ''
+      protocol: fullDevice.protocol || 'Gb28181',
+      device_tag: fullDevice.device_tag || '',
     }
     showModal.value = true
   } catch (e) {
@@ -1399,85 +824,90 @@ function removePullUrl(index) { form.value.pull_urls.splice(index, 1) }
 function addPushUrl() { form.value.push_urls.push({ protocol: 'rtmp', url: '', priority: form.value.push_urls.length + 1 }) }
 function removePushUrl(index) { form.value.push_urls.splice(index, 1) }
 
-async function submitDevice() {
-  if (!form.value.name.trim()) { ElMessage.error('请填写设备名称'); return }
-  if (form.value.protocol === 'Gb28181') {
-    if (!sipIdPrefix.value) { ElMessage.error('请选择所属地区'); return }
-    if (!form.value.gb_industry_code) { ElMessage.error('请选择行业类型'); return }
-    if (!form.value.gb_device_type) { ElMessage.error('请选择设备类型'); return }
-    if (!form.value.gb_network_code) { ElMessage.error('请选择网络类型'); return }
-    if (!sipIdSuffix.value || sipIdSuffix.value.length !== 6) {
-      ElMessage.error('SIP ID 后缀必须填写 6 位数字')
-      return
+const currentFormRef = computed(() => {
+  if (isEdit.value) {
+    switch (form.value.protocol) {
+      case 'Gb28181': return gbFormRef.value
+      case 'Rtsp': return rtspFormRef.value
+      case 'Onvif': return onvifFormRef.value
+      case 'Rtmp': return rtmpFormRef.value
     }
-    const previewLength = sipIdPreview.value.length
-    if (previewLength !== 20) {
-      ElMessage.error(`SIP ID 必须是20位，当前${previewLength}位，请检查：行政区划${sipIdPrefix.value.length}位 + 基层2位 + 行业2位 + 设备3位 + 网络1位 + 后缀6位`)
-      return
+  } else {
+    switch (activeDeviceTab.value) {
+      case 'gb28181': return gbFormRef.value
+      case 'rtsp': return rtspFormRef.value
+      case 'onvif': return onvifFormRef.value
+      case 'rtmp': return rtmpFormRef.value
     }
-    if (!form.value.device_password) { ElMessage.error('请填写SIP密码'); return }
   }
-  if (form.value.protocol === 'Onvif' && !form.value.host.trim()) { ElMessage.error('请填写设备地址'); return }
-  if (form.value.protocol === 'Onvif' && !form.value.device_username) { ElMessage.error('请填写用户名'); return }
-  if (form.value.protocol === 'Onvif' && !form.value.device_password) { ElMessage.error('请填写密码'); return }
-  if (form.value.protocol === 'Rtsp' && form.value.rtsp_mode === 'pull' && !form.value.rtsp_full_url.trim()) { ElMessage.error('请填写RTSP全链接'); return }
+  return null
+})
 
-  const finalDeviceTag = form.value.protocol === 'Gb28181'
-    ? (isEdit.value ? sipIdPreview.value : sipIdPreview.value)
-    : null
+async function submitDevice() {
+  const formRef = currentFormRef.value
+  if (!formRef) { ElMessage.error('无法获取表单'); return }
+  
+  const validation = formRef.validate()
+  if (!validation.valid) {
+    ElMessage.error(validation.message)
+    return
+  }
+  
+  const data = formRef.getData()
+
+  const finalDeviceTag = data.protocol === 'Gb28181' ? data.device_tag : null
 
   const payload = {
-    name: form.value.name, protocol: form.value.protocol,
-    host: form.value.host || null, port: form.value.port || null,
-    device_username: form.value.device_username || null, device_password: form.value.device_password || null,
-    media_server_tag: form.value.media_server_tag || null,
-    pull_urls: form.value.pull_urls?.filter(u => u.url).length > 0 ? form.value.pull_urls : undefined,
-    push_urls: form.value.push_urls?.filter(u => u.url).length > 0 ? form.value.push_urls : undefined,
-    playback_username: form.value.playback_username || null, playback_password: form.value.playback_password || null,
-    device_tag: finalDeviceTag, region_code: sipIdPrefix.value || null, group_id: form.value.group_id || null, is_public: form.value.is_public,
-    app: form.value.app || null,
+    name: data.name, protocol: data.protocol,
+    host: data.host || null, port: data.port || null,
+    device_username: data.device_username || null, device_password: data.device_password || null,
+    media_server_tag: data.media_server_tag || null,
+    pull_urls: data.pull_urls?.filter(u => u.url).length > 0 ? data.pull_urls : undefined,
+    push_urls: data.push_urls?.filter(u => u.url).length > 0 ? data.push_urls : undefined,
+    playback_username: data.playback_username || null, playback_password: data.playback_password || null,
+    device_tag: finalDeviceTag, region_code: data.region_code || null, group_id: data.group_id || null, is_public: data.is_public,
+    app: data.app || null,
     extended: {
-      ...(form.value.extended || {}),
-      rtsp_mode: form.value.protocol === 'Rtsp' ? (form.value.rtsp_mode || null) : null,
-      rtsp_full_url: form.value.protocol === 'Rtsp' && form.value.rtsp_mode === 'pull' ? (form.value.rtsp_full_url || null) : null,
-      rtmp_mode: form.value.protocol === 'Rtmp' ? (form.value.rtmp_mode || null) : null,
-      gb_transport: form.value.protocol === 'Gb28181' ? (form.value.gb_transport || null) : null,
+      ...(data.extended || {}),
+      rtsp_mode: data.protocol === 'Rtsp' ? (data.rtsp_mode || null) : null,
+      rtsp_full_url: data.protocol === 'Rtsp' && data.rtsp_mode === 'pull' ? (data.rtsp_full_url || null) : null,
+      rtmp_mode: data.protocol === 'Rtmp' ? (data.rtmp_mode || null) : null,
+      gb_transport: data.protocol === 'Gb28181' ? (data.gb_transport || null) : null,
     },
   }
 
   // GB28181: 完整流配置
-  if (form.value.protocol === 'Gb28181' && form.value.enable_stream_config) {
+  if (data.protocol === 'Gb28181' && data.enable_stream_config) {
     payload.extended.stream_config = {
-      video_codec: form.value.stream_config.video_codec || null,
-      audio_codec: form.value.stream_config.audio_codec || null,
-      video_payload_type: form.value.stream_config.video_payload_type,
-      audio_payload_type: form.value.stream_config.audio_payload_type,
-      profile_level_id: form.value.stream_config.profile_level_id || null,
-      packaging_mode: form.value.stream_config.packaging_mode || null,
-      sprop_parameter_sets: form.value.stream_config.sprop_parameter_sets || null,
-      stream_mode: form.value.stream_config.stream_mode || null,
+      video_codec: data.stream_config.video_codec || null,
+      audio_codec: data.stream_config.audio_codec || null,
+      video_payload_type: data.stream_config.video_payload_type,
+      audio_payload_type: data.stream_config.audio_payload_type,
+      profile_level_id: data.stream_config.profile_level_id || null,
+      packaging_mode: data.stream_config.packaging_mode || null,
+      sprop_parameter_sets: data.stream_config.sprop_parameter_sets || null,
+      stream_mode: data.stream_config.stream_mode || null,
     }
   }
   if (isEdit.value) {
-    const deviceTag = form.value.protocol === 'Onvif' ? form.value.device_tag : null
-    await deviceStore.updateDevice(editingId.value, payload, deviceTag)
+    await deviceStore.updateDevice(editingId.value, payload, data.device_tag)
     await fetchDevices(); closeModal()
     return
   }
-  if (form.value.protocol === 'Onvif' && form.value.pull_urls.filter(u => u.url).length > 1) {
-    const streams = form.value.pull_urls.map((url, i) => ({
-      token: form.value.extended?.profile_token?.[i] || `stream_${i}`,
-      name: `${form.value.name} - 通道${i + 1}`,
+  if (data.protocol === 'Onvif' && data.pull_urls?.filter(u => u.url).length > 1) {
+    const streams = data.pull_urls.map((url, i) => ({
+      token: data.extended?.profile_token?.[i] || `stream_${i}`,
+      name: `${data.name} - 通道${i + 1}`,
       rtsp_url: url.url,
     }))
     const res = await request.post('/onvif/devices', {
       urn: null,
-      x_addr: form.value.host,
-      name: form.value.name,
+      x_addr: data.host,
+      name: data.name,
       manufacturer: null,
       model: null,
-      username: form.value.device_username,
-      password: form.value.device_password,
+      username: data.device_username,
+      password: data.device_password,
       capabilities: { media: null, ptz: null, events: null, imaging: null },
       types: [],
       scopes: [],
@@ -1489,198 +919,6 @@ async function submitDevice() {
   }
   await deviceStore.createDevice(payload)
   await fetchDevices(); closeModal()
-}
-
-async function discoverDevices() {
-  discovering.value = true; discoveredDevices.value = []
-  try {
-    const res = await request.post('/onvif/discover')
-    discoveredDevices.value = res.data?.data || []
-  } catch (e) {
-    toast.error('发现设备失败: ' + (e?.message || e))
-  } finally {
-    discovering.value = false
-  }
-}
-
-function openOnvifDiscoverModal() {
-  onvifSelectedDevice.value = null
-  onvifRtspUrls.value = []
-  onvifDiscoverUser.value = ''
-  onvifDiscoverPwd.value = ''
-  onvifManualIp.value = ''
-  showDiscoverModal.value = true
-  discoveredDevices.value = []
-}
-
-function onvifDiscoverManual() {
-  if (!onvifManualIp.value.trim()) { ElMessage.warning('请输入 IP 地址'); return }
-  onvifDiscovering.value = true
-  onvifRtspUrls.value = []
-  const ip = onvifManualIp.value.trim()
-  const port = ip.includes(':') ? parseInt(ip.split(':')[1]) : 80
-  const host = ip.includes(':') ? ip.split(':')[0] : ip
-  request.post('/onvif/probe', { host, port }).then(res => {
-    const data = res.data?.data
-    const devices = Array.isArray(data) ? data : (data ? [data] : [])
-    if (devices.length === 0) {
-      ElMessage.warning('未发现 ONVIF 设备，请检查 IP 地址或设备是否在线')
-      return
-    }
-    devices.forEach(dev => {
-      const devAddr = dev.x_addr || `http://${dev.host}:${dev.port}/onvif/device_service`
-      const exists = discoveredDevices.value.find(d => (d.address || d.x_addr) === devAddr)
-      if (!exists) {
-        discoveredDevices.value.push({ ...dev, address: devAddr, _from: 'manual' })
-      }
-    })
-    onvifSelectedDevice.value = discoveredDevices.value.find(d => d.host === host) || discoveredDevices.value[discoveredDevices.value.length - 1]
-  }).catch(e => {
-    toast.error('发现失败: ' + (e?.message || e))
-  }).finally(() => {
-    onvifDiscovering.value = false
-  })
-}
-
-function closeDiscoverModal() {
-  showDiscoverModal.value = false
-  onvifSelectedDevice.value = null
-  onvifRtspUrls.value = []
-  onvifDiscoverUser.value = ''
-  onvifManualIp.value = ''
-  onvifDiscoverPwd.value = ''
-  onvifCapabilities.value = { rtsp_url: '', ptz: false, audio: false }
-  onvifStreams.value = []
-  onvifSelectedStreams.value = []
-}
-
-async function onvifFetchProfiles() {
-  const dev = onvifSelectedDevice.value
-  if (!dev) return
-  const address = dev.address || dev.x_addr || ''
-  if (!address) { ElMessage.warning('设备地址为空'); return }
-  onvifFetchingProfiles.value = true
-  onvifCapabilities.value = { rtsp_url: '', ptz: false, audio: false }
-  onvifStreams.value = []
-  onvifSelectedStreams.value = []
-  try {
-    const capsRes = await request.post('/onvif/capabilities', {
-      x_addr: address,
-      username: onvifDiscoverUser.value || '',
-      password: onvifDiscoverPwd.value || '',
-    })
-    const capsData = capsRes.data?.data
-    const profiles = capsData?.profiles || []
-    if (profiles.length === 0) {
-      ElMessage.warning('未发现媒体通道，请检查地址和认证信息')
-      return
-    }
-    const streamRes = await request.post('/onvif/stream-uris', {
-      x_addr: address,
-      media_x_addr: capsData?.capabilities?.media?.x_addr || null,
-      username: onvifDiscoverUser.value || '',
-      password: onvifDiscoverPwd.value || '',
-      profiles: profiles.map(p => p.token),
-    })
-    const streams = streamRes.data?.data?.streams || []
-    onvifStreams.value = profiles.map((p, i) => {
-      const stream = streams.find(s => s.token === p.token) || streams[i] || {}
-      return {
-        token: p.token,
-        name: p.name || `通道 ${i + 1}`,
-        width: p.width || stream.width || 0,
-        height: p.height || stream.height || 0,
-        encoding: p.encoding || stream.encoding || '',
-        rtsp_url: stream.rtsp_url || '',
-      }
-    }).filter(s => s.rtsp_url)
-    if (onvifStreams.value.length > 0) {
-      onvifSelectAllStreams.value = true
-      ElMessage.success(`已获取 ${onvifStreams.value.length} 个视频通道`)
-    } else {
-      ElMessage.warning('未发现 RTSP 链接，请检查用户名和密码')
-    }
-    const firstStream = streams.find(s => s.rtsp_url) || streams[0] || {}
-    onvifCapabilities.value = {
-      rtsp_url: firstStream.rtsp_url || '',
-      ptz: !!(capsData?.capabilities?.ptz),
-      audio: !!(capsData?.capabilities?.events),
-    }
-  } catch (e) {
-    ElMessage.error('获取能力失败: ' + (e?.message || e))
-  } finally {
-    onvifFetchingProfiles.value = false
-  }
-}
-
-function onDiscoverDialogOpened() {
-  discoveredDevices.value = []
-  onvifSelectedDevice.value = null
-  onvifCapabilities.value = { rtsp_url: '', ptz: false, audio: false }
-  discoverDevices()
-}
-
-async function confirmOnvifDevice() {
-  const dev = onvifSelectedDevice.value
-  if (!dev || onvifSelectedStreams.value.length === 0) return
-  const address = dev.address || dev.x_addr || ''
-  const manufacturer = dev.manufacturer || ''
-  const model = dev.model || ''
-  const baseName = dev.name || `${manufacturer} ${model}`.trim() || 'ONVIF 设备'
-  const caps = onvifCapabilities.value
-  form.value.name = baseName
-  form.value.host = address
-  form.value.port = 80
-  form.value.protocol = 'Onvif'
-  form.value.device_username = onvifDiscoverUser.value || ''
-  form.value.device_password = onvifDiscoverPwd.value || ''
-  form.value.pull_urls = onvifSelectedStreams.value.map((stream, i) => ({
-    protocol: 'rtsp',
-    url: stream.rtsp_url,
-    priority: 1,
-  }))
-  form.value.extended = {
-    ...(form.value.extended || {}),
-    stream_key: form.value.stream_key || null,
-    profile_token: onvifSelectedStreams.value.map(s => s.token),
-    width: onvifSelectedStreams.value.map(s => s.width),
-    height: onvifSelectedStreams.value.map(s => s.height),
-    encoding: onvifSelectedStreams.value.map(s => s.encoding),
-    ptz_support: caps.ptz,
-    audio_support: caps.audio,
-  }
-  closeDiscoverModal()
-  showModal.value = true
-  isEdit.value = false
-  editingId.value = null
-}
-
-function addDiscoveredDevice(dev) {
-  const address = dev.address || dev.x_addr || ''
-  let host = '', port = 554
-  if (address) {
-    const lastColon = address.lastIndexOf(':')
-    if (lastColon > 0) {
-      host = address.substring(0, lastColon)
-      port = parseInt(address.substring(lastColon + 1)) || 554
-    } else {
-      host = address
-    }
-  }
-  const manufacturer = dev.manufacturer || ''
-  const model = dev.model || ''
-  const name = dev.name || `${manufacturer} ${model}`.trim() || `ONVIF ${host}`
-  form.value = defaultForm()
-  form.value.name = name
-  form.value.host = address
-  form.value.port = port
-  form.value.protocol = 'Onvif'
-  form.value.device_username = ''
-  form.value.device_password = ''
-  showDiscoverModal.value = false
-  isEdit.value = false
-  editingId.value = null
-  showModal.value = true
 }
 
 async function openPlayLinks(device) {

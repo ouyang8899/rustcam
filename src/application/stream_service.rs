@@ -115,7 +115,20 @@ impl StreamService {
             };
 
             if !on_media_server {
-                let stream_info = server.add_stream_proxy(&app, &stream_key, rtsp_url).await
+                let rtsp_url_with_auth = if let (Some(user), Some(pass)) = (&device.device_username, &device.device_password) {
+                    if rtsp_url.starts_with("rtsp://") && !rtsp_url.contains('@') {
+                        if let Some(stripped) = rtsp_url.strip_prefix("rtsp://") {
+                            format!("rtsp://{}:{}@{}", user, pass, stripped)
+                        } else {
+                            rtsp_url.to_string()
+                        }
+                    } else {
+                        rtsp_url.to_string()
+                    }
+                } else {
+                    rtsp_url.to_string()
+                };
+                let stream_info = server.add_stream_proxy(&app, &stream_key, &rtsp_url_with_auth).await
                     .map_err(|e| {
                         tracing::error!("[StreamService] add_stream_proxy failed for {}: {}", stream_key, e);
                         AppError::MediaServerError(format!("Media server error: {}", e))

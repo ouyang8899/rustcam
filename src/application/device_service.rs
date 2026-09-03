@@ -651,8 +651,8 @@ impl DeviceService {
 
         let uuid = Uuid::new_v4().to_string();
         let device_tag = match urn {
-            Some(u) if !u.is_empty() => format!("{}_{}", u, uuid),
-            _ => format!("urn:uuid:{}", uuid),
+            Some(u) if !u.is_empty() => u.replace(":", "_"),
+            _ => format!("onvif_{}", uuid.replace("-", "")),
         };
 
         let parent_name = name
@@ -692,6 +692,14 @@ impl DeviceService {
 
         self.infra.db.create_device(&parent).await?;
         tracing::info!("[DeviceService] Created ONVIF parent device: id={}, name={}", parent.id, parent.name);
+
+        let pull_urls: Vec<PullUrl> = streams.iter().enumerate().map(|(i, s)| PullUrl {
+            protocol: StreamProtocol::Rtsp,
+            url: s.rtsp_url.clone(),
+            priority: i as u8 + 1,
+        }).collect();
+        parent.pull_urls = pull_urls;
+        self.infra.db.update_device(&parent).await?;
 
         let mut child_results = Vec::new();
         child_results.push(serde_json::json!({
@@ -980,6 +988,43 @@ impl DeviceService {
                     }
                     Err(e) => {
                         tracing::warn!("[DeviceService] Failed to get channel for device {}: {}", device_tag, e);
+                    }
+                }
+            }
+        } else if matches!(device.protocol, Protocol::Onvif) {
+            if let Some(ref device_tag) = device.device_tag {
+                let channels = self.infra.db.get_channels_by_device_tag_cached(device_tag);
+                for mut channel in channels {
+                    if &channel.channel_tag == device_tag {
+                        continue;
+                    }
+                    if let Some(pull_url) = device.pull_urls.iter().find(|p| {
+                        p.url.contains(&channel.channel_tag)
+                    }) {
+                        let rtsp_url_with_auth = if let (Some(u), Some(p)) = (&device.device_username, &device.device_password) {
+                            Self::embed_rtsp_auth(&pull_url.url, u, p)
+                        } else {
+                            pull_url.url.clone()
+                        };
+                        if let Some(ext) = channel.channel_extended.as_mut() {
+                            if let Some(obj) = ext.as_object_mut() {
+                                obj.insert("rtsp_url".to_string(), serde_json::json!(rtsp_url_with_auth));
+                            }
+                        }
+                        if let Err(e) = self.infra.db.update_channel(&channel).await {
+                            tracing::warn!("[DeviceService] Failed to update ONVIF channel {}: {}", channel.channel_tag, e);
+                        }
+
+                        let stream_key = crate::domain::make_stream_key(device_tag, &channel.channel_tag);
+                        let streams = self.stream_service.get_streams_by_channel(device_tag, &channel.channel_tag).await;
+                        for stream in streams {
+                            if matches!(stream.state, crate::domain::StreamState::Active | crate::domain::StreamState::Starting | crate::domain::StreamState::Recovering) {
+                                match self.stream_service.restart_stream(&stream_key, &rtsp_url_with_auth).await {
+                                    Ok(_) => tracing::info!("[DeviceService] ONVIF channel {} stream restarted with new URL", channel.channel_tag),
+                                    Err(e) => tracing::warn!("[DeviceService] Failed to restart stream for channel {}: {}", channel.channel_tag, e),
+                                }
+                            }
+                        }
                     }
                 }
             }
