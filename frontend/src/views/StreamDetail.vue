@@ -58,45 +58,80 @@
                 </div>
               </div>
 
-              <div v-if="supportPtz && stream?.channel_tag" class="ptz-panel">
-                <div class="ptz-title">PTZ 控制</div>
-                <div class="ptz-control">
-                  <div class="ptz-grid">
-                    <button class="ptz-dir-btn ptz-dir-up" @mousedown="ptzControl('up', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">▲</button>
-                    <button class="ptz-dir-btn ptz-dir-lf" @mousedown="ptzControl('left', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">◀</button>
-                    <button class="ptz-stop-btn" @click="ptzControl('stop', 1)">●</button>
-                    <button class="ptz-dir-btn ptz-dir-rt" @mousedown="ptzControl('right', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">▶</button>
-                    <button class="ptz-dir-btn ptz-dir-dn" @mousedown="ptzControl('down', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">▼</button>
-                  </div>
-                  <div class="ptz-zoom">
-                    <button class="ptz-opt-btn" @mousedown="ptzControl('zoom_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">ZOOM+</button>
-                    <button class="ptz-opt-btn" @mousedown="ptzControl('zoom_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">ZOOM-</button>
-                  </div>
-                  <div class="ptz-focus">
-                    <button class="ptz-opt-btn" @mousedown="ptzControl('focus_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">FOCUS+</button>
-                    <button class="ptz-opt-btn" @mousedown="ptzControl('focus_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">FOCUS-</button>
-                  </div>
-                  <div class="ptz-iris">
-                    <button class="ptz-opt-btn" @mousedown="ptzControl('iris_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">IRIS+</button>
-                    <button class="ptz-opt-btn" @mousedown="ptzControl('iris_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">IRIS-</button>
-                  </div>
+              <div v-if="supportPtz && stream?.channel_tag" class="ptz-sidebar">
+                <div class="ptz-control-header">
+                  <span class="ptz-label">云台控制</span>
+                  <div class="ptz-status-dot" :class="{ active: ptzStatus?.moving }"></div>
                 </div>
-
-                <div class="preset-section">
-                  <div class="preset-header">
-                    <span>预制位</span>
-                    <el-button size="small" type="primary" @click="showPresetDialog = true">保存</el-button>
-                  </div>
-                  <div v-if="presets.length === 0" class="empty-presets">暂无预制位</div>
-                  <div v-else class="preset-list">
-                    <div v-for="preset in presets" :key="preset.token" class="preset-item">
-                      <span class="preset-name">{{ preset.name }}</span>
-                      <div class="preset-actions">
-                        <el-button size="small" @click="gotoPreset(preset)">调用</el-button>
-                        <el-button size="small" type="danger" plain @click="removePreset(preset)">删</el-button>
-                      </div>
+                <div class="ptz-dpad">
+                  <button class="dpad-btn dpad-up" @mousedown="ptzControl('up', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4l-8 8h5v8h6v-8h5z"/></svg>
+                  </button>
+                  <button class="dpad-btn dpad-left" @mousedown="ptzControl('left', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 12l8-8v5h8v6h-8v5z"/></svg>
+                  </button>
+                  <button class="dpad-center" @click="ptzControl('stop', 1)">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                  </button>
+                  <button class="dpad-btn dpad-right" @mousedown="ptzControl('right', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 12l-8 8v-5H4v-6h8V4z"/></svg>
+                  </button>
+                  <button class="dpad-btn dpad-down" @mousedown="ptzControl('down', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 20l8-8h-5V4h-6v8H4z"/></svg>
+                  </button>
+                </div>
+                <div class="ptz-aux-row">
+                  <div class="aux-group">
+                    <span class="aux-label">变倍</span>
+                    <div class="aux-btns">
+                      <button class="aux-btn" @mousedown="ptzControl('zoom_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">+</button>
+                      <button class="aux-btn" @mousedown="ptzControl('zoom_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">−</button>
                     </div>
                   </div>
+                  <div class="aux-group">
+                    <span class="aux-label">聚焦</span>
+                    <div class="aux-btns">
+                      <button class="aux-btn" @mousedown="ptzControl('focus_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">+</button>
+                      <button class="aux-btn" @mousedown="ptzControl('focus_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">−</button>
+                    </div>
+                  </div>
+                  <div class="aux-group">
+                    <span class="aux-label">光圈</span>
+                    <div class="aux-btns">
+                      <button class="aux-btn" @mousedown="ptzControl('iris_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">+</button>
+                      <button class="aux-btn" @mousedown="ptzControl('iris_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">−</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="ptz-joystick-area" ref="joystickRef" @mousedown="startJoystick" @touchstart.prevent="startJoystick">
+                  <div class="joystick-base">
+                    <div class="joystick-stick" :style="joystickStyle"></div>
+                  </div>
+                </div>
+                <div class="ptz-position" v-if="ptzStatus?.position">
+                  <span class="pos-label">位置</span>
+                  <span class="pos-value">P:{{ ptzStatus.position.pan?.toFixed(2) }} T:{{ ptzStatus.position.tilt?.toFixed(2) }} Z:{{ ptzStatus.position.zoom?.toFixed(2) }}</span>
+                </div>
+              </div>
+            </div>
+          </el-card>
+
+          <el-card v-if="supportPtz && stream?.channel_tag" shadow="never" class="preset-card">
+            <template #header>
+              <div class="preset-header">
+                <span>预制位</span>
+                <el-button size="small" type="primary" @click="showPresetDialog = true">保存当前</el-button>
+              </div>
+            </template>
+            <div v-if="presets.length === 0" class="empty-presets">暂无预制位</div>
+            <div v-else class="preset-grid">
+              <div v-for="preset in presets" :key="preset.token" class="preset-tile">
+                <div class="preset-info">
+                  <span class="preset-name">{{ preset.name }}</span>
+                </div>
+                <div class="preset-actions">
+                  <el-button size="small" type="primary" @click="gotoPreset(preset)">调用</el-button>
+                  <el-button size="small" type="danger" plain @click="removePreset(preset)">删除</el-button>
                 </div>
               </div>
             </div>
@@ -284,6 +319,15 @@ const presets = ref([])
 const showPresetDialog = ref(false)
 const newPresetName = ref('')
 let ptzStopTimer = null
+const joystickRef = ref(null)
+const joystickActive = ref(false)
+const joystickDelta = ref({ x: 0, y: 0 })
+const ptzStatus = ref(null)
+const ptzStatusTimer = ref(null)
+
+const joystickStyle = computed(() => ({
+  transform: `translate(${joystickDelta.value.x * 30}px, ${joystickDelta.value.y * 30}px)`
+}))
 
 const stateType = (state) => {
   const map = { Active: 'success', Idle: 'info', Starting: 'warning', Stopping: 'warning', Recovering: 'warning', Error: 'danger', Stopped: 'info' }
@@ -451,6 +495,74 @@ async function removePreset(preset) {
   }
 }
 
+function startJoystick(e) {
+  joystickActive.value = true
+  updateJoystick(e)
+}
+
+function updateJoystick(e) {
+  if (!joystickActive.value || !joystickRef.value) return
+  
+  const rect = joystickRef.value.getBoundingClientRect()
+  const centerX = rect.left + rect.width / 2
+  const centerY = rect.top + rect.height / 2
+  
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY
+  
+  let dx = (clientX - centerX) / (rect.width / 2)
+  let dy = (clientY - centerY) / (rect.height / 2)
+  
+  const dist = Math.sqrt(dx * dx + dy * dy)
+  if (dist > 1) {
+    dx /= dist
+    dy /= dist
+  }
+  
+  joystickDelta.value = { x: dx, y: dy }
+  
+  if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
+    const { device_tag, channel_tag } = stream.value
+    channelStore.channelPtzControl(device_tag, channel_tag, {
+      type: 'continuous',
+      pan: dx,
+      tilt: -dy,
+      zoom: 0
+    }, ptzSpeed.value).catch(() => {})
+  }
+}
+
+function stopJoystick() {
+  if (!joystickActive.value) return
+  joystickActive.value = false
+  joystickDelta.value = { x: 0, y: 0 }
+  
+  const { device_tag, channel_tag } = stream.value
+  channelStore.channelPtzControl(device_tag, channel_tag, 'stop', ptzSpeed.value)
+}
+
+async function fetchPtzStatus() {
+  if (!stream.value?.device_tag || !stream.value?.channel_tag) return
+  try {
+    const status = await channelStore.getChannelPtzStatus(stream.value.device_tag, stream.value.channel_tag)
+    ptzStatus.value = status
+  } catch {
+    ptzStatus.value = null
+  }
+}
+
+function startPtzStatusPolling() {
+  fetchPtzStatus()
+  ptzStatusTimer.value = setInterval(fetchPtzStatus, 5000)
+}
+
+function stopPtzStatusPolling() {
+  if (ptzStatusTimer.value) {
+    clearInterval(ptzStatusTimer.value)
+    ptzStatusTimer.value = null
+  }
+}
+
 async function confirmStop() {
   try {
     await ElMessageBox.confirm('确定停止此流吗？', '确认', { type: 'warning' })
@@ -485,12 +597,28 @@ function formatTime(ts) {
   return d.toLocaleString()
 }
 
-onMounted(fetchData)
+onMounted(() => {
+  fetchData()
+  
+  document.addEventListener('mousemove', updateJoystick)
+  document.addEventListener('mouseup', stopJoystick)
+  document.addEventListener('touchmove', updateJoystick)
+  document.addEventListener('touchend', stopJoystick)
+  
+  if (supportPtz.value) {
+    startPtzStatusPolling()
+  }
+})
 
 onUnmounted(() => {
   if (playerRef.value) {
     playerRef.value.destroy()
   }
+  document.removeEventListener('mousemove', updateJoystick)
+  document.removeEventListener('mouseup', stopJoystick)
+  document.removeEventListener('touchmove', updateJoystick)
+  document.removeEventListener('touchend', stopJoystick)
+  stopPtzStatusPolling()
 })
 </script>
 
@@ -515,295 +643,291 @@ onUnmounted(() => {
   min-width: 0;
 }
 
-.ptz-panel {
-  width: 180px;
+.ptz-sidebar {
+  width: 160px;
   flex-shrink: 0;
-  background: var(--el-fill-color-lighter);
+  background: linear-gradient(180deg, var(--el-fill-color-lighter) 0%, var(--el-fill-color-dark) 100%);
   border-radius: var(--radius-base);
-  padding: 12px;
+  padding: 14px 10px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  border: 1px solid var(--el-border-color-lighter);
 }
 
-.ptz-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--el-text-color-primary);
-  text-align: center;
-}
-
-.ptz-panel .ptz-control {
+.ptz-control-header {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
-.preset-section {
+.ptz-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ptz-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--el-text-color-dim);
+  transition: all 0.3s;
+}
+
+.ptz-status-dot.active {
+  background: var(--el-color-success);
+  box-shadow: 0 0 8px var(--el-color-success);
+}
+
+.ptz-dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 40px);
+  grid-template-rows: repeat(3, 40px);
+  gap: 4px;
+  justify-content: center;
+}
+
+.dpad-btn {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--el-border-color);
+  background: var(--el-fill-color-light);
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  color: var(--el-text-color-primary);
+}
+
+.dpad-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.dpad-btn:hover {
+  background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
+}
+
+.dpad-btn:active {
+  transform: scale(0.92);
+  background: var(--el-color-primary);
+  color: white;
+}
+
+.dpad-center {
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.06);
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  color: var(--el-color-danger);
+}
+
+.dpad-center svg {
+  width: 16px;
+  height: 16px;
+}
+
+.dpad-center:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: var(--el-color-danger);
+}
+
+.dpad-center:active {
+  transform: scale(0.92);
+  background: var(--el-color-danger);
+  color: white;
+}
+
+.dpad-up { grid-column: 2; grid-row: 1; }
+.dpad-left { grid-column: 1; grid-row: 2; }
+.dpad-center { grid-column: 2; grid-row: 2; }
+.dpad-right { grid-column: 3; grid-row: 2; }
+.dpad-down { grid-column: 2; grid-row: 3; }
+
+.ptz-aux-row {
+  display: flex;
+  gap: 6px;
+  padding-top: 8px;
   border-top: 1px solid var(--el-border-color-lighter);
-  padding-top: 12px;
+}
+
+.aux-group {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  gap: 4px;
+}
+
+.aux-label {
+  font-size: 9px;
+  color: var(--el-text-color-secondary);
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.aux-btns {
+  display: flex;
+  gap: 2px;
+}
+
+.aux-btn {
+  flex: 1;
+  height: 26px;
+  border: 1px solid var(--el-border-color);
+  background: var(--el-fill-color-light);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  transition: all 0.15s;
+}
+
+.aux-btn:hover {
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
+}
+
+.aux-btn:active {
+  background: var(--el-color-primary);
+  color: white;
+}
+
+.ptz-joystick-area {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.ptz-joystick-area .joystick-base {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: var(--el-fill-color-light);
+  border: 2px solid var(--el-border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.ptz-joystick-area .joystick-stick {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--el-color-primary-light-3) 0%, var(--el-color-primary) 100%);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  transition: transform 0.05s ease-out;
+  pointer-events: none;
+}
+
+.ptz-position {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  background: var(--el-fill-color-dark);
+  border-radius: 6px;
+  border: 1px solid var(--el-border-color-lighter);
+}
+
+.pos-label {
+  font-size: 9px;
+  color: var(--el-text-color-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.pos-value {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--el-text-color-secondary);
+}
+
+.preset-card :deep(.el-card__header) {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
 .preset-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
 }
 
 .preset-header span {
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.preset-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--el-fill-color-lighter);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.preset-tile:hover {
+  border-color: var(--el-color-primary);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+}
+
+.preset-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.preset-name {
+  font-size: 13px;
   font-weight: 500;
   color: var(--el-text-color-primary);
 }
 
-.preset-list {
-  flex: 1;
-  overflow-y: auto;
-}
-
-.preset-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-}
-
-.preset-item:last-child {
-  border-bottom: none;
-}
-
-.preset-name {
-  font-size: 12px;
-  color: var(--el-text-color-primary);
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .preset-actions {
   display: flex;
-  gap: 2px;
-  flex-shrink: 0;
+  gap: 4px;
 }
 
 .preset-actions .el-button {
-  padding: 2px 6px;
+  flex: 1;
+  padding: 4px 8px;
   font-size: 11px;
 }
 
 .empty-presets {
   text-align: center;
-  padding: 12px 0;
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-}
-
-.ptz-panel .ptz-grid {
-  flex: 1;
-  display: grid;
-  grid-template-columns: repeat(3, 36px);
-  grid-template-rows: repeat(3, 36px);
-  gap: 4px;
-  justify-content: center;
-}
-
-.ptz-panel .ptz-dir-btn {
-  width: 36px;
-  height: 36px;
-  font-size: 11px;
-}
-
-.ptz-panel .ptz-dir-up { grid-column: 2; grid-row: 1; justify-self: center; align-self: center; }
-.ptz-panel .ptz-dir-lf { grid-column: 1; grid-row: 2; justify-self: center; align-self: center; }
-.ptz-panel .ptz-stop-btn {
-  width: 36px;
-  height: 36px;
-  font-size: 10px;
-  grid-column: 2;
-  grid-row: 2;
-  justify-self: center;
-  align-self: center;
-}
-.ptz-panel .ptz-dir-rt { grid-column: 3; grid-row: 2; justify-self: center; align-self: center; }
-.ptz-panel .ptz-dir-dn { grid-column: 2; grid-row: 3; justify-self: center; align-self: center; }
-
-.ptz-panel .ptz-zoom {
-  display: flex;
-  gap: 4px;
-  margin-top: 8px;
-}
-
-.ptz-panel .ptz-focus {
-  display: flex;
-  gap: 4px;
-  margin-top: 4px;
-}
-
-.ptz-panel .ptz-iris {
-  display: flex;
-  gap: 4px;
-  margin-top: 4px;
-}
-
-.ptz-panel .ptz-opt-btn {
-  flex: 1;
-  height: 24px;
-  font-size: 9px;
-}
-
-.ptz-panel .ptz-speed {
-  display: none;
-}
-.player-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 300px; color: var(--text-muted); gap: var(--space-3); }
-.url-text { font-family: var(--font-mono); font-size: var(--text-xs); word-break: break-all; }
-.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: var(--space-1); }
-.status-dot.online { background: var(--color-success); }
-.status-dot.offline { background: var(--text-muted); }
-.url-item { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-
-.ptz-control {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-
-.ptz-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 38px);
-  grid-template-rows: repeat(3, 38px);
-  gap: 4px;
-}
-
-.ptz-dir-btn {
-  width: 38px;
-  height: 38px;
-  border: 1px solid var(--el-border-color);
-  background: var(--el-fill-color-light);
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  transition: all 0.15s;
-}
-
-.ptz-dir-btn:hover {
-  border-color: var(--el-color-primary);
-  color: var(--el-color-primary);
-}
-
-.ptz-dir-btn:active {
-  background: var(--el-color-primary-light-9);
-}
-
-.ptz-dir-up { grid-column: 2; grid-row: 1; justify-self: center; }
-.ptz-dir-lf { grid-column: 1; grid-row: 2; justify-self: center; }
-
-.ptz-stop-btn {
-  grid-column: 2; grid-row: 2; justify-self: center;
-  width: 34px; height: 34px;
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  background: rgba(239, 68, 68, 0.08);
-  border-radius: 50%;
-  color: var(--el-color-danger);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  transition: all 0.15s;
-}
-
-.ptz-stop-btn:hover {
-  border-color: var(--el-color-danger);
-  background: rgba(239, 68, 68, 0.15);
-}
-
-.ptz-dir-rt { grid-column: 3; grid-row: 2; justify-self: center; }
-.ptz-dir-dn { grid-column: 2; grid-row: 3; justify-self: center; }
-
-.ptz-zoom {
-  display: flex;
-  gap: 8px;
-  width: 100%;
-}
-
-.ptz-opt-btn {
-  flex: 1;
-  height: 32px;
-  border: 1px solid var(--el-border-color);
-  background: var(--el-fill-color-light);
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 500;
-  transition: all 0.15s;
-}
-
-.ptz-opt-btn:hover {
-  border-color: var(--el-color-primary);
-  color: var(--el-color-primary);
-}
-
-.ptz-speed {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  width: 100%;
-}
-
-.ptz-speed span:first-child {
-  width: 28px;
-}
-
-.ptz-speed span:last-child {
-  width: 28px;
-  text-align: right;
-}
-
-.empty-presets {
-  text-align: center;
-  padding: 24px;
+  padding: 32px 0;
   color: var(--el-text-color-secondary);
   font-size: 13px;
-}
-
-.preset-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.preset-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-}
-
-.preset-item:last-child {
-  border-bottom: none;
-}
-
-.preset-name {
-  font-size: 13px;
-  color: var(--el-text-color-primary);
-}
-
-.preset-actions {
-  display: flex;
-  gap: 4px;
 }
 
 .card-header {
@@ -811,4 +935,11 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
 }
+
+.player-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 300px; color: var(--text-muted); gap: var(--space-3); }
+.url-text { font-family: var(--font-mono); font-size: var(--text-xs); word-break: break-all; }
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: var(--space-1); }
+.status-dot.online { background: var(--color-success); }
+.status-dot.offline { background: var(--text-muted); }
+.url-item { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 </style>

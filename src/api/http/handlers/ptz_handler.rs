@@ -157,12 +157,12 @@ pub async fn channel_ptz_control_handler(
     let command = build_command(&req)?;
     
     let device = state.app.registry.device_service.get_device_by_device_tag(&device_tag)?
-        .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
+        .ok_or_else(|| AppError::NotFound(format!("设备 {} 不存在", device_tag)))?;
     
     match state.app.registry.device_service.handle_ptz_control(device.id, command.clone(), req.speed).await {
         Ok(result) => Ok(Json(ApiResponse::success(result))),
         Err(e) => {
-            tracing::warn!("[PTZ] Channel control failed: {}/{} err={}", device_tag, channel_tag, e);
+            tracing::warn!("[PTZ] 通道控制失败: {}/{} err={}", device_tag, channel_tag, e);
             Err(e)
         }
     }
@@ -174,7 +174,7 @@ pub async fn get_channel_ptz_presets_handler(
     Path((device_tag, channel_tag)): Path<(String, String)>,
 ) -> Result<Json<ApiResponse<Vec<PtzPreset>>>, AppError> {
     let device = state.app.registry.device_service.get_device_by_device_tag(&device_tag)?
-        .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
+        .ok_or_else(|| AppError::NotFound(format!("设备 {} 不存在", device_tag)))?;
     let presets = state.app.registry.device_service.list_ptz_presets(device.id).await?;
     Ok(Json(ApiResponse::success(presets)))
 }
@@ -186,7 +186,7 @@ pub async fn create_channel_ptz_preset_handler(
     Json(req): Json<CreatePresetRequest>,
 ) -> Result<Json<ApiResponse<PtzPreset>>, AppError> {
     let device = state.app.registry.device_service.get_device_by_device_tag(&device_tag)?
-        .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
+        .ok_or_else(|| AppError::NotFound(format!("设备 {} 不存在", device_tag)))?;
     let preset = state.app.registry.device_service.create_ptz_preset(device.id, &req.name).await?;
     Ok(Json(ApiResponse::success(preset)))
 }
@@ -197,7 +197,7 @@ pub async fn delete_channel_ptz_preset_handler(
     Path((device_tag, channel_tag, token)): Path<(String, String, String)>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
     let device = state.app.registry.device_service.get_device_by_device_tag(&device_tag)?
-        .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
+        .ok_or_else(|| AppError::NotFound(format!("设备 {} 不存在", device_tag)))?;
     state.app.registry.device_service.delete_ptz_preset(device.id, &token).await?;
     Ok(Json(ApiResponse::success(())))
 }
@@ -208,7 +208,7 @@ pub async fn get_channel_ptz_status_handler(
     Path((device_tag, channel_tag)): Path<(String, String)>,
 ) -> Result<Json<ApiResponse<PtzStatus>>, AppError> {
     let device = state.app.registry.device_service.get_device_by_device_tag(&device_tag)?
-        .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
+        .ok_or_else(|| AppError::NotFound(format!("设备 {} 不存在", device_tag)))?;
     let status = state.app.registry.device_service.get_ptz_status(device.id).await?;
     Ok(Json(ApiResponse::success(status)))
 }
@@ -220,7 +220,7 @@ pub async fn rename_channel_ptz_preset_handler(
     Json(req): Json<RenamePresetRequest>,
 ) -> Result<Json<ApiResponse<PtzPreset>>, AppError> {
     let device = state.app.registry.device_service.get_device_by_device_tag(&device_tag)?
-        .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
+        .ok_or_else(|| AppError::NotFound(format!("设备 {} 不存在", device_tag)))?;
     let preset = state.app.registry.device_service.rename_ptz_preset(device.id, &token, &req.name).await?;
     Ok(Json(ApiResponse::success(preset)))
 }

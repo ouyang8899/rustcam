@@ -10,6 +10,7 @@ use crate::protocol::event::{SignalEvent, ProtocolType, TransportType, PtzComman
 use crate::protocol::traits::ProtocolDeps;
 use crate::protocol::onvif::auth::UsernameToken;
 use crate::protocol::onvif::events::PullPointServer;
+use crate::protocol::onvif::ptz_client::OnvifPtzClient;
 use crate::error::{Result, AppError};
 
 // ═══════════════════════════════════════════════════════════════
@@ -768,5 +769,114 @@ impl SignalAdapter for OnvifAdapter {
     }
 
     async fn start(&mut self, _device_tag: &str) -> Result<()> { Ok(()) }
-    async fn ptz_control(&mut self, _channel_id: &str, _command: &crate::protocol::event::PtzCommand, _speed: Option<u8>) -> Result<()> { Ok(()) }
+    
+    async fn ptz_control(&mut self, channel_id: &str, command: &PtzCommand, speed: Option<u8>) -> Result<()> {
+        let device = match self.deps.device_lookup.find_by_tag(channel_id).await {
+            Some(d) => d,
+            None => {
+                tracing::warn!("[ONVIF] PTZ device not found: {}", channel_id);
+                return Ok(());
+            }
+        };
+
+        let parent_tag = match &device.parent_device_tag {
+            Some(tag) => tag.clone(),
+            None => {
+                tracing::debug!("[ONVIF] PTZ device {} has no parent, using itself", channel_id);
+                channel_id.to_string()
+            }
+        };
+
+        let parent = match self.deps.device_lookup.find_by_tag(&parent_tag).await {
+            Some(p) => p,
+            None => {
+                tracing::warn!("[ONVIF] PTZ parent device not found: {}", parent_tag);
+                return Ok(());
+            }
+        };
+
+        let ptz_url = match &parent.extended {
+            Some(ext) => ext.get("capabilities")
+                .and_then(|c| c.get("ptz"))
+                .and_then(|u| u.as_str())
+                .and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) }),
+            None => None,
+        };
+
+        let ptz_url = match ptz_url {
+            Some(url) => url,
+            None => {
+                tracing::warn!("[ONVIF] No PTZ URL found for device {}", parent_tag);
+                return Ok(());
+            }
+        };
+
+        let profile_token = match &parent.extended {
+            Some(ext) => ext.get("onvif_token")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Profile_1")
+                .to_string(),
+            None => "Profile_1".to_string(),
+        };
+
+        let client = OnvifPtzClient::new(
+            ptz_url,
+            parent.device_username.clone(),
+            parent.device_password.clone(),
+        ).with_profile(profile_token);
+
+        match command {
+            PtzCommand::ContinuousMove { pan, tilt, zoom } => {
+                if pan.abs() < 0.01 && tilt.abs() < 0.01 && zoom.abs() < 0.01 {
+                    let _ = client.stop().await;
+                } else {
+                    let _ = client.continuous_move(*pan, *tilt, *zoom).await;
+                }
+            }
+            PtzCommand::Up => {
+                let s = speed.map(|v| v as f64 / 100.0).unwrap_or(0.5);
+                let _ = client.continuous_move(0.0, s, 0.0).await;
+            }
+            PtzCommand::Down => {
+                let s = speed.map(|v| v as f64 / 100.0).unwrap_or(0.5);
+                let _ = client.continuous_move(0.0, -s, 0.0).await;
+            }
+            PtzCommand::Left => {
+                let s = speed.map(|v| v as f64 / 100.0).unwrap_or(0.5);
+                let _ = client.continuous_move(-s, 0.0, 0.0).await;
+            }
+            PtzCommand::Right => {
+                let s = speed.map(|v| v as f64 / 100.0).unwrap_or(0.5);
+                let _ = client.continuous_move(s, 0.0, 0.0).await;
+            }
+            PtzCommand::ZoomIn => {
+                let s = speed.map(|v| v as f64 / 100.0).unwrap_or(0.5);
+                let _ = client.continuous_move(0.0, 0.0, s).await;
+            }
+            PtzCommand::ZoomOut => {
+                let s = speed.map(|v| v as f64 / 100.0).unwrap_or(0.5);
+                let _ = client.continuous_move(0.0, 0.0, -s).await;
+            }
+            PtzCommand::Stop => {
+                let _ = client.stop().await;
+            }
+            PtzCommand::GotoPreset { preset_token } => {
+                let _ = client.goto_preset(preset_token).await;
+            }
+            PtzCommand::SetPreset { preset_name } => {
+                let _ = client.set_preset("", preset_name.as_deref()).await
+                    .map_err(|e| tracing::warn!("[ONVIF] SetPreset failed: {}", e));
+            }
+            PtzCommand::RemovePreset { preset_token } => {
+                let _ = client.remove_preset(preset_token).await
+                    .map_err(|e| tracing::warn!("[ONVIF] RemovePreset failed: {}", e));
+            }
+            _ => {
+                tracing::debug!("[ONVIF] PTZ command {:?} not supported directly", command);
+            }
+        }
+
+        tracing::debug!("[ONVIF] PTZ sent: channel={} cmd={:?}", channel_id, command);
+        Ok(())
+    }
 }

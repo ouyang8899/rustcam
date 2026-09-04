@@ -415,14 +415,14 @@ impl DeviceService {
                 (tag.clone(), token)
             }
             _ => {
-                return Err(AppError::BadRequest(format!("ONVIF device {} has no parent/token for PTZ", device.id)));
+                return Err(AppError::BadRequest(format!("ONVIF 设备 {} 缺少父设备或token配置", device.id)));
             }
         };
 
         let parent = match infra.db.get_device_by_device_tag(&parent_tag) {
             Some(p) => p,
             None => {
-                return Err(AppError::NotFound(format!("ONVIF parent device {} not found", parent_tag)));
+                return Err(AppError::NotFound(format!("ONVIF 父设备 {} 不存在", parent_tag)));
             }
         };
 
@@ -437,7 +437,7 @@ impl DeviceService {
         let ptz_url = match ptz_url {
             Some(url) if !url.is_empty() => url,
             _ => {
-                return Err(AppError::NotFound(format!("No PTZ URL found for device {}", parent_tag)));
+                return Err(AppError::NotFound(format!("设备 {} 未配置PTZ地址", parent_tag)));
             }
         };
 
@@ -483,7 +483,7 @@ impl DeviceService {
         device: &Device,
         command: &PtzCommand,
         speed: &Option<u8>,
-    ) -> Result<()> {
+    ) -> Result<Option<String>> {
         let channel_id = match &device.device_tag {
             Some(tag) => tag.clone(),
             None => {
@@ -498,12 +498,12 @@ impl DeviceService {
         };
 
         let adapter_arc = adapter_manager::get_adapter(&adapter_key)
-            .ok_or_else(|| AppError::NotFound(format!("Device {} is offline", channel_id)))?;
+            .ok_or_else(|| AppError::DeviceOffline(format!("设备 {} 已离线", channel_id)))?;
 
         let mut inner = adapter_arc.lock().await;
         (&mut *inner).ptz_control(&channel_id, command, *speed).await?;
         tracing::debug!("[PTZ] GB28181 sent: device={} cmd={:?}", channel_id, command);
-        Ok(())
+        Ok(None)
     }
 
     pub async fn handle_ptz_control(
@@ -529,25 +529,37 @@ impl DeviceService {
             device.protocol
         };
 
-        let preset_token = match target_protocol {
+        match target_protocol {
             Protocol::Onvif => {
-                Self::dispatch_onvif_ptz(&self.infra, &device, &command, &speed).await?
+                let preset_token = Self::dispatch_onvif_ptz(&self.infra, &device, &command, &speed).await?;
+                tracing::info!("[PTZ] Sent: device={} cmd={:?}", device_id, command);
+                Ok(PtzControlResult {
+                    success: true,
+                    message: "PTZ command sent".to_string(),
+                    preset_token,
+                })
             }
             Protocol::Gb28181 => {
+                let channel_id = device.device_tag.clone().unwrap_or_default();
+                let adapter_key = device.parent_device_tag.clone().unwrap_or(channel_id.clone());
+                
+                if adapter_manager::get_adapter(&adapter_key).is_none() {
+                    tracing::debug!("[PTZ] GB28181 device offline: device={}", channel_id);
+                    return Err(AppError::DeviceOffline(format!("设备 {} 已离线", channel_id)));
+                }
+                
                 Self::dispatch_gb28181_ptz(&self.infra, &device, &command, &speed).await?;
-                None
+                tracing::info!("[PTZ] Sent: device={} cmd={:?}", device_id, command);
+                Ok(PtzControlResult {
+                    success: true,
+                    message: "PTZ command sent".to_string(),
+                    preset_token: None,
+                })
             }
             _ => {
-                return Err(AppError::BadRequest(format!("Unsupported PTZ protocol: {:?}", device.protocol)));
+                Err(AppError::BadRequest(format!("Unsupported PTZ protocol: {:?}", device.protocol)))
             }
-        };
-
-        tracing::info!("[PTZ] Sent: device={} cmd={:?}", device_id, command);
-        Ok(PtzControlResult {
-            success: true,
-            message: "PTZ command sent".to_string(),
-            preset_token,
-        })
+        }
     }
 
     pub async fn get_ptz_status(&self, device_id: i64) -> Result<PtzStatus> {

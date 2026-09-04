@@ -645,13 +645,18 @@ impl Gb28181Adapter {
     fn build_catalog_query(&self) -> Vec<u8> {
         let sn = self.seq.load(Ordering::SeqCst);
         let device_tag = self.device_tag_str();
-        let (platform_id, platform_domain, platform_ip, platform_port) = crate::protocol::gb28181::get_gb28181_platform_config()
+        let (platform_id, platform_domain, platform_ip, _platform_port) = crate::protocol::gb28181::get_gb28181_platform_config()
             .get()
             .map(|(id, domain, ip, port)| (id.as_str(), domain.as_str(), ip.as_str(), *port))
             .unwrap_or(("00000000000000000000", "0000000000", "0.0.0.0", 5060));
 
+        let server_port = match self.transport {
+            TransportProtocol::Tcp => self.deps.config.signaling_server.tcp_signaling_port,
+            TransportProtocol::Udp => self.deps.config.signaling_server.udp_signaling_port,
+        };
+
         let local_ip = if platform_ip == "0.0.0.0" {
-            if let Some(peer) = self.udp_peer {
+            if let Some(ref peer) = self.remote_addr {
                 crate::protocol::gb28181::detect_local_ip(peer.ip().to_string().as_str())
                     .unwrap_or_else(|| "0.0.0.0".to_string())
             } else {
@@ -672,16 +677,16 @@ impl Gb28181Adapter {
         let call_id = format!("cat-{}", ts);
         let from_uri = SipUri {
             user: Some(platform_id.to_string()),
-            host: format!("{}:{}", local_ip, platform_port),
+            host: format!("{}:{}", local_ip, server_port),
             port: None,
             params: HashMap::new(),
         };
-        let device_ip = self.udp_peer
+        let device_ip = self.remote_addr
             .map(|p| p.ip().to_string())
             .unwrap_or_else(|| local_ip.clone());
         let to_uri = SipUri {
             user: Some(device_tag.to_string()),
-            host: format!("{}:{}", device_ip, platform_port),
+            host: format!("{}:{}", device_ip, server_port),
             port: None,
             params: HashMap::new(),
         };
@@ -691,7 +696,10 @@ impl Gb28181Adapter {
             .with_param("tag", &format!("cat{}", ts));
         let to_name_addr = SipNameAddr::new(to_uri.clone());
 
-        let via_str = format!("SIP/2.0/UDP {}:{};branch=z9hG4bKcat{}", local_ip, platform_port, ts);
+        let via_str = match self.transport {
+            TransportProtocol::Tcp => format!("SIP/2.0/TCP {}:{};branch=z9hG4bKcat{}", local_ip, server_port, ts),
+            TransportProtocol::Udp => format!("SIP/2.0/UDP {}:{};branch=z9hG4bKcat{}", local_ip, server_port, ts),
+        };
         
         let msg = SipMessage::request(SipMethod::Message, to_uri)
             .header("via", &via_str)
@@ -2048,6 +2056,14 @@ impl SignalAdapter for Gb28181Adapter {
 
             self.last_message_at = Some(chrono::Utc::now());
 
+            if let Some(ref via) = sip_msg.headers.via {
+                let via_transport = via.transport.to_uppercase();
+                if via_transport == "TCP" && self.transport == TransportProtocol::Udp {
+                    tracing::info!("[GB28181] Detected TCP transport from Via header, switching from UDP to TCP");
+                    self.transport = TransportProtocol::Tcp;
+                }
+            }
+
             let (first_line, headers, body) = sip_msg.to_old_format();
 
             let (event, response) = if first_line.starts_with("SIP/2.0") {
@@ -2070,7 +2086,12 @@ impl SignalAdapter for Gb28181Adapter {
             };
 
             if let Some(resp) = &response {
-                tracing::debug!("[GB28181] Sending response to {}: {}", self.udp_peer.map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string()), &resp[..resp.len().min(200)]);
+                let peer_info = if self.write.is_some() {
+                    format!("TCP (transport={:?})", self.transport)
+                } else {
+                    format!("UDP ({})", self.udp_peer.map(|a| a.to_string()).unwrap_or_else(|| "unknown".to_string()))
+                };
+                tracing::debug!("[GB28181] Sending response via {}: {}", peer_info, &resp[..resp.len().min(200)]);
                 if let Err(e) = self.send(resp.as_bytes()).await {
                     tracing::error!("[GB28181] Failed to send response: {}", e);
                 }
@@ -2123,6 +2144,7 @@ impl SignalAdapter for Gb28181Adapter {
 
     async fn send(&mut self, data: &[u8]) -> Result<()> {
         if let Some(ref write_arc) = self.write {
+            tracing::debug!("[GB28181] TCP send: {} bytes", data.len());
             let mut write = write_arc.write().await;
             write.write_all(data).await
                 .map_err(|e| AppError::Internal(format!("TCP write: {}", e)))?;
@@ -2157,6 +2179,10 @@ impl SignalAdapter for Gb28181Adapter {
 
     fn set_tcp_write(&mut self, write: OwnedWriteHalf) {
         self.write = Some(Arc::new(tokio::sync::RwLock::new(write)));
+        if self.transport == TransportProtocol::Udp {
+            tracing::info!("[GB28181] TCP connection established, setting transport to TCP");
+            self.transport = TransportProtocol::Tcp;
+        }
     }
 
     async fn set_udp_peer(&mut self, addr: SocketAddr) -> Result<()> {
@@ -2657,7 +2683,7 @@ a=rtpmap:8 PCMA/8000
             to_tag: None,
             start_time: chrono::Utc::now(),
             audio_socket: None,
-            tcp_stream,
+            tcp_stream: tcp_stream.clone(),
             rtp_ssrc: rand_ssrc(),
             rtp_sequence: rand_u16(),
             rtp_timestamp: rand_u32(),
@@ -2701,8 +2727,22 @@ a=rtpmap:8 PCMA/8000
             sdp
         );
         
-        if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
-            sender.send(sip_msg.as_bytes()).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        match transport {
+            TransportType::TCP => {
+                if let Some(ref tcp_stream_arc) = tcp_stream {
+                    let mut tcp_stream_guard = tcp_stream_arc.write().await;
+                    if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut *tcp_stream_guard, sip_msg.as_bytes()).await {
+                        tracing::warn!("[GB28181] Failed to send audio INVITE via TCP: {}", e);
+                    } else if let Err(e) = tokio::io::AsyncWriteExt::flush(&mut *tcp_stream_guard).await {
+                        tracing::warn!("[GB28181] Failed to flush audio INVITE via TCP: {}", e);
+                    }
+                }
+            },
+            _ => {
+                if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
+                    sender.send(sip_msg.as_bytes()).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                }
+            }
         }
         
         Ok(())
@@ -2718,9 +2758,11 @@ a=rtpmap:8 PCMA/8000
                 .map(|(id, _, ip, port)| (id.as_str(), ip.as_str(), *port))
                 .unwrap_or(("34020000000000000000", "0.0.0.0", 5060));
             
+            let via_transport = if session.tcp_stream.is_some() { "TCP" } else { "UDP" };
+            
             let sip_msg = format!(
                 "BYE sip:{}@{}:{} SIP/2.0\r\n\
-                 Via: SIP/2.0/UDP {}:{};branch=z9hG4bK{};rport\r\n\
+                 Via: SIP/2.0/{} {}:{};branch=z9hG4bK{};rport\r\n\
                  From: <sip:{}@{}:{}>;tag={}\r\n\
                  To: <sip:{}@{}:{}>;tag={}\r\n\
                  Call-ID: {}\r\n\
@@ -2728,7 +2770,7 @@ a=rtpmap:8 PCMA/8000
                  User-Agent: RustCam-Media/2.0\r\n\
                  Content-Length: 0\r\n\r\n",
                 device_tag, session.device_ip, session.device_audio_port,
-                platform_ip, platform_port,
+                via_transport, platform_ip, platform_port,
                 chrono::Utc::now().timestamp_millis(),
                 platform_id, platform_ip, platform_port, &session.from_tag,
                 device_tag, session.device_ip, session.device_audio_port,
@@ -2736,16 +2778,25 @@ a=rtpmap:8 PCMA/8000
                 &session.call_id
             );
             
-            if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
-                let addr = format!("{}:{}", session.device_ip, session.device_audio_port);
-                let _ = sender.send_to(sip_msg.as_bytes(), &addr).await;
+            if let Some(ref tcp_stream_arc) = session.tcp_stream {
+                let mut tcp_stream = tcp_stream_arc.write().await;
+                if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut *tcp_stream, sip_msg.as_bytes()).await {
+                    tracing::warn!("[GB28181] Failed to send audio BYE via TCP: {}", e);
+                } else if let Err(e) = tokio::io::AsyncWriteExt::flush(&mut *tcp_stream).await {
+                    tracing::warn!("[GB28181] Failed to flush audio BYE via TCP: {}", e);
+                }
+            } else {
+                if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
+                    let addr = format!("{}:{}", session.device_ip, session.device_audio_port);
+                    let _ = sender.send_to(sip_msg.as_bytes(), &addr).await;
+                }
             }
         }
         Ok(())
     }
 
     pub async fn send_audio_to_device(&self, device_tag: &str, pcm_data: &[i16]) -> Result<()> {
-        let session_opt = {
+        let (session_opt, is_tcp) = {
             let mut sessions = self.audio_talk_sessions.write().await;
             if let Some(session) = sessions.get_mut(device_tag) {
                 let encoded = crate::protocol::gb28181::audio::linear_to_alaw(pcm_data);
@@ -2756,9 +2807,10 @@ a=rtpmap:8 PCMA/8000
                 session.rtp_timestamp = session.rtp_timestamp.wrapping_add(160);
                 session.rtp_sequence = session.rtp_sequence.wrapping_add(1);
                 
-                Some((encoded, timestamp, ssrc, sequence, session.device_ip.clone(), session.device_audio_port))
+                let is_tcp = session.tcp_stream.is_some();
+                (Some((encoded, timestamp, ssrc, sequence, session.device_ip.clone(), session.device_audio_port)), is_tcp)
             } else {
-                None
+                (None, false)
             }
         };
         
@@ -2771,9 +2823,26 @@ a=rtpmap:8 PCMA/8000
                 sequence,
             );
             
-            let addr = format!("{}:{}", device_ip, device_port);
-            if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
-                sender.send_to(&rtp_packet, &addr).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+            if is_tcp {
+                let len = rtp_packet.len() as u16;
+                let mut frame = Vec::with_capacity(2 + rtp_packet.len());
+                frame.extend_from_slice(&len.to_be_bytes());
+                frame.extend_from_slice(&rtp_packet);
+                
+                if let Some(stream_arc) = self.audio_talk_sessions.read().await.get(device_tag).and_then(|s| s.tcp_stream.clone()) {
+                    let mut stream = stream_arc.write().await;
+                    if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut *stream, &frame).await {
+                        tracing::error!("[GB28181] TCP audio write failed: {}", e);
+                        if let Some(session) = self.audio_talk_sessions.write().await.get_mut(device_tag) {
+                            session.tcp_stream = None;
+                        }
+                    }
+                }
+            } else {
+                let addr = format!("{}:{}", device_ip, device_port);
+                if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
+                    sender.send_to(&rtp_packet, &addr).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+                }
             }
         }
         
@@ -2819,7 +2888,7 @@ a=rtpmap:8 PCMA/8000
         
         if let Some(ref stream_arc) = self.audio_talk_sessions.read().await.get(device_tag).and_then(|s| s.tcp_stream.clone()) {
             let mut stream = stream_arc.write().await;
-            if let Err(e) = stream.write_all(&rtp_packet_with_len).await {
+            if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut *stream, &rtp_packet_with_len).await {
                 tracing::error!("[GB28181] TCP write failed: {}", e);
                 if let Some(session) = self.audio_talk_sessions.write().await.get_mut(device_tag) {
                     session.tcp_stream = None;

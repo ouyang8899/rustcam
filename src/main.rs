@@ -197,6 +197,7 @@ async fn main() -> anyhow::Result<()> {
         max_packet_size: 1024 * 1024,
         read_buffer_size: 65536,
         connection_timeout: 60,
+        keepalive_interval_secs: 30,
     };
     let tcp_server = TcpServer::new(
         tcp_config.clone(),
