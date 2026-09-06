@@ -67,6 +67,12 @@ impl From<crate::auth::errors::AuthError> for AppError {
     }
 }
 
+impl From<crate::media::MediaError> for AppError {
+    fn from(err: crate::media::MediaError) -> Self {
+        AppError::Internal(err.to_string())
+    }
+}
+
 impl From<rbatis::rbdc::Error> for AppError {
     fn from(err: rbatis::rbdc::Error) -> Self {
         AppError::Internal(err.to_string())

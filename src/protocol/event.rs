@@ -90,6 +90,14 @@ pub enum SignalEvent {
         device_tag: Option<String>,
         session_id: String,
     },
+    PlaybackResult {
+        device_id: i64,
+        device_tag: Option<String>,
+        session_id: String,
+        success: bool,
+        error_code: Option<u16>,
+        error_message: Option<String>,
+    },
     PtzControl {
         device_id: String,
         command: PtzCommand,
@@ -188,6 +196,10 @@ pub enum SignalEvent {
         data: Vec<u8>,
         timestamp: u32,
     },
+    AudioTalkReady {
+        device_id: i64,
+        device_tag: Option<String>,
+    },
 }
 impl SignalEvent {
     /// 获取事件类型字符串
@@ -204,6 +216,7 @@ impl SignalEvent {
             SignalEvent::StreamRestart { .. } => "stream_restart".to_string(),
             SignalEvent::StartPlay { .. } => "start_play".to_string(),
             SignalEvent::StopPlay { .. } => "stop_play".to_string(),
+            SignalEvent::PlaybackResult { .. } => "playback_result".to_string(),
             SignalEvent::PtzControl { .. } => "ptz_control".to_string(),
             SignalEvent::Alarm { .. } => "alarm".to_string(),
             SignalEvent::QueryDeviceInfo { .. } => "query_device_info".to_string(),
@@ -223,6 +236,7 @@ impl SignalEvent {
             SignalEvent::StartAudioTalk { .. } => "start_audio_talk".to_string(),
             SignalEvent::StopAudioTalk { .. } => "stop_audio_talk".to_string(),
             SignalEvent::AudioData { .. } => "audio_data".to_string(),
+            SignalEvent::AudioTalkReady { .. } => "audio_talk_ready".to_string(),
         }
     }
 }
@@ -332,10 +346,4 @@ pub enum PtzCommand {
     RemovePreset { preset_token: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum TransportType {
-    UDP,
-    TCP,
-    HTTP,
-    WebSocket,
-}
+pub use crate::common_types::TransportType;

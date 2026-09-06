@@ -5,10 +5,47 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use async_trait::async_trait;
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::io::{AsyncWriteExt, AsyncWrite};
+
 use chrono::{DateTime, Utc};
 
+/// GB28181 播放错误类型
+#[derive(Debug, Clone)]
+pub enum PlaybackError {
+    DeviceOffline,
+    DeviceHasNoRecording,
+    DeviceNotFound,
+    AuthenticationFailed,
+    ServerError(String),
+    Busy,
+    Timeout,
+    Unknown(String),
+}
+
+impl std::fmt::Display for PlaybackError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PlaybackError::DeviceOffline => write!(f, "设备不在线"),
+            PlaybackError::DeviceHasNoRecording => write!(f, "设备在请求的时间段内没有录像"),
+            PlaybackError::DeviceNotFound => write!(f, "设备不存在"),
+            PlaybackError::AuthenticationFailed => write!(f, "认证失败"),
+            PlaybackError::ServerError(s) => write!(f, "服务器错误: {}", s),
+            PlaybackError::Busy => write!(f, "设备忙"),
+            PlaybackError::Timeout => write!(f, "请求超时"),
+            PlaybackError::Unknown(s) => write!(f, "未知错误: {}", s),
+        }
+    }
+}
+
 use crate::context::registry;
-use crate::protocol::event::{EventHandler, SignalEvent, ProtocolType, TransportType, CatalogChannel, PtzCommand};
+use crate::common_types::TransportType;
+use crate::protocol::event::{EventHandler, SignalEvent, ProtocolType, CatalogChannel, PtzCommand};
+use crate::media::{MediaSession as SessionMediaSession, MediaType, Direction, TalkMiddleware, AudioCodec};
+use crate::media::DataTransport;
+use crate::media::node::{
+    BasicMediaNode, TalkNodeMiddleware,
+    SendChainNodeMiddleware, MediaNodeType, MediaNodeId, MediaNode,
+};
+use crate::media::transport::DataTransportAdapter;
 
 use crate::adapter::media_server::RtpTransport;
 use crate::protocol::adapter::SignalAdapter;
@@ -101,9 +138,6 @@ impl Default for RegistrationTimeout {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum TransportProtocol { Tcp, Udp }
-
 type GbWriteHalf = Arc<tokio::sync::RwLock<OwnedWriteHalf>>;
 
 #[derive(Clone)]
@@ -126,13 +160,15 @@ pub struct SubSession {
     /// 媒体服务器IP (来自alloc_rtp_port返回的server_ip)
     pub server_ip: String,
     pub server_port: u16,
-    pub transport: TransportProtocol,
+    pub transport: TransportType,
     pub device_host: String,
     pub device_port: u16,
     pub rtp_port: u16,
     pub media_started: bool,
     pub device_nated_ip: Option<String>,
     pub device_nated_port: Option<u16>,
+    /// 是否为录像回放会话
+    pub is_playback: bool,
 }
 
 #[derive(Clone)]
@@ -148,7 +184,7 @@ pub struct Gb28181Adapter {
     pub recv_buffer: SipMessageBuffer,
     pub write: Option<GbWriteHalf>,
     pub max_buffer_size: usize,
-    pub transport: TransportProtocol,
+    pub transport: TransportType,
     pub call_id: Option<String>,
     pub from_tag: Option<String>,
     pub to_tag: Option<String>,
@@ -157,7 +193,7 @@ pub struct Gb28181Adapter {
     pub deps: Arc<ProtocolDeps>,
     pub sessions: Arc<tokio::sync::RwLock<HashMap<String, SubSession>>>,
     pub subscriptions: Arc<tokio::sync::RwLock<HashMap<String, Subscription>>>,
-    pub audio_talk_sessions: Arc<tokio::sync::RwLock<HashMap<String, AudioTalkSession>>>,
+    pub pending_audio_talks: Arc<tokio::sync::RwLock<HashMap<String, (String, String, u16, u16, bool, Option<u16>)>>>,
     pub registration_state: RegistrationState,
     pub wait_timer: Option<WaitTimer>,
     pub event_handler_name: Option<String>,
@@ -171,23 +207,6 @@ pub struct Subscription {
     pub event_type: String,
     pub expires: u32,
     pub created_at: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AudioTalkSession {
-    pub device_tag: String,
-    pub device_ip: String,
-    pub device_audio_port: u16,
-    pub platform_audio_port: u16,
-    pub call_id: String,
-    pub from_tag: String,
-    pub to_tag: Option<String>,
-    pub start_time: chrono::DateTime<chrono::Utc>,
-    pub audio_socket: Option<Arc<tokio::net::UdpSocket>>,
-    pub tcp_stream: Option<Arc<tokio::sync::RwLock<tokio::net::TcpStream>>>,
-    pub rtp_ssrc: u32,
-    pub rtp_sequence: u16,
-    pub rtp_timestamp: u32,
 }
 
 impl Gb28181Adapter {
@@ -216,7 +235,7 @@ impl Gb28181Adapter {
             recv_buffer: SipMessageBuffer::new(),
             write: None,
             max_buffer_size: 1024 * 1024,
-            transport: TransportProtocol::Tcp,
+            transport: TransportType::Tcp,
             call_id: None,
             from_tag: None,
             to_tag: None,
@@ -225,7 +244,7 @@ impl Gb28181Adapter {
             deps: Arc::new(deps),
             sessions: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             subscriptions: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-            audio_talk_sessions: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            pending_audio_talks: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             registration_state: RegistrationState::Init,
             wait_timer: None,
             event_handler_name: None,
@@ -336,6 +355,54 @@ impl Gb28181Adapter {
             }
         }
         None
+    }
+
+    fn parse_audio_codec_from_sdp(sdp: &str) -> Option<(u8, String)> {
+        let mut audio_pt = None;
+        let mut rtpmap: std::collections::HashMap<u8, String> = std::collections::HashMap::new();
+        
+        for line in sdp.lines() {
+            let line = line.trim();
+            
+            if line.starts_with("m=audio") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 4 {
+                    for pt_str in parts[3..].iter() {
+                        if let Ok(pt) = pt_str.parse::<u8>() {
+                            audio_pt = Some(pt);
+                            break;
+                        }
+                    }
+                }
+            } else if line.starts_with("a=rtpmap:") {
+                let rest = &line[10..];
+                if let Some((pt_fmt, rest)) = rest.split_once(' ') {
+                    if let Ok(pt) = pt_fmt.parse::<u8>() {
+                        let encoding = rest.split('/').next().unwrap_or("").to_uppercase();
+                        rtpmap.insert(pt, encoding);
+                    }
+                }
+            }
+        }
+        
+        if let Some(pt) = audio_pt {
+            if let Some(encoding) = rtpmap.get(&pt) {
+                return Some((pt, encoding.clone()));
+            }
+        }
+        
+        None
+    }
+
+    fn audio_pt_to_codec(pt: u8) -> Option<&'static str> {
+        match pt {
+            0 => Some("PCMU"),
+            8 => Some("PCMA"),
+            9 => Some("G722"),
+            18 => Some("G729"),
+            97 => Some("AAC"),
+            _ => None,
+        }
     }
 
     fn parse_subject_device_id(subject: &str) -> Option<String> {
@@ -607,7 +674,7 @@ impl Gb28181Adapter {
         let server_ip = self.remote_addr.map(|a| a.ip().to_string()).unwrap_or_else(|| "0.0.0.0".to_string());
         let branch = format!("z9hG4bK{}", &call_id[..7]);
 
-        let via = if self.transport == TransportProtocol::Tcp {
+        let via = if self.transport == TransportType::Tcp {
             format!("SIP/2.0/TCP {}:{};branch={};rport", server_ip, server_port, branch)
         } else {
             format!("SIP/2.0/UDP {}:{};branch={};rport", server_ip, server_port, branch)
@@ -651,8 +718,9 @@ impl Gb28181Adapter {
             .unwrap_or(("00000000000000000000", "0000000000", "0.0.0.0", 5060));
 
         let server_port = match self.transport {
-            TransportProtocol::Tcp => self.deps.config.signaling_server.tcp_signaling_port,
-            TransportProtocol::Udp => self.deps.config.signaling_server.udp_signaling_port,
+            TransportType::Tcp => self.deps.config.signaling_server.tcp_signaling_port,
+            TransportType::Udp => self.deps.config.signaling_server.udp_signaling_port,
+            _ => unreachable!("GB28181 only supports TCP and UDP transport"),
         };
 
         let local_ip = if platform_ip == "0.0.0.0" {
@@ -697,8 +765,9 @@ impl Gb28181Adapter {
         let to_name_addr = SipNameAddr::new(to_uri.clone());
 
         let via_str = match self.transport {
-            TransportProtocol::Tcp => format!("SIP/2.0/TCP {}:{};branch=z9hG4bKcat{}", local_ip, server_port, ts),
-            TransportProtocol::Udp => format!("SIP/2.0/UDP {}:{};branch=z9hG4bKcat{}", local_ip, server_port, ts),
+            TransportType::Tcp => format!("SIP/2.0/TCP {}:{};branch=z9hG4bKcat{}", local_ip, server_port, ts),
+            TransportType::Udp => format!("SIP/2.0/UDP {}:{};branch=z9hG4bKcat{}", local_ip, server_port, ts),
+            _ => unreachable!("GB28181 only supports TCP and UDP transport"),
         };
         
         let msg = SipMessage::request(SipMethod::Message, to_uri)
@@ -791,8 +860,9 @@ impl Gb28181Adapter {
     fn via_header(&self, branch: &str) -> String {
         let addr = self.remote_addr.map(|a| a.to_string()).unwrap_or_else(|| "0.0.0.0".to_string());
         match self.transport {
-            TransportProtocol::Tcp => format!("SIP/2.0/TCP {};rport;branch={}", addr, branch),
-            TransportProtocol::Udp => format!("SIP/2.0/UDP {};rport;branch={}", addr, branch),
+            TransportType::Tcp => format!("SIP/2.0/TCP {};rport;branch={}", addr, branch),
+            TransportType::Udp => format!("SIP/2.0/UDP {};rport;branch={}", addr, branch),
+            _ => unreachable!("GB28181 only supports TCP and UDP transport"),
         }
     }
 
@@ -1069,7 +1139,7 @@ impl Gb28181Adapter {
 
         sdp.push_str(&video_line);
         sdp.push_str(&audio_line);
-        sdp.push_str(&format!("y={}\r\n", ssrc));
+        sdp.push_str(&format!("y={:010}\r\n", ssrc));
 
         // f字段格式: f=v/编码格式/分辨率/帧率/码率类型/码率
         // v=视频, 编码格式: PS/H264/H265等, 分辨率: 宽*高, 帧率: 数字, 码率类型: 1(可变码率)/0(固定码率), 码率: Kbps
@@ -1286,7 +1356,7 @@ impl Gb28181Adapter {
                 return (None, Some(self.build_403_response(&via_branch, &cseq)));
             }
         };
-        tracing::info!("[GB28181] Device found: username={}, password={}", username, password);
+        tracing::info!("[GB28181] Device found: username={}", username);
         if auth_params.username != username {
             tracing::warn!("[GB28181] Username mismatch: auth={} vs db={}", auth_params.username, username);
             return (None, Some(self.build_403_response(&via_branch, &cseq)));
@@ -1557,7 +1627,7 @@ impl Gb28181Adapter {
                 if let Some(app) = self.get_device_app(&session.channel_id).await {
                     let _ = self.deps.stream_manager.stop_stream(&app, &session.stream_key).await;
                 }
-                self.deps.rtp_tunnel.unregister(&session.stream_key);
+                
                 self.sessions.write().await.clear();
                 return (
                     Some(SignalEvent::StopPlay {
@@ -1572,7 +1642,7 @@ impl Gb28181Adapter {
             if let Some(app) = self.get_device_app(&session.channel_id).await {
                 let _ = self.deps.stream_manager.stop_stream(&app, &session.stream_key).await;
             }
-            self.deps.rtp_tunnel.unregister(&session.stream_key);
+            
             self.sessions.write().await.retain(|_, s| s.call_id != call_id);
             return (
                 Some(SignalEvent::StopPlay {
@@ -1589,7 +1659,7 @@ impl Gb28181Adapter {
             if let Some(app) = self.get_device_app(&session.channel_id).await {
                 let _ = self.deps.stream_manager.stop_stream(&app, &session.stream_key).await;
             }
-            self.deps.rtp_tunnel.unregister(&session.stream_key);
+            
         }
         self.sessions.write().await.clear();
 
@@ -1617,11 +1687,51 @@ impl Gb28181Adapter {
     }
 
     async fn handle_sip_response(
-        &mut self, first_line: &str, headers: &[(String, String)], _body: &str,
+        &mut self, first_line: &str, headers: &[(String, String)], body: &str,
     ) -> (Option<SignalEvent>, Option<String>) {
         let call_id = Self::get_header(headers, "Call-ID").unwrap_or_default();
         let cseq_line = Self::get_header(headers, "CSeq").unwrap_or_default();
         let is_invite_response = cseq_line.to_lowercase().contains("invite");
+        
+        if call_id.starts_with("audio-") && is_invite_response && first_line.contains(" 200 ") {
+            tracing::info!("[GB28181] Audio talk 200 OK received: call_id={}", call_id);
+            if let Some((pt, encoding)) = Self::parse_audio_codec_from_sdp(body) {
+                tracing::info!("[GB28181] Audio talk codec selected: pt={} encoding={}", pt, encoding);
+                if let Some(codec_str) = Self::audio_pt_to_codec(pt) {
+                    let codec = if codec_str == "PCMA" {
+                        crate::media::AudioCodec::Pcma
+                    } else if codec_str == "PCMU" {
+                        crate::media::AudioCodec::Pcmu
+                    } else {
+                        tracing::warn!("[GB28181] Unsupported audio codec: {}, using PCMA", codec_str);
+                        crate::media::AudioCodec::Pcma
+                    };
+                    
+                    let device_tag = call_id.strip_prefix("audio-").unwrap_or(&call_id).to_string();
+                    let (device_ip, device_audio_port, platform_port, is_tcp, tcp_server_port) = {
+                        let pending = self.pending_audio_talks.read().await;
+                        if let Some((_, ip, port, p_port, tcp, tcp_port)) = pending.get(&call_id) {
+                            (ip.clone(), *port, *p_port, *tcp, *tcp_port)
+                        } else {
+                            ("0.0.0.0".to_string(), 0, 0, false, None)
+                        }
+                    };
+                    
+                    let peer_addr: SocketAddr = format!("{}:{}", device_ip, device_audio_port)
+                        .parse()
+                        .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap());
+                    
+                    let transport = if is_tcp { TransportType::Tcp } else { TransportType::Udp };
+                    let tcp_port = if is_tcp { tcp_server_port } else { None };
+                    
+                    tracing::info!("[GB28181] Calling finish_audio_talk_setup for device {}", device_tag);
+                    if let Err(e) = self.finish_audio_talk_setup(&device_tag, codec, peer_addr, transport, platform_port, tcp_port).await {
+                        tracing::error!("[GB28181] finish_audio_talk_setup failed: {}", e);
+                    }
+                }
+            }
+            return (None, None);
+        }
 
         let sub_session = {
             let sessions = self.sessions.read().await;
@@ -1653,16 +1763,55 @@ impl Gb28181Adapter {
         }
 
         let is_200 = first_line.contains(" 200 ");
-        let is_error = first_line.starts_with("SIP/2.0 ") && (
-            first_line.contains(" 401 ") || first_line.contains(" 403 ") ||
-            first_line.contains(" 404 ") || first_line.contains(" 488 ") ||
-            first_line.contains(" 500 ") || first_line.contains(" 503 ") ||
-            first_line.contains(" 600 "));
 
-        if is_error {
-            tracing::warn!("[GB28181] INVITE failed: channel={} status={}", session.channel_id, first_line);
+        let sdp_type = if session.is_playback { "Playback" } else { "Real-time" };
+
+        let parse_error_code = |line: &str| -> Option<u16> {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 {
+                parts[1].parse().ok()
+            } else {
+                None
+            }
+        };
+
+        let error_message = if first_line.contains(" 488 ") {
+            Some("设备在请求的时间段内没有录像".to_string())
+        } else if first_line.contains(" 404 ") {
+            Some("设备不存在".to_string())
+        } else if first_line.contains(" 401 ") || first_line.contains(" 403 ") {
+            Some("认证失败".to_string())
+        } else if first_line.contains(" 600 ") {
+            Some("设备忙".to_string())
+        } else if first_line.contains(" 500 ") || first_line.contains(" 503 ") {
+            Some("服务器错误".to_string())
+        } else {
+            None
+        };
+
+        if let Some(msg) = error_message {
+            let error_code = parse_error_code(first_line);
+            tracing::warn!(
+                "[GB28181] {} INVITE rejected: channel={}, call_id={}, error={}",
+                sdp_type, session.channel_id, call_id, msg
+            );
+
+            if session.is_playback {
+                let device_id = self.device_id.unwrap_or(0);
+                let event = crate::protocol::event::SignalEvent::PlaybackResult {
+                    device_id,
+                    device_tag: self.device_tag.clone(),
+                    session_id: call_id.clone(),
+                    success: false,
+                    error_code,
+                    error_message: Some(msg),
+                };
+                if let Err(e) = self.deps.event_publisher.publish(event).await {
+                    tracing::warn!("[GB28181] Failed to publish PlaybackResult event: {}", e);
+                }
+            }
+
             self.sessions.write().await.retain(|_, s| s.call_id != call_id);
-            self.deps.rtp_tunnel.unregister(&session.stream_key);
             return (None, None);
         }
 
@@ -1781,7 +1930,7 @@ impl Gb28181Adapter {
         };
 
         // Via头 - 格式: SIP/2.0/UDP IP:端口;rport;branch=xxx (rport在前)
-        let via = if session.transport == TransportProtocol::Tcp {
+        let via = if session.transport == TransportType::Tcp {
             format!("SIP/2.0/TCP {}:{};rport;branch={}", session.server_ip, session.server_port, session.via_branch)
         } else {
             format!("SIP/2.0/UDP {}:{};rport;branch={}", session.server_ip, session.server_port, session.via_branch)
@@ -1864,8 +2013,36 @@ impl Gb28181Adapter {
 
             tracing::info!("[GB28181] Stream started: channel={} stream={}", session.channel_id, session.stream_key);
             self.set_registration_state(RegistrationState::Streaming);
+
+            if session.is_playback {
+                let event = crate::protocol::event::SignalEvent::PlaybackResult {
+                    device_id: self.device_id.unwrap_or(0),
+                    device_tag: self.device_tag.clone(),
+                    session_id: call_id.clone(),
+                    success: true,
+                    error_code: None,
+                    error_message: None,
+                };
+                if let Err(e) = self.deps.event_publisher.publish(event).await {
+                    tracing::warn!("[GB28181] Failed to publish PlaybackResult event: {}", e);
+                }
+            }
         } else {
             tracing::error!("[GB28181] Failed to start stream: channel={} err={:?}", session.channel_id, start_result);
+
+            if session.is_playback {
+                let event = crate::protocol::event::SignalEvent::PlaybackResult {
+                    device_id: self.device_id.unwrap_or(0),
+                    device_tag: self.device_tag.clone(),
+                    session_id: call_id.clone(),
+                    success: false,
+                    error_code: None,
+                    error_message: Some("流启动失败".to_string()),
+                };
+                if let Err(e) = self.deps.event_publisher.publish(event).await {
+                    tracing::warn!("[GB28181] Failed to publish PlaybackResult event: {}", e);
+                }
+            }
         }
 
         (Some(SignalEvent::StartPlay {
@@ -1873,7 +2050,7 @@ impl Gb28181Adapter {
             device_tag: Some(session.channel_id.clone()),
             session_id: session.stream_key.clone(),
             channel_id: Some(session.channel_id.clone()),
-            transport: TransportType::UDP,
+            transport: TransportType::Udp,
             media_server_name: Some(session.media_server_name.clone()),
         }), None)
     }
@@ -2058,9 +2235,9 @@ impl SignalAdapter for Gb28181Adapter {
 
             if let Some(ref via) = sip_msg.headers.via {
                 let via_transport = via.transport.to_uppercase();
-                if via_transport == "TCP" && self.transport == TransportProtocol::Udp {
+                if via_transport == "TCP" && self.transport == TransportType::Udp {
                     tracing::info!("[GB28181] Detected TCP transport from Via header, switching from UDP to TCP");
-                    self.transport = TransportProtocol::Tcp;
+                    self.transport = TransportType::Tcp;
                 }
             }
 
@@ -2132,7 +2309,7 @@ impl SignalAdapter for Gb28181Adapter {
             }
 
             for session in sessions {
-                self.deps.rtp_tunnel.unregister(&session.stream_key);
+                
             }
             self.sessions.write().await.clear();
         }
@@ -2179,15 +2356,15 @@ impl SignalAdapter for Gb28181Adapter {
 
     fn set_tcp_write(&mut self, write: OwnedWriteHalf) {
         self.write = Some(Arc::new(tokio::sync::RwLock::new(write)));
-        if self.transport == TransportProtocol::Udp {
+        if self.transport == TransportType::Udp {
             tracing::info!("[GB28181] TCP connection established, setting transport to TCP");
-            self.transport = TransportProtocol::Tcp;
+            self.transport = TransportType::Tcp;
         }
     }
 
     async fn set_udp_peer(&mut self, addr: SocketAddr) -> Result<()> {
         self.udp_peer = Some(addr);
-        self.transport = TransportProtocol::Udp;
+        self.transport = TransportType::Udp;
         Ok(())
     }
 
@@ -2199,11 +2376,11 @@ impl SignalAdapter for Gb28181Adapter {
             if let Some(transport) = ext.get("gb_transport").and_then(|v| v.as_str()) {
                 let transport_str = match transport.to_uppercase().as_str() {
                     "TCP" => {
-                        self.transport = TransportProtocol::Tcp;
+                        self.transport = TransportType::Tcp;
                         "TCP"
                     },
                     _ => {
-                        self.transport = TransportProtocol::Udp;
+                        self.transport = TransportType::Udp;
                         "UDP"
                     },
                 };
@@ -2217,8 +2394,9 @@ impl SignalAdapter for Gb28181Adapter {
         let from_tag = uuid::Uuid::new_v4().to_string().replace("-", "");
         let branch = format!("z9hG4bK{}", &call_id[..7]);
         let server_port = match self.transport {
-            TransportProtocol::Tcp => self.deps.config.signaling_server.tcp_signaling_port,
-            TransportProtocol::Udp => self.deps.config.signaling_server.udp_signaling_port,
+            TransportType::Tcp => self.deps.config.signaling_server.tcp_signaling_port,
+            TransportType::Udp => self.deps.config.signaling_server.udp_signaling_port,
+            _ => unreachable!("GB28181 only supports TCP and UDP transport"),
         };
         let server_gb_id = &self.deps.config.signaling_server.server_gb_id;
         let server_gb_domain = &self.deps.config.signaling_server.server_gb_domain;
@@ -2244,7 +2422,7 @@ impl SignalAdapter for Gb28181Adapter {
         };
         
         // Via: SIP/2.0/UDP 192.168.1.211:5060;branch=z9hG4bKa396e08;rport
-        let via = if self.transport == TransportProtocol::Tcp {
+        let via = if self.transport == TransportType::Tcp {
             format!("SIP/2.0/TCP {local_ip}:{server_port};branch={branch};rport")
         } else {
             format!("SIP/2.0/UDP {local_ip}:{server_port};branch={branch};rport")
@@ -2292,6 +2470,7 @@ impl SignalAdapter for Gb28181Adapter {
             media_started: false,
             device_nated_ip: None,
             device_nated_port: None,
+            is_playback: false,
         };
 
         let old_session = self.sessions.write().await.insert(device_tag.to_string(), session.clone());
@@ -2301,7 +2480,6 @@ impl SignalAdapter for Gb28181Adapter {
                 if let Some(app) = self.get_device_app(&old.channel_id).await {
                     let _ = self.deps.stream_manager.stop_stream(&app, &old.stream_key).await;
                 }
-                self.deps.rtp_tunnel.unregister(&old.stream_key);
             }
         }
 
@@ -2346,8 +2524,9 @@ impl SignalAdapter for Gb28181Adapter {
         let from_tag = uuid::Uuid::new_v4().to_string().replace("-", "");
         let branch = format!("z9hG4bK{}", &call_id[..7]);
         let server_port = match self.transport {
-            TransportProtocol::Tcp => self.deps.config.signaling_server.tcp_signaling_port,
-            TransportProtocol::Udp => self.deps.config.signaling_server.udp_signaling_port,
+            TransportType::Tcp => self.deps.config.signaling_server.tcp_signaling_port,
+            TransportType::Udp => self.deps.config.signaling_server.udp_signaling_port,
+            _ => unreachable!("GB28181 only supports TCP and UDP transport"),
         };
         let server_gb_id = &self.deps.config.signaling_server.server_gb_id;
         let server_gb_domain = &self.deps.config.signaling_server.server_gb_domain;
@@ -2371,7 +2550,7 @@ impl SignalAdapter for Gb28181Adapter {
             self.remote_addr.map(|a| a.ip().to_string()).unwrap_or_else(|| "127.0.0.1".to_string())
         };
         
-        let via = if self.transport == TransportProtocol::Tcp {
+        let via = if self.transport == TransportType::Tcp {
             format!("SIP/2.0/TCP {local_ip}:{server_port};branch={branch};rport")
         } else {
             format!("SIP/2.0/UDP {local_ip}:{server_port};branch={branch};rport")
@@ -2413,6 +2592,7 @@ impl SignalAdapter for Gb28181Adapter {
             media_started: false,
             device_nated_ip: None,
             device_nated_port: None,
+            is_playback: true,
         };
 
         let old_session = self.sessions.write().await.insert(device_tag.to_string(), session.clone());
@@ -2422,7 +2602,6 @@ impl SignalAdapter for Gb28181Adapter {
                 if let Some(app) = self.get_device_app(&old.channel_id).await {
                     let _ = self.deps.stream_manager.stop_stream(&app, &old.stream_key).await;
                 }
-                self.deps.rtp_tunnel.unregister(&old.stream_key);
             }
         }
 
@@ -2453,6 +2632,7 @@ impl SignalAdapter for Gb28181Adapter {
         tracing::info!("[GB28181] Sending Playback INVITE to device={}, stream={}, rtp={}, start={}, end={}", device_tag, stream_key, rtp_port, start_ntp, end_ntp);
         self.send(invite.as_bytes()).await?;
 
+        tracing::info!("[GB28181] Playback INVITE sent, waiting for device response asynchronously");
         Ok(())
     }
 
@@ -2517,8 +2697,9 @@ impl SignalAdapter for Gb28181Adapter {
         let to_tag = uuid::Uuid::new_v4().to_string().replace("-", "");
         let branch = format!("z9hG4bK{}", &call_id[..7]);
         let server_port = match self.transport {
-            TransportProtocol::Tcp => self.deps.config.signaling_server.tcp_signaling_port,
-            TransportProtocol::Udp => self.deps.config.signaling_server.udp_signaling_port,
+            TransportType::Tcp => self.deps.config.signaling_server.tcp_signaling_port,
+            TransportType::Udp => self.deps.config.signaling_server.udp_signaling_port,
+            _ => unreachable!("GB28181 only supports TCP and UDP transport"),
         };
         let server_ip = self.remote_addr.map(|a| a.ip().to_string()).unwrap_or_else(|| "0.0.0.0".to_string());
         let server_gb_id = &self.deps.config.signaling_server.server_gb_id;
@@ -2528,7 +2709,7 @@ impl SignalAdapter for Gb28181Adapter {
         let device_host = device.host.clone();
         let device_port = device.port;
 
-        let via = if self.transport == TransportProtocol::Tcp {
+        let via = if self.transport == TransportType::Tcp {
             format!("SIP/2.0/TCP {server_ip}:{server_port};branch={branch};rport")
         } else {
             format!("SIP/2.0/UDP {server_ip}:{server_port};branch={branch};rport")
@@ -2600,11 +2781,27 @@ impl Gb28181Adapter {
         self.send_notify(device_tag, "presence", &content).await
     }
 
-    pub fn build_audio_invite_sdp(&self, device_ip: &str, audio_port: u16) -> String {
+    pub fn build_audio_invite_sdp(&self, device_ip: &str, audio_port: u16, ssrc: u32, codecs: &[&str]) -> String {
         let (platform_id, platform_ip, platform_port) = crate::protocol::gb28181::get_gb28181_platform_config()
             .get()
             .map(|(id, _, ip, port)| (id.as_str(), ip.as_str(), *port))
             .unwrap_or(("34020000000000000000", "0.0.0.0", 5060));
+        
+        let codec_info: Vec<(&str, u8, &str)> = codecs.iter()
+            .map(|c| {
+                let pt = Self::codec_to_audio_pt(c);
+                let (encoding, clock) = Self::codec_to_audio_rtp_map(c);
+                (*c, pt, encoding)
+            })
+            .collect();
+        
+        let pt_list: Vec<String> = codec_info.iter().map(|(_, pt, _)| pt.to_string()).collect();
+        let m_line = format!("m=audio {} RTP/AVP {}", audio_port, pt_list.join(" "));
+        
+        let mut rtpmap_lines = String::new();
+        for (_, pt, encoding) in &codec_info {
+            rtpmap_lines.push_str(&format!("a=rtpmap:{} {}/8000\r\n", pt, encoding));
+        }
         
         format!(
             r#"v=0
@@ -2612,19 +2809,37 @@ o={} 0 0 IN IP4 {}
 s=Talk
 c=IN IP4 {}
 t=0 0
-m=audio {} RTP/AVP 8
-a=sendonly
-a=rtpmap:8 PCMA/8000
+{}
+a=sendrecv
+y={:010}
+a=ssrc:{}
+{}
 "#,
-            platform_id, platform_ip, platform_ip, audio_port
+            platform_id, platform_ip, platform_ip, m_line, ssrc, ssrc, rtpmap_lines
         )
     }
 
-    pub fn build_audio_invite_sdp_tcp(&self, device_ip: &str, tcp_port: u16) -> String {
+    pub fn build_audio_invite_sdp_tcp(&self, device_ip: &str, tcp_port: u16, ssrc: u32, codecs: &[&str]) -> String {
         let (platform_id, platform_ip, platform_port) = crate::protocol::gb28181::get_gb28181_platform_config()
             .get()
             .map(|(id, _, ip, port)| (id.as_str(), ip.as_str(), *port))
             .unwrap_or(("34020000000000000000", "0.0.0.0", 5060));
+        
+        let codec_info: Vec<(&str, u8, &str)> = codecs.iter()
+            .map(|c| {
+                let pt = Self::codec_to_audio_pt(c);
+                let (encoding, clock) = Self::codec_to_audio_rtp_map(c);
+                (*c, pt, encoding)
+            })
+            .collect();
+        
+        let pt_list: Vec<String> = codec_info.iter().map(|(_, pt, _)| pt.to_string()).collect();
+        let m_line = format!("m=audio {} TCP/RTP/AVP {}", tcp_port, pt_list.join(" "));
+        
+        let mut rtpmap_lines = String::new();
+        for (_, pt, encoding) in &codec_info {
+            rtpmap_lines.push_str(&format!("a=rtpmap:{} {}/8000\r\n", pt, encoding));
+        }
         
         format!(
             r#"v=0
@@ -2632,67 +2847,115 @@ o={} 0 0 IN IP4 {}
 s=Talk
 c=IN IP4 {}
 t=0 0
-m=audio {} TCP/RTP/AVP 8
+{}
 a=setup:passive
 a=connection:new
-a=rtpmap:8 PCMA/8000
+a=sendrecv
+y={:010}
+a=ssrc:{}
+{}
 "#,
-            platform_id, platform_ip, platform_ip, tcp_port
+            platform_id, platform_ip, platform_ip, m_line, ssrc, ssrc, rtpmap_lines
         )
     }
 
-    pub async fn start_audio_talk(
-        &self,
+    pub async fn start_audio_talk_v2(
+        &mut self,
         device_tag: &str,
+        channel_tag: &str,
         device_ip: &str,
         device_audio_port: u16,
         platform_audio_port: u16,
         transport: TransportType,
     ) -> Result<()> {
+        tracing::info!(
+            "[GB28181] start_audio_talk_v2: device={} channel={} ip={} port={} transport={:?}",
+            device_tag, channel_tag, device_ip, device_audio_port, transport
+        );
+        
         let call_id = format!("audio-{}", chrono::Utc::now().timestamp_millis());
         let from_tag = format!("ft-{}", chrono::Utc::now().timestamp_millis() % 1000000);
+        let is_tcp = transport == TransportType::Tcp;
         
-        let sdp = match transport {
-            TransportType::TCP => self.build_audio_invite_sdp_tcp(device_ip, platform_audio_port),
-            _ => self.build_audio_invite_sdp(device_ip, device_audio_port),
-        };
-        
-        let tcp_stream = if transport == TransportType::TCP {
-            let addr = format!("{}:{}", device_ip, device_audio_port);
-            match tokio::net::TcpStream::connect(&addr).await {
-                Ok(stream) => {
-                    tracing::info!("[GB28181] TCP audio connection established to {}", addr);
-                    Some(Arc::new(tokio::sync::RwLock::new(stream)))
+        let (actual_port, actual_ssrc, tcp_server_port) = if transport == TransportType::Tcp {
+            if let Some(manager) = crate::media::get_rtp_server_manager() {
+                match manager.allocate_tcp(device_tag, channel_tag).await {
+                    Ok((port, ssrc, _tcp_server)) => {
+                        tracing::info!("[GB28181] Allocated TCP audio port {} for SSRC {}", port, ssrc);
+                        self.pending_audio_talks.write().await.insert(
+                            call_id.clone(),
+                            (device_tag.to_string(), device_ip.to_string(), device_audio_port, platform_audio_port, is_tcp, Some(port)),
+                        );
+                        (port, ssrc, Some(port))
+                    }
+                    Err(e) => {
+                        tracing::warn!("[GB28181] Failed to allocate TCP RTP server: {}", e);
+                        self.pending_audio_talks.write().await.insert(
+                            call_id.clone(),
+                            (device_tag.to_string(), device_ip.to_string(), device_audio_port, platform_audio_port, is_tcp, None),
+                        );
+                        (platform_audio_port, 0, None)
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!("[GB28181] Failed to establish TCP audio connection: {}", e);
-                    None
-                }
+            } else {
+                tracing::warn!("[GB28181] RtpServerManager not available");
+                self.pending_audio_talks.write().await.insert(
+                    call_id.clone(),
+                    (device_tag.to_string(), device_ip.to_string(), device_audio_port, platform_audio_port, is_tcp, None),
+                );
+                (platform_audio_port, 0, None)
             }
         } else {
-            None
+            let actual_channel = if let Some(sub_session) = self.sessions.read().await.get(device_tag) {
+                sub_session.channel_id.clone()
+            } else {
+                channel_tag.to_string()
+            };
+            
+            if let Some(manager) = crate::media::get_rtp_server_manager() {
+                match manager.allocate_udp(device_tag, &actual_channel).await {
+                    Ok((port, ssrc, udp_server)) => {
+                        let peer_addr: SocketAddr = format!("{}:{}", device_ip, device_audio_port).parse().unwrap();
+                        
+                        let socket = udp_server.rtp_socket();
+                        let udp_transport = crate::media::transport::UdpTransport::with_socket(socket, peer_addr);
+                        let transport_adapter = DataTransportAdapter::new(Arc::new(udp_transport));
+                        
+                        let node_id_str = format!("{}_{}", device_tag, actual_channel);
+                        let node_id = MediaNodeId::new(MediaNodeType::UDP, &node_id_str);
+                        let node: Arc<dyn MediaNode> = Arc::new(BasicMediaNode::new(node_id, Arc::new(transport_adapter)));
+                        
+                        let talk_mw = TalkNodeMiddleware::new(AudioCodec::Pcma);
+                        node.add_recv_chain(Box::new(talk_mw)).await;
+                        
+                        let send_mw = SendChainNodeMiddleware::new(AudioCodec::Pcma);
+                        node.add_send_chain(MediaNodeType::UDP, Box::new(send_mw));
+                        
+                        if let Some(mgr) = crate::media::get_media_session_manager() {
+                            let session = mgr.get_or_create(device_tag, &actual_channel);
+                            session.add_node(node.clone())?;
+                            tracing::info!("[GB28181] Added MediaNode to session: {}_{}", device_tag, actual_channel);
+                        }
+                        
+                        tracing::info!("[GB28181] Created MediaNode for audio talk: device={} channel={} ssrc={}", device_tag, actual_channel, ssrc);
+                        
+                        (port, ssrc, None)
+                    }
+                    Err(e) => {
+                        tracing::warn!("[GB28181] Failed to allocate UDP RTP server: {}", e);
+                        (platform_audio_port, 0, None)
+                    }
+                }
+            } else {
+                tracing::warn!("[GB28181] UDP RTP server manager not available");
+                (platform_audio_port, 0, None)
+            }
         };
         
-        let session = AudioTalkSession {
-            device_tag: device_tag.to_string(),
-            device_ip: device_ip.to_string(),
-            device_audio_port,
-            platform_audio_port,
-            call_id: call_id.clone(),
-            from_tag: from_tag.clone(),
-            to_tag: None,
-            start_time: chrono::Utc::now(),
-            audio_socket: None,
-            tcp_stream: tcp_stream.clone(),
-            rtp_ssrc: rand_ssrc(),
-            rtp_sequence: rand_u16(),
-            rtp_timestamp: rand_u32(),
+        let sdp = match transport {
+            TransportType::Tcp => self.build_audio_invite_sdp_tcp(device_ip, actual_port, actual_ssrc, &["PCMA", "PCMU"]),
+            _ => self.build_audio_invite_sdp(device_ip, actual_port, actual_ssrc, &["PCMA", "PCMU"]),
         };
-        
-        let mut sessions = self.audio_talk_sessions.write().await;
-        sessions.insert(device_tag.to_string(), session);
-        
-        tracing::info!("[GB28181] Starting audio talk: device={} ip={} port={} transport={:?}", device_tag, device_ip, device_audio_port, transport);
         
         let (platform_id, platform_ip, platform_port) = crate::protocol::gb28181::get_gb28181_platform_config()
             .get()
@@ -2700,7 +2963,7 @@ a=rtpmap:8 PCMA/8000
             .unwrap_or(("34020000000000000000", "0.0.0.0", 5060));
         
         let via_transport = match transport {
-            TransportType::TCP => "TCP",
+            TransportType::Tcp => "TCP",
             _ => "UDP",
         };
         
@@ -2727,179 +2990,199 @@ a=rtpmap:8 PCMA/8000
             sdp
         );
         
-        match transport {
-            TransportType::TCP => {
-                if let Some(ref tcp_stream_arc) = tcp_stream {
-                    let mut tcp_stream_guard = tcp_stream_arc.write().await;
-                    if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut *tcp_stream_guard, sip_msg.as_bytes()).await {
-                        tracing::warn!("[GB28181] Failed to send audio INVITE via TCP: {}", e);
-                    } else if let Err(e) = tokio::io::AsyncWriteExt::flush(&mut *tcp_stream_guard).await {
-                        tracing::warn!("[GB28181] Failed to flush audio INVITE via TCP: {}", e);
-                    }
-                }
-            },
-            _ => {
-                if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
-                    sender.send(sip_msg.as_bytes()).await.map_err(|e| anyhow::anyhow!("{}", e))?;
-                }
-            }
-        }
+        self.send(sip_msg.as_bytes()).await?;
+        
+        let is_tcp = transport == TransportType::Tcp;
+        tracing::info!("[GB28181] INVITE sent with SSRC {} on port {}, waiting for 200 OK", actual_ssrc, actual_port);
         
         Ok(())
     }
-
-    pub async fn stop_audio_talk(&self, device_tag: &str) -> Result<()> {
-        let mut sessions = self.audio_talk_sessions.write().await;
-        if let Some(session) = sessions.remove(device_tag) {
-            tracing::info!("[GB28181] Stopping audio talk: device={}", device_tag);
-            
-            let (platform_id, platform_ip, platform_port) = crate::protocol::gb28181::get_gb28181_platform_config()
-                .get()
-                .map(|(id, _, ip, port)| (id.as_str(), ip.as_str(), *port))
-                .unwrap_or(("34020000000000000000", "0.0.0.0", 5060));
-            
-            let via_transport = if session.tcp_stream.is_some() { "TCP" } else { "UDP" };
-            
-            let sip_msg = format!(
-                "BYE sip:{}@{}:{} SIP/2.0\r\n\
-                 Via: SIP/2.0/{} {}:{};branch=z9hG4bK{};rport\r\n\
-                 From: <sip:{}@{}:{}>;tag={}\r\n\
-                 To: <sip:{}@{}:{}>;tag={}\r\n\
-                 Call-ID: {}\r\n\
-                 CSeq: 2 BYE\r\n\
-                 User-Agent: RustCam-Media/2.0\r\n\
-                 Content-Length: 0\r\n\r\n",
-                device_tag, session.device_ip, session.device_audio_port,
-                via_transport, platform_ip, platform_port,
-                chrono::Utc::now().timestamp_millis(),
-                platform_id, platform_ip, platform_port, &session.from_tag,
-                device_tag, session.device_ip, session.device_audio_port,
-                session.to_tag.as_deref().unwrap_or(""),
-                &session.call_id
-            );
-            
-            if let Some(ref tcp_stream_arc) = session.tcp_stream {
-                let mut tcp_stream = tcp_stream_arc.write().await;
-                if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut *tcp_stream, sip_msg.as_bytes()).await {
-                    tracing::warn!("[GB28181] Failed to send audio BYE via TCP: {}", e);
-                } else if let Err(e) = tokio::io::AsyncWriteExt::flush(&mut *tcp_stream).await {
-                    tracing::warn!("[GB28181] Failed to flush audio BYE via TCP: {}", e);
-                }
-            } else {
-                if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
-                    let addr = format!("{}:{}", session.device_ip, session.device_audio_port);
-                    let _ = sender.send_to(sip_msg.as_bytes(), &addr).await;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn send_audio_to_device(&self, device_tag: &str, pcm_data: &[i16]) -> Result<()> {
-        let (session_opt, is_tcp) = {
-            let mut sessions = self.audio_talk_sessions.write().await;
-            if let Some(session) = sessions.get_mut(device_tag) {
-                let encoded = crate::protocol::gb28181::audio::linear_to_alaw(pcm_data);
-                let timestamp = session.rtp_timestamp;
-                let ssrc = session.rtp_ssrc;
-                let sequence = session.rtp_sequence;
-                
-                session.rtp_timestamp = session.rtp_timestamp.wrapping_add(160);
-                session.rtp_sequence = session.rtp_sequence.wrapping_add(1);
-                
-                let is_tcp = session.tcp_stream.is_some();
-                (Some((encoded, timestamp, ssrc, sequence, session.device_ip.clone(), session.device_audio_port)), is_tcp)
-            } else {
-                (None, false)
-            }
+    
+    pub async fn finish_audio_talk_setup(
+        &mut self,
+        device_tag: &str,
+        codec: crate::media::AudioCodec,
+        peer_addr: SocketAddr,
+        transport: TransportType,
+        platform_audio_port: u16,
+        tcp_server_port: Option<u16>,
+    ) -> Result<()> {
+        tracing::info!("[GB28181] finish_audio_talk_setup: device={} codec={:?} transport={:?}", device_tag, codec, transport);
+        
+        let channel_id = if let Some(sub_session) = self.sessions.read().await.get(device_tag) {
+            sub_session.channel_id.clone()
+        } else {
+            return Err(AppError::Internal(format!("No session for device: {}", device_tag)));
         };
         
-        if let Some((encoded, timestamp, ssrc, sequence, device_ip, device_port)) = session_opt {
-            let rtp_packet = crate::protocol::gb28181::rtp::build_audio_rtp_packet_with_seq(
-                &encoded,
-                8,
-                timestamp,
-                ssrc,
-                sequence,
-            );
-            
-            if is_tcp {
-                let len = rtp_packet.len() as u16;
-                let mut frame = Vec::with_capacity(2 + rtp_packet.len());
-                frame.extend_from_slice(&len.to_be_bytes());
-                frame.extend_from_slice(&rtp_packet);
-                
-                if let Some(stream_arc) = self.audio_talk_sessions.read().await.get(device_tag).and_then(|s| s.tcp_stream.clone()) {
-                    let mut stream = stream_arc.write().await;
-                    if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut *stream, &frame).await {
-                        tracing::error!("[GB28181] TCP audio write failed: {}", e);
-                        if let Some(session) = self.audio_talk_sessions.write().await.get_mut(device_tag) {
-                            session.tcp_stream = None;
+        if transport == TransportType::Tcp {
+            if let Some(port) = tcp_server_port {
+                if let Some(manager) = crate::media::get_rtp_server_manager() {
+                    if let Some(tcp_server) = manager.get_tcp_server(port).await {
+                        if let Some((stream, addr)) = tcp_server.take_accepted_stream().await {
+                            tracing::info!("[GB28181] TCP accept succeeded for device {} from {}", device_tag, addr);
+                            
+                            let tcp_transport = crate::media::transport::Gb28181TcpTransport::with_stream(stream)
+                                .map_err(|e| AppError::Internal(format!("TCP transport error: {}", e)))?;
+                            let transport_adapter = DataTransportAdapter::new(Arc::new(tcp_transport));
+                            
+                            let node_id_str = format!("{}_{}", device_tag, channel_id);
+                            let node_id = MediaNodeId::new(MediaNodeType::TCP, &node_id_str);
+                            let node: Arc<dyn MediaNode> = Arc::new(BasicMediaNode::new(node_id, Arc::new(transport_adapter)));
+                            
+                            let talk_mw = TalkNodeMiddleware::new(codec);
+                            node.add_recv_chain(Box::new(talk_mw)).await;
+                            
+                            let send_mw = SendChainNodeMiddleware::new(codec);
+                            node.add_send_chain(MediaNodeType::TCP, Box::new(send_mw));
+                            
+                            if let Some(mgr) = crate::media::get_media_session_manager() {
+                                let session = mgr.get_or_create(device_tag, &channel_id);
+                                session.add_node(node.clone())?;
+                                tracing::info!("[GB28181] TCP MediaNode added to session: {}_{}", device_tag, channel_id);
+                            }
+                        } else {
+                            tracing::warn!("[GB28181] TCP accept not ready yet for device {}", device_tag);
                         }
                     }
                 }
-            } else {
-                let addr = format!("{}:{}", device_ip, device_port);
-                if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
-                    sender.send_to(&rtp_packet, &addr).await.map_err(|e| anyhow::anyhow!("{}", e))?;
-                }
             }
-        }
-        
-        Ok(())
-    }
-    
-    pub async fn send_audio_to_device_tcp(&self, device_tag: &str, pcm_data: &[i16]) -> Result<()> {
-        let rtp_packet_with_len = {
-            let mut sessions = self.audio_talk_sessions.write().await;
-            if let Some(session) = sessions.get_mut(device_tag) {
-                if session.tcp_stream.is_none() {
-                    tracing::warn!("[GB28181] No TCP stream for device {}, attempting reconnect", device_tag);
-                    let addr = format!("{}:{}", session.device_ip, session.device_audio_port);
-                    if let Ok(stream) = tokio::net::TcpStream::connect(&addr).await {
-                        session.tcp_stream = Some(Arc::new(tokio::sync::RwLock::new(stream)));
-                        tracing::info!("[GB28181] TCP audio reconnected to {}", addr);
-                    } else {
-                        return Ok(());
+            tracing::info!("[GB28181] TCP Session confirmed for device {} with codec {:?}", device_tag, codec);
+        } else {
+            if let Some(manager) = crate::media::get_media_session_manager() {
+                if let Some(session) = manager.get(device_tag, &channel_id) {
+                    let node_id = format!("{}_{}", device_tag, channel_id);
+                    if session.get_node(&node_id).is_some() {
+                        tracing::info!("[GB28181] UDP Node confirmed for device {} channel {} codec {:?}", device_tag, channel_id, codec);
                     }
                 }
-                
-                let encoded = crate::protocol::gb28181::audio::linear_to_alaw(pcm_data);
-                let timestamp = session.rtp_timestamp;
-                let ssrc = session.rtp_ssrc;
-                let sequence = session.rtp_sequence;
-                
-                session.rtp_timestamp = session.rtp_timestamp.wrapping_add(160);
-                session.rtp_sequence = session.rtp_sequence.wrapping_add(1);
-                
-                let rtp_packet = crate::protocol::gb28181::rtp::build_audio_rtp_packet_with_seq(
-                    &encoded, 8, timestamp, ssrc, sequence
-                );
-                
-                let len = rtp_packet.len() as u16;
-                let mut frame = Vec::with_capacity(2 + rtp_packet.len());
-                frame.extend_from_slice(&len.to_be_bytes());
-                frame.extend_from_slice(&rtp_packet);
-                frame
-            } else {
-                return Ok(());
             }
+        }
+        
+        tracing::info!("[GB28181] Media sessions created for device {}", device_tag);
+        
+        let device_id = self.deps.device_lookup.find_by_tag(device_tag)
+            .await
+            .map(|d| d.id)
+            .unwrap_or(0);
+        
+        let event = crate::protocol::event::SignalEvent::AudioTalkReady {
+            device_id,
+            device_tag: Some(device_tag.to_string()),
         };
         
-        if let Some(ref stream_arc) = self.audio_talk_sessions.read().await.get(device_tag).and_then(|s| s.tcp_stream.clone()) {
-            let mut stream = stream_arc.write().await;
-            if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut *stream, &rtp_packet_with_len).await {
-                tracing::error!("[GB28181] TCP write failed: {}", e);
-                if let Some(session) = self.audio_talk_sessions.write().await.get_mut(device_tag) {
-                    session.tcp_stream = None;
-                }
-                return Err(anyhow::anyhow!("TCP write failed: {}", e).into());
-            }
+        if let Err(e) = self.deps.event_publisher.publish(event).await {
+            tracing::warn!("[GB28181] Failed to publish AudioTalkReady event: {}", e);
+        } else {
+            tracing::info!("[GB28181] Published AudioTalkReady event for device {}", device_tag);
         }
         
         Ok(())
     }
     
+    pub async fn stop_audio_talk_v2(&self, device_tag: &str) -> Result<()> {
+        let channel_id = match self.sessions.read().await.get(device_tag) {
+            Some(s) => s.channel_id.clone(),
+            None => return Ok(()),
+        };
+        
+        let manager = match crate::media::get_media_session_manager() {
+            Some(m) => m,
+            None => return Ok(()),
+        };
+        
+        if let Some(session) = manager.get(device_tag, &channel_id) {
+            let node_id = format!("{}_{}", device_tag, channel_id);
+            if let Some(node) = session.remove_node(&node_id) {
+                tracing::info!("[GB28181] stop_audio_talk_v2: device={} channel={}", device_tag, channel_id);
+                if let Err(e) = node.stop().await {
+                    tracing::warn!("[GB28181] Failed to stop media node: {}", e);
+                }
+            }
+        }
+        Ok(())
+    }
+    
+    pub async fn send_audio_to_device_v2(&self, device_tag: &str, pcm_data: &[i16]) -> Result<()> {
+        let channel_id = match self.sessions.read().await.get(device_tag) {
+            Some(s) => s.channel_id.clone(),
+            None => return Err(AppError::Internal(format!("No active session for device: {}", device_tag))),
+        };
+        
+        let manager = match crate::media::get_media_session_manager() {
+            Some(m) => m,
+            None => return Err(AppError::Internal("No MediaSessionManager".into())),
+        };
+        
+        let session = match manager.get(device_tag, &channel_id) {
+            Some(s) => s,
+            None => return Err(AppError::Internal(format!("No session found for device: {}", device_tag))),
+        };
+        
+        let node_id = format!("{}_{}", device_tag, channel_id);
+        let node = match session.get_node(&node_id) {
+            Some(n) => n,
+            None => return Err(AppError::Internal(format!("No media node: {}", node_id))),
+        };
+        
+        let mut pcm_bytes = Vec::with_capacity(pcm_data.len() * 2);
+        for &sample in pcm_data {
+            pcm_bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+        node.send(&pcm_bytes).await?;
+        Ok(())
+    }
+
+    pub async fn is_audio_talk_active(&self, device_tag: &str) -> bool {
+        if let Some(sub_session) = self.sessions.read().await.get(device_tag) {
+            let channel_id = &sub_session.channel_id;
+            if let Some(manager) = crate::media::get_media_session_manager() {
+                if let Some(session) = manager.get(device_tag, channel_id) {
+                    let node_id = format!("{}_{}", device_tag, channel_id);
+                    return session.get_node(&node_id).is_some();
+                }
+            }
+        }
+        false
+    }
+    
+    pub async fn recv_audio_from_device_v2(&self, device_tag: &str) -> Result<Option<Vec<i16>>> {
+        let channel_id = match self.sessions.read().await.get(device_tag) {
+            Some(s) => s.channel_id.clone(),
+            None => return Ok(None),
+        };
+        
+        let manager = match crate::media::get_media_session_manager() {
+            Some(m) => m,
+            None => return Ok(None),
+        };
+        
+        let session = match manager.get(device_tag, &channel_id) {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        
+        let node_id = format!("{}_{}", device_tag, channel_id);
+        let node = match session.get_node(&node_id) {
+            Some(n) => n,
+            None => return Ok(None),
+        };
+        
+        match node.recv().await {
+            Ok(data) => {
+                let samples: Vec<i16> = data
+                    .chunks_exact(2)
+                    .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
+                    .collect();
+                Ok(Some(samples))
+            }
+            Err(e) => {
+                tracing::warn!("[GB28181] Failed to recv from node: {}", e);
+                Err(AppError::Internal(e.to_string()))
+            }
+        }
+    }
+
     async fn send_bye_to_session(&self, session: &SubSession) -> Result<()> {
         let (platform_id, platform_ip, platform_port) = crate::protocol::gb28181::get_gb28181_platform_config()
             .get()
@@ -2908,8 +3191,9 @@ a=rtpmap:8 PCMA/8000
 
         let device_tag = self.device_tag_str();
         let via_transport = match session.transport {
-            TransportProtocol::Tcp => "TCP",
-            TransportProtocol::Udp => "UDP",
+            TransportType::Tcp => "TCP",
+            TransportType::Udp => "UDP",
+            _ => unreachable!("GB28181 only supports TCP and UDP transport"),
         };
         let sip_msg = format!(
             "BYE sip:{}@{}:{} SIP/2.0\r\n\
@@ -2930,40 +3214,35 @@ a=rtpmap:8 PCMA/8000
         );
 
         match session.transport {
-            TransportProtocol::Tcp => {
+            TransportType::Tcp => {
                 if let Some(ref write_arc) = self.write {
                     let mut write = write_arc.write().await;
                     write.write_all(sip_msg.as_bytes()).await.map_err(|e| AppError::Internal(e.to_string()))?;
                     let _ = write.flush().await;
                 }
             }
-            TransportProtocol::Udp => {
+            TransportType::Udp => {
                 if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
                     let addr = format!("{}:{}", session.device_host, session.device_port);
                     sender.send_to(sip_msg.as_bytes(), &addr).await.map_err(|e| AppError::Internal(e.to_string()))?;
                 }
             }
+            _ => unreachable!("GB28181 only supports TCP and UDP transport"),
         }
         Ok(())
     }
 }
 
 fn rand_ssrc() -> u32 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    (now.as_nanos() as u32).wrapping_add(12345)
+    rand::random()
 }
 
 fn rand_u16() -> u16 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    (now.as_nanos() as u16).wrapping_add(1)
+    rand::random()
 }
 
 fn rand_u32() -> u32 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    (now.as_nanos() as u32).wrapping_add(1)
+    rand::random()
 }
 
 #[cfg(test)]
@@ -3268,7 +3547,7 @@ mod tests {
         adapter.from_tag = Some("from_tag_123".to_string());
         adapter.to_tag = Some("to_tag_456".to_string());
         adapter.call_id = Some("call_id_789".to_string());
-        adapter.transport = TransportProtocol::Udp;
+        adapter.transport = TransportType::Udp;
         
         let response = adapter.build_401_response("z9hG4bKbranch", "1 REGISTER", "realm123");
         
@@ -3289,7 +3568,7 @@ mod tests {
         adapter.from_tag = Some("from_tag_123".to_string());
         adapter.to_tag = Some("to_tag_456".to_string());
         adapter.call_id = Some("call_id_789".to_string());
-        adapter.transport = TransportProtocol::Udp;
+        adapter.transport = TransportType::Udp;
         
         let response = adapter.build_403_response("z9hG4bKbranch", "1 REGISTER");
         

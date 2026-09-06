@@ -1,14 +1,10 @@
 mod adapter;
 pub mod auth;
 mod ptz;
-pub mod audio;
-pub mod rtp;
-pub mod tcp_audio_pool;
 pub mod sip;
 
 pub use adapter::Gb28181Adapter;
 pub use sip::{SipMessage, SipUri, SipMethod, SipNameAddr};
-pub use tcp_audio_pool::{TcpAudioServerPool, TcpAudioServerConfig, TcpAudioConnection};
 
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
@@ -34,14 +30,4 @@ pub fn detect_local_ip(remote_ip: &str) -> Option<String> {
     socket.connect(format!("{}:5060", remote_ip)).ok()?;
     let local = socket.local_addr().ok()?;
     Some(local.ip().to_string())
-}
-
-static TCP_AUDIO_SERVER_POOL: OnceCell<Arc<TcpAudioServerPool>> = OnceCell::new();
-
-pub fn init_tcp_audio_server_pool(config: TcpAudioServerConfig) {
-    TCP_AUDIO_SERVER_POOL.set(Arc::new(TcpAudioServerPool::new(config))).ok();
-}
-
-pub fn get_tcp_audio_server_pool() -> Option<&'static Arc<TcpAudioServerPool>> {
-    TCP_AUDIO_SERVER_POOL.get()
 }

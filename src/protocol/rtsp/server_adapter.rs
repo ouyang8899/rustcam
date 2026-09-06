@@ -19,6 +19,10 @@ use crate::protocol::rtsp::session::{
     RtspSessionState,
 };
 use crate::error::{AppError, Result};
+use crate::media::{
+    MediaType, Direction, MiddlewareChain,
+    LogMiddleware,
+};
 
 const MAX_INTERLEAVED_BUFFER: usize = 1024 * 1024;
 
@@ -311,27 +315,34 @@ impl RtspServerAdapter {
                 break;
             }
 
-            match self
-                .deps
-                .rtp_tunnel
-                .handle_interleaved(&stream_key, &self.interleaved_buffer[consumed..])
-                .await
-            {
-                Ok(Some(frame_len)) => {
-                    consumed += frame_len;
-                }
-                Ok(None) => {
-                    if consumed > 0 {
-                        self.interleaved_buffer.drain(..consumed);
-                    }
-                    break;
-                }
-                Err(e) => {
-                    tracing::error!("[RTSP] RTP tunnel error: {}", e);
-                    self.interleaved_buffer.clear();
-                    break;
-                }
+            let magic = self.interleaved_buffer[consumed];
+            if magic != 0x24 {
+                tracing::warn!("[RTSP] Invalid interleaved magic byte: 0x{:02x}", magic);
+                self.interleaved_buffer.clear();
+                break;
             }
+
+            if consumed + 4 > self.interleaved_buffer.len() {
+                break;
+            }
+
+            let channel = self.interleaved_buffer[consumed + 1];
+            let payload_len = u16::from_be_bytes([
+                self.interleaved_buffer[consumed + 2],
+                self.interleaved_buffer[consumed + 3],
+            ]) as usize;
+            let total_len = 4 + payload_len;
+
+            if consumed + total_len > self.interleaved_buffer.len() {
+                break;
+            }
+
+            consumed += total_len;
+
+            if consumed > 0 {
+                self.interleaved_buffer.drain(..consumed);
+            }
+            break;
         }
 
         (vec![], None)
@@ -565,19 +576,7 @@ impl RtspServerAdapter {
                         .and_then(|t| Self::parse_interleaved_channels(t))
                         .unwrap_or((0, 1));
 
-                    let _ = self
-                        .deps
-                        .rtp_tunnel
-                        .register(
-                            stream_key.clone(),
-                            format!("{}:{}", server_ip, rtp_port)
-                                .parse()
-                                .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap()),
-                            interleaved_channels.0,
-                        )
-                        .await;
-
-                    tracing::info!(
+tracing::info!(
                         "[RTSP] SETUP (TCP): stream={}, ch={}-{}, zlm={}:{}",
                         stream_key,
                         interleaved_channels.0,
@@ -591,23 +590,14 @@ impl RtspServerAdapter {
                         interleaved_channels.0, interleaved_channels.1
                     )
                 } else {
-                    // UDP 模式：客户端直接发送 RTP 到 ZLMediaKit
-                    tracing::info!(
-                        "[RTSP] SETUP (UDP): stream={}, zlm={}:{}-{}, client={}-{}",
-                        stream_key,
-                        server_ip,
-                        rtp_port,
-                        rtp_port + 1,
-                        client_rtp,
-                        client_rtcp
-                    );
+                    // TODO: 使用 MediaSession + MediaNode + MediaTransport 重构
+                    // 旧实现已移除 media_manager依赖
+                    tracing::warn!("[RTSP] UDP mode requires MediaSession + MediaNode refactoring");
 
                     format!(
-                        "RTP/AVP;unicast;client_port={}-{};server_port={}-{};source={}",
+                        "RTP/AVP;unicast;client_port={}-{};server_port=0-0;source={}",
                         client_rtp,
                         client_rtcp,
-                        rtp_port,
-                        rtp_port + 1,
                         server_ip
                     )
                 };
@@ -656,7 +646,7 @@ impl RtspServerAdapter {
                     device_tag: None,
                     session_id: session_id.clone(),
                     channel_id: Some(stream_key),
-                    transport: TransportType::TCP,
+                    transport: TransportType::Tcp,
                     media_server_name,
                 });
 
@@ -711,11 +701,8 @@ impl RtspServerAdapter {
                         (sess_id.to_string(), None)
                     };
 
-                if let Some(ref server_tag) = media_server_name {
-                    self.close_rtp_port(&stream_key, server_tag).await;
-                }
-
-                self.deps.rtp_tunnel.unregister(&stream_key);
+                // TODO: 使用 MediaSession + MediaNode 清理资源
+                // 旧实现已移除 media_manager依赖
 
                 let session_id = self.session.clone().unwrap_or(sess_id.to_string());
                 events.push(SignalEvent::StopPlay {
@@ -728,6 +715,16 @@ impl RtspServerAdapter {
                 self.session = None;
 
                 tracing::info!("[RTSP] TEARDOWN: stream={}", stream_key);
+                (events, Some(RtspResponse::ok(cseq)))
+            }
+
+            "GET_PARAMETER" => {
+                tracing::debug!("[RTSP] GET_PARAMETER: session={:?}", session_header);
+                (events, Some(RtspResponse::ok(cseq)))
+            }
+
+            "SET_PARAMETER" => {
+                tracing::debug!("[RTSP] SET_PARAMETER: session={:?}", session_header);
                 (events, Some(RtspResponse::ok(cseq)))
             }
 
@@ -851,7 +848,6 @@ impl SignalAdapter for RtspServerAdapter {
 
             self.send_teardown(&stream_key).await?;
 
-            self.deps.rtp_tunnel.unregister(&stream_key);
             remove_session(sess_id);
             self.session = None;
         }

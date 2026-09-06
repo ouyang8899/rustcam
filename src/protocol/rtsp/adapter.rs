@@ -67,7 +67,7 @@ impl RtspAdapter {
                     device_tag: None,
                     session_id: self.session.clone().unwrap_or_else(|| format!("rtsp_{}", chrono::Utc::now().timestamp())),
                     channel_id: Some("0".to_string()),
-                    transport: crate::protocol::event::TransportType::TCP,
+                    transport: crate::protocol::event::TransportType::Tcp,
                     media_server_name: None,
                 });
             }

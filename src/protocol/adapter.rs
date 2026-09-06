@@ -58,6 +58,38 @@ pub trait SignalAdapter: Send + Sync {
         Ok(())
     }
 
+    async fn start_audio_talk_v2(
+        &mut self,
+        _device_tag: &str,
+        _channel_tag: &str,
+        _device_ip: &str,
+        _device_audio_port: u16,
+        _platform_audio_port: u16,
+        _transport: crate::protocol::event::TransportType,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    async fn stop_audio_talk_v2(&mut self, _device_tag: &str) -> Result<()> {
+        Ok(())
+    }
+
+    async fn send_audio_to_device_v2(&mut self, _device_tag: &str, _pcm_data: &[i16]) -> Result<()> {
+        Ok(())
+    }
+
+    async fn recv_audio_from_device_v2(&mut self, _device_tag: &str) -> Result<Option<Vec<i16>>> {
+        Ok(None)
+    }
+
+    async fn is_audio_talk_active(&self, _device_tag: &str) -> bool {
+        false
+    }
+
+    async fn set_tcp_stream_for_talk(&mut self, _device_tag: &str, _stream: Arc<tokio::net::TcpStream>) -> Result<()> {
+        Ok(())
+    }
+
     fn needs_timeout_check(&self) -> bool { false }
 
     async fn handle_registration_timeout(&mut self) {}

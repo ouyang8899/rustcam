@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use crate::domain::traits::{DeviceLookup, StreamManager, EventPublisher, CacheStore};
 use crate::infrastructure::cluster::ClusterManager;
-use crate::protocol::rtsp::rtp_tunnel::RtpTunnel;
 use crate::protocol::adapter_manager::AdapterEntry;
 use crate::config::AppConfig;
 
@@ -12,7 +11,6 @@ pub struct ProtocolDeps {
     pub stream_manager: Arc<dyn StreamManager>,
     pub event_publisher: Arc<dyn EventPublisher>,
     pub cluster: Arc<ClusterManager>,
-    pub rtp_tunnel: Arc<RtpTunnel>,
     pub redis: Arc<dyn CacheStore>,
     pub config: Arc<AppConfig>,
     pub register_fn: Arc<dyn Fn(String, AdapterEntry) + Send + Sync>,
@@ -25,7 +23,6 @@ impl ProtocolDeps {
         stream_manager: Arc<dyn StreamManager>,
         event_publisher: Arc<dyn EventPublisher>,
         cluster: Arc<ClusterManager>,
-        rtp_tunnel: Arc<RtpTunnel>,
         redis: Arc<dyn CacheStore>,
         config: Arc<AppConfig>,
     ) -> Self {
@@ -34,7 +31,6 @@ impl ProtocolDeps {
             stream_manager,
             event_publisher,
             cluster,
-            rtp_tunnel,
             redis,
             config,
             register_fn: Arc::new(|_, _| {}),
@@ -59,7 +55,6 @@ impl std::fmt::Debug for ProtocolDeps {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ProtocolDeps")
             .field("cluster_servers", &self.cluster.server_count())
-            .field("rtp_tunnels", &self.rtp_tunnel.tunnel_count())
             .field("rtsp_auth", &self.config.rtsp_auth.enabled)
             .finish()
     }
@@ -175,7 +170,6 @@ impl ProtocolDeps {
             stream_manager: Arc::new(TestStreamManager),
             event_publisher: Arc::new(TestEventPublisher),
             cluster: Arc::new(ClusterManager::new_from_configs(vec![])),
-            rtp_tunnel: Arc::new(RtpTunnel::new()),
             redis: Arc::new(TestCacheStore),
             config: Arc::new(AppConfig::default()),
             register_fn: Arc::new(|_, _| {}),

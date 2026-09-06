@@ -8,16 +8,9 @@ use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
 use rustcam_media::context::{init_registry, ServiceRegistry};
 use rustcam_media::config::AppConfig;
-use rustcam_media::protocol::{
-    AdapterRegistry, ProtocolMatcher, ProtocolType, SignalAdapter,
-    gb28181::Gb28181Adapter,
-    onvif::OnvifAdapter,
-    rtsp::RtspServerAdapter,
-    websocket::WebSocketAdapter,
-};
-use rustcam_media::protocol::traits::ProtocolDeps;
+use rustcam_media::protocol::SignalAdapter;
 use rustcam_media::transport::{
-    TcpServer, ServerConfig, UdpServer, UdpServerConfig,
+    SipTcpServer, SipTcpServerConfig, SipUdpServer, SipUdpServerConfig,
 };
 use rustcam_media::api::{AppState, create_router, FullState};
 
@@ -46,47 +39,6 @@ async fn shutdown_signal() {
             info!("Received SIGTERM signal");
         },
     }
-}
-
-/// 创建协议适配器注册表
-fn create_adapter_registry(_deps: ProtocolDeps) -> AdapterRegistry {
-    let mut registry = AdapterRegistry::new();
-
-    // GB28181
-    registry.register_with_deps(
-        |deps, register_fn, unregister_fn| {
-            Box::new(Gb28181Adapter::new(deps, register_fn, unregister_fn)) as Box<dyn SignalAdapter + 'static>
-        },
-        ProtocolType::Gb28181,
-        "GB28181",
-    );
-    registry.register_matcher(ProtocolMatcher::gb28181(), ProtocolType::Gb28181);
-
-    // ONVIF
-    registry.register_with_deps(
-        |deps, _, _| Box::new(OnvifAdapter::new(deps)) as Box<dyn SignalAdapter + 'static>,
-        ProtocolType::Onvif,
-        "ONVIF",
-    );
-    registry.register_matcher(ProtocolMatcher::onvif(), ProtocolType::Onvif);
-
-    // RTSP
-    registry.register_with_deps(
-        |deps, _, _| Box::new(RtspServerAdapter::new(deps)) as Box<dyn SignalAdapter + 'static>,
-        ProtocolType::Rtsp,
-        "RTSP-Server",
-    );
-    registry.register_matcher(ProtocolMatcher::rtsp(), ProtocolType::Rtsp);
-
-    // WebSocket
-    registry.register_with_deps(
-        |deps, _, _| Box::new(WebSocketAdapter::new(deps)) as Box<dyn SignalAdapter + 'static>,
-        ProtocolType::WebRtc,
-        "WebSocket",
-    );
-    registry.register_matcher(ProtocolMatcher::websocket(), ProtocolType::WebRtc);
-
-    registry
 }
 
 /// 初始化日志系统
@@ -170,11 +122,7 @@ async fn main() -> anyhow::Result<()> {
     registry.start_all().await;
     info!("All services started");
 
-    // 4. 创建协议适配器
-    let adapter_registry = Arc::new(create_adapter_registry(registry.protocol_deps.clone()));
-    info!("Protocol adapters registered: {:?}", adapter_registry.registered_protocols());
-
-    // 5. 构建 HTTP 路由
+    // 4. 构建 HTTP 路由
     let auth_state = registry.get_auth_state().await?;
     let app = create_router(AppState::from_registry(&registry), auth_state);
 
@@ -187,54 +135,67 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind(&http_addr).await?;
     info!("HTTP API server listening on {}", http_addr);
 
-    // 7. TCP 信令服务器
-    let tcp_config = ServerConfig {
-        bind_addr: format!(
-            "{}:{}",
-            registry.infra.config().signaling_server.bind_ip,
-            registry.infra.config().signaling_server.tcp_signaling_port,
-        ),
-        max_packet_size: 1024 * 1024,
-        read_buffer_size: 65536,
-        connection_timeout: 60,
-        keepalive_interval_secs: 30,
+    // 7. SIP TCP 信令服务器
+    let sig_cfg = &registry.infra.config().signaling_server;
+    let tcp_config = SipTcpServerConfig {
+        bind_addr: format!("{}:{}", sig_cfg.bind_ip, sig_cfg.tcp_signaling_port),
+        max_connections: sig_cfg.tcp_max_connections,
+        read_buffer_size: sig_cfg.tcp_read_buffer_size,
+        connection_timeout: sig_cfg.tcp_connection_timeout,
+        keepalive_interval_secs: sig_cfg.tcp_keepalive_interval_secs,
+        read_timeout_secs: sig_cfg.tcp_read_timeout_secs,
     };
-    let tcp_server = TcpServer::new(
+    let sip_tcp_server = SipTcpServer::new(
         tcp_config.clone(),
-        adapter_registry.clone(),
         registry.infra.event_bus.clone(),
         registry.infra.metrics.clone(),
         registry.protocol_deps.clone(),
     )
-        .await?;
-    info!("TCP signaling server listening on {}", tcp_config.bind_addr);
+    .await?;
+    info!("SIP TCP server listening on {}", tcp_config.bind_addr);
 
-    // 8. UDP 服务器
-    let udp_config = UdpServerConfig {
-        bind_addr: format!(
-            "{}:{}",
-            registry.infra.config().signaling_server.bind_ip,
-            registry.infra.config().signaling_server.udp_signaling_port,
-        ),
-        max_packet_size: 65536,
-        adapter_timeout_secs: 120,
+    // 8. SIP UDP 服务器
+    let udp_config = SipUdpServerConfig {
+        bind_addr: format!("{}:{}", sig_cfg.bind_ip, sig_cfg.udp_signaling_port),
+        max_packet_size: sig_cfg.udp_max_packet_size,
+        adapter_timeout_secs: sig_cfg.udp_adapter_timeout_secs,
+        max_adapters: sig_cfg.udp_max_adapters,
     };
-    let udp_socket = tokio::net::UdpSocket::bind(&udp_config.bind_addr).await?;
-    let udp_socket = Arc::new(udp_socket);
-
-    let udp_server = UdpServer::with_socket(
+    let sip_udp_server = SipUdpServer::new(
         udp_config.clone(),
-        udp_socket.clone(),
-        adapter_registry.clone(),
         registry.infra.event_bus.clone(),
         registry.infra.metrics.clone(),
         registry.protocol_deps.clone(),
-    );
-    info!("UDP server listening on {}", udp_config.bind_addr);
+    )
+    .await?;
+    info!("SIP UDP server listening on {}", udp_config.bind_addr);
 
-    // 9. GB28181 全局配置
+    // 9. RTP 服务器管理器
+    let udp_rtp_config = registry.infra.config().udp_rtp_server.clone();
+    rustcam_media::init_rtp_server_manager(
+        udp_rtp_config.port_start,
+        udp_rtp_config.port_end,
+        udp_rtp_config.timeout_secs,
+    ).await;
 
-    // 10. 后台 nonce 清理任务（每 5 分钟清理过期 nonce）
+    // 10. TCP RTSP RTP 服务器
+    let tcp_rtsp_rtp_config = registry.infra.config().tcp_rtp_server.clone();
+    let tcp_rtsp_rtp_server = match rustcam_media::init_tcp_rtsp_rtp_server(
+        tcp_rtsp_rtp_config,
+        registry.infra.event_bus.clone(),
+        registry.infra.metrics.clone(),
+        registry.protocol_deps.clone(),
+    ).await {
+        Ok(server) => server,
+        Err(e) => {
+            error!("Failed to initialize TCP RTSP RTP server: {}", e);
+            return Err(e.into());
+        }
+    };
+
+    // 11. GB28181 全局配置
+
+    // 12. 后台 nonce 清理任务（每 5 分钟清理过期 nonce）
     let _nonce_cleanup = tokio::spawn(async {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(300));
         loop {
@@ -245,7 +206,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // 10. RTSP 会话超时清理任务（每 60 秒）
+    // 13. RTSP 会话超时清理任务（每 60 秒）
     let rtsp_cluster = registry.media.cluster.clone();
     let _rtsp_cleanup = tokio::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
@@ -258,7 +219,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // 11. GB28181 订阅超时清理任务（每 5 分钟）
+    // 14. GB28181 订阅超时清理任务（每 5 分钟）
     let _gb28181_sub_cleanup = tokio::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(300));
         loop {
@@ -270,23 +231,15 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    rustcam_media::protocol::gb28181::set_udp_sender(udp_socket);
+    rustcam_media::protocol::gb28181::set_udp_sender(sip_udp_server.socket());
     rustcam_media::protocol::gb28181::set_gb28181_platform_config(
         registry.infra.config().signaling_server.server_gb_id.clone(),
         registry.infra.config().signaling_server.server_gb_domain.clone(),
         registry.infra.config().signaling_server.bind_ip.clone(),
         registry.infra.config().signaling_server.tcp_signaling_port,
     );
-    rustcam_media::protocol::gb28181::init_tcp_audio_server_pool(
-        rustcam_media::protocol::gb28181::TcpAudioServerConfig {
-            port_start: registry.infra.config().signaling_server.tcp_audio_port_start,
-            port_end: registry.infra.config().signaling_server.tcp_audio_port_end,
-            idle_timeout_secs: registry.infra.config().signaling_server.tcp_audio_idle_timeout_secs,
-            max_servers: registry.infra.config().signaling_server.tcp_audio_max_servers,
-        }
-    );
 
-    // 10. 并发运行所有服务
+    // 15. 并发运行所有服务
     let http_server = axum::serve(listener, app);
 
     tokio::select! {
@@ -295,14 +248,19 @@ async fn main() -> anyhow::Result<()> {
                 error!("HTTP server error: {}", e);
             }
         }
-        result = tcp_server.run() => {
+        result = sip_tcp_server.run() => {
             if let Err(e) = result {
-                error!("TCP server error: {}", e);
+                error!("SIP TCP server error: {}", e);
             }
         }
-        result = udp_server.run() => {
+        result = sip_udp_server.run() => {
             if let Err(e) = result {
-                error!("UDP server error: {}", e);
+                error!("SIP UDP server error: {}", e);
+            }
+        }
+        result = tcp_rtsp_rtp_server.run() => {
+            if let Err(e) = result {
+                error!("TCP RTSP RTP server error: {}", e);
             }
         }
         _ = shutdown_signal() => {
@@ -310,7 +268,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // 11. 优雅关闭
+    // 16. 优雅关闭
     info!("Initiating graceful shutdown...");
     registry.graceful_shutdown().await;
 

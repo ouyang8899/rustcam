@@ -655,7 +655,7 @@ impl OnvifAdapter {
                     device_tag: None,
                     session_id: format!("onvif_{}", chrono::Utc::now().timestamp_millis()),
                     channel_id: Some(Self::extract_profile_token(data)),
-                    transport: TransportType::TCP,
+                    transport: TransportType::Tcp,
                     media_server_name: None,
                 });
             }

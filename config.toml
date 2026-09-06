@@ -67,6 +67,20 @@ tcp_audio_port_start = 15000
 tcp_audio_port_end = 15100
 tcp_audio_idle_timeout_secs = 30
 tcp_audio_max_servers = 10
+tcp_max_connections = 1000
+tcp_read_buffer_size = 65536
+tcp_connection_timeout = 60
+tcp_keepalive_interval_secs = 30
+tcp_read_timeout_secs = 300
+udp_max_packet_size = 65536
+udp_adapter_timeout_secs = 300
+udp_max_adapters = 10000
+
+[tcp_rtp_server]
+bind_addr = "0.0.0.0:554"
+max_connections = 1000
+connection_timeout = 60
+keepalive_interval_secs = 30
 
 [jwt]
 secret = "change-me-in-production"

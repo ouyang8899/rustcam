@@ -15,6 +15,7 @@ use crate::protocol::adapter_manager::{AdapterEntry, set_adapter as am_set, remo
 use crate::auth::AuthState;
 pub use crate::auth::casbin::CasbinManager;
 use crate::auth::auth_db::PostgresAuthRepository;
+use crate::media::MediaSessionManager;
 
 /// 服务注册中心
 ///
@@ -65,6 +66,9 @@ pub struct ServiceRegistry {
 
     /// 协议层依赖 (Trait objects)
     pub protocol_deps: ProtocolDeps,
+
+    /// RTSP 信令会话管理器
+    pub session_manager: Arc<MediaSessionManager>,
 }
 
 impl ServiceRegistry {
@@ -206,13 +210,13 @@ impl ServiceRegistry {
             stream_service.clone() as Arc<dyn StreamManager>,
             infra.event_bus.clone() as Arc<dyn EventPublisher>,
             media.cluster.clone(),
-            media.rtp_tunnel.clone(),
             infra.redis.clone() as Arc<dyn CacheStore>,
             infra.config.clone(),
         ).with_registration(register_fn, unregister_fn);
 
         let ws_broadcaster = infra.ws_broadcaster.clone();
         let play_service = media.play_service.clone();
+        let session_manager = Arc::new(MediaSessionManager::new());
 
         tracing::info!("[ServiceRegistry] All services initialized");
 
@@ -232,6 +236,7 @@ impl ServiceRegistry {
             play_service,
             ws_broadcaster,
             protocol_deps,
+            session_manager,
         })
     }
 
@@ -288,7 +293,6 @@ impl ServiceRegistry {
         tracing::info!("[ServiceRegistry] Initiating graceful shutdown...");
         self.device_service.stop().await;
         self.session_service.stop().await;
-        self.media.rtp_tunnel.shutdown().await;
         tracing::info!("[ServiceRegistry] Shutdown complete");
     }
 

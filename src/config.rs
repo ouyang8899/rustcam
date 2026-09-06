@@ -49,6 +49,10 @@ pub struct AppConfig {
     pub log: LogConfig,
     #[serde(default)]
     pub recovery: RecoveryConfig,
+    #[serde(default)]
+    pub udp_rtp_server: UdpRtpServerConfig,
+    #[serde(default)]
+    pub tcp_rtp_server: TcpRtpServerConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
@@ -101,6 +105,42 @@ pub struct MediaPortsConfig {
     pub rtmp: u16,
     pub http_flv: u16,
     pub ws_flv: u16,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct UdpRtpServerConfig {
+    pub port_start: u16,
+    pub port_end: u16,
+    pub timeout_secs: u64,
+}
+
+impl Default for UdpRtpServerConfig {
+    fn default() -> Self {
+        Self {
+            port_start: 15000,
+            port_end: 15100,
+            timeout_secs: 30,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct TcpRtpServerConfig {
+    pub bind_addr: String,
+    pub max_connections: usize,
+    pub connection_timeout: u64,
+    pub keepalive_interval_secs: u64,
+}
+
+impl Default for TcpRtpServerConfig {
+    fn default() -> Self {
+        Self {
+            bind_addr: "0.0.0.0:554".to_string(),
+            max_connections: 1000,
+            connection_timeout: 60,
+            keepalive_interval_secs: 30,
+        }
+    }
 }
 
 impl MediaPortsConfig {
@@ -215,10 +255,47 @@ pub struct SignalingServerConfig {
     pub external_ip: Option<String>,
     pub tcp_signaling_port: u16,
     pub udp_signaling_port: u16,
-    pub tcp_audio_port_start: u16,
-    pub tcp_audio_port_end: u16,
-    pub tcp_audio_idle_timeout_secs: u64,
-    pub tcp_audio_max_servers: usize,
+    #[serde(default = "default_tcp_max_connections")]
+    pub tcp_max_connections: usize,
+    #[serde(default = "default_tcp_read_buffer_size")]
+    pub tcp_read_buffer_size: usize,
+    #[serde(default = "default_tcp_connection_timeout")]
+    pub tcp_connection_timeout: u64,
+    #[serde(default = "default_tcp_keepalive_interval_secs")]
+    pub tcp_keepalive_interval_secs: u64,
+    #[serde(default = "default_tcp_read_timeout_secs")]
+    pub tcp_read_timeout_secs: u64,
+    #[serde(default = "default_udp_max_packet_size")]
+    pub udp_max_packet_size: usize,
+    #[serde(default = "default_udp_adapter_timeout_secs")]
+    pub udp_adapter_timeout_secs: u64,
+    #[serde(default = "default_udp_max_adapters")]
+    pub udp_max_adapters: usize,
+}
+
+fn default_tcp_max_connections() -> usize {
+    1000
+}
+fn default_tcp_read_buffer_size() -> usize {
+    65536
+}
+fn default_tcp_connection_timeout() -> u64 {
+    60
+}
+fn default_tcp_keepalive_interval_secs() -> u64 {
+    30
+}
+fn default_tcp_read_timeout_secs() -> u64 {
+    300
+}
+fn default_udp_max_packet_size() -> usize {
+    65536
+}
+fn default_udp_adapter_timeout_secs() -> u64 {
+    300
+}
+fn default_udp_max_adapters() -> usize {
+    10000
 }
 
 impl Default for SignalingServerConfig {
@@ -230,10 +307,14 @@ impl Default for SignalingServerConfig {
             external_ip: None,
             tcp_signaling_port: 5060,
             udp_signaling_port: 5061,
-            tcp_audio_port_start: 15000,
-            tcp_audio_port_end: 15100,
-            tcp_audio_idle_timeout_secs: 30,
-            tcp_audio_max_servers: 10,
+            tcp_max_connections: default_tcp_max_connections(),
+            tcp_read_buffer_size: default_tcp_read_buffer_size(),
+            tcp_connection_timeout: default_tcp_connection_timeout(),
+            tcp_keepalive_interval_secs: default_tcp_keepalive_interval_secs(),
+            tcp_read_timeout_secs: default_tcp_read_timeout_secs(),
+            udp_max_packet_size: default_udp_max_packet_size(),
+            udp_adapter_timeout_secs: default_udp_adapter_timeout_secs(),
+            udp_max_adapters: default_udp_max_adapters(),
         }
     }
 }
@@ -311,6 +392,8 @@ impl Default for AppConfig {
             jwt: JwtConfig::default(),
             log: LogConfig::default(),
             recovery: RecoveryConfig::default(),
+            udp_rtp_server: UdpRtpServerConfig::default(),
+            tcp_rtp_server: TcpRtpServerConfig::default(),
         }
     }
 }

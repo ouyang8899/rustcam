@@ -4,7 +4,6 @@ pub mod sdp;
 pub mod response;
 pub mod session;
 pub mod server_adapter;
-pub mod rtp_tunnel;
 
 pub use auth::{RtspAuthContext, authenticate};
 pub use sdp::{SdpParser, SdpInfo, SdpTrack};
@@ -16,4 +15,3 @@ pub use session::{
     cleanup_expired,
 };
 pub use server_adapter::RtspServerAdapter;
-pub use rtp_tunnel::RtpTunnel;
