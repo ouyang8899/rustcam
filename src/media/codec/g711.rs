@@ -14,16 +14,16 @@ impl G711 {
         let mut r#try = 0;
         if val < 0 {
             let negated = !val;
-            if negated >= G711::SEG_END[3] {
+            if negated >= G711::SEG_END[1] {
                 r#try |= 0x08;
             }
-            if negated >= G711::SEG_END[5] {
+            if negated >= G711::SEG_END[3] {
                 r#try |= 0x04;
             }
-            if negated >= G711::SEG_END[7] {
+            if negated >= G711::SEG_END[5] {
                 r#try |= 0x02;
             }
-            if negated >= G711::SEG_END[9] {
+            if negated >= G711::SEG_END[7] {
                 r#try |= 0x01;
             }
         }

@@ -40,8 +40,9 @@ export async function playDevice(deviceTag) {
   return res.data.data
 }
 
-export async function startDevice(deviceTag) {
-  const res = await request.post(`/devices/${encodeURIComponent(deviceTag)}/start`)
+export async function startDevice(deviceTag, channelTag = '') {
+  const params = channelTag ? `?channel_tag=${encodeURIComponent(channelTag)}` : ''
+  const res = await request.post(`/devices/${encodeURIComponent(deviceTag)}/start${params}`)
   return res.data.data
 }
 

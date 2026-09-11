@@ -358,6 +358,6 @@ impl SignalAdapter for WebSocketAdapter {
         self.write = Some(Arc::new(tokio::sync::RwLock::new(write)));
     }
 
-    async fn start(&mut self, _device_tag: &str) -> Result<()> { Ok(()) }
+    async fn start(&mut self, _device_tag: &str, _channel_tag: &str) -> Result<()> { Ok(()) }
     async fn ptz_control(&mut self, _channel_id: &str, _command: &crate::protocol::event::PtzCommand, _speed: Option<u8>) -> Result<()> { Ok(()) }
 }

@@ -44,6 +44,11 @@ impl PaginationQuery {
     pub fn offset(&self) -> usize { self.offset.unwrap_or(0) }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct StartDeviceQuery {
+    pub channel_tag: Option<String>,
+}
+
 /// 播放请求参数
 #[derive(Debug, Deserialize)]
 pub struct PlayRequest {
@@ -322,11 +327,14 @@ pub async fn stop_device_handler(
 pub async fn start_device_handler(
     State(state): State<Arc<FullState>>,
     Path(device_tag): Path<String>,
+    Query(params): Query<StartDeviceQuery>,
 ) -> Result<Json<ApiResponse<StartDeviceResult>>, AppError> {
     let registry = &state.app.registry;
 
     let device = registry.device_service.get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
+
+    let channel_tag = params.channel_tag.as_deref().unwrap_or("");
 
     match device.protocol {
         Protocol::Gb28181 => {
@@ -337,7 +345,7 @@ pub async fn start_device_handler(
                 .ok_or_else(|| AppError::NotFound(format!("Device {} is offline", device_tag)))?;
 
             let mut inner = adapter_arc.lock().await;
-            (&mut *inner).start(&device_tag).await
+            (&mut *inner).start(&device_tag, channel_tag).await
                 .map_err(|e| AppError::Internal(format!("INVITE failed: {}", e)))?;
 
             Ok(Json(ApiResponse::success(StartDeviceResult {

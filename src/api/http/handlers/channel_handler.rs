@@ -126,7 +126,7 @@ pub async fn start_channel_stream_handler(
         .ok_or_else(|| AppError::BadRequest(format!("GB28181 adapter not found for device {}", device_tag)))?;
     
     let mut guard = adapter.lock().await;
-    guard.start(&channel_tag).await
+    guard.start(&device_tag, &channel_tag).await
         .map_err(|e| AppError::Internal(format!("Failed to start stream: {}", e)))?;
     
     tracing::info!("[Channel] Started GB28181 stream: device={}, channel={}", device_tag, channel_tag);

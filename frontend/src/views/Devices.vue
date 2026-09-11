@@ -163,11 +163,7 @@
                   <el-table-column label="媒体服务器" prop="media_server_name" min-width="120" show-overflow-tooltip />
                   <el-table-column label="操作" width="220" align="center">
                     <template #default="{ row }">
-                      <template v-if="row.has_stream">
-                        <el-button size="small" disabled>播放</el-button>
-                        <el-button size="small" type="primary" plain @click="router.push('/streams')">流</el-button>
-                      </template>
-                      <el-button v-else size="small" type="primary" @click="startStreamAndPlay(row)">播放</el-button>
+                      <el-button v-if="row.has_stream" size="small" type="primary" plain @click="router.push('/streams')">流</el-button>
                       <el-button size="small" @click="router.push(`/channels?device_tag=${row.device_tag}`)">通道</el-button>
                       <el-button size="small" @click="router.push(`/devices/${row.device_tag}`)">详情</el-button>
                       <el-button size="small" @click="openEditModal(row)">编辑</el-button>
@@ -925,22 +921,6 @@ async function openPlayLinks(device) {
   selectedDevice.value = device
   playLinks.value = await deviceStore.getPlayLinks(device.device_tag)
   showPlayLinksModal.value = true
-}
-
-async function startStreamAndPlay(device) {
-  try {
-    const result = await import('../api/devices.js').then(m => m.startDevice(device.device_tag))
-    if (result?.message) {
-      ElMessage.info(result.message)
-    } else {
-      ElMessage.success('流已启动')
-    }
-  } catch (e) {
-    const msg = e?.response?.data?.message || e?.message || String(e)
-    ElMessage.error('启动流失败: ' + msg)
-    return
-  }
-  await router.push('/streams')
 }
 
 async function deleteDevice(device) {

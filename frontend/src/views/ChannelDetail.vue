@@ -37,6 +37,9 @@
                   :type="selectedStreamType"
                   :isLive="true"
                   :autoplay="true"
+                  :deviceTag="route.params.deviceTag"
+                  :channelTag="route.params.channelTag"
+                  :enableBroadcast="true"
                 />
                 <div v-else-if="loading" class="loading-state">
                   <el-icon class="is-loading"><Loading /></el-icon>
@@ -242,6 +245,9 @@ const statusType = computed(() => {
   if (s === 'error') return 'danger'
   return 'info'
 })
+
+const isGb28181 = computed(() => device.value?.protocol?.toLowerCase() === 'gb28181')
+const isOnvif = computed(() => device.value?.protocol?.toLowerCase() === 'onvif')
 
 const currentStreamUrl = computed(() => {
   if (!playLinks.value) return null
@@ -541,8 +547,6 @@ onUnmounted(() => {
   flex: 1;
   aspect-ratio: 16 / 9;
   background: #000;
-  border-radius: 4px;
-  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;

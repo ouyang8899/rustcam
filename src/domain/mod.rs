@@ -12,6 +12,8 @@ pub mod stream;
 pub mod user;
 pub mod traits;
 
+pub use traits::*;
+
 pub use alarm::*;
 pub use device::*;
 pub use ptz::*;

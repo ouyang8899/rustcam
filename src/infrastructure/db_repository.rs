@@ -674,6 +674,13 @@ impl DbRepository {
             .collect()
     }
 
+    pub fn get_audio_broadcast_channel_cached(&self, device_tag: &str) -> Option<Channel> {
+        self.channels_cache.iter()
+            .filter(|c| c.device_tag == device_tag && c.is_audio_channel())
+            .map(|r| r.clone())
+            .next()
+    }
+
     pub fn list_all_channels_cached(&self) -> Vec<Channel> {
         self.channels_cache.iter().map(|r| r.clone()).collect()
     }

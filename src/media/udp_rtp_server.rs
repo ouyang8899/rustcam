@@ -2,23 +2,17 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
-use tokio::sync::{mpsc, RwLock};
-use bytes::BytesMut;
+use tokio::sync::RwLock;
 use crate::media::errors::{MediaError, Result};
+use crate::media::node::{MediaRtpPacket, RtpPacketCallback};
 use crate::media::rtp::RtpHeader;
-
-#[derive(Debug, Clone)]
-pub struct RtpPacket {
-    pub data: Vec<u8>,
-    pub ssrc: u32,
-    pub payload_type: u8,
-}
 
 #[derive(Debug, Clone)]
 pub struct Session {
     pub ssrc: u32,
     pub device_tag: String,
     pub allocated_at: std::time::Instant,
+    pub callback: Arc<dyn RtpPacketCallback>,
 }
 
 pub struct UDPRtpServer {
@@ -54,7 +48,7 @@ impl UDPRtpServer {
         sessions.get(&ssrc).cloned()
     }
     
-    pub async fn allocate(&self, ssrc: u32, device_tag: String) -> bool {
+    pub async fn allocate(&self, ssrc: u32, device_tag: String, callback: Arc<dyn RtpPacketCallback>) -> bool {
         let mut sessions = self.sessions.write().await;
         if sessions.contains_key(&ssrc) {
             tracing::warn!("[UDPRtpServer] SSRC {} already allocated on port {}", ssrc, self.port);
@@ -64,6 +58,7 @@ impl UDPRtpServer {
             ssrc,
             device_tag: device_tag.clone(),
             allocated_at: std::time::Instant::now(),
+            callback,
         });
         tracing::info!("[UDPRtpServer] Port {} allocated for SSRC {} / device {}", self.port, ssrc, device_tag);
         true
@@ -80,11 +75,9 @@ impl UDPRtpServer {
         self.sessions.read().await.len()
     }
     
-    pub async fn start_recv_loop(
-        self: Arc<Self>,
-        ssrc_map: Arc<RwLock<HashMap<u32, mpsc::Sender<RtpPacket>>>>,
-    ) {
+    pub async fn start_recv_loop(self: Arc<Self>) {
         let socket = self.rtp_socket.clone();
+        let sessions = self.sessions.clone();
         let port = self.port;
         
         tokio::spawn(async move {
@@ -97,16 +90,14 @@ impl UDPRtpServer {
                         if let Ok(header) = RtpHeader::parse(data) {
                             let ssrc = header.ssrc;
                             
-                            let map = ssrc_map.read().await;
-                            if let Some(sender) = map.get(&ssrc) {
-                                let packet = RtpPacket {
+                            let sessions_lock = sessions.read().await;
+                            if let Some(session) = sessions_lock.get(&ssrc) {
+                                let packet = MediaRtpPacket {
                                     data: data.to_vec(),
                                     ssrc,
                                     payload_type: header.payload_type,
                                 };
-                                if sender.send(packet).await.is_err() {
-                                    tracing::debug!("[UDPRtpServer] Failed to send RTP packet for SSRC {} on port {}", ssrc, port);
-                                }
+                                session.callback.on_rtp_packet(packet);
                             } else {
                                 tracing::debug!("[UDPRtpServer] No handler for SSRC {} on port {} from {}", ssrc, port, addr);
                             }

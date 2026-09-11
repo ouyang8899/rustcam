@@ -8,6 +8,7 @@ use tokio::sync::{Mutex, Semaphore};
 use tokio_util::sync::CancellationToken;
 use crate::protocol::gb28181::Gb28181Adapter;
 use crate::protocol::adapter::SignalAdapter;
+use crate::protocol::adapter_manager;
 use crate::protocol::traits::ProtocolDeps;
 use crate::protocol::event::SignalEvent;
 use crate::infrastructure::event_bus::EventBus;
@@ -305,8 +306,12 @@ impl SipTcpServer {
 
         let mut adapter: Box<dyn SignalAdapter + Send + Sync> = Box::new(Gb28181Adapter::new(
             deps,
-            Arc::new(|_, _| {}),
-            Arc::new(|_| {}),
+            Arc::new(|device_tag, entry| {
+                adapter_manager::set_adapter(device_tag, entry);
+            }),
+            Arc::new(|device_tag| {
+                adapter_manager::remove_adapter(&device_tag);
+            }),
         ));
         
         adapter.on_connected(addr).await?;
@@ -315,6 +320,10 @@ impl SipTcpServer {
         adapter.set_tcp_write(write_half);
 
         let adapter_arc: Arc<Mutex<Box<dyn SignalAdapter + Send + Sync>>> = Arc::new(Mutex::new(adapter));
+        {
+            let mut guard = adapter_arc.lock().await;
+            guard.set_adapter_entry(adapter_arc.clone());
+        }
         let entry = Arc::new(TcpConnectionEntry::new(adapter_arc.clone(), addr));
         
         connections.insert(addr.to_string(), entry.clone());
@@ -335,6 +344,12 @@ impl SipTcpServer {
                         Ok(Ok(n)) => {
                             metrics.bytes_received(n);
                             entry.update_activity();
+
+                            if let Ok(msg) = String::from_utf8(buffer[..n].to_vec()) {
+                                tracing::info!("[SipTcpServer] RECV from {}:\n{}", addr, msg);
+                            } else {
+                                tracing::info!("[SipTcpServer] RECV {} bytes from {} (binary)", n, addr);
+                            }
                             
                             let parse_result = {
                                 let mut guard = adapter_arc.lock().await;

@@ -204,7 +204,7 @@ fn public_routes(state: Arc<FullState>) -> Router {
         .route("/api/v1/public/streams", get(device_handler::list_public_streams_handler))
         .route("/api/v1/stats", get(stats_handler))
         .route("/ws", get(crate::api::websocket::ws_handler))
-        .route("/ws/audio-talk/{device_id}", get(crate::api::websocket::audio_talk_handler))
+        .route("/ws/audio-talk/{device_id}/{channel_id}", get(crate::api::websocket::audio_talk_handler))
         // HTTP trace layer (logs incoming requests at TRACE level)
         .layer(axum::middleware::from_fn(trace_layer))
         .with_state(state)

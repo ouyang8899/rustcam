@@ -768,7 +768,7 @@ impl SignalAdapter for OnvifAdapter {
         self.write = Some(std::sync::Arc::new(tokio::sync::RwLock::new(write)));
     }
 
-    async fn start(&mut self, _device_tag: &str) -> Result<()> { Ok(()) }
+    async fn start(&mut self, _device_tag: &str, _channel_tag: &str) -> Result<()> { Ok(()) }
     
     async fn ptz_control(&mut self, channel_id: &str, command: &PtzCommand, speed: Option<u8>) -> Result<()> {
         let device = match self.deps.device_lookup.find_by_tag(channel_id).await {

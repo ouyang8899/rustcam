@@ -9,7 +9,7 @@
       </div>
     </div>
 
-    <div v-else >
+    <div v-else class="video-container">
       <video
         ref="videoRef"
         playsinline
@@ -69,9 +69,34 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"/>
               </svg>
             </button>
+
+            <div v-if="enableBroadcast && deviceTag" class="broadcast-status">
+              <span v-if="broadcastStatus === 'idle' && !isBroadcasting" class="status-text idle">可广播</span>
+              <span v-else-if="broadcastStatus === 'connecting'" class="status-text connecting">连接中...</span>
+              <span v-else-if="broadcastStatus === 'inviting'" class="status-text inviting">广播开启中...</span>
+              <span v-else-if="broadcastStatus === 'ready'" class="status-text ready">通话中</span>
+              <span v-else-if="broadcastStatus === 'error'" class="status-text error" :title="broadcastError">错误</span>
+            </div>
           </div>
         </div>
       </div>
+
+      <button
+        v-if="enableBroadcast && deviceTag"
+        @click="toggleBroadcast"
+        :class="['broadcast-btn', { active: isBroadcasting, connecting: broadcastStatus === 'connecting' || broadcastStatus === 'inviting' }]"
+        :title="isBroadcasting ? '点击停止广播' : '点击开始广播'"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+        <div v-if="isBroadcasting" class="audio-level">
+          <div class="audio-level-bar" :style="{ height: audioLevel + '%' }"></div>
+        </div>
+      </button>
     </div>
   </div>
 </template>
@@ -99,10 +124,22 @@ const props = defineProps({
   autoplay: {
     type: Boolean,
     default: false
+  },
+  deviceTag: {
+    type: String,
+    default: ''
+  },
+  channelTag: {
+    type: String,
+    default: ''
+  },
+  enableBroadcast: {
+    type: Boolean,
+    default: false
   }
 })
 
-const emit = defineEmits(['play', 'pause', 'error', 'ended', 'stats'])
+const emit = defineEmits(['play', 'pause', 'error', 'ended', 'stats', 'broadcastStatusChange'])
 
 const videoRef = ref(null)
 const loading = ref(false)
@@ -115,6 +152,18 @@ const duration = ref(0)
 const bitrate = ref(0)
 const hideControls = ref(false)
 const hideControlsTimer = ref(null)
+
+const isBroadcasting = ref(false)
+const broadcastStatus = ref('idle')
+const broadcastError = ref('')
+const audioLevel = ref(0)
+
+let talkWs = null
+let audioContext = null
+let mediaStream = null
+let audioProcessor = null
+let audioAnalyser = null
+let animationFrameId = null
 
 let hlsInstance = null
 let flvInstance = null
@@ -151,6 +200,8 @@ async function initPlayer() {
   loading.value = true
   error.value = null
   isVideoReady.value = false
+
+  console.log('[VideoPlayer] initPlayer props:', { enableBroadcast: props.enableBroadcast, deviceTag: props.deviceTag })
 
   const protocol = props.type === 'auto' ? detectProtocol(url) : props.type
   console.log('[VideoPlayer] initPlayer:', { url, propsType: props.type, detectedProtocol: protocol })
@@ -510,6 +561,206 @@ function formatTime(seconds) {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
 }
 
+async function toggleBroadcast() {
+  if (isBroadcasting.value) {
+    await stopBroadcast()
+  } else {
+    await startBroadcast()
+  }
+}
+
+async function startBroadcast() {
+  if (!props.enableBroadcast || !props.deviceTag) {
+    broadcastError.value = 'Broadcast not enabled'
+    return
+  }
+
+  try {
+    broadcastStatus.value = 'connecting'
+    broadcastError.value = ''
+
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsHost = window.location.host
+    const channelTag = props.channelTag || props.deviceTag
+    const wsUrl = `${wsProtocol}//${wsHost}/ws/audio-talk/${props.deviceTag}/${channelTag}`
+    console.log('[Broadcast] Connecting to:', wsUrl)
+
+    talkWs = new WebSocket(wsUrl)
+
+    talkWs.onopen = () => {
+      console.log('[Broadcast] WebSocket connected')
+      startMicCapture()
+    }
+
+    talkWs.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        console.log('[Broadcast] Received:', data)
+
+        if (data.status === 'ready') {
+          broadcastStatus.value = 'ready'
+          isBroadcasting.value = true
+          if (videoRef.value) {
+            videoRef.value.muted = true
+          }
+          emit('broadcastStatusChange', { broadcasting: true, status: 'ready' })
+          startAudioLevelMonitoring()
+        } else if (data.status === 'inviting') {
+          broadcastStatus.value = 'inviting'
+        } else if (data.status === 'error') {
+          broadcastStatus.value = 'error'
+          broadcastError.value = data.message || 'Unknown error'
+          isBroadcasting.value = false
+          if (videoRef.value) {
+            videoRef.value.muted = false
+          }
+          emit('broadcastStatusChange', { broadcasting: false, status: 'error', error: broadcastError.value })
+        } else if (data.status === 'already_started') {
+          broadcastStatus.value = 'ready'
+          isBroadcasting.value = true
+          if (videoRef.value) {
+            videoRef.value.muted = true
+          }
+          emit('broadcastStatusChange', { broadcasting: true, status: 'ready' })
+        }
+      } catch (e) {
+        console.error('[Broadcast] Parse error:', e)
+      }
+    }
+
+    talkWs.onerror = (e) => {
+      console.error('[Broadcast] WebSocket error:', e)
+      broadcastStatus.value = 'error'
+      broadcastError.value = 'Connection error'
+    }
+
+    talkWs.onclose = () => {
+      console.log('[Broadcast] WebSocket closed')
+      if (isBroadcasting.value) {
+        stopBroadcast()
+      }
+    }
+  } catch (e) {
+    console.error('[Broadcast] Start error:', e)
+    broadcastStatus.value = 'error'
+    broadcastError.value = e.message
+  }
+}
+
+async function stopBroadcast() {
+  console.log('[Broadcast] Stopping...')
+
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId)
+    animationFrameId = null
+  }
+
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(track => track.stop())
+    mediaStream = null
+  }
+
+  if (audioProcessor) {
+    audioProcessor.disconnect()
+    audioProcessor = null
+  }
+
+  if (audioContext) {
+    await audioContext.close()
+    audioContext = null
+  }
+
+  if (talkWs) {
+    talkWs.close()
+    talkWs = null
+  }
+
+  isBroadcasting.value = false
+  broadcastStatus.value = 'idle'
+  audioLevel.value = 0
+
+  if (videoRef.value) {
+    videoRef.value.muted = false
+  }
+
+  emit('broadcastStatusChange', { broadcasting: false, status: 'idle' })
+}
+
+async function startMicCapture() {
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    })
+
+    audioContext = new (window.AudioContext || window.webkitAudioContext)()
+    const source = audioContext.createMediaStreamSource(mediaStream)
+
+    audioAnalyser = audioContext.createAnalyser()
+    audioAnalyser.fftSize = 256
+    source.connect(audioAnalyser)
+
+    const bufferSize = 4096
+    audioProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1)
+
+    audioProcessor.onaudioprocess = (e) => {
+      if (!isBroadcasting.value || !talkWs || talkWs.readyState !== WebSocket.OPEN) {
+        return
+      }
+
+      const inputData = e.inputBuffer.getChannelData(0)
+      const pcmData = new Int16Array(inputData.length)
+
+      for (let i = 0; i < inputData.length; i++) {
+        const s = Math.max(-1, Math.min(1, inputData[i]))
+        pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+      }
+
+      const buffer = new ArrayBuffer(pcmData.length * 2)
+      const view = new DataView(buffer)
+      for (let i = 0; i < pcmData.length; i++) {
+        view.setInt16(i * 2, pcmData[i], true)
+      }
+
+      if (talkWs && talkWs.readyState === WebSocket.OPEN) {
+        talkWs.send(buffer)
+      }
+    }
+
+    source.connect(audioProcessor)
+    audioProcessor.connect(audioContext.destination)
+
+    talkWs.send(JSON.stringify({ action: 'start_talk' }))
+    broadcastStatus.value = 'inviting'
+  } catch (e) {
+    console.error('[Broadcast] Mic capture error:', e)
+    broadcastStatus.value = 'error'
+    broadcastError.value = `Microphone error: ${e.message}`
+    isBroadcasting.value = false
+  }
+}
+
+function startAudioLevelMonitoring() {
+  if (!audioAnalyser) return
+
+  const dataArray = new Uint8Array(audioAnalyser.frequencyBinCount)
+
+  function update() {
+    if (!isBroadcasting.value || !audioAnalyser) return
+
+    audioAnalyser.getByteFrequencyData(dataArray)
+    const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
+    audioLevel.value = Math.min(100, Math.round((average / 128) * 100))
+
+    animationFrameId = requestAnimationFrame(update)
+  }
+
+  update()
+}
+
 watch(currentSrc, () => {
   initPlayer()
 })
@@ -580,6 +831,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   clearTimeout(hideControlsTimer.value)
+  if (isBroadcasting.value) {
+    stopBroadcast()
+  }
   destroyPlayer()
 })
 
@@ -587,16 +841,24 @@ defineExpose({
   play: togglePlay,
   pause: togglePlay,
   reconnect,
-  destroy: destroyPlayer
+  destroy: destroyPlayer,
+  startBroadcast,
+  stopBroadcast
 })
 </script>
 
 <style scoped>
 video {
   max-width: 100%;
-  width: 100%;
+  max-height: 100%;
+  width: auto;
   height: auto;
   display: block;
+  object-fit: contain;
+}
+
+.video-container {
+  position: relative;
 }
 
 .controls {
@@ -647,6 +909,117 @@ video {
   font-size: 10px;
   font-weight: bold;
   margin-left: 8px;
+}
+
+.broadcast-btn {
+  position: absolute;
+  bottom: 50px;
+  right: 10px;
+  background: rgba(59, 130, 246, 0.8) !important;
+  z-index: 100;
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.broadcast-btn.active {
+  background: rgba(239, 68, 68, 0.8);
+  animation: pulse-broadcast 1.5s ease-in-out infinite;
+}
+
+.broadcast-btn.connecting {
+  background: rgba(245, 158, 11, 0.8);
+  animation: pulse-connecting 1s ease-in-out infinite;
+}
+
+.broadcast-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.broadcast-btn.active svg {
+  stroke: white;
+}
+
+.audio-level {
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 16px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 2px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  overflow: hidden;
+}
+
+.audio-level-bar {
+  width: 100%;
+  background: linear-gradient(to top, #22c55e, #eab308, #ef4444);
+  border-radius: 2px;
+  transition: height 0.05s ease-out;
+}
+
+.broadcast-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-text {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.status-text.connecting {
+  background: rgba(245, 158, 11, 0.8);
+  color: white;
+}
+
+.status-text.inviting {
+  background: rgba(245, 158, 11, 0.8);
+  color: white;
+}
+
+.status-text.ready {
+  background: rgba(239, 68, 68, 0.8);
+  color: white;
+  animation: blink 1s ease-in-out infinite;
+}
+
+.status-text.error {
+  background: rgba(239, 68, 68, 0.8);
+  color: white;
+}
+
+@keyframes pulse-broadcast {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+  }
+}
+
+@keyframes pulse-connecting {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(245, 158, 11, 0);
+  }
+}
+
+@keyframes blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
 }
 </style>
 

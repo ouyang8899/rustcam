@@ -7,6 +7,7 @@ pub mod gb28181;
 pub mod onvif;
 pub mod rtsp;
 pub mod websocket;
+pub mod adapter_event_handler;
 
 pub use event::ProtocolType;
 pub use adapter::{AdapterRegistry, SignalAdapter};

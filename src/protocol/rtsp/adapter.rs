@@ -132,6 +132,6 @@ impl SignalAdapter for RtspAdapter {
     fn name(&self) -> &'static str { "RTSP" }
     fn keepalive(&self) -> bool { true }
     fn idle_timeout(&self) -> Option<u64> { Some(60) }
-    async fn start(&mut self, _device_tag: &str) -> Result<()> { Ok(()) }
+    async fn start(&mut self, _device_tag: &str, _channel_tag: &str) -> Result<()> { Ok(()) }
     async fn ptz_control(&mut self, _channel_id: &str, _command: &crate::protocol::event::PtzCommand, _speed: Option<u8>) -> Result<()> { Ok(()) }
 }

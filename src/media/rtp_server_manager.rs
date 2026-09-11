@@ -1,10 +1,12 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU16, Ordering};
 use dashmap::DashMap;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::RwLock;
 use once_cell::sync::OnceCell;
 use crate::media::errors::{MediaError, Result};
-use crate::media::rtp_server::{RtpPortRange, UDPRtpServer, UdpRtpPacket, TcpRtpServer};
+use crate::media::node::RtpPacketCallback;
+use crate::media::rtp_server::{RtpPortRange, UDPRtpServer, TcpRtpServer};
+use crate::media::transport::gb28181_broadcast::GB28181BroadcastVoiceTransport;
 use crate::protocol::event::TransportType;
 
 #[derive(Debug, Clone)]
@@ -113,10 +115,10 @@ impl RtpServerManager {
         (nanos as u32) ^ (rand_simple() as u32)
     }
     
-    pub async fn allocate(&self, device_tag: &str, channel_tag: &str, protocol: TransportType) -> Result<(u16, u32)> {
+    pub async fn allocate(&self, device_tag: &str, channel_tag: &str, protocol: TransportType, callback: Arc<dyn RtpPacketCallback>) -> Result<(u16, u32)> {
         match protocol {
             TransportType::Udp => {
-                let (port, ssrc, _) = self.allocate_udp(device_tag, channel_tag).await?;
+                let (port, ssrc, _) = self.allocate_udp(device_tag, channel_tag, callback).await?;
                 Ok((port, ssrc))
             }
             TransportType::Tcp => {
@@ -127,10 +129,10 @@ impl RtpServerManager {
         }
     }
     
-    pub async fn allocate_udp(&self, device_tag: &str, channel_tag: &str) -> Result<(u16, u32, Arc<UDPRtpServer>)> {
+    pub async fn allocate_udp(&self, device_tag: &str, channel_tag: &str, callback: Arc<dyn RtpPacketCallback>) -> Result<(u16, u32, Arc<UDPRtpServer>)> {
         let ssrc = Self::generate_ssrc();
         
-        let (rtp_port, rtcp_port) = self.get_next_udp_port().await
+        let (rtp_port, _rtcp_port) = self.get_next_udp_port().await
             .ok_or_else(|| MediaError::PortAllocation("No available UDP ports".into()))?;
         
         let server = Arc::new(UDPRtpServer::new(rtp_port).await?);
@@ -138,6 +140,8 @@ impl RtpServerManager {
         if !server.allocate(ssrc, device_tag.to_string(), channel_tag.to_string()).await {
             return Err(MediaError::PortAllocation(format!("Port {} already allocated", rtp_port)));
         }
+        
+        server.set_callback(callback).await;
         
         self.udp_servers.insert(rtp_port, server.clone());
         self.ports.insert(PortKey(rtp_port, TransportType::Udp), PortInfo {
@@ -148,37 +152,7 @@ impl RtpServerManager {
             allocated_at: std::time::Instant::now(),
         });
         
-        let ssrc_map: Arc<DashMap<u32, mpsc::Sender<UdpRtpPacket>>> = Arc::new(DashMap::new());
-        let server_clone = server.clone();
-        
-        tokio::spawn(async move {
-            let socket = server_clone.rtp_socket();
-            let port = server_clone.port();
-            let mut buffer = vec![0u8; 2048];
-            
-            loop {
-                match socket.recv_from(&mut buffer).await {
-                    Ok((len, _addr)) => {
-                        let data = &buffer[..len];
-                        if let Ok(header) = crate::media::rtp::RtpHeader::parse(data) {
-                            let ssrc = header.ssrc;
-                            if let Some(sender) = ssrc_map.get(&ssrc) {
-                                let packet = UdpRtpPacket {
-                                    data: data.to_vec(),
-                                    ssrc,
-                                    payload_type: header.payload_type,
-                                };
-                                let _ = sender.send(packet).await;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!("[UDPRtpServer] Recv error on port {}: {}", port, e);
-                        break;
-                    }
-                }
-            }
-        });
+        server.clone().start_recv_loop().await;
         
         tracing::info!("[RtpServerManager] Allocated UDP port {} (SSRC {}) for {}/{}", rtp_port, ssrc, device_tag, channel_tag);
         Ok((rtp_port, ssrc, server))
@@ -209,6 +183,87 @@ impl RtpServerManager {
         Ok((port, ssrc, server))
     }
     
+    pub async fn allocate_tcp_for_broadcast(
+        &self,
+        device_tag: &str,
+        channel_tag: &str,
+    ) -> Result<(u16, u32, Arc<TcpRtpServer>)> {
+        let ssrc = Self::generate_ssrc();
+        
+        let port = self.get_next_tcp_port().await
+            .ok_or_else(|| MediaError::PortAllocation("No available TCP ports".into()))?;
+        
+        let server = Arc::new(TcpRtpServer::new(port).await?);
+        
+        if !server.allocate(ssrc, device_tag.to_string(), channel_tag.to_string()).await {
+            return Err(MediaError::PortAllocation(format!("TCP Port {} already allocated", port)));
+        }
+        
+        self.tcp_servers.insert(port, server.clone());
+        self.ports.insert(PortKey(port, TransportType::Tcp), PortInfo {
+            protocol: TransportType::Tcp,
+            device_tag: device_tag.to_string(),
+            channel_tag: channel_tag.to_string(),
+            ssrc: Some(ssrc),
+            allocated_at: std::time::Instant::now(),
+        });
+        
+        tracing::info!("[RtpServerManager] Allocated TCP broadcast port {} (SSRC {}) for {}/{}", port, ssrc, device_tag, channel_tag);
+        Ok((port, ssrc, server))
+    }
+    
+    pub async fn allocate_udp_for_broadcast(
+        &self,
+        device_tag: &str,
+        channel_tag: &str,
+    ) -> Result<(u16, u32)> {
+        let ssrc = Self::generate_ssrc();
+        
+        let (rtp_port, rtcp_port) = self.get_next_udp_port().await
+            .ok_or_else(|| MediaError::PortAllocation("No available UDP ports".into()))?;
+        
+        let server = Arc::new(UDPRtpServer::new(rtp_port).await?);
+        
+        if !server.allocate(ssrc, device_tag.to_string(), channel_tag.to_string()).await {
+            return Err(MediaError::PortAllocation(format!("Port {} already allocated", rtp_port)));
+        }
+        
+        self.udp_servers.insert(rtp_port, server.clone());
+        self.ports.insert(PortKey(rtp_port, TransportType::Udp), PortInfo {
+            protocol: TransportType::Udp,
+            device_tag: device_tag.to_string(),
+            channel_tag: channel_tag.to_string(),
+            ssrc: Some(ssrc),
+            allocated_at: std::time::Instant::now(),
+        });
+        
+        tracing::info!("[RtpServerManager] Allocated UDP broadcast port {} (SSRC {}) for {}/{}", rtp_port, ssrc, device_tag, channel_tag);
+        Ok((rtp_port, ssrc))
+    }
+
+    pub async fn allocate_tcp_active_for_broadcast(
+        &self,
+        device_ip: &str,
+        device_port: u16,
+    ) -> Result<(u32, GB28181BroadcastVoiceTransport)> {
+        use std::net::SocketAddr;
+
+        let ssrc = Self::generate_ssrc();
+
+        let addr: SocketAddr = format!("{}:{}", device_ip, device_port)
+            .parse()
+            .map_err(|e| MediaError::PortAllocation(format!("Invalid device address: {}", e)))?;
+
+        use tokio::net::TcpStream;
+        let stream = TcpStream::connect(addr).await
+            .map_err(|e| MediaError::PortAllocation(format!("Failed to connect to device: {}", e)))?;
+
+        let transport = GB28181BroadcastVoiceTransport::new_tcp_active(stream, ssrc, 8).await;
+
+        tracing::info!("[RtpServerManager] TCP active connected to device {}:{} (SSRC {})", device_ip, device_port, ssrc);
+        Ok((ssrc, transport))
+    }
+
     pub async fn release(&self, port: u16, protocol: TransportType) {
         let key = PortKey(port, protocol);
         

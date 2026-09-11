@@ -5,7 +5,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, AsyncWrite};
 use tokio::sync::Mutex;
 use async_trait::async_trait;
 use bytes::{BytesMut, BufMut};
+use std::collections::HashMap;
 use crate::media::errors::{MediaError, Result};
+use crate::media::node::DataType;
 use super::DataTransport;
 
 const MAX_FRAME_SIZE: usize = 65536;
@@ -69,6 +71,81 @@ impl DataTransport for TcpTransport {
         Ok(buf)
     }
     
+    async fn close(&self) -> Result<()> {
+        if let Ok(mut stream) = self.stream.try_lock() {
+            let _ = stream.shutdown().await;
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl crate::media::node::MediaTransport for TcpTransport {
+    fn local_addr(&self) -> Result<SocketAddr> {
+        self.stream.blocking_lock().local_addr()
+            .map_err(|e| MediaError::Transport(format!("Failed to get local addr: {}", e)))
+    }
+
+    fn peer_addr(&self) -> Result<SocketAddr> {
+        Ok(self.remote)
+    }
+
+    async fn send(&self, data: &[u8], _data_type: DataType) -> Result<()> {
+        let mut stream = self.stream.lock().await;
+        stream.write_all(data).await
+            .map_err(|e| MediaError::TransportSend(format!("TCP send failed: {}", e)))?;
+        Ok(())
+    }
+
+    async fn recv(&self) -> Result<HashMap<DataType, BytesMut>> {
+        let mut buf = vec![0u8; 4096];
+        let mut stream = self.stream.lock().await;
+        let n = stream.read(&mut buf).await
+            .map_err(|e| MediaError::TransportRecv(format!("TCP recv failed: {}", e)))?;
+        drop(stream);
+        buf.truncate(n);
+        let mut result = HashMap::new();
+        result.insert(DataType::OrgData, BytesMut::from(&buf[..n]));
+        Ok(result)
+    }
+
+    async fn close(&self) -> Result<()> {
+        if let Ok(mut stream) = self.stream.try_lock() {
+            let _ = stream.shutdown().await;
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl crate::media::node::MediaTransport for Gb28181TcpTransport {
+    fn local_addr(&self) -> Result<SocketAddr> {
+        self.stream.blocking_lock().local_addr()
+            .map_err(|e| MediaError::Transport(format!("Failed to get local addr: {}", e)))
+    }
+
+    fn peer_addr(&self) -> Result<SocketAddr> {
+        Ok(self.remote)
+    }
+
+    async fn send(&self, data: &[u8], data_type: DataType) -> Result<()> {
+        match data_type {
+            DataType::Rtcp => {
+                self.send_raw(data).await
+            }
+            _ => {
+                self.send_raw(data).await
+            }
+        }
+    }
+
+    async fn recv(&self) -> Result<HashMap<DataType, BytesMut>> {
+        let data = self.recv_raw().await?;
+        let mut result = HashMap::new();
+        result.insert(DataType::OrgData, BytesMut::from(data.as_slice()));
+        Ok(result)
+    }
+
     async fn close(&self) -> Result<()> {
         if let Ok(mut stream) = self.stream.try_lock() {
             let _ = stream.shutdown().await;

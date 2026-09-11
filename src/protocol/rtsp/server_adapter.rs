@@ -20,7 +20,9 @@ use crate::protocol::rtsp::session::{
 };
 use crate::error::{AppError, Result};
 use crate::media::{
-    MediaType, Direction, MiddlewareChain,
+    MediaType,
+    Direction, 
+    MiddlewareChain,
     LogMiddleware,
 };
 
@@ -150,6 +152,7 @@ impl RtspServerAdapter {
 
     async fn send_raw(&self, data: &[u8]) -> Result<()> {
         if let Some(ref write_arc) = self.write {
+            tracing::info!("[RTSP] SEND TCP ({} bytes)", data.len());
             let mut write = write_arc.write().await;
             write.write_all(data).await
                 .map_err(|e| AppError::Internal(format!("TCP write error: {}", e)))?;
@@ -878,6 +881,6 @@ impl SignalAdapter for RtspServerAdapter {
         self.write = Some(Arc::new(tokio::sync::RwLock::new(write)));
     }
 
-    async fn start(&mut self, _device_tag: &str) -> Result<()> { Ok(()) }
+    async fn start(&mut self, _device_tag: &str, _channel_tag: &str) -> Result<()> { Ok(()) }
     async fn ptz_control(&mut self, _channel_id: &str, _command: &crate::protocol::event::PtzCommand, _speed: Option<u8>) -> Result<()> { Ok(()) }
 }

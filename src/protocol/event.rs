@@ -181,14 +181,20 @@ pub enum SignalEvent {
         event_type: String,
         channels: Vec<CatalogChannel>,
     },
+    // 事件驱动的音频通话
     StartAudioTalk {
-        device_id: i64,
-        device_tag: Option<String>,
-        audio_port: u16,
+        device_tag: String,
+        connection_id: u64,
     },
     StopAudioTalk {
-        device_id: i64,
-        device_tag: Option<String>,
+        device_tag: String,
+        connection_id: u64,
+    },
+    AudioTalkResponse {
+        device_tag: String,
+        connection_id: u64,
+        status: TalkResponseStatus,
+        message: Option<String>,
     },
     AudioData {
         device_id: i64,
@@ -199,6 +205,34 @@ pub enum SignalEvent {
     AudioTalkReady {
         device_id: i64,
         device_tag: Option<String>,
+    },
+    AudioBroadcastRequest {
+        device_id: i64,
+        device_tag: Option<String>,
+        channel_id: String,
+    },
+    AudioBroadcastAccept {
+        device_id: i64,
+        device_tag: Option<String>,
+        channel_id: String,
+        audio_port: u16,
+    },
+    AudioBroadcastReject {
+        device_id: i64,
+        device_tag: Option<String>,
+        channel_id: String,
+        message: Option<String>,
+    },
+    AudioBroadcastInvite {
+        device_id: i64,
+        device_tag: Option<String>,
+        ssrc: u32,
+        sdp: String,
+    },
+    AudioBroadcastReady {
+        device_id: i64,
+        device_tag: Option<String>,
+        port: u16,
     },
 }
 impl SignalEvent {
@@ -237,6 +271,51 @@ impl SignalEvent {
             SignalEvent::StopAudioTalk { .. } => "stop_audio_talk".to_string(),
             SignalEvent::AudioData { .. } => "audio_data".to_string(),
             SignalEvent::AudioTalkReady { .. } => "audio_talk_ready".to_string(),
+            SignalEvent::AudioBroadcastRequest { .. } => "audio_broadcast_request".to_string(),
+            SignalEvent::AudioBroadcastAccept { .. } => "audio_broadcast_accept".to_string(),
+            SignalEvent::AudioBroadcastReject { .. } => "audio_broadcast_reject".to_string(),
+            SignalEvent::AudioBroadcastInvite { .. } => "audio_broadcast_invite".to_string(),
+            SignalEvent::AudioBroadcastReady { .. } => "audio_broadcast_ready".to_string(),
+            SignalEvent::StartAudioTalk { .. } => "start_audio_talk".to_string(),
+            SignalEvent::StopAudioTalk { .. } => "stop_audio_talk".to_string(),
+            SignalEvent::AudioTalkResponse { .. } => "audio_talk_response".to_string(),
+        }
+    }
+
+    pub fn device_tag(&self) -> Option<String> {
+        match self {
+            SignalEvent::DeviceRegister { device_tag, .. } => device_tag.clone(),
+            SignalEvent::DeviceKeepalive { device_tag, .. } => device_tag.clone(),
+            SignalEvent::DeviceOffline { device_tag, .. } => device_tag.clone(),
+            SignalEvent::DeviceOnline { device_tag, .. } => device_tag.clone(),
+            SignalEvent::StartPlay { device_tag, .. } => device_tag.clone(),
+            SignalEvent::StopPlay { device_tag, .. } => device_tag.clone(),
+            SignalEvent::PlaybackResult { device_tag, .. } => device_tag.clone(),
+            SignalEvent::PtzControl { device_id, .. } => Some(device_id.clone()),
+            SignalEvent::Alarm { device_id, .. } => Some(device_id.clone()),
+            SignalEvent::QueryDeviceInfo { device_tag, .. } => device_tag.clone(),
+            SignalEvent::QueryDeviceStatus { device_tag, .. } => device_tag.clone(),
+            SignalEvent::QueryDeviceConfig { device_tag, .. } => device_tag.clone(),
+            SignalEvent::SetDeviceConfig { device_tag, .. } => device_tag.clone(),
+            SignalEvent::PresetQuery { device_tag, .. } => device_tag.clone(),
+            SignalEvent::PresetSet { device_tag, .. } => device_tag.clone(),
+            SignalEvent::PresetGoto { device_tag, .. } => device_tag.clone(),
+            SignalEvent::PresetRemove { device_tag, .. } => device_tag.clone(),
+            SignalEvent::CatalogResponse { device_tag, .. } => device_tag.clone(),
+            SignalEvent::DeviceSubscribe { device_tag, .. } => device_tag.clone(),
+            SignalEvent::DeviceNotify { device_tag, .. } => device_tag.clone(),
+            SignalEvent::CatalogNotify { device_tag, .. } => device_tag.clone(),
+            SignalEvent::StartAudioTalk { device_tag, .. } => Some(device_tag.clone()),
+            SignalEvent::StopAudioTalk { device_tag, .. } => Some(device_tag.clone()),
+            SignalEvent::AudioData { device_tag, .. } => device_tag.clone(),
+            SignalEvent::AudioTalkReady { device_tag, .. } => device_tag.clone(),
+            SignalEvent::AudioBroadcastRequest { device_tag, .. } => device_tag.clone(),
+            SignalEvent::AudioBroadcastAccept { device_tag, .. } => device_tag.clone(),
+            SignalEvent::AudioBroadcastReject { device_tag, .. } => device_tag.clone(),
+            SignalEvent::AudioBroadcastInvite { device_tag, .. } => device_tag.clone(),
+            SignalEvent::AudioBroadcastReady { device_tag, .. } => device_tag.clone(),
+            SignalEvent::AudioTalkResponse { device_tag, .. } => Some(device_tag.clone()),
+            _ => None,
         }
     }
 }
@@ -301,6 +380,19 @@ impl CatalogChannel {
             _ => false,
         }
     }
+
+    pub fn is_video_channel(&self) -> bool {
+        if let Some(ref model) = self.model {
+            let model_upper = model.to_uppercase();
+            if model_upper.contains("AUDIO") || model_upper.contains("SPEAKER") || model_upper.contains("MIC") || model_upper.contains("INPUT") {
+                return false;
+            }
+        }
+        match self.get_device_type_code() {
+            Some(136) | Some(137) => false,
+            _ => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -344,6 +436,14 @@ pub enum PtzCommand {
     GotoPreset { preset_token: String },
     SetPreset { preset_name: Option<String> },
     RemovePreset { preset_token: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TalkResponseStatus {
+    Ready,
+    Error,
+    Inviting,
 }
 
 pub use crate::common_types::TransportType;

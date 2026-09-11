@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use crate::media::errors::{MediaError, Result};
+use crate::media::node::{MediaRtpPacket, RtpPacketCallback};
 
 #[derive(Debug, Clone)]
 pub struct RtpPortRange {
@@ -33,6 +34,7 @@ pub struct UDPRtpServer {
     device_tag: RwLock<Option<String>>,
     channel_tag: RwLock<Option<String>>,
     allocated_at: RwLock<Option<std::time::Instant>>,
+    callback: RwLock<Option<Arc<dyn RtpPacketCallback>>>,
 }
 
 impl UDPRtpServer {
@@ -52,6 +54,7 @@ impl UDPRtpServer {
             device_tag: RwLock::new(None),
             channel_tag: RwLock::new(None),
             allocated_at: RwLock::new(None),
+            callback: RwLock::new(None),
         })
     }
     
@@ -93,6 +96,44 @@ impl UDPRtpServer {
         
         tracing::info!("[UDPRtpServer] Port {} allocated for SSRC {} / {}/{}", self.port, ssrc, device_tag, channel_tag);
         true
+    }
+    
+    pub async fn set_callback(&self, callback: Arc<dyn RtpPacketCallback>) {
+        let mut callback_guard = self.callback.write().await;
+        *callback_guard = Some(callback);
+    }
+    
+    pub async fn start_recv_loop(self: Arc<Self>) {
+        let socket = self.rtp_socket.clone();
+        let port = self.port;
+        
+        tokio::spawn(async move {
+            let mut buffer = vec![0u8; 2048];
+            loop {
+                match socket.recv_from(&mut buffer).await {
+                    Ok((len, _addr)) => {
+                        let data = &buffer[..len];
+                        if let Ok(header) = crate::media::rtp::RtpHeader::parse(data) {
+                            let cb_guard = self.callback.read().await;
+                            if let Some(cb) = cb_guard.as_ref() {
+                                let packet = MediaRtpPacket {
+                                    data: data.to_vec(),
+                                    ssrc: header.ssrc,
+                                    payload_type: header.payload_type,
+                                };
+                                cb.on_rtp_packet(packet);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("[UDPRtpServer] Recv error on port {}: {}", port, e);
+                        break;
+                    }
+                }
+            }
+        });
+        
+        tracing::info!("[UDPRtpServer] Started recv loop on port {}", port);
     }
     
     pub async fn release(&self) {
@@ -143,7 +184,7 @@ pub struct UdpRtpPacket {
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 pub struct TcpRtpServer {
     port: u16,
@@ -154,6 +195,7 @@ pub struct TcpRtpServer {
     allocated_at: RwLock<Option<std::time::Instant>>,
     shutdown: AtomicBool,
     accepted_stream: RwLock<Option<(TcpStream, std::net::SocketAddr)>>,
+    waiters: RwLock<Vec<oneshot::Sender<(Arc<TcpStream>, std::net::SocketAddr)>>>,
 }
 
 impl TcpRtpServer {
@@ -172,6 +214,7 @@ impl TcpRtpServer {
             allocated_at: RwLock::new(None),
             shutdown: AtomicBool::new(false),
             accepted_stream: RwLock::new(None),
+            waiters: RwLock::new(Vec::new()),
         })
     }
     
@@ -244,5 +287,25 @@ impl TcpRtpServer {
     
     pub async fn take_accepted_stream(&self) -> Option<(TcpStream, std::net::SocketAddr)> {
         self.listener.accept().await.ok()
+    }
+    
+    pub async fn wait_for_accept(&self) -> Option<(Arc<TcpStream>, std::net::SocketAddr)> {
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut waiters = self.waiters.write().await;
+            waiters.push(tx);
+        }
+        rx.await.ok()
+    }
+    
+    pub async fn set_accepted_stream(&self, stream: TcpStream, addr: std::net::SocketAddr) {
+        let waiters = {
+            let mut waiters = self.waiters.write().await;
+            std::mem::take(&mut *waiters)
+        };
+        let stream = Arc::new(stream);
+        for waiter in waiters {
+            let _ = waiter.send((Arc::clone(&stream), addr));
+        }
     }
 }

@@ -8,6 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::protocol::gb28181::Gb28181Adapter;
 use crate::protocol::adapter::SignalAdapter;
+use crate::protocol::adapter_manager;
 
 use crate::protocol::event::SignalEvent;
 use crate::protocol::traits::ProtocolDeps;
@@ -96,7 +97,11 @@ impl SipUdpServer {
                             let data = buf[..n].to_vec();
                             let addr_key = addr.to_string();
 
-                            tracing::debug!("[SipUdpServer] Received {} bytes from {}", n, addr_key);
+                            if let Ok(msg) = String::from_utf8(data.clone()) {
+                                tracing::info!("[SipUdpServer] RECV from {}:\n{}", addr_key, msg);
+                            } else {
+                                tracing::info!("[SipUdpServer] RECV {} bytes from {} (binary)", n, addr_key);
+                            }
 
                             let entry = if let Some(existing) = self.adapters.get(&addr_key) {
                                 tracing::debug!("[SipUdpServer] Found existing adapter for {}", addr_key);
@@ -198,8 +203,12 @@ impl SipUdpServer {
 
         let mut adapter: Box<dyn SignalAdapter + Send + Sync> = Box::new(Gb28181Adapter::new(
             self.deps.clone(),
-            Arc::new(|_, _| {}),
-            Arc::new(|_| {}),
+            Arc::new(|device_tag, entry| {
+                adapter_manager::set_adapter(device_tag, entry);
+            }),
+            Arc::new(|device_tag| {
+                adapter_manager::remove_adapter(&device_tag);
+            }),
         ));
 
         let addr: SocketAddr = addr_key.parse().map_err(|e| {
@@ -213,8 +222,13 @@ impl SipUdpServer {
             let _ = adapter.set_local_addr(local_addr).await;
         }
 
+        let adapter_arc = Arc::new(tokio::sync::Mutex::new(adapter));
+        {
+            let mut guard = adapter_arc.lock().await;
+            guard.set_adapter_entry(adapter_arc.clone());
+        }
         let entry = Arc::new(UdpAdapterEntry {
-            adapter: Arc::new(tokio::sync::Mutex::new(adapter)),
+            adapter: adapter_arc.clone(),
             last_active: std::sync::atomic::AtomicI64::new(chrono::Utc::now().timestamp()),
         });
 

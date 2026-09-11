@@ -8,7 +8,6 @@ use tokio::sync::{RwLock, Mutex};
 use tokio_util::sync::CancellationToken;
 
 use crate::protocol::rtsp::RtspServerAdapter;
-use crate::protocol::gb28181::Gb28181Adapter;
 use crate::protocol::adapter::SignalAdapter;
 use crate::protocol::traits::ProtocolDeps;
 use crate::protocol::event::SignalEvent;
@@ -47,63 +46,18 @@ impl Default for TcpRtspRtpServerConfig {
     }
 }
 
-#[derive(Debug)]
-enum ProtocolType {
-    Rtsp,
-    Gb28181Sip,
-    Gb28181Audio,
-}
-
-impl ProtocolType {
-    fn detect(data: &[u8]) -> Option<Self> {
-        if data.len() < 4 {
-            return None;
-        }
-
-        if data.starts_with(b"OPTIONS") || data.starts_with(b"DESCRIBE") ||
-           data.starts_with(b"SETUP") || data.starts_with(b"PLAY") ||
-           data.starts_with(b"PAUSE") || data.starts_with(b"TEARDOWN") ||
-           data.starts_with(b"GET_PARAMETER") || data.starts_with(b"SET_PARAMETER") ||
-           data.starts_with(b"ANNOUNCE") || data.starts_with(b"RECORD") {
-            return Some(ProtocolType::Rtsp);
-        }
-
-        if data.starts_with(b"REGISTER") || data.starts_with(b"INVITE") ||
-           data.starts_with(b"BYE") || data.starts_with(b"ACK") ||
-           data.starts_with(b"MESSAGE") || data.starts_with(b"OPTIONS") ||
-           data.starts_with(b"CANCEL") || data.starts_with(b"NOTIFY") ||
-           data.starts_with(b"SUBSCRIBE") || data.starts_with(b"INFO") ||
-           data.starts_with(b"PRACK") {
-            if data.windows(4).any(|w| w == b" sip") || data.windows(7).any(|w| w == b" SIP/2.") {
-                return Some(ProtocolType::Gb28181Sip);
-            }
-        }
-
-        if data.len() >= 4 && (data[0] == 0x80 || data[0] == 0x90) {
-            let len = u16::from_be_bytes([data[2], data[3]]) as usize;
-            if data.len() >= 4 + len && len >= 12 && len <= 1500 {
-                return Some(ProtocolType::Gb28181Audio);
-            }
-        }
-
-        None
-    }
-}
-
 struct ConnectionEntry {
     adapter: Arc<Mutex<Box<dyn SignalAdapter + Send + Sync>>>,
     device_tag: Mutex<Option<String>>,
     connected_at: std::time::Instant,
     last_message_at: std::sync::atomic::AtomicI64,
     remote_addr: SocketAddr,
-    protocol: ProtocolType,
 }
 
 impl ConnectionEntry {
     fn new(
         adapter: Arc<Mutex<Box<dyn SignalAdapter + Send + Sync>>>,
         remote_addr: SocketAddr,
-        protocol: ProtocolType,
     ) -> Self {
         Self {
             adapter,
@@ -111,7 +65,6 @@ impl ConnectionEntry {
             connected_at: std::time::Instant::now(),
             last_message_at: std::sync::atomic::AtomicI64::new(chrono::Utc::now().timestamp()),
             remote_addr,
-            protocol,
         }
     }
 
@@ -349,52 +302,7 @@ impl TcpRtspRtpServer {
     ) -> anyhow::Result<()> {
         tracing::info!("[TcpRtspRtpServer] New connection from {}", addr);
 
-        let mut peek_buf = vec![0u8; 1024];
-        
-        let protocol = tokio::time::timeout(
-            Duration::from_secs(5),
-            stream.peek(&mut peek_buf),
-        ).await;
-
-        let protocol = match protocol {
-            Ok(Ok(n)) => {
-                if n == 0 {
-                    tracing::debug!("[TcpRtspRtpServer] Empty connection from {}", addr);
-                    return Ok(());
-                }
-                match ProtocolType::detect(&peek_buf[..n]) {
-                    Some(p) => {
-                        tracing::info!("[TcpRtspRtpServer] Detected protocol {:?} from {}", p, addr);
-                        p
-                    }
-                    None => {
-                        tracing::warn!("[TcpRtspRtpServer] Unknown protocol from {}", addr);
-                        ProtocolType::Gb28181Audio
-                    }
-                }
-            }
-            Ok(Err(e)) => {
-                tracing::error!("[TcpRtspRtpServer] Peek error from {}: {}", addr, e);
-                return Ok(());
-            }
-            Err(_) => {
-                tracing::warn!("[TcpRtspRtpServer] Connection timeout from {}", addr);
-                return Ok(());
-            }
-        };
-
-        let adapter: Box<dyn SignalAdapter + Send + Sync> = match &protocol {
-            ProtocolType::Rtsp => {
-                Box::new(RtspServerAdapter::new(deps))
-            }
-            ProtocolType::Gb28181Sip | ProtocolType::Gb28181Audio => {
-                Box::new(Gb28181Adapter::new(
-                    deps,
-                    Arc::new(|_, _| {}),
-                    Arc::new(|_| {}),
-                ))
-            }
-        };
+        let adapter: Box<dyn SignalAdapter + Send + Sync> = Box::new(RtspServerAdapter::new(deps));
 
         let mut adapter = adapter;
         adapter.on_connected(addr).await?;
@@ -403,7 +311,7 @@ impl TcpRtspRtpServer {
         adapter.set_tcp_write(write_half);
 
         let adapter_arc: Arc<Mutex<Box<dyn SignalAdapter + Send + Sync>>> = Arc::new(Mutex::new(adapter));
-        let entry = Arc::new(ConnectionEntry::new(adapter_arc.clone(), addr, protocol));
+        let entry = Arc::new(ConnectionEntry::new(adapter_arc.clone(), addr));
         
         connections.insert(addr.to_string(), entry.clone());
 
@@ -423,6 +331,12 @@ impl TcpRtspRtpServer {
                         Ok(Ok(n)) => {
                             metrics.bytes_received(n);
                             entry.update_activity();
+
+                            if let Ok(msg) = String::from_utf8(buffer[..n].to_vec()) {
+                                tracing::info!("[TcpRtspRtpServer] RECV from {}:\n{}", addr, msg);
+                            } else {
+                                tracing::info!("[TcpRtspRtpServer] RECV {} bytes from {}", n, addr);
+                            }
                             
                             let parse_result = {
                                 let mut guard = adapter_arc.lock().await;

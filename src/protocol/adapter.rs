@@ -7,6 +7,7 @@ use crate::protocol::event::{SignalEvent, ProtocolType};
 use crate::protocol::traits::ProtocolDeps;
 use crate::protocol::matcher::ProtocolMatcher;
 use crate::protocol::adapter_manager::AdapterEntry;
+use crate::domain::EventPublisher;
 
 // ═══════════════════════════════════════════════════════════════
 // SignalAdapter Trait
@@ -36,7 +37,9 @@ pub trait SignalAdapter: Send + Sync {
 
     async fn set_local_addr(&mut self, _addr: SocketAddr) -> Result<()> { Ok(()) }
 
-    async fn start(&mut self, device_tag: &str) -> Result<()>;
+    fn set_adapter_entry(&mut self, _entry: crate::protocol::adapter_manager::AdapterEntry) {}
+
+    async fn start(&mut self, device_tag: &str, channel_tag: &str) -> Result<()>;
 
     async fn start_playback(&mut self, device_tag: &str, start_time: chrono::DateTime<chrono::Utc>, end_time: chrono::DateTime<chrono::Utc>) -> Result<()> {
         Ok(())
@@ -77,6 +80,18 @@ pub trait SignalAdapter: Send + Sync {
     async fn send_audio_to_device_v2(&mut self, _device_tag: &str, _pcm_data: &[i16]) -> Result<()> {
         Ok(())
     }
+
+    async fn start_audio_talk_internal(&mut self, _device_tag: &str, _connection_id: u64) -> Result<()> {
+        Ok(())
+    }
+
+    async fn stop_audio_talk_internal(&mut self, _connection_id: u64) -> Result<()> {
+        Ok(())
+    }
+
+    async fn handle_event(&mut self, _event: SignalEvent, _event_bus: Arc<dyn EventPublisher>) {}
+
+    async fn publish_event(&mut self, _event: SignalEvent) {}
 
     async fn recv_audio_from_device_v2(&mut self, _device_tag: &str) -> Result<Option<Vec<i16>>> {
         Ok(None)

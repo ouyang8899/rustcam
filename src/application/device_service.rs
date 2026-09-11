@@ -220,54 +220,139 @@ impl DeviceService {
             }
 
             SignalEvent::CatalogResponse { device_id: _, device_tag, channels } => {
-                let parent_tag = device_tag.as_deref().unwrap_or("");
-                let device_count = channels.iter().filter(|ch| !ch.is_directory()).count();
-                tracing::info!("[DeviceService] Catalog from {}: {} total, {} devices (excluding dirs)", parent_tag, channels.len(), device_count);
+                let catalog_sender = device_tag.as_deref().unwrap_or("");
+                let device_count = channels.iter().filter(|ch| ch.is_directory()).count();
+                let channel_count = channels.iter().filter(|ch| !ch.is_directory()).count();
+                tracing::info!("[DeviceService] Catalog from {}: {} total, {} devices, {} channels", catalog_sender, channels.len(), device_count, channel_count);
 
-                let mut channel_ids = Vec::new();
-                for ch in channels {
-                    if ch.is_directory() {
-                        tracing::debug!("[DeviceService] Skipping directory: {}", ch.device_id);
-                        continue;
+                if infra.db.get_device_by_device_tag(catalog_sender).is_none() {
+                    tracing::debug!("[DeviceService] Catalog sender device {} not found, creating placeholder", catalog_sender);
+                    let mut sender_device = Device::new(catalog_sender.to_string(), Protocol::Gb28181);
+                    sender_device.device_tag = Some(catalog_sender.to_string());
+                    if let Err(e) = infra.db.create_device(&sender_device).await {
+                        tracing::error!("[DeviceService] Create catalog sender device {} failed: {}", catalog_sender, e);
                     }
-
-                    let extended = serde_json::json!({
-                        "manufacturer": ch.manufacturer,
-                        "model": ch.model,
-                    });
-
-                    let status = if ch.is_online() { DeviceStatus::Online } else { DeviceStatus::Offline };
-
-                    if let Ok(Some(mut channel)) = infra.db.get_channel(parent_tag, &ch.device_id).await {
-                        channel.name = ch.name.clone();
-                        channel.status = status;
-                        channel.extended = Some(extended);
-                        if let Err(e) = infra.db.update_channel(&channel).await {
-                            tracing::error!("[DeviceService] Update channel {} failed: {}", ch.device_id, e);
-                        }
-                    } else {
-                        let mut channel = Channel::new(parent_tag.to_string(), ch.device_id.clone(), ch.name.clone());
-                        channel.status = status;
-                        channel.extended = Some(extended);
-                        channel.device_type = DeviceType::IPC;
-                        if ch.device_id.len() >= 13 {
-                            channel.device_type_code = Some(ch.device_id[10..13].to_string());
-                        }
-                        channel.manufacturer = ch.manufacturer.as_ref().map(|s| s.to_string());
-                        channel.model = ch.model.as_ref().map(|s| s.to_string());
-                        if let Err(e) = infra.db.create_channel(&channel).await {
-                            tracing::error!("[DeviceService] Create channel {} failed: {}", ch.device_id, e);
-                        }
-                    }
-                    channel_ids.push(ch.device_id.clone());
                 }
 
-                if let Some(adapter) = adapter_manager::get_adapter(parent_tag) {
+                let mut video_channel_ids = Vec::new();
+                use std::collections::HashMap;
+                let mut parent_device_attrs: HashMap<String, (&str, &str)> = HashMap::new();
+                
+                for ch in channels {
+                    let parent_id = ch.parent_id.as_deref().unwrap_or(catalog_sender);
+                    if !ch.is_directory() {
+                        if ch.is_video_channel() {
+                            parent_device_attrs.insert(parent_id.to_string(), (ch.manufacturer.as_deref().unwrap_or(""), ch.model.as_deref().unwrap_or("")));
+                        } else if !parent_device_attrs.contains_key(parent_id) {
+                            parent_device_attrs.insert(parent_id.to_string(), (ch.manufacturer.as_deref().unwrap_or(""), ch.model.as_deref().unwrap_or("")));
+                        }
+                    }
+                }
+                
+                for ch in channels {
+                    let parent_id = ch.parent_id.as_deref().unwrap_or(catalog_sender);
+
+                    if ch.is_directory() {
+                        tracing::debug!("[DeviceService] Processing device from catalog: {} (parent={})", ch.device_id, parent_id);
+                        
+                        if parent_id != catalog_sender {
+                            let mut current_parent = parent_id;
+                            while infra.db.get_device_by_device_tag(current_parent).is_none() {
+                                let (manufacturer, model) = parent_device_attrs.get(current_parent).copied().unwrap_or(("", ""));
+                                tracing::debug!("[DeviceService] Parent device {} not found, creating placeholder", current_parent);
+                                let mut parent_device = Device::new(current_parent.to_string(), Protocol::Gb28181);
+                                parent_device.device_tag = Some(current_parent.to_string());
+                                parent_device.extended = Some(serde_json::json!({
+                                    "manufacturer": manufacturer,
+                                    "model": model,
+                                }));
+                                if let Err(e) = infra.db.create_device(&parent_device).await {
+                                    tracing::error!("[DeviceService] Create parent device {} failed: {}", current_parent, e);
+                                    break;
+                                }
+                                break;
+                            }
+                        }
+                        
+                        let extended = serde_json::json!({
+                            "manufacturer": ch.manufacturer,
+                            "model": ch.model,
+                        });
+                        
+                        if let Some(mut device) = infra.db.get_device_by_device_tag(&ch.device_id) {
+                            device.name = ch.name.clone();
+                            device.extended = Some(extended);
+                            device.parent_device_tag = Some(parent_id.to_string());
+                            if let Err(e) = infra.db.update_device(&device).await {
+                                tracing::error!("[DeviceService] Update device {} failed: {}", ch.device_id, e);
+                            }
+                        } else {
+                            let mut device = Device::new(ch.name.clone(), Protocol::Gb28181);
+                            device.device_tag = Some(ch.device_id.clone());
+                            device.parent_device_tag = Some(parent_id.to_string());
+                            device.extended = Some(extended);
+                            if let Err(e) = infra.db.create_device(&device).await {
+                                tracing::error!("[DeviceService] Create device {} failed: {}", ch.device_id, e);
+                            }
+                        }
+                    } else {
+                        if infra.db.get_device_by_device_tag(parent_id).is_none() {
+                            let (manufacturer, model) = parent_device_attrs.get(parent_id).copied().unwrap_or(("", ""));
+                            tracing::debug!("[DeviceService] Parent device {} not found, creating placeholder", parent_id);
+                            let mut parent_device = Device::new(parent_id.to_string(), Protocol::Gb28181);
+                            parent_device.device_tag = Some(parent_id.to_string());
+                            parent_device.extended = Some(serde_json::json!({
+                                "manufacturer": manufacturer,
+                                "model": model,
+                            }));
+                            if let Err(e) = infra.db.create_device(&parent_device).await {
+                                tracing::error!("[DeviceService] Create parent device {} failed: {}", parent_id, e);
+                            }
+                        }
+
+                        let extended = serde_json::json!({
+                            "manufacturer": ch.manufacturer,
+                            "model": ch.model,
+                        });
+
+                        let status = if ch.is_online() { DeviceStatus::Online } else { DeviceStatus::Offline };
+
+                        if let Ok(Some(mut channel)) = infra.db.get_channel(parent_id, &ch.device_id).await {
+                            channel.name = ch.name.clone();
+                            channel.status = status;
+                            channel.extended = Some(extended);
+                            if let Err(e) = infra.db.update_channel(&channel).await {
+                                tracing::error!("[DeviceService] Update channel {} failed: {}", ch.device_id, e);
+                            }
+                        } else {
+                            let mut channel = Channel::new(parent_id.to_string(), ch.device_id.clone(), ch.name.clone());
+                            channel.status = status;
+                            channel.extended = Some(extended);
+                            channel.device_type = DeviceType::IPC;
+                            if ch.device_id.len() >= 13 {
+                                channel.device_type_code = Some(ch.device_id[10..13].to_string());
+                            }
+                            channel.manufacturer = ch.manufacturer.as_ref().map(|s| s.to_string());
+                            channel.model = ch.model.as_ref().map(|s| s.to_string());
+                            if let Err(e) = infra.db.create_channel(&channel).await {
+                                tracing::error!("[DeviceService] Create channel {} failed: {}", ch.device_id, e);
+                            }
+                        }
+
+                        if ch.is_video_channel() {
+                            video_channel_ids.push(ch.device_id.clone());
+                        } else {
+                            tracing::debug!("[DeviceService] Skipping INVITE for non-video channel: {} (model={:?})", ch.device_id, ch.model);
+                        }
+                    }
+                }
+
+                if let Some(adapter) = adapter_manager::get_adapter(catalog_sender) {
                     let mut guard = adapter.lock().await;
-                    for channel_id in &channel_ids {
-                        match guard.start(channel_id).await {
-                            Ok(_) => tracing::info!("[DeviceService] Auto-INVITE sent for channel {}/{}", parent_tag, channel_id),
-                            Err(e) => tracing::error!("[DeviceService] Auto-INVITE failed for channel {}/{}: {}", parent_tag, channel_id, e),
+                    for channel_id in &video_channel_ids {
+                        match guard.start(catalog_sender, channel_id).await {
+                            Ok(_) => tracing::info!("[DeviceService] Auto-INVITE sent for channel {}/{}", catalog_sender, channel_id),
+                            Err(e) => tracing::error!("[DeviceService] Auto-INVITE failed for channel {}/{}: {}", catalog_sender, channel_id, e),
                         }
                     }
                 }
@@ -854,6 +939,12 @@ impl DeviceService {
         if let Some(ref new_device_tag) = req.device_tag {
             if let Some(ref old_device_tag) = device.device_tag {
                 if old_device_tag != new_device_tag {
+                    if let Some(mgr) = crate::media::get_media_session_manager() {
+                        if mgr.remove(old_device_tag).is_some() {
+                            tracing::info!("[DeviceService] Removed MediaSession for device tag change: {} -> {}", old_device_tag, new_device_tag);
+                        }
+                    }
+                    
                     let streams = self.stream_service.get_streams_by_device(old_device_tag).await;
                     let active_streams: Vec<_> = streams.iter()
                         .filter(|s| matches!(s.state, StreamState::Starting | StreamState::Recovering | StreamState::Active))

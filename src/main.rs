@@ -8,7 +8,6 @@ use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
 use rustcam_media::context::{init_registry, ServiceRegistry};
 use rustcam_media::config::AppConfig;
-use rustcam_media::protocol::SignalAdapter;
 use rustcam_media::transport::{
     SipTcpServer, SipTcpServerConfig, SipUdpServer, SipUdpServerConfig,
 };
@@ -178,6 +177,9 @@ async fn main() -> anyhow::Result<()> {
         udp_rtp_config.timeout_secs,
     ).await;
 
+    // 9.5 Media Session 管理器
+    rustcam_media::init_media_session_manager().await;
+
     // 10. TCP RTSP RTP 服务器
     let tcp_rtsp_rtp_config = registry.infra.config().tcp_rtp_server.clone();
     let tcp_rtsp_rtp_server = match rustcam_media::init_tcp_rtsp_rtp_server(
@@ -238,6 +240,27 @@ async fn main() -> anyhow::Result<()> {
         registry.infra.config().signaling_server.bind_ip.clone(),
         registry.infra.config().signaling_server.tcp_signaling_port,
     );
+
+    // 14.5 启动适配器事件处理器
+    let event_bus = registry.infra.event_bus.clone();
+    let _adapter_event_handle = tokio::spawn(async move {
+        let mut rx = event_bus.subscribe();
+        let event_bus_for_handler = event_bus.clone();
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    rustcam_media::protocol::adapter_event_handler::handle_adapter_event(event, event_bus_for_handler.clone()).await;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    tracing::info!("[AdapterEvent] Event bus closed, stopping handler");
+                    break;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!("[AdapterEvent] Event bus lagged {} events", n);
+                }
+            }
+        }
+    });
 
     // 15. 并发运行所有服务
     let http_server = axum::serve(listener, app);
