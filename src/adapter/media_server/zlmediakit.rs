@@ -317,7 +317,7 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         let tcp_mode = match transport { RtpTransport::TcpPassive => 1, _ => 0 };
 
         #[derive(Deserialize)]
-        struct Resp { code: i32, port: Option<u16> }
+        struct Resp { code: i32, port: Option<u16>, msg: Option<String> }
         let params = [
             ("port", &port.to_string()),
             ("enable_tcp", &enable_tcp.to_string()),
@@ -327,6 +327,19 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         tracing::info!("[ZLMediaKit] open_rtp_server: stream_id={}, requested_port={}, enable_tcp={}, tcp_mode={}",
             stream_id, port, enable_tcp, tcp_mode);
         let resp: Resp = self.client.get_with_params("/index/api/openRtpServer", &params).await?;
+
+        if resp.code == -300 {
+            tracing::info!("[ZLMediaKit] open_rtp_server: stream_id={} already exists (code=-300), closing and retrying", stream_id);
+            if let Err(e) = self.close_rtp_server(stream_id).await {
+                tracing::warn!("[ZLMediaKit] close_rtp_server failed: {}, proceeding with retry", e);
+            }
+            let resp: Resp = self.client.get_with_params("/index/api/openRtpServer", &params).await?;
+            let actual_port = resp.port.unwrap_or(port);
+            tracing::info!("[ZLMediaKit] open_rtp_server result after retry: stream_id={}, actual_port={}, code={}",
+                stream_id, actual_port, resp.code);
+            return Ok((actual_port, base_host_from_config(&self.config)));
+        }
+
         let actual_port = resp.port.unwrap_or(port);
         tracing::info!("[ZLMediaKit] open_rtp_server result: stream_id={}, actual_port={}, code={}",
             stream_id, actual_port, resp.code);

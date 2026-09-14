@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::io::AsyncWriteExt;
 
+use crate::domain::SessionType;
 use crate::protocol::adapter::SignalAdapter;
 use crate::protocol::event::{SignalEvent, ProtocolType, TransportType, PtzCommand};
 use crate::protocol::traits::ProtocolDeps;
@@ -207,6 +208,7 @@ impl WebSocketAdapter {
                         channel_id: json.get("channel").and_then(|v| v.as_str()).map(String::from),
                         transport: TransportType::WebSocket,
                         media_server_name: None,
+                        session_type: SessionType::Play,
                     });
                 }
             }
@@ -218,6 +220,7 @@ impl WebSocketAdapter {
                         device_id,
                         device_tag: None,
                         session_id: json.get("session_id").and_then(|v| v.as_str()).unwrap_or("ws_session").to_string(),
+                        session_type: SessionType::Play,
                     });
                 }
             }

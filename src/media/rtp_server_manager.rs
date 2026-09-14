@@ -23,6 +23,7 @@ struct PortKey(u16, TransportType);
 
 pub struct RtpServerManager {
     port_range: RtpPortRange,
+    bind_addr: String,
     udp_servers: DashMap<u16, Arc<UDPRtpServer>>,
     tcp_servers: DashMap<u16, Arc<TcpRtpServer>>,
     ports: DashMap<PortKey, PortInfo>,
@@ -33,12 +34,13 @@ pub struct RtpServerManager {
 }
 
 impl RtpServerManager {
-    pub fn new(port_range: RtpPortRange, timeout_secs: u64) -> Self {
+    pub fn new(port_range: RtpPortRange, bind_addr: String, timeout_secs: u64) -> Self {
         let start = port_range.start;
-        tracing::info!("[RtpServerManager] Created with port range {}-{}, timeout {}s", 
-            port_range.start, port_range.end, timeout_secs);
+        tracing::info!("[RtpServerManager] Created with port range {}-{}, bind {}, timeout {}s", 
+            port_range.start, port_range.end, bind_addr, timeout_secs);
         Self {
             port_range,
+            bind_addr,
             udp_servers: DashMap::new(),
             tcp_servers: DashMap::new(),
             ports: DashMap::new(),
@@ -115,10 +117,10 @@ impl RtpServerManager {
         (nanos as u32) ^ (rand_simple() as u32)
     }
     
-    pub async fn allocate(&self, device_tag: &str, channel_tag: &str, protocol: TransportType, callback: Arc<dyn RtpPacketCallback>) -> Result<(u16, u32)> {
+    pub async fn allocate(&self, device_tag: &str, channel_tag: &str, protocol: TransportType, _callback: Arc<dyn RtpPacketCallback>) -> Result<(u16, u32)> {
         match protocol {
             TransportType::Udp => {
-                let (port, ssrc, _) = self.allocate_udp(device_tag, channel_tag, callback).await?;
+                let (port, ssrc, _) = self.allocate_udp(device_tag, channel_tag).await?;
                 Ok((port, ssrc))
             }
             TransportType::Tcp => {
@@ -129,19 +131,17 @@ impl RtpServerManager {
         }
     }
     
-    pub async fn allocate_udp(&self, device_tag: &str, channel_tag: &str, callback: Arc<dyn RtpPacketCallback>) -> Result<(u16, u32, Arc<UDPRtpServer>)> {
+    pub async fn allocate_udp(&self, device_tag: &str, channel_tag: &str) -> Result<(u16, u32, Arc<UDPRtpServer>)> {
         let ssrc = Self::generate_ssrc();
         
         let (rtp_port, _rtcp_port) = self.get_next_udp_port().await
             .ok_or_else(|| MediaError::PortAllocation("No available UDP ports".into()))?;
         
-        let server = Arc::new(UDPRtpServer::new(rtp_port).await?);
+        let server = Arc::new(UDPRtpServer::new(&self.bind_addr, rtp_port).await?);
         
         if !server.allocate(ssrc, device_tag.to_string(), channel_tag.to_string()).await {
             return Err(MediaError::PortAllocation(format!("Port {} already allocated", rtp_port)));
         }
-        
-        server.set_callback(callback).await;
         
         self.udp_servers.insert(rtp_port, server.clone());
         self.ports.insert(PortKey(rtp_port, TransportType::Udp), PortInfo {
@@ -151,8 +151,6 @@ impl RtpServerManager {
             ssrc: Some(ssrc),
             allocated_at: std::time::Instant::now(),
         });
-        
-        server.clone().start_recv_loop().await;
         
         tracing::info!("[RtpServerManager] Allocated UDP port {} (SSRC {}) for {}/{}", rtp_port, ssrc, device_tag, channel_tag);
         Ok((rtp_port, ssrc, server))
@@ -164,7 +162,7 @@ impl RtpServerManager {
         let port = self.get_next_tcp_port().await
             .ok_or_else(|| MediaError::PortAllocation("No available TCP ports".into()))?;
         
-        let server = Arc::new(TcpRtpServer::new(port).await?);
+        let server = Arc::new(TcpRtpServer::new_passive(&self.bind_addr, port).await?);
         
         if !server.allocate(ssrc, device_tag.to_string(), channel_tag.to_string()).await {
             return Err(MediaError::PortAllocation(format!("TCP Port {} already allocated", port)));
@@ -182,86 +180,26 @@ impl RtpServerManager {
         tracing::info!("[RtpServerManager] Allocated TCP port {} (SSRC {}) for {}/{}", port, ssrc, device_tag, channel_tag);
         Ok((port, ssrc, server))
     }
-    
-    pub async fn allocate_tcp_for_broadcast(
-        &self,
-        device_tag: &str,
-        channel_tag: &str,
-    ) -> Result<(u16, u32, Arc<TcpRtpServer>)> {
+
+    pub async fn allocate_tcp_active(&self) -> Result<(u16, u32, Arc<TcpRtpServer>)> {
         let ssrc = Self::generate_ssrc();
         
         let port = self.get_next_tcp_port().await
             .ok_or_else(|| MediaError::PortAllocation("No available TCP ports".into()))?;
         
-        let server = Arc::new(TcpRtpServer::new(port).await?);
-        
-        if !server.allocate(ssrc, device_tag.to_string(), channel_tag.to_string()).await {
-            return Err(MediaError::PortAllocation(format!("TCP Port {} already allocated", port)));
-        }
+        let server = Arc::new(TcpRtpServer::new_active(&self.bind_addr, port).await?);
         
         self.tcp_servers.insert(port, server.clone());
         self.ports.insert(PortKey(port, TransportType::Tcp), PortInfo {
             protocol: TransportType::Tcp,
-            device_tag: device_tag.to_string(),
-            channel_tag: channel_tag.to_string(),
+            device_tag: String::new(),
+            channel_tag: String::new(),
             ssrc: Some(ssrc),
             allocated_at: std::time::Instant::now(),
         });
         
-        tracing::info!("[RtpServerManager] Allocated TCP broadcast port {} (SSRC {}) for {}/{}", port, ssrc, device_tag, channel_tag);
+        tracing::info!("[RtpServerManager] Allocated TCP active server on port {} (SSRC {})", port, ssrc);
         Ok((port, ssrc, server))
-    }
-    
-    pub async fn allocate_udp_for_broadcast(
-        &self,
-        device_tag: &str,
-        channel_tag: &str,
-    ) -> Result<(u16, u32)> {
-        let ssrc = Self::generate_ssrc();
-        
-        let (rtp_port, rtcp_port) = self.get_next_udp_port().await
-            .ok_or_else(|| MediaError::PortAllocation("No available UDP ports".into()))?;
-        
-        let server = Arc::new(UDPRtpServer::new(rtp_port).await?);
-        
-        if !server.allocate(ssrc, device_tag.to_string(), channel_tag.to_string()).await {
-            return Err(MediaError::PortAllocation(format!("Port {} already allocated", rtp_port)));
-        }
-        
-        self.udp_servers.insert(rtp_port, server.clone());
-        self.ports.insert(PortKey(rtp_port, TransportType::Udp), PortInfo {
-            protocol: TransportType::Udp,
-            device_tag: device_tag.to_string(),
-            channel_tag: channel_tag.to_string(),
-            ssrc: Some(ssrc),
-            allocated_at: std::time::Instant::now(),
-        });
-        
-        tracing::info!("[RtpServerManager] Allocated UDP broadcast port {} (SSRC {}) for {}/{}", rtp_port, ssrc, device_tag, channel_tag);
-        Ok((rtp_port, ssrc))
-    }
-
-    pub async fn allocate_tcp_active_for_broadcast(
-        &self,
-        device_ip: &str,
-        device_port: u16,
-    ) -> Result<(u32, GB28181BroadcastVoiceTransport)> {
-        use std::net::SocketAddr;
-
-        let ssrc = Self::generate_ssrc();
-
-        let addr: SocketAddr = format!("{}:{}", device_ip, device_port)
-            .parse()
-            .map_err(|e| MediaError::PortAllocation(format!("Invalid device address: {}", e)))?;
-
-        use tokio::net::TcpStream;
-        let stream = TcpStream::connect(addr).await
-            .map_err(|e| MediaError::PortAllocation(format!("Failed to connect to device: {}", e)))?;
-
-        let transport = GB28181BroadcastVoiceTransport::new_tcp_active(stream, ssrc, 8).await;
-
-        tracing::info!("[RtpServerManager] TCP active connected to device {}:{} (SSRC {})", device_ip, device_port, ssrc);
-        Ok((ssrc, transport))
     }
 
     pub async fn release(&self, port: u16, protocol: TransportType) {
@@ -384,9 +322,10 @@ fn rand_simple() -> u64 {
 
 static RTP_SERVER_MANAGER: OnceCell<Arc<RtpServerManager>> = OnceCell::new();
 
-pub async fn init_rtp_server_manager(port_start: u16, port_end: u16, timeout_secs: u64) {
+pub async fn init_rtp_server_manager(port_start: u16, port_end: u16, bind_addr: String, timeout_secs: u64) {
     let manager = Arc::new(RtpServerManager::new(
         RtpPortRange::new(port_start, port_end),
+        bind_addr,
         timeout_secs,
     ));
     RTP_SERVER_MANAGER.set(manager.clone()).ok();

@@ -38,13 +38,13 @@ pub struct UDPRtpServer {
 }
 
 impl UDPRtpServer {
-    pub async fn new(port: u16) -> Result<Self> {
-        let rtp_socket = tokio::net::UdpSocket::bind(format!("0.0.0.0:{}", port)).await
+    pub async fn new(bind_addr: &str, port: u16) -> Result<Self> {
+        let rtp_socket = tokio::net::UdpSocket::bind(format!("{}:{}", bind_addr, port)).await
             .map_err(|e| MediaError::Transport(format!("RTP bind failed: {}", e)))?;
-        let rtcp_socket = tokio::net::UdpSocket::bind(format!("0.0.0.0:{}", port + 1)).await
+        let rtcp_socket = tokio::net::UdpSocket::bind(format!("{}:{}", bind_addr, port + 1)).await
             .map_err(|e| MediaError::Transport(format!("RTCP bind failed: {}", e)))?;
         
-        tracing::info!("[UDPRtpServer] Created on RTP port {} / RTCP port {}", port, port + 1);
+        tracing::info!("[UDPRtpServer] Created on {}:{} / {}", bind_addr, port, port + 1);
         
         Ok(Self {
             rtp_socket: Arc::new(rtp_socket),
@@ -186,40 +186,74 @@ use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 
+pub enum TcpMode {
+    Passive,
+    Active,
+}
+
 pub struct TcpRtpServer {
     port: u16,
-    listener: tokio::net::TcpListener,
+    mode: TcpMode,
+    listener: Option<tokio::net::TcpListener>,
+    socket: Arc<tokio::sync::Mutex<Option<tokio::net::TcpSocket>>>,
     ssrc: RwLock<Option<u32>>,
     device_tag: RwLock<Option<String>>,
     channel_tag: RwLock<Option<String>>,
     allocated_at: RwLock<Option<std::time::Instant>>,
     shutdown: AtomicBool,
-    accepted_stream: RwLock<Option<(TcpStream, std::net::SocketAddr)>>,
-    waiters: RwLock<Vec<oneshot::Sender<(Arc<TcpStream>, std::net::SocketAddr)>>>,
 }
 
 impl TcpRtpServer {
-    pub async fn new(port: u16) -> Result<Self> {
-        let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await
+    pub async fn new_passive(bind_addr: &str, port: u16) -> Result<Self> {
+        let listener = tokio::net::TcpListener::bind(format!("{}:{}", bind_addr, port)).await
             .map_err(|e| MediaError::Transport(format!("TCP RTP bind failed: {}", e)))?;
         
-        tracing::info!("[TcpRtpServer] Created on port {}", port);
+        tracing::info!("[TcpRtpServer] Passive mode created on {}:{}", bind_addr, port);
         
         Ok(Self {
             port,
-            listener,
+            mode: TcpMode::Passive,
+            listener: Some(listener),
+            socket: Arc::new(tokio::sync::Mutex::new(None)),
             ssrc: RwLock::new(None),
             device_tag: RwLock::new(None),
             channel_tag: RwLock::new(None),
             allocated_at: RwLock::new(None),
             shutdown: AtomicBool::new(false),
-            accepted_stream: RwLock::new(None),
-            waiters: RwLock::new(Vec::new()),
+        })
+    }
+    
+    pub async fn new_active(bind_addr: &str, port: u16) -> Result<Self> {
+        let socket = tokio::net::TcpSocket::new_v4()
+            .map_err(|e| MediaError::Transport(format!("TCP socket create failed: {}", e)))?;
+        
+        let addr: std::net::SocketAddr = format!("{}:{}", bind_addr, port).parse()
+            .map_err(|e| MediaError::Transport(format!("Invalid address: {}", e)))?;
+        
+        socket.bind(addr)
+            .map_err(|e| MediaError::Transport(format!("TCP bind failed: {}", e)))?;
+        
+        tracing::info!("[TcpRtpServer] Active mode created on {}:{}", bind_addr, port);
+        
+        Ok(Self {
+            port,
+            mode: TcpMode::Active,
+            listener: None,
+            socket: Arc::new(tokio::sync::Mutex::new(Some(socket))),
+            ssrc: RwLock::new(None),
+            device_tag: RwLock::new(None),
+            channel_tag: RwLock::new(None),
+            allocated_at: RwLock::new(None),
+            shutdown: AtomicBool::new(false),
         })
     }
     
     pub fn port(&self) -> u16 {
         self.port
+    }
+    
+    pub fn mode(&self) -> &TcpMode {
+        &self.mode
     }
     
     pub fn is_shutdown(&self) -> bool {
@@ -282,30 +316,17 @@ impl TcpRtpServer {
     }
     
     pub async fn accept(&self) -> std::io::Result<(TcpStream, std::net::SocketAddr)> {
-        self.listener.accept().await
-    }
-    
-    pub async fn take_accepted_stream(&self) -> Option<(TcpStream, std::net::SocketAddr)> {
-        self.listener.accept().await.ok()
-    }
-    
-    pub async fn wait_for_accept(&self) -> Option<(Arc<TcpStream>, std::net::SocketAddr)> {
-        let (tx, rx) = oneshot::channel();
-        {
-            let mut waiters = self.waiters.write().await;
-            waiters.push(tx);
+        match &self.listener {
+            Some(listener) => listener.accept().await,
+            None => Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Not in passive mode")),
         }
-        rx.await.ok()
     }
     
-    pub async fn set_accepted_stream(&self, stream: TcpStream, addr: std::net::SocketAddr) {
-        let waiters = {
-            let mut waiters = self.waiters.write().await;
-            std::mem::take(&mut *waiters)
+    pub async fn connect(&self, remote: std::net::SocketAddr) -> std::io::Result<TcpStream> {
+        let socket = match self.socket.lock().await.take() {
+            Some(socket) => socket,
+            None => return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Socket already used or not in active mode")),
         };
-        let stream = Arc::new(stream);
-        for waiter in waiters {
-            let _ = waiter.send((Arc::clone(&stream), addr));
-        }
+        socket.connect(remote).await
     }
 }

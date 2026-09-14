@@ -25,7 +25,7 @@ pub mod websocket;
 pub use udp::UdpTransport;
 pub use tcp::{TcpTransport, Gb28181TcpTransport};
 pub use gb28181_broadcast::GB28181BroadcastVoiceTransport;
-pub use websocket::WebSocketMediaTransport;
+pub use websocket::{WebSocketMediaTransport, WebSocketMediaNodeTransport};
 
 pub struct NullTransport;
 

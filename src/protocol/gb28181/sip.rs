@@ -1126,8 +1126,16 @@ impl SipMessageBuffer {
                     match SipMessage::from_rsip_message(&rsip_msg) {
                         Some(sip_msg) => return Some((sip_msg, total_len)),
                         None => {
-                            tracing::warn!("[SIP] Failed to convert rsip message");
-                            continue;
+                            let uri_preview = format!("{:?}", rsip_msg);
+                            tracing::warn!("[SIP] Failed to convert rsip message: rsip_msg={}", &uri_preview[..uri_preview.len().min(200)]);
+                            // 回退到旧解析方式
+                            match SipMessage::parse(&single_msg) {
+                                Some(msg) => return Some((msg, total_len)),
+                                None => {
+                                    tracing::warn!("[SIP] Fallback parse also failed for INVITE");
+                                    continue;
+                                }
+                            }
                         }
                     }
                 }

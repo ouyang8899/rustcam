@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use std::net::SocketAddr;
+use crate::domain::SessionType;
 use crate::protocol::event::{SignalEvent, ProtocolType, PtzCommand};
 use crate::protocol::adapter::SignalAdapter;
 use crate::error::Result;
@@ -69,6 +70,7 @@ impl RtspAdapter {
                     channel_id: Some("0".to_string()),
                     transport: crate::protocol::event::TransportType::Tcp,
                     media_server_name: None,
+                    session_type: SessionType::Play,
                 });
             }
             if line.starts_with("CSeq:") {

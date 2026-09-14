@@ -22,6 +22,8 @@ impl EventBus {
     }
 
     pub async fn publish(&self, event: SignalEvent) -> anyhow::Result<()> {
+        let event_type = event.event_type();
+        tracing::info!("[EventBus] Publishing event: {}, handlers: {}, receivers: {}", event_type, self.handlers.len(), self.tx.receiver_count());
         self.tx.send(event.clone()).map_err(|e| anyhow::anyhow!("broadcast send: {}", e))?;
 
         // 1. 发送到广播 channel（原有订阅者）

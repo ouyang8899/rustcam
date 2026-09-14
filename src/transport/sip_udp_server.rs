@@ -6,6 +6,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
 
+use crate::domain::SessionType;
 use crate::protocol::gb28181::Gb28181Adapter;
 use crate::protocol::adapter::SignalAdapter;
 use crate::protocol::adapter_manager;
@@ -126,10 +127,7 @@ impl SipUdpServer {
                                     for event in events {
                                         self.metrics.event_received();
 
-                                        if matches!(&event,
-                                            SignalEvent::StopPlay { .. } |
-                                            SignalEvent::DeviceOffline { .. }
-                                        ) {
+                                        if matches!(&event, SignalEvent::DeviceOffline { .. }) {
                                             tracing::info!("[SipUdpServer] Device {} sent disconnect, removing adapter", addr_key);
                                             let _ = guard.on_disconnected().await;
                                             drop(guard);
@@ -138,6 +136,21 @@ impl SipUdpServer {
                                                 tracing::error!("[SipUdpServer] Failed to publish event: {}", e);
                                             }
                                             break;
+                                        }
+
+                                        if let SignalEvent::StopPlay { session_type, .. } = &event {
+                                            if *session_type == SessionType::Broadcast {
+                                                tracing::info!("[SipUdpServer] Broadcast StopPlay - not removing adapter (managed by signaling)");
+                                            } else {
+                                                tracing::info!("[SipUdpServer] Device {} sent StopPlay, removing adapter", addr_key);
+                                                let _ = guard.on_disconnected().await;
+                                                drop(guard);
+                                                self.adapters.remove(&addr_key);
+                                                if let Err(e) = self.event_bus.publish(event).await {
+                                                    tracing::error!("[SipUdpServer] Failed to publish event: {}", e);
+                                                }
+                                                break;
+                                            }
                                         }
 
                                         if let Err(e) = self.event_bus.publish(event).await {

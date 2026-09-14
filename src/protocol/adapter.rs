@@ -3,6 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::net::tcp::OwnedWriteHalf;
 use crate::error::Result;
+use crate::media::MediaNodeId;
 use crate::protocol::event::{SignalEvent, ProtocolType};
 use crate::protocol::traits::ProtocolDeps;
 use crate::protocol::matcher::ProtocolMatcher;
@@ -57,10 +58,6 @@ pub trait SignalAdapter: Send + Sync {
         Ok(String::new())
     }
 
-    async fn send_audio_to_device(&mut self, _device_tag: &str, _pcm_data: &[i16]) -> Result<()> {
-        Ok(())
-    }
-
     async fn start_audio_talk_v2(
         &mut self,
         _device_tag: &str,
@@ -77,15 +74,15 @@ pub trait SignalAdapter: Send + Sync {
         Ok(())
     }
 
-    async fn send_audio_to_device_v2(&mut self, _device_tag: &str, _pcm_data: &[i16]) -> Result<()> {
+    async fn send_audio_to_device(&mut self, _device_tag: &str, _pcm_data: &[i16]) -> Result<()> {
         Ok(())
     }
 
-    async fn start_audio_talk_internal(&mut self, _device_tag: &str, _connection_id: u64) -> Result<()> {
+    async fn start_audio_talk_internal(&mut self, _device_tag: &str, _node_id: MediaNodeId) -> Result<()> {
         Ok(())
     }
 
-    async fn stop_audio_talk_internal(&mut self, _connection_id: u64) -> Result<()> {
+    async fn stop_audio_talk_internal(&mut self, _node_id: MediaNodeId) -> Result<()> {
         Ok(())
     }
 

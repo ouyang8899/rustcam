@@ -707,7 +707,9 @@ async function startMicCapture() {
     audioProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1)
 
     audioProcessor.onaudioprocess = (e) => {
+      console.log('[Broadcast] audioProcessor callback: isBroadcasting=', isBroadcasting.value, 'talkWs=', talkWs ? talkWs.readyState : 'null');
       if (!isBroadcasting.value || !talkWs || talkWs.readyState !== WebSocket.OPEN) {
+        console.log('[Broadcast] Skipping audio - not ready');
         return
       }
 
@@ -726,6 +728,7 @@ async function startMicCapture() {
       }
 
       if (talkWs && talkWs.readyState === WebSocket.OPEN) {
+        console.log('[Broadcast] Sending audio buffer:', buffer.byteLength, 'bytes');
         talkWs.send(buffer)
       }
     }
@@ -733,6 +736,7 @@ async function startMicCapture() {
     source.connect(audioProcessor)
     audioProcessor.connect(audioContext.destination)
 
+    console.log('[Broadcast] Sending start_talk action');
     talkWs.send(JSON.stringify({ action: 'start_talk' }))
     broadcastStatus.value = 'inviting'
   } catch (e) {

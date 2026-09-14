@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use bytes::{BufMut, BytesMut};
 use dashmap::DashMap;
 use once_cell::sync::OnceCell;
+use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -18,7 +19,7 @@ use crate::media::rtp::{RtpHeader, RtpPacket};
 
 static NODE_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MediaNodeType {
     GB28181_MEDIA,
     GB28181_BROADCAST_VOICE,
@@ -55,33 +56,33 @@ impl std::fmt::Display for MediaNodeType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaNodeId {
     pub id: u64,
     pub node_type: MediaNodeType,
-    pub device_id: String,
-    pub channel_id: Option<String>,
+    pub device_tag: String,
+    pub channel_tag: Option<String>,
 }
 
 impl MediaNodeId {
-    pub fn new(node_type: MediaNodeType, device_id: &str) -> Self {
+    pub fn new(node_type: MediaNodeType, device_tag: &str, channel_tag: Option<String>) -> Self {
         Self {
             id: NODE_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
             node_type,
-            device_id: device_id.to_string(),
-            channel_id: None,
+            device_tag: device_tag.to_string(),
+            channel_tag: channel_tag,
         }
     }
 
-    pub fn with_channel(mut self, channel_id: &str) -> Self {
-        self.channel_id = Some(channel_id.to_string());
+    pub fn with_channel(mut self, channel_tag: Option<String>) -> Self {
+        self.channel_tag = channel_tag;
         self
     }
 
     pub fn as_str(&self) -> String {
-        match &self.channel_id {
-            Some(ch) => format!("{}:{}/{}", self.node_type, self.device_id, ch),
-            None => format!("{}:{}", self.node_type, self.device_id),
+        match &self.channel_tag {
+            Some(ch) => format!("{}:{}/{}", self.node_type, self.device_tag, ch),
+            None => format!("{}:{}", self.node_type, self.device_tag),
         }
     }
 }
@@ -160,14 +161,6 @@ impl NodeMediaContext {
         }
     }
 
-    pub fn data_type(&self) -> DataType {
-        *self
-            .data
-            .keys()
-            .find(|&k| *k != DataType::OrgData)
-            .unwrap_or(&DataType::Audio)
-    }
-
     pub fn get_data(&self, data_type: DataType) -> Option<&BytesMut> {
         self.data.get(&data_type)
     }
@@ -224,13 +217,12 @@ impl NodeMiddleware for BasicMiddleware {
         chain: &[Arc<dyn NodeMiddleware>],
         next_index: usize,
     ) -> bool {
-        let data_type = ctx.data_type();
-        let buf = if let Some(existing) = ctx.data.get_mut(&data_type) {
+        let buf = if let Some(existing) = ctx.data.get_mut(&DataType::Audio) {
             existing
         } else if let Some(org) = ctx.data.get(&DataType::OrgData) {
             let mut new_buf = org.clone();
             let stop = (self.func)(&mut new_buf);
-            ctx.data.insert(data_type, new_buf);
+            ctx.data.insert(DataType::Audio, new_buf);
             if stop {
                 return true;
             }
@@ -254,15 +246,15 @@ impl NodeMiddleware for BasicMiddleware {
 
 use std::sync::atomic::AtomicU8;
 
-pub struct TalkNodeMiddleware {
+pub struct G711ToLinearPcmMiddleware {
     name: String,
     codec: AtomicU8,
 }
 
-impl TalkNodeMiddleware {
+impl G711ToLinearPcmMiddleware {
     pub fn new(codec: AudioCodec) -> Self {
         Self {
-            name: "talk".to_string(),
+            name: "g711_to_pcm".to_string(),
             codec: AtomicU8::new(codec as u8),
         }
     }
@@ -272,7 +264,7 @@ impl TalkNodeMiddleware {
     }
 }
 
-impl NodeMiddleware for TalkNodeMiddleware {
+impl NodeMiddleware for G711ToLinearPcmMiddleware {
     fn name(&self) -> &str {
         &self.name
     }
@@ -287,7 +279,6 @@ impl NodeMiddleware for TalkNodeMiddleware {
         chain: &[Arc<dyn NodeMiddleware>],
         next_index: usize,
     ) -> bool {
-        let data_type = ctx.data_type();
         let input_data = match ctx.data.get(&DataType::OrgData) {
             Some(d) => d.clone(),
             None => return true,
@@ -307,23 +298,23 @@ impl NodeMiddleware for TalkNodeMiddleware {
             pcm_data.extend_from_slice(&sample.to_le_bytes());
         }
         ctx.data
-            .insert(data_type, BytesMut::from(pcm_data.as_slice()));
+            .insert(DataType::Audio, BytesMut::from(pcm_data.as_slice()));
         if next_index < chain.len() {
             return chain[next_index].process(ctx, chain, next_index + 1);
         }
-        false
+        true
     }
 }
 
-pub struct SendChainNodeMiddleware {
+pub struct LinearPcmToG711Middleware {
     name: String,
     codec: AtomicU8,
 }
 
-impl SendChainNodeMiddleware {
+impl LinearPcmToG711Middleware {
     pub fn new(codec: AudioCodec) -> Self {
         Self {
-            name: "send_chain".to_string(),
+            name: "pcm_to_g711".to_string(),
             codec: AtomicU8::new(codec as u8),
         }
     }
@@ -333,7 +324,7 @@ impl SendChainNodeMiddleware {
     }
 }
 
-impl NodeMiddleware for SendChainNodeMiddleware {
+impl NodeMiddleware for LinearPcmToG711Middleware {
     fn name(&self) -> &str {
         &self.name
     }
@@ -348,7 +339,6 @@ impl NodeMiddleware for SendChainNodeMiddleware {
         chain: &[Arc<dyn NodeMiddleware>],
         next_index: usize,
     ) -> bool {
-        let data_type = ctx.data_type();
         let input_data = match ctx.data.get(&DataType::OrgData) {
             Some(d) => d.clone(),
             None => return true,
@@ -369,11 +359,11 @@ impl NodeMiddleware for SendChainNodeMiddleware {
         };
 
         ctx.data
-            .insert(data_type, BytesMut::from(encoded.as_slice()));
+            .insert(DataType::Audio, BytesMut::from(encoded.as_slice()));
         if next_index < chain.len() {
             return chain[next_index].process(ctx, chain, next_index + 1);
         }
-        false
+        true
     }
 }
 
@@ -417,8 +407,7 @@ impl NodeMiddleware for RtpSendMiddleware {
         chain: &[Arc<dyn NodeMiddleware>],
         next_index: usize,
     ) -> bool {
-        let data_type = ctx.data_type();
-        let input_data = match ctx.data.get(&DataType::OrgData) {
+        let input_data = match ctx.data.get(&DataType::Audio) {
             Some(d) => d.clone(),
             None => return true,
         };
@@ -445,11 +434,11 @@ impl NodeMiddleware for RtpSendMiddleware {
         };
 
         header_bytes.extend_from_slice(&input_data);
-        ctx.data.insert(data_type, header_bytes);
+        ctx.data.insert(DataType::Audio, header_bytes);
         if next_index < chain.len() {
             return chain[next_index].process(ctx, chain, next_index + 1);
         }
-        false
+        true
     }
 }
 
@@ -555,6 +544,8 @@ pub trait MediaNode: MediaTransportCallback + Send + Sync {
 
     fn add_send_chain(&self, target_type: MediaNodeType, mw: Box<dyn NodeMiddleware + 'static>);
 
+    async fn add_post_process(&self, mw: Box<dyn NodeMiddleware + 'static>);
+
     async fn stop(&self) -> Result<()>;
 
     fn as_any(&self) -> &dyn Any;
@@ -574,6 +565,7 @@ pub struct BasicMediaNode {
 #[async_trait]
 impl MediaTransportCallback for BasicMediaNode {
     async fn on_media_data(&self, data: HashMap<DataType, BytesMut>) {
+        tracing::debug!("[MediaNode] on_media_data called, data.len={}", data.len());
         let _ = self.sendto_receivers(data).await;
     }
 }
@@ -629,12 +621,6 @@ impl BasicMediaNode {
         }
     }
 
-    pub async fn add_post_process(&self, mw: Box<dyn NodeMiddleware + 'static>) {
-        let mut chain = self.post_process_chain.write().await;
-        let arc_mw: Arc<dyn NodeMiddleware> = mw.into();
-        chain.push(arc_mw);
-    }
-
     pub async fn stop(&self) -> Result<()> {
         self.datatransport.close().await
     }
@@ -683,6 +669,12 @@ impl MediaNode for BasicMediaNode {
 
     fn datatransport(&self) -> Arc<dyn MediaTransport> {
         self.datatransport.clone()
+    }
+
+    async fn add_post_process(&self, mw: Box<dyn NodeMiddleware + 'static>) {
+        let mut chain = self.post_process_chain.write().await;
+        let arc_mw: Arc<dyn NodeMiddleware> = mw.into();
+        chain.push(arc_mw);
     }
 
     async fn send_data_to_remote(
@@ -765,20 +757,24 @@ impl MediaSession {
     }
 
     pub fn get_broadcast_nodes(&self) -> Vec<Arc<dyn MediaNode>> {
-        self.nodes.iter()
+        self.nodes
+            .iter()
             .filter(|n| n.value().node_type() == MediaNodeType::GB28181_BROADCAST_VOICE)
             .map(|n| n.value().clone())
             .collect()
     }
 
     pub fn get_broadcast_node(&self, channel_tag: &str) -> Option<Arc<dyn MediaNode>> {
-        self.nodes.iter()
+        self.nodes
+            .iter()
             .find(|n| n.value().node_type() == MediaNodeType::GB28181_BROADCAST_VOICE)
             .map(|n| n.value().clone())
     }
 
     pub fn has_broadcast_session(&self) -> bool {
-        self.nodes.iter().any(|n| n.value().node_type() == MediaNodeType::GB28181_BROADCAST_VOICE)
+        self.nodes
+            .iter()
+            .any(|n| n.value().node_type() == MediaNodeType::GB28181_BROADCAST_VOICE)
     }
 
     pub fn start_broadcast(&self, channel_tag: &str, node: Arc<dyn MediaNode>) {
@@ -795,21 +791,17 @@ impl MediaSession {
     }
 
     pub async fn end_broadcast(&self, channel_tag: &str) -> bool {
-        let node_id = self.nodes.iter()
+        let node_id = self
+            .nodes
+            .iter()
             .find(|n| n.value().node_type() == MediaNodeType::GB28181_BROADCAST_VOICE)
             .map(|n| n.key().clone());
-        
+
         if let Some(node_id) = node_id {
             if let Some((_, removed)) = self.nodes.remove(&node_id) {
-                tracing::info!(
-                    "[MediaSession] broadcast {} session removed",
-                    channel_tag
-                );
+                tracing::info!("[MediaSession] broadcast {} session removed", channel_tag);
                 if let Err(e) = removed.stop().await {
-                    tracing::warn!(
-                        "[MediaSession] Failed to stop broadcast node: {}",
-                        e
-                    );
+                    tracing::warn!("[MediaSession] Failed to stop broadcast node: {}", e);
                 }
                 return true;
             }
@@ -818,23 +810,19 @@ impl MediaSession {
     }
 
     pub async fn end_all_broadcasts(&self) -> usize {
-        let broadcast_node_ids: Vec<MediaNodeId> = self.nodes.iter()
+        let broadcast_node_ids: Vec<MediaNodeId> = self
+            .nodes
+            .iter()
             .filter(|n| n.value().node_type() == MediaNodeType::GB28181_BROADCAST_VOICE)
             .map(|n| n.key().clone())
             .collect();
-        
+
         let mut removed = 0;
         for node_id in &broadcast_node_ids {
             if let Some((_, removed_node)) = self.nodes.remove(node_id) {
-                tracing::info!(
-                    "[MediaSession] broadcast node {} removed",
-                    node_id.id
-                );
+                tracing::info!("[MediaSession] broadcast node {} removed", node_id.id);
                 if let Err(e) = removed_node.stop().await {
-                    tracing::warn!(
-                        "[MediaSession] Failed to stop broadcast node: {}",
-                        e
-                    );
+                    tracing::warn!("[MediaSession] Failed to stop broadcast node: {}", e);
                 }
                 removed += 1;
             }
@@ -869,10 +857,11 @@ impl MediaSession {
 
     pub fn remove_node(&self, node_id: &MediaNodeId) -> Option<Arc<dyn MediaNode>> {
         if let Some((_, node)) = self.nodes.remove(node_id) {
-            let node_id_str = node.id().device_id.clone();
+            let node_id_str = node.id().device_tag.clone();
             for item in self.nodes.iter() {
                 let existing_node = item.value();
-                let keys: Vec<MediaNodeType> = existing_node.receivers().iter().map(|i| *i.key()).collect();
+                let keys: Vec<MediaNodeType> =
+                    existing_node.receivers().iter().map(|i| *i.key()).collect();
                 for key in keys {
                     existing_node.remove_receiver(key, &node_id_str);
                 }

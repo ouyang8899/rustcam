@@ -10,6 +10,7 @@ pub enum SessionType {
     Record,
     Playback,
     Ptz,
+    Broadcast,
 }
 
 impl fmt::Display for SessionType {
@@ -19,6 +20,7 @@ impl fmt::Display for SessionType {
             SessionType::Record => write!(f, "record"),
             SessionType::Playback => write!(f, "playback"),
             SessionType::Ptz => write!(f, "ptz"),
+            SessionType::Broadcast => write!(f, "broadcast"),
         }
     }
 }

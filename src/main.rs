@@ -170,18 +170,19 @@ async fn main() -> anyhow::Result<()> {
     info!("SIP UDP server listening on {}", udp_config.bind_addr);
 
     // 9. RTP 服务器管理器
-    let udp_rtp_config = registry.infra.config().udp_rtp_server.clone();
+    let signaling_config = &registry.infra.config().signaling_server;
     rustcam_media::init_rtp_server_manager(
-        udp_rtp_config.port_start,
-        udp_rtp_config.port_end,
-        udp_rtp_config.timeout_secs,
+        signaling_config.rtp_port_start,
+        signaling_config.rtp_port_end,
+        signaling_config.rtp_bind_addr.clone(),
+        signaling_config.rtp_idle_timeout_secs,
     ).await;
 
     // 9.5 Media Session 管理器
     rustcam_media::init_media_session_manager().await;
 
     // 10. TCP RTSP RTP 服务器
-    let tcp_rtsp_rtp_config = registry.infra.config().tcp_rtp_server.clone();
+    let tcp_rtsp_rtp_config = registry.infra.config().rtsp_server.clone();
     let tcp_rtsp_rtp_server = match rustcam_media::init_tcp_rtsp_rtp_server(
         tcp_rtsp_rtp_config,
         registry.infra.event_bus.clone(),
@@ -245,10 +246,12 @@ async fn main() -> anyhow::Result<()> {
     let event_bus = registry.infra.event_bus.clone();
     let _adapter_event_handle = tokio::spawn(async move {
         let mut rx = event_bus.subscribe();
+        tracing::info!("[AdapterEvent] Subscribed to event bus, waiting for events");
         let event_bus_for_handler = event_bus.clone();
         loop {
             match rx.recv().await {
                 Ok(event) => {
+                    tracing::debug!("[AdapterEvent] Received event from broadcast channel");
                     rustcam_media::protocol::adapter_event_handler::handle_adapter_event(event, event_bus_for_handler.clone()).await;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {

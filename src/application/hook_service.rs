@@ -299,7 +299,7 @@ pub struct StreamTrackInfo {
     pub ready: Option<bool>,
     pub width: Option<u32>,
     pub height: Option<u32>,
-    pub fps: Option<u32>,
+    pub fps: Option<f64>,
     pub sample_rate: Option<u32>,
     pub sample_bit: Option<u16>,
     pub channels: Option<u8>,

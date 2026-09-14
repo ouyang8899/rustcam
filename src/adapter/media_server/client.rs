@@ -95,5 +95,39 @@ impl MediaServerClient {
         self.post(path, &serde_json::Value::Null).await
     }
 
+    pub async fn post_with_params<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        params: &[(&str, &String)],
+    ) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let mut url_with_secret = format!("{}?secret={}", url, self.secret);
+        for (k, v) in params {
+            url_with_secret.push_str(&format!("&{}={}", k, v));
+        }
+
+        debug!("[MediaServer] POST {}", url_with_secret);
+
+        let start = std::time::Instant::now();
+        let resp = timeout(TokioDuration::from_secs(15), self.http.post(&url_with_secret).send()).await
+            .map_err(|_| anyhow::anyhow!("POST request timeout after 15s"))??;
+        let elapsed = start.elapsed();
+
+        let status = resp.status();
+        let body_text = resp.text().await
+            .map_err(|e| anyhow::anyhow!("read body failed: {}", e))?;
+
+        debug!("[MediaServer] POST {} -> {} ({}ms)", url, status, elapsed.as_millis());
+        debug!("[MediaServer] POST {} response body: {}", url, body_text);
+
+        if !status.is_success() {
+            anyhow::bail!("API error: {} - {}", status, body_text);
+        }
+
+        let body: serde_json::Value = serde_json::from_str(&body_text)
+            .context("Deserialize response")?;
+        serde_json::from_value(body).context("Deserialize response")
+    }
+
     pub fn base_url(&self) -> &str { &self.base_url }
 }

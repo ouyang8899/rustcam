@@ -5,6 +5,7 @@ use tokio::io::AsyncWriteExt;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
+use crate::domain::SessionType;
 use crate::protocol::adapter::SignalAdapter;
 use crate::protocol::event::{SignalEvent, ProtocolType, TransportType, PtzCommand};
 use crate::protocol::traits::ProtocolDeps;
@@ -657,6 +658,7 @@ impl OnvifAdapter {
                     channel_id: Some(Self::extract_profile_token(data)),
                     transport: TransportType::Tcp,
                     media_server_name: None,
+                    session_type: SessionType::Play,
                 });
             }
             if action.contains("ContinuousMove") {

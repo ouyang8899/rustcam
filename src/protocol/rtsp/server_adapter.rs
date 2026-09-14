@@ -6,6 +6,7 @@ use tokio::io::AsyncWriteExt;
 use async_trait::async_trait;
 
 use crate::adapter::media_server::RtpTransport;
+use crate::domain::SessionType;
 use crate::protocol::adapter::SignalAdapter;
 use crate::protocol::event::{SignalEvent, ProtocolType, TransportType, PtzCommand};
 use crate::protocol::traits::ProtocolDeps;
@@ -19,12 +20,6 @@ use crate::protocol::rtsp::session::{
     RtspSessionState,
 };
 use crate::error::{AppError, Result};
-use crate::media::{
-    MediaType,
-    Direction, 
-    MiddlewareChain,
-    LogMiddleware,
-};
 
 const MAX_INTERLEAVED_BUFFER: usize = 1024 * 1024;
 
@@ -651,6 +646,7 @@ tracing::info!(
                     channel_id: Some(stream_key),
                     transport: TransportType::Tcp,
                     media_server_name,
+                    session_type: SessionType::Play,
                 });
 
                 (
@@ -712,6 +708,7 @@ tracing::info!(
                     device_id: 0,
                     device_tag: None,
                     session_id,
+                    session_type: SessionType::Play,
                 });
 
                 remove_session(sess_id);

@@ -60,13 +60,9 @@ default_password = "admin"
 [signaling_server]
 server_gb_id = "31011500001000000001"
 server_gb_domain = "3101150000"
-bind_ip = "0.0.0.0"
+bind_ip = "192.168.1.7"
 tcp_signaling_port = 5060
 udp_signaling_port = 5061
-tcp_audio_port_start = 15000
-tcp_audio_port_end = 15100
-tcp_audio_idle_timeout_secs = 30
-tcp_audio_max_servers = 10
 tcp_max_connections = 1000
 tcp_read_buffer_size = 65536
 tcp_connection_timeout = 60
@@ -75,9 +71,13 @@ tcp_read_timeout_secs = 300
 udp_max_packet_size = 65536
 udp_adapter_timeout_secs = 300
 udp_max_adapters = 10000
+rtp_port_start = 15000
+rtp_port_end = 15100
+rtp_idle_timeout_secs = 30
+rtp_bind_addr = "192.168.1.7"
 
-[tcp_rtp_server]
-bind_addr = "0.0.0.0:554"
+[rtsp_server]
+bind_addr = "192.168.1.7:554"
 max_connections = 1000
 connection_timeout = 60
 keepalive_interval_secs = 30

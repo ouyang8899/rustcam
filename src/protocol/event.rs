@@ -2,6 +2,9 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::domain::SessionType;
+use crate::media::MediaNodeId;
+
 #[async_trait]
 pub trait EventHandler: Send + Sync {
     async fn handle(&self, event: SignalEvent);
@@ -84,11 +87,13 @@ pub enum SignalEvent {
         channel_id: Option<String>,
         transport: TransportType,
         media_server_name: Option<String>,
+        session_type: SessionType,
     },
     StopPlay {
         device_id: i64,
         device_tag: Option<String>,
         session_id: String,
+        session_type: SessionType,
     },
     PlaybackResult {
         device_id: i64,
@@ -183,16 +188,13 @@ pub enum SignalEvent {
     },
     // 事件驱动的音频通话
     StartAudioTalk {
-        device_tag: String,
-        connection_id: u64,
+        node_id: MediaNodeId,
     },
     StopAudioTalk {
-        device_tag: String,
-        connection_id: u64,
+        node_id: MediaNodeId,
     },
     AudioTalkResponse {
-        device_tag: String,
-        connection_id: u64,
+        node_id: MediaNodeId,
         status: TalkResponseStatus,
         message: Option<String>,
     },
@@ -203,8 +205,7 @@ pub enum SignalEvent {
         timestamp: u32,
     },
     AudioTalkReady {
-        device_id: i64,
-        device_tag: Option<String>,
+        node_id: MediaNodeId,
     },
     AudioBroadcastRequest {
         device_id: i64,
@@ -305,16 +306,16 @@ impl SignalEvent {
             SignalEvent::DeviceSubscribe { device_tag, .. } => device_tag.clone(),
             SignalEvent::DeviceNotify { device_tag, .. } => device_tag.clone(),
             SignalEvent::CatalogNotify { device_tag, .. } => device_tag.clone(),
-            SignalEvent::StartAudioTalk { device_tag, .. } => Some(device_tag.clone()),
-            SignalEvent::StopAudioTalk { device_tag, .. } => Some(device_tag.clone()),
+            SignalEvent::StartAudioTalk { node_id, .. } => Some(node_id.device_tag.clone()),
+            SignalEvent::StopAudioTalk { node_id, .. } => Some(node_id.device_tag.clone()),
             SignalEvent::AudioData { device_tag, .. } => device_tag.clone(),
-            SignalEvent::AudioTalkReady { device_tag, .. } => device_tag.clone(),
+            SignalEvent::AudioTalkReady { node_id, .. } => Some(node_id.device_tag.clone()),
             SignalEvent::AudioBroadcastRequest { device_tag, .. } => device_tag.clone(),
             SignalEvent::AudioBroadcastAccept { device_tag, .. } => device_tag.clone(),
             SignalEvent::AudioBroadcastReject { device_tag, .. } => device_tag.clone(),
             SignalEvent::AudioBroadcastInvite { device_tag, .. } => device_tag.clone(),
             SignalEvent::AudioBroadcastReady { device_tag, .. } => device_tag.clone(),
-            SignalEvent::AudioTalkResponse { device_tag, .. } => Some(device_tag.clone()),
+            SignalEvent::AudioTalkResponse { node_id, .. } => Some(node_id.device_tag.clone()),
             _ => None,
         }
     }

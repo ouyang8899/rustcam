@@ -77,17 +77,25 @@ impl SessionService {
         event: &SignalEvent,
     ) -> anyhow::Result<()> {
         match event {
-            SignalEvent::StartPlay { device_id, session_id, .. } => {
-                tracing::info!("[SessionService] StartPlay: device={} session={}", device_id, session_id);
-                let session = Session::new(SessionType::Play, 0i64);
+            SignalEvent::StartPlay { device_id, session_id, session_type, .. } => {
+                tracing::info!("[SessionService] StartPlay: device={} session={} type={}", device_id, session_id, session_type);
+                if *session_type == SessionType::Broadcast {
+                    tracing::info!("[SessionService] Broadcast session - skipping DB session creation (managed by signaling)");
+                    return Ok(());
+                }
+                let session = Session::new(*session_type, 0i64);
                 infra.db.sessions_cache().insert(session.id, session.clone());
                 if let Err(e) = infra.db.create_session(&session).await {
                     tracing::error!("[SessionService] Failed to persist session: {}", e);
                 }
             }
 
-            SignalEvent::StopPlay { device_id: _, session_id, .. } => {
-                tracing::info!("[SessionService] StopPlay: session={}", session_id);
+            SignalEvent::StopPlay { device_id: _, session_id, session_type, .. } => {
+                tracing::info!("[SessionService] StopPlay: session={} type={}", session_id, session_type);
+                if *session_type == SessionType::Broadcast {
+                    tracing::info!("[SessionService] Broadcast session - skipping DB session deletion (managed by signaling)");
+                    return Ok(());
+                }
                 if let Some(session) = infra.db.sessions_cache()
                     .iter()
                     .find(|s| s.stream_key() == *session_id)

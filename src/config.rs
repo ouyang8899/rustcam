@@ -50,9 +50,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub recovery: RecoveryConfig,
     #[serde(default)]
-    pub udp_rtp_server: UdpRtpServerConfig,
-    #[serde(default)]
-    pub tcp_rtp_server: TcpRtpServerConfig,
+    pub rtsp_server: TcpRtpServerConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
@@ -105,23 +103,6 @@ pub struct MediaPortsConfig {
     pub rtmp: u16,
     pub http_flv: u16,
     pub ws_flv: u16,
-}
-
-#[derive(Debug, Clone, Deserialize, serde::Serialize)]
-pub struct UdpRtpServerConfig {
-    pub port_start: u16,
-    pub port_end: u16,
-    pub timeout_secs: u64,
-}
-
-impl Default for UdpRtpServerConfig {
-    fn default() -> Self {
-        Self {
-            port_start: 15000,
-            port_end: 15100,
-            timeout_secs: 30,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
@@ -271,6 +252,14 @@ pub struct SignalingServerConfig {
     pub udp_adapter_timeout_secs: u64,
     #[serde(default = "default_udp_max_adapters")]
     pub udp_max_adapters: usize,
+    #[serde(default = "default_rtp_port_start")]
+    pub rtp_port_start: u16,
+    #[serde(default = "default_rtp_port_end")]
+    pub rtp_port_end: u16,
+    #[serde(default = "default_rtp_idle_timeout_secs")]
+    pub rtp_idle_timeout_secs: u64,
+    #[serde(default = "default_rtp_bind_addr")]
+    pub rtp_bind_addr: String,
 }
 
 fn default_tcp_max_connections() -> usize {
@@ -297,6 +286,18 @@ fn default_udp_adapter_timeout_secs() -> u64 {
 fn default_udp_max_adapters() -> usize {
     10000
 }
+fn default_rtp_port_start() -> u16 {
+    15000
+}
+fn default_rtp_port_end() -> u16 {
+    15100
+}
+fn default_rtp_idle_timeout_secs() -> u64 {
+    30
+}
+fn default_rtp_bind_addr() -> String {
+    "0.0.0.0".to_string()
+}
 
 impl Default for SignalingServerConfig {
     fn default() -> Self {
@@ -315,6 +316,10 @@ impl Default for SignalingServerConfig {
             udp_max_packet_size: default_udp_max_packet_size(),
             udp_adapter_timeout_secs: default_udp_adapter_timeout_secs(),
             udp_max_adapters: default_udp_max_adapters(),
+            rtp_port_start: default_rtp_port_start(),
+            rtp_port_end: default_rtp_port_end(),
+            rtp_idle_timeout_secs: default_rtp_idle_timeout_secs(),
+            rtp_bind_addr: default_rtp_bind_addr(),
         }
     }
 }
@@ -392,8 +397,7 @@ impl Default for AppConfig {
             jwt: JwtConfig::default(),
             log: LogConfig::default(),
             recovery: RecoveryConfig::default(),
-            udp_rtp_server: UdpRtpServerConfig::default(),
-            tcp_rtp_server: TcpRtpServerConfig::default(),
+            rtsp_server: TcpRtpServerConfig::default(),
         }
     }
 }
