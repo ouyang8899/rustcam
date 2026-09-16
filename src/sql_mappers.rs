@@ -1417,3 +1417,48 @@ pub async fn channel_delete_by_device_tag_and_channel_tag(
     device_tag: &str,
     channel_tag: &str,
 ) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct BroadcastSessionRow {
+    pub id: Option<i64>,
+    pub device_tag: String,
+    pub channel_id: String,
+    pub call_id: String,
+    pub from_tag: String,
+    pub to_tag: String,
+    pub device_host: String,
+    pub device_port: i32,
+    pub transport: String,
+    pub created_at: Option<RbatisDateTime>,
+}
+
+#[html_sql("sql/broadcast_session.html")]
+pub async fn broadcast_session_insert(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+    channel_id: &str,
+    call_id: &str,
+    from_tag: &str,
+    to_tag: &str,
+    device_host: &str,
+    device_port: i32,
+    transport: &str,
+    created_at: Option<RbatisDateTime>,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+#[html_sql("sql/broadcast_session.html")]
+pub async fn broadcast_session_delete_by_device_tag(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+#[html_sql("sql/broadcast_session.html")]
+pub async fn broadcast_session_select_by_device_tag(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+) -> rbatis::Result<Vec<BroadcastSessionRow>> { impled!() }
+
+#[html_sql("sql/broadcast_session.html")]
+pub async fn broadcast_session_select_all(
+    rb: &dyn rbatis::Executor,
+) -> rbatis::Result<Vec<BroadcastSessionRow>> { impled!() }

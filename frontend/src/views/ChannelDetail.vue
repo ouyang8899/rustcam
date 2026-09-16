@@ -517,9 +517,8 @@ onUnmounted(() => {
   background: #000;
   border-radius: 4px;
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  position: relative;
+  min-width: 0;
 }
 
 .loading-state,

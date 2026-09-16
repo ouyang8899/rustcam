@@ -1,6 +1,6 @@
 <template>
-  <div >
-    <div v-if="!src && !liveSrc">
+  <div class="video-player">
+    <div v-if="!src && !liveSrc" class="empty-state-wrapper">
       <div>
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
@@ -19,65 +19,53 @@
         @dblclick="toggleFullscreen"
       ></video>
 
-      <div v-if="loading">
-        <div></div>
+      <div v-if="loading" class="overlay loading-overlay">
+        <div class="spinner"></div>
       </div>
 
-      <div v-if="error">
-        <div>
+      <div v-if="error" class="overlay error-overlay">
+        <div class="error-inner">
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
           </svg>
           <p>{{ error }}</p>
-          <button @click="reconnect">
-            Retry
-          </button>
+          <button @click="reconnect">Retry</button>
         </div>
       </div>
 
-      <div class="controls">
-        <div>
-          <div>
-            <button @click="togglePlay">
-              <svg v-if="isPlaying" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
-              </svg>
-              <svg v-else fill="currentColor" viewBox="0 0 24 24">
-                <path d="M8 5v14l11-7z"/>
-              </svg>
-            </button>
-
-            <div v-if="currentTime > 0">
-              {{ formatTime(currentTime) }} / {{ formatTime(duration) }}
-            </div>
+      <div class="controls" :class="{ hidden: hideControls }">
+        <div class="controls-left">
+          <button @click="togglePlay">
+            <svg v-if="isPlaying" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+            </svg>
+            <svg v-else fill="currentColor" viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+          </button>
+          <div v-if="currentTime > 0" class="time-display">
+            {{ formatTime(currentTime) }} / {{ formatTime(duration) }}
           </div>
+        </div>
 
-          <div>
-            <div v-if="isLive" class="live-tag">
-              LIVE
-            </div>
-
-            <div v-if="bitrate">
-              {{ bitrate }} kbps
-            </div>
-
-            <button @click="toggleFullscreen">
-              <svg v-if="isFullscreen" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h-4.5M15 15v4.5m0-4.5l5.25 5.25"/>
-              </svg>
-              <svg v-else fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"/>
-              </svg>
-            </button>
-
-            <div v-if="enableBroadcast && deviceTag" class="broadcast-status">
-              <span v-if="broadcastStatus === 'idle' && !isBroadcasting" class="status-text idle">可广播</span>
-              <span v-else-if="broadcastStatus === 'connecting'" class="status-text connecting">连接中...</span>
-              <span v-else-if="broadcastStatus === 'inviting'" class="status-text inviting">广播开启中...</span>
-              <span v-else-if="broadcastStatus === 'ready'" class="status-text ready">通话中</span>
-              <span v-else-if="broadcastStatus === 'error'" class="status-text error" :title="broadcastError">错误</span>
-            </div>
+        <div class="controls-right">
+          <div v-if="isLive" class="live-tag">LIVE</div>
+          <div v-if="bitrate" class="bitrate-display">{{ bitrate }} kbps</div>
+          <div v-if="enableBroadcast && deviceTag" class="broadcast-status">
+            <span v-if="broadcastStatus === 'idle' && !isBroadcasting" class="status-text idle">可广播</span>
+            <span v-else-if="broadcastStatus === 'connecting'" class="status-text connecting">连接中...</span>
+            <span v-else-if="broadcastStatus === 'inviting'" class="status-text inviting">广播开启中...</span>
+            <span v-else-if="broadcastStatus === 'ready'" class="status-text ready">通话中</span>
+            <span v-else-if="broadcastStatus === 'error'" class="status-text error" :title="broadcastError">错误</span>
           </div>
+          <button @click="toggleFullscreen">
+            <svg v-if="isFullscreen" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h-4.5M15 15v4.5m0-4.5l5.25 5.25"/>
+            </svg>
+            <svg v-else fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"/>
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -179,6 +167,7 @@ let wsConnected = false
 let flvHeaderParsed = false
 let videoCodec = null
 let audioCodec = null
+let audioSessionId = 0
 
 const currentSrc = computed(() => props.liveSrc || props.src)
 
@@ -671,6 +660,9 @@ async function stopBroadcast() {
   }
 
   if (talkWs) {
+    if (talkWs.readyState === WebSocket.OPEN) {
+      talkWs.send(JSON.stringify({ action: 'stop_talk' }))
+    }
     talkWs.close()
     talkWs = null
   }
@@ -687,6 +679,9 @@ async function stopBroadcast() {
 }
 
 async function startMicCapture() {
+  audioSessionId++
+  const currentSessionId = audioSessionId
+
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -699,17 +694,22 @@ async function startMicCapture() {
     audioContext = new (window.AudioContext || window.webkitAudioContext)()
     const source = audioContext.createMediaStreamSource(mediaStream)
 
+    const micGain = audioContext.createGain()
+    micGain.gain.value = 0.3
+
     audioAnalyser = audioContext.createAnalyser()
     audioAnalyser.fftSize = 256
-    source.connect(audioAnalyser)
+    source.connect(micGain)
+    micGain.connect(audioAnalyser)
 
-    const bufferSize = 4096
+    const bufferSize = 2048
     audioProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1)
 
     audioProcessor.onaudioprocess = (e) => {
-      console.log('[Broadcast] audioProcessor callback: isBroadcasting=', isBroadcasting.value, 'talkWs=', talkWs ? talkWs.readyState : 'null');
+      if (currentSessionId !== audioSessionId) {
+        return
+      }
       if (!isBroadcasting.value || !talkWs || talkWs.readyState !== WebSocket.OPEN) {
-        console.log('[Broadcast] Skipping audio - not ready');
         return
       }
 
@@ -728,13 +728,13 @@ async function startMicCapture() {
       }
 
       if (talkWs && talkWs.readyState === WebSocket.OPEN) {
-        console.log('[Broadcast] Sending audio buffer:', buffer.byteLength, 'bytes');
         talkWs.send(buffer)
       }
     }
 
-    source.connect(audioProcessor)
-    audioProcessor.connect(audioContext.destination)
+    const dest = audioContext.createMediaStreamDestination()
+    micGain.connect(audioProcessor)
+    audioProcessor.connect(dest)
 
     console.log('[Broadcast] Sending start_talk action');
     talkWs.send(JSON.stringify({ action: 'start_talk' }))
@@ -852,47 +852,102 @@ defineExpose({
 </script>
 
 <style scoped>
-video {
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
-  height: auto;
-  display: block;
-  object-fit: contain;
+.video-player {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 160px;
+  background: #000;
+  overflow: hidden;
+}
+
+.empty-state-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: #999;
+}
+
+.empty-state-wrapper svg {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 8px;
 }
 
 .video-container {
-  position: relative;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #000;
+}
+
+.video-container video {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+  object-fit: contain;
+  background: #000;
 }
 
 .controls {
-  background: rgba(0, 0, 0, 0.7);
-  padding: 8px 12px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 24px 12px 10px;
+  box-sizing: border-box;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.4) 60%, transparent 100%);
+  z-index: 10;
+  transition: opacity 0.25s ease;
 }
 
-.controls > div {
+.controls.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.controls-left,
+.controls-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  min-width: 0;
+}
+
+.controls-right {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
 }
 
 .controls button {
-  background: rgba(255, 255, 255, 0.2);
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.18);
   border: none;
   border-radius: 4px;
-  padding: 6px 8px;
+  padding: 0;
   cursor: pointer;
   color: white;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background 0.15s;
 }
 
 .controls button:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.35);
 }
 
 .controls button svg {
@@ -900,38 +955,110 @@ video {
   height: 16px;
 }
 
-.controls > div > div {
-  color: white;
+.time-display,
+.bitrate-display {
+  color: #fff;
   font-size: 12px;
   font-family: Arial, sans-serif;
+  white-space: nowrap;
 }
 
-.controls .live-tag {
+.live-tag {
   background: #e74c3c;
+  color: #fff;
   padding: 2px 6px;
   border-radius: 3px;
   font-size: 10px;
   font-weight: bold;
-  margin-left: 8px;
+  line-height: 1.4;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.loading-overlay {
+  background: rgba(0, 0, 0, 0.4);
+  pointer-events: auto;
+}
+
+.error-overlay {
+  background: rgba(0, 0, 0, 0.7);
+  pointer-events: auto;
+}
+
+.error-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+  font-size: 13px;
+}
+
+.error-inner svg {
+  width: 32px;
+  height: 32px;
+  color: #ef4444;
+}
+
+.error-inner button {
+  margin-top: 4px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: none;
+  background: #3b82f6;
+  color: #fff;
+  cursor: pointer;
+}
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .broadcast-btn {
   position: absolute;
-  bottom: 50px;
   right: 10px;
-  background: rgba(59, 130, 246, 0.8) !important;
+  bottom: 52px;
+  background: rgba(59, 130, 246, 0.85);
+  border: none;
+  color: #fff;
   z-index: 100;
   padding: 8px;
-  border-radius: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.broadcast-btn:hover {
+  background: rgba(59, 130, 246, 1);
 }
 
 .broadcast-btn.active {
-  background: rgba(239, 68, 68, 0.8);
+  background: rgba(239, 68, 68, 0.9);
   animation: pulse-broadcast 1.5s ease-in-out infinite;
 }
 
 .broadcast-btn.connecting {
-  background: rgba(245, 158, 11, 0.8);
+  background: rgba(245, 158, 11, 0.9);
   animation: pulse-connecting 1s ease-in-out infinite;
 }
 

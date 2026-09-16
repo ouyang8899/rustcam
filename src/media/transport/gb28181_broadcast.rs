@@ -1,18 +1,27 @@
 use crate::media::errors::{MediaError, Result};
 use crate::media::node::{DataType, MediaNode, MediaTransportCallback};
-use crate::media::rtp_server::TcpRtpServer;
+use crate::media::rtp_server::{TcpRtpServer, UDPRtpServer};
 use async_trait::async_trait;
-use bytes::{BufMut, BytesMut};
+use bytes::BytesMut;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex, Weak};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpStream, UdpSocket};
+use tokio::net::TcpStream;
+use tokio::sync::mpsc;
 
+const PACER_INTERVAL_MS: u64 = 20;
+const PACER_CHUNK_BYTES: usize = 160;
+const SILENCE_ALAW: u8 = 0xD5;
+const MAX_BUFFER_BYTES: usize = 16000;
+const AUDIO_CHANNEL_CAPACITY: usize = 1000;
+
+#[derive(Clone)]
 pub enum BroadcastMode {
     Udp {
-        socket: Arc<UdpSocket>,
+        server: Arc<UDPRtpServer>,
         remote: SocketAddr,
     },
     TcpPassive {
@@ -27,45 +36,52 @@ pub enum BroadcastMode {
 }
 
 pub struct GB28181BroadcastVoiceTransport {
+    me: Weak<GB28181BroadcastVoiceTransport>,
     mode: BroadcastMode,
     ssrc: u32,
     seq_num: AtomicU16,
     timestamp: AtomicU32,
     payload_type: u8,
+    audio_tx: Mutex<Option<mpsc::Sender<Vec<u8>>>>,
+    pacer_started: AtomicBool,
 }
 
 impl GB28181BroadcastVoiceTransport {
-    pub fn new_udp(
-        socket: Arc<UdpSocket>,
-        remote: SocketAddr,
-        ssrc: u32,
-        payload_type: u8,
-    ) -> Self {
-        Self {
-            mode: BroadcastMode::Udp { socket, remote },
+    fn make_arc(mode: BroadcastMode, ssrc: u32, payload_type: u8) -> Arc<Self> {
+        Arc::new_cyclic(|weak| Self {
+            me: weak.clone(),
+            mode,
             ssrc,
             seq_num: AtomicU16::new(0),
             timestamp: AtomicU32::new(0),
             payload_type,
-        }
+            audio_tx: Mutex::new(None),
+            pacer_started: AtomicBool::new(false),
+        })
     }
 
-    pub fn new_tcp_passive(
-        server: Arc<TcpRtpServer>,
+    pub fn new_udp(
+        server: Arc<UDPRtpServer>,
+        remote: SocketAddr,
         ssrc: u32,
         payload_type: u8,
-    ) -> Self {
-        tracing::info!("[GB28181Broadcast] TCP Passive created on port {}", server.port());
-        Self {
-            mode: BroadcastMode::TcpPassive {
+    ) -> Arc<Self> {
+        Self::make_arc(BroadcastMode::Udp { server, remote }, ssrc, payload_type)
+    }
+
+    pub fn new_tcp_passive(server: Arc<TcpRtpServer>, ssrc: u32, payload_type: u8) -> Arc<Self> {
+        tracing::info!(
+            "[GB28181Broadcast] TCP Passive created on port {}",
+            server.port()
+        );
+        Self::make_arc(
+            BroadcastMode::TcpPassive {
                 server,
                 stream: Arc::new(tokio::sync::Mutex::new(None)),
             },
             ssrc,
-            seq_num: AtomicU16::new(0),
-            timestamp: AtomicU32::new(0),
             payload_type,
-        }
+        )
     }
 
     pub fn new_tcp_active(
@@ -73,24 +89,152 @@ impl GB28181BroadcastVoiceTransport {
         remote: SocketAddr,
         ssrc: u32,
         payload_type: u8,
-    ) -> Self {
-        tracing::info!("[GB28181Broadcast] TCP Active created (connect pending) to {:?}", remote);
-        Self {
-            mode: BroadcastMode::TcpActive {
+    ) -> Arc<Self> {
+        tracing::info!(
+            "[GB28181Broadcast] TCP Active created (connect pending) to {:?}",
+            remote
+        );
+        Self::make_arc(
+            BroadcastMode::TcpActive {
                 server,
                 stream: Arc::new(tokio::sync::Mutex::new(None)),
                 remote,
             },
             ssrc,
-            seq_num: AtomicU16::new(0),
-            timestamp: AtomicU32::new(0),
             payload_type,
+        )
+    }
+
+    fn build_rtp_header(&self, ts: u32, seq: u16) -> [u8; 12] {
+        [
+            0x80,
+            self.payload_type,
+            (seq >> 8) as u8,
+            seq as u8,
+            (ts >> 24) as u8,
+            (ts >> 16) as u8,
+            (ts >> 8) as u8,
+            ts as u8,
+            (self.ssrc >> 24) as u8,
+            (self.ssrc >> 16) as u8,
+            (self.ssrc >> 8) as u8,
+            self.ssrc as u8,
+        ]
+    }
+
+    async fn pacer_loop(me: Weak<Self>, mut rx: mpsc::Receiver<Vec<u8>>) {
+        let mut interval = tokio::time::interval(Duration::from_millis(PACER_INTERVAL_MS));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut buffer: Vec<u8> = Vec::with_capacity(2048);
+
+        loop {
+            interval.tick().await;
+
+            loop {
+                match rx.try_recv() {
+                    Ok(data) => buffer.extend_from_slice(&data),
+                    Err(mpsc::error::TryRecvError::Empty) => break,
+                    Err(mpsc::error::TryRecvError::Disconnected) => {
+                        tracing::info!("[GB28181Broadcast] pacer exit, channel disconnected");
+                        return;
+                    }
+                }
+            }
+
+            if buffer.len() > MAX_BUFFER_BYTES {
+                let drop = buffer.len() - MAX_BUFFER_BYTES;
+                tracing::warn!(
+                    "[GB28181Broadcast] pacer buffer overflow, dropping {} bytes",
+                    drop
+                );
+                buffer.drain(..drop);
+            }
+
+            let chunk: Vec<u8> = if buffer.len() >= PACER_CHUNK_BYTES {
+                buffer.drain(..PACER_CHUNK_BYTES).collect()
+            } else {
+                let mut c: Vec<u8> = buffer.drain(..).collect();
+                c.resize(PACER_CHUNK_BYTES, SILENCE_ALAW);
+                c
+            };
+
+            let Some(this) = me.upgrade() else {
+                tracing::debug!("[GB28181Broadcast] pacer exit, transport dropped");
+                return;
+            };
+
+            let seq = this.seq_num.fetch_add(1, Ordering::Relaxed);
+            let ts = this
+                .timestamp
+                .fetch_add(PACER_CHUNK_BYTES as u32, Ordering::Relaxed);
+            let header = this.build_rtp_header(ts, seq);
+
+            Self::send_packet(&this.mode, &header, &chunk).await;
         }
     }
-    
+
+    async fn send_packet(mode: &BroadcastMode, header: &[u8; 12], payload: &[u8]) {
+        match mode {
+            BroadcastMode::Udp { server, remote } => {
+                server.touch_active().await;
+                let socket = server.rtp_socket();
+
+                let mut packet = Vec::with_capacity(12 + payload.len());
+                packet.extend_from_slice(header);
+                packet.extend_from_slice(payload);
+
+                let rtp_seq = u16::from_be_bytes([header[2], header[3]]);
+                let rtp_ts = u32::from_be_bytes([header[4], header[5], header[6], header[7]]);
+                tracing::trace!(
+                    "[GB28181Broadcast] UDP SEND to={} seq={} ts={} len={}",
+                    remote,
+                    rtp_seq,
+                    rtp_ts,
+                    payload.len()
+                );
+
+                if let Err(e) = socket.send_to(&packet, remote).await {
+                    tracing::error!("[GB28181Broadcast] UDP send failed: {}", e);
+                }
+            }
+            BroadcastMode::TcpPassive { server, stream }
+            | BroadcastMode::TcpActive { server, stream, .. } => {
+                server.touch_active().await;
+
+                let payload_len = 12 + payload.len();
+                let mut frame = Vec::with_capacity(4 + payload_len);
+                frame.push(0x24);
+                frame.push(0x00);
+                frame.extend_from_slice(&(payload_len as u16).to_be_bytes());
+                frame.extend_from_slice(header);
+                frame.extend_from_slice(payload);
+
+                let rtp_seq = u16::from_be_bytes([header[2], header[3]]);
+                let rtp_ts = u32::from_be_bytes([header[4], header[5], header[6], header[7]]);
+                tracing::trace!(
+                    "[GB28181Broadcast] TCP SEND seq={} ts={} len={}",
+                    rtp_seq,
+                    rtp_ts,
+                    payload.len()
+                );
+
+                let mut guard = stream.lock().await;
+                if let Some(s) = guard.as_mut() {
+                    if let Err(e) = s.write_all(&frame).await {
+                        tracing::error!("[GB28181Broadcast] TCP send failed: {}", e);
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn connect(&self) -> Result<()> {
         match &self.mode {
-            BroadcastMode::TcpActive { server, stream, remote } => {
+            BroadcastMode::TcpActive {
+                server,
+                stream,
+                remote,
+            } => {
                 if stream.lock().await.is_some() {
                     return Ok(());
                 }
@@ -107,34 +251,37 @@ impl GB28181BroadcastVoiceTransport {
         }
     }
 
-    fn build_rtp_header(&self) -> Vec<u8> {
-        let seq = self.seq_num.fetch_add(1, Ordering::Relaxed);
-        let ts = self.timestamp.fetch_add(160, Ordering::Relaxed);
-        vec![
-            0x80,
-            0x80,
-            (seq >> 8) as u8,
-            seq as u8,
-            (ts >> 24) as u8,
-            (ts >> 16) as u8,
-            (ts >> 8) as u8,
-            ts as u8,
-            (self.ssrc >> 24) as u8,
-            (self.ssrc >> 16) as u8,
-            (self.ssrc >> 8) as u8,
-            self.ssrc as u8,
-        ]
+    pub async fn accept(&self) -> Result<SocketAddr> {
+        match &self.mode {
+            BroadcastMode::TcpPassive { server, stream } => {
+                let (client_stream, addr) = server
+                    .accept()
+                    .await
+                    .map_err(|e| MediaError::Transport(format!("TCP accept failed: {}", e)))?;
+                let mut guard = stream.lock().await;
+                *guard = Some(client_stream);
+                Ok(addr)
+            }
+            _ => Err(MediaError::Transport("Not in TCP passive mode".into())),
+        }
     }
 
     pub fn activate(self: Arc<Self>, node: Arc<dyn MediaNode>) {
         tokio::spawn(async move {
             loop {
                 let data = match &self.mode {
-                    BroadcastMode::Udp { socket, .. } => {
+                    BroadcastMode::Udp { server, .. } => {
+                        server.touch_active().await;
+                        let socket = server.rtp_socket();
                         let mut buf = vec![0u8; 2048];
                         match socket.recv_from(&mut buf).await {
-                            Ok((len, _)) => {
+                            Ok((len, from)) => {
                                 buf.truncate(len);
+                                tracing::trace!(
+                                    "[GB28181Broadcast] UDP RECV from={} len={}",
+                                    from,
+                                    len
+                                );
                                 BytesMut::from(&buf[..])
                             }
                             Err(e) => {
@@ -143,7 +290,9 @@ impl GB28181BroadcastVoiceTransport {
                             }
                         }
                     }
-                    BroadcastMode::TcpPassive { stream, .. } | BroadcastMode::TcpActive { stream, .. } => {
+                    BroadcastMode::TcpPassive { server, stream }
+                    | BroadcastMode::TcpActive { server, stream, .. } => {
+                        server.touch_active().await;
                         match self.recv_tcp_frame(stream.clone()).await {
                             Ok(data) => data,
                             Err(e) => {
@@ -162,166 +311,59 @@ impl GB28181BroadcastVoiceTransport {
         });
     }
 
-    async fn recv_tcp_frame(&self, stream: Arc<tokio::sync::Mutex<Option<TcpStream>>>) -> Result<BytesMut> {
+    async fn recv_tcp_frame(
+        &self,
+        stream: Arc<tokio::sync::Mutex<Option<TcpStream>>>,
+    ) -> Result<BytesMut> {
         let mut guard = stream.lock().await;
-        let stream = guard.as_mut()
+        let stream = guard
+            .as_mut()
             .ok_or_else(|| MediaError::Transport("TCP stream not connected".into()))?;
-        
-        let mut header = [0u8; 2];
+
+        let mut header = [0u8; 4];
         stream
             .read_exact(&mut header)
             .await
             .map_err(|e| MediaError::TransportRecv(format!("TCP read header failed: {}", e)))?;
-        let len = u16::from_be_bytes(header) as usize;
-        if len > 2048 {
-            return Err(MediaError::TransportRecv("Frame too large".into()));
+
+        if header[0] != 0x24 {
+            return Err(MediaError::TransportRecv(format!(
+                "Invalid RTP frame magic: 0x{:02x}",
+                header[0]
+            )));
         }
+
+        let len = u16::from_be_bytes([header[2], header[3]]) as usize;
+        if len > 2048 {
+            return Err(MediaError::TransportRecv(format!(
+                "RTP frame too large: {}",
+                len
+            )));
+        }
+
         let mut data = vec![0u8; len];
         stream
             .read_exact(&mut data)
             .await
             .map_err(|e| MediaError::TransportRecv(format!("TCP read data failed: {}", e)))?;
+
         Ok(BytesMut::from(&data[..]))
     }
-    
-    pub async fn accept(&self) -> Result<SocketAddr> {
-        match &self.mode {
-            BroadcastMode::TcpPassive { server, stream } => {
-                let (client_stream, addr) = server
-                    .accept()
-                    .await
-                    .map_err(|e| MediaError::Transport(format!("TCP accept failed: {}", e)))?;
-                let mut guard = stream.lock().await;
-                *guard = Some(client_stream);
-                Ok(addr)
-            }
-            _ => Err(MediaError::Transport("Not in TCP passive mode".into())),
+
+    fn start_pacer_if_needed(&self) {
+        if self.pacer_started.swap(true, Ordering::SeqCst) {
+            return;
         }
-    }
-}
-
-#[async_trait]
-impl crate::media::node::MediaTransport for GB28181BroadcastVoiceTransport {
-    fn local_addr(&self) -> Result<SocketAddr> {
-        match &self.mode {
-            BroadcastMode::Udp { socket, .. } => socket
-                .local_addr()
-                .map_err(|e| MediaError::Transport(format!("Failed to get local addr: {}", e))),
-            BroadcastMode::TcpPassive { stream, .. } => {
-                let guard = stream.blocking_lock();
-                if let Some(s) = guard.as_ref() {
-                    s.local_addr().map_err(|e| MediaError::Transport(format!("Failed to get local addr: {}", e)))
-                } else {
-                    Err(MediaError::Transport("TCP not connected".into()))
-                }
-            }
-            BroadcastMode::TcpActive { stream, .. } => {
-                let guard = stream.blocking_lock();
-                if let Some(s) = guard.as_ref() {
-                    s.local_addr().map_err(|e| MediaError::Transport(format!("Failed to get local addr: {}", e)))
-                } else {
-                    Err(MediaError::Transport("TCP not connected".into()))
-                }
-            }
+        let (tx, rx) = mpsc::channel::<Vec<u8>>(AUDIO_CHANNEL_CAPACITY);
+        {
+            let mut guard = self.audio_tx.lock().unwrap();
+            *guard = Some(tx);
         }
+        let weak = self.me.clone();
+        tokio::spawn(Self::pacer_loop(weak, rx));
+        tracing::info!("[GB28181Broadcast] pacer started");
     }
 
-    fn peer_addr(&self) -> Result<SocketAddr> {
-        match &self.mode {
-            BroadcastMode::Udp { remote, .. } => Ok(*remote),
-            BroadcastMode::TcpPassive { stream, .. } => {
-                let guard = stream.blocking_lock();
-                if let Some(s) = guard.as_ref() {
-                    s.peer_addr().map_err(|e| MediaError::Transport(format!("Failed to get peer addr: {}", e)))
-                } else {
-                    Err(MediaError::Transport("TCP not connected".into()))
-                }
-            }
-            BroadcastMode::TcpActive { stream, .. } => {
-                let guard = stream.blocking_lock();
-                if let Some(s) = guard.as_ref() {
-                    s.peer_addr().map_err(|e| MediaError::Transport(format!("Failed to get peer addr: {}", e)))
-                } else {
-                    Err(MediaError::Transport("TCP not connected".into()))
-                }
-            }
-        }
-    }
-
-    async fn send(&self, data: &[u8], _data_type: DataType) -> Result<()> {
-        let header = self.build_rtp_header();
-        let payload_len = 12 + data.len();
-
-        match &self.mode {
-            BroadcastMode::Udp { socket, remote } => {
-                let mut packet = Vec::with_capacity(12 + data.len());
-                packet.extend_from_slice(&header);
-                packet.extend_from_slice(data);
-                socket
-                    .send_to(&packet, remote)
-                    .await
-                    .map_err(|e| MediaError::TransportSend(format!("UDP send failed: {}", e)))?;
-            }
-            BroadcastMode::TcpPassive { stream, .. } | BroadcastMode::TcpActive { stream, .. } => {
-                let mut guard = stream.lock().await;
-                let stream = guard.as_mut()
-                    .ok_or_else(|| MediaError::Transport("TCP not connected".into()))?;
-                let mut frame = Vec::with_capacity(2 + payload_len);
-                frame.put_u16(payload_len as u16);
-                frame.extend_from_slice(&header);
-                frame.extend_from_slice(data);
-                stream
-                    .write_all(&frame)
-                    .await
-                    .map_err(|e| MediaError::TransportSend(format!("TCP send failed: {}", e)))?;
-            }
-        }
-        Ok(())
-    }
-
-    async fn recv(&self) -> Result<HashMap<DataType, BytesMut>> {
-        let data = match &self.mode {
-            BroadcastMode::Udp { socket, .. } => {
-                let mut buf = vec![0u8; 2048];
-                let (len, _) = socket
-                    .recv_from(&mut buf)
-                    .await
-                    .map_err(|e| MediaError::TransportRecv(format!("UDP recv failed: {}", e)))?;
-                buf.truncate(len);
-                BytesMut::from(&buf[..len])
-            }
-            BroadcastMode::TcpPassive { stream, .. } | BroadcastMode::TcpActive { stream, .. } => {
-                let mut guard = stream.lock().await;
-                let stream = guard.as_mut()
-                    .ok_or_else(|| MediaError::Transport("TCP not connected".into()))?;
-                let mut header = [0u8; 2];
-                stream.read_exact(&mut header).await.map_err(|e| {
-                    MediaError::TransportRecv(format!("TCP read header failed: {}", e))
-                })?;
-                let len = u16::from_be_bytes(header) as usize;
-                if len > 2048 {
-                    return Err(MediaError::TransportRecv("Frame too large".into()));
-                }
-                let mut data = vec![0u8; len];
-                stream.read_exact(&mut data).await.map_err(|e| {
-                    MediaError::TransportRecv(format!("TCP read data failed: {}", e))
-                })?;
-                BytesMut::from(&data[..])
-            }
-        };
-
-        let mut result = HashMap::new();
-        let data_type = Self::classify_rtp_packet(&data);
-        result.insert(data_type, data);
-        Ok(result)
-    }
-
-    async fn close(&self) -> Result<()> {
-        Ok(())
-    }
-}
-
-impl GB28181BroadcastVoiceTransport {
     fn classify_rtp_packet(data: &[u8]) -> DataType {
         if data.len() < 2 {
             return DataType::Audio;
@@ -336,7 +378,7 @@ impl GB28181BroadcastVoiceTransport {
             return DataType::Audio;
         }
 
-        if payload_type >= 200 && payload_type <= 204 {
+        if (200..=204).contains(&payload_type) {
             return DataType::Rtcp;
         }
 
@@ -345,5 +387,151 @@ impl GB28181BroadcastVoiceTransport {
             98 | 99 | 104 | 105 | 106 | 107 | 108 | 109 | 110 | 111 | 112 => DataType::Video,
             _ => DataType::Audio,
         }
+    }
+}
+
+#[async_trait]
+impl crate::media::node::MediaTransport for GB28181BroadcastVoiceTransport {
+    fn local_addr(&self) -> Result<SocketAddr> {
+        match &self.mode {
+            BroadcastMode::Udp { server, .. } => server
+                .rtp_socket()
+                .local_addr()
+                .map_err(|e| MediaError::Transport(format!("Failed to get local addr: {}", e))),
+            BroadcastMode::TcpPassive { stream, .. } => {
+                let guard = stream.blocking_lock();
+                if let Some(s) = guard.as_ref() {
+                    s.local_addr().map_err(|e| {
+                        MediaError::Transport(format!("Failed to get local addr: {}", e))
+                    })
+                } else {
+                    Err(MediaError::Transport("TCP not connected".into()))
+                }
+            }
+            BroadcastMode::TcpActive { stream, .. } => {
+                let guard = stream.blocking_lock();
+                if let Some(s) = guard.as_ref() {
+                    s.local_addr().map_err(|e| {
+                        MediaError::Transport(format!("Failed to get local addr: {}", e))
+                    })
+                } else {
+                    Err(MediaError::Transport("TCP not connected".into()))
+                }
+            }
+        }
+    }
+
+    fn peer_addr(&self) -> Result<SocketAddr> {
+        match &self.mode {
+            BroadcastMode::Udp { remote, .. } => Ok(*remote),
+            BroadcastMode::TcpPassive { stream, .. } => {
+                let guard = stream.blocking_lock();
+                if let Some(s) = guard.as_ref() {
+                    s.peer_addr().map_err(|e| {
+                        MediaError::Transport(format!("Failed to get peer addr: {}", e))
+                    })
+                } else {
+                    Err(MediaError::Transport("TCP not connected".into()))
+                }
+            }
+            BroadcastMode::TcpActive { stream, .. } => {
+                let guard = stream.blocking_lock();
+                if let Some(s) = guard.as_ref() {
+                    s.peer_addr().map_err(|e| {
+                        MediaError::Transport(format!("Failed to get peer addr: {}", e))
+                    })
+                } else {
+                    Err(MediaError::Transport("TCP not connected".into()))
+                }
+            }
+        }
+    }
+
+    async fn send(&self, data: &[u8], data_type: DataType) -> Result<()> {
+        if matches!(data_type, DataType::Audio) {
+            self.start_pacer_if_needed();
+
+            let tx = {
+                let guard = self.audio_tx.lock().unwrap();
+                guard.as_ref().cloned()
+            };
+            let Some(tx) = tx else {
+                return Err(MediaError::TransportSend("transport closed".into()));
+            };
+
+            if let Err(e) = tx.try_send(data.to_vec()) {
+                match e {
+                    mpsc::error::TrySendError::Full(_) => {
+                        tracing::warn!(
+                            "[GB28181Broadcast] audio channel full, dropping {} bytes",
+                            data.len()
+                        );
+                    }
+                    mpsc::error::TrySendError::Closed(_) => {
+                        return Err(MediaError::TransportSend("audio channel closed".into()));
+                    }
+                }
+            }
+        } else {
+            let seq = self.seq_num.fetch_add(1, Ordering::Relaxed);
+            let ts = self
+                .timestamp
+                .fetch_add(data.len() as u32, Ordering::Relaxed);
+            let header = self.build_rtp_header(ts, seq);
+            Self::send_packet(&self.mode, &header, data).await;
+        }
+        Ok(())
+    }
+
+    async fn recv(&self) -> Result<HashMap<DataType, BytesMut>> {
+        let data = match &self.mode {
+            BroadcastMode::Udp { server, .. } => {
+                server.touch_active().await;
+                let socket = server.rtp_socket();
+                let mut buf = vec![0u8; 2048];
+                let (len, _) = socket
+                    .recv_from(&mut buf)
+                    .await
+                    .map_err(|e| MediaError::TransportRecv(format!("UDP recv failed: {}", e)))?;
+                buf.truncate(len);
+                BytesMut::from(&buf[..len])
+            }
+            BroadcastMode::TcpPassive { server, stream } => {
+                server.touch_active().await;
+                self.recv_tcp_frame(stream.clone()).await?
+            }
+            BroadcastMode::TcpActive { server, stream, .. } => {
+                server.touch_active().await;
+                self.recv_tcp_frame(stream.clone()).await?
+            }
+        };
+
+        let mut result = HashMap::new();
+        let data_type = Self::classify_rtp_packet(&data);
+        result.insert(data_type, data);
+        Ok(result)
+    }
+
+    async fn close(&self) -> Result<()> {
+        tracing::info!("[GB28181Broadcast] Closing transport");
+
+        {
+            let mut guard = self.audio_tx.lock().unwrap();
+            tracing::info!("[GB28181Broadcast] Dropping audio_tx sender");
+            guard.take();
+        }
+
+        match &self.mode {
+            BroadcastMode::TcpPassive { stream, .. }
+            | BroadcastMode::TcpActive { stream, .. } => {
+                let mut guard = stream.lock().await;
+                if let Some(mut s) = guard.take() {
+                    let _ = s.shutdown().await;
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
     }
 }

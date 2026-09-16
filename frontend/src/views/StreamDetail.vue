@@ -641,6 +641,7 @@ onUnmounted(() => {
   border-radius: var(--radius-base);
   overflow: hidden;
   min-width: 0;
+  position: relative;
 }
 
 .ptz-sidebar {

@@ -70,6 +70,9 @@ async-trait = "0.1.92"
 regex = "1.13.1"
 tokio-util = "0.7"
 
+# Audio resampling
+rubato = "5"
+
 # SIP parsing
 rsip = "0.4"
 

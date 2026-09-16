@@ -189,6 +189,12 @@ pub struct SubSession {
 
 pub struct PendingAudioTalkEntry {
     pub node_id: MediaNodeId,
+    pub call_id: String,
+    pub from_tag: String,
+    pub to_tag: String,
+    pub device_host: String,
+    pub device_port: u16,
+    pub transport: TransportType,
 }
 
 #[derive(Clone)]
@@ -292,6 +298,7 @@ impl Gb28181Adapter {
             sessions: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             subscriptions: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             pending_audio_talks: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+            last_broadcast_session: None,
             registration_state: RegistrationState::Init,
             wait_timer: None,
             event_handler_name: None,
@@ -1881,6 +1888,21 @@ impl Gb28181Adapter {
                     Some(self.build_sip_response_only_headers_with_to(200, "OK", &via_branch, &cseq, Some(&request_from_uri), request_from_tag.as_deref(), Some(&request_to_uri), None, None, Some(&call_id), None)),
                 );
             } else {
+                let is_busy = body.to_lowercase().contains("voice talk is busy") || body.to_lowercase().contains("busy");
+                if is_busy {
+                    tracing::warn!("[GB28181] Device reported busy, attempting to clear session");
+                    let sessions = self.sessions.read().await;
+                    if let Some(session) = sessions.iter().find(|s| s.device_tag == device_tag && s.session_type == SessionType::Broadcast) {
+                        tracing::info!("[GB28181] Found broadcast SubSession, sending BYE");
+                        let session_clone = session.clone();
+                        drop(sessions);
+                        if let Err(e) = self.send_bye_to_session(&session_clone).await {
+                            tracing::warn!("[GB28181] Failed to send BYE: {}", e);
+                        }
+                    } else {
+                        tracing::warn!("[GB28181] No broadcast SubSession found");
+                    }
+                }
                 return (
                     Some(SignalEvent::AudioBroadcastReject {
                         device_id: self.device_id_i64(),
@@ -2176,8 +2198,12 @@ impl Gb28181Adapter {
 
         match self.registration_state {
             RegistrationState::Init => {
-                tracing::warn!("[GB28181] Keepalive in Init state, rejecting");
-                let resp = self.build_403_response(&via_branch, &cseq);
+                tracing::warn!("[GB28181] Keepalive in Init state, sending 401 to trigger re-registration");
+                let server_realm = super::get_gb28181_platform_config()
+                    .get()
+                    .map(|c| c.1.clone())
+                    .unwrap_or_else(|| self.device_tag_str());
+                let resp = self.build_401_response(&via_branch, &cseq, &server_realm);
                 return (None, Some(resp));
             }
             RegistrationState::Registered => {
@@ -2941,7 +2967,7 @@ impl Gb28181Adapter {
                 SetupMode::Udp => {
                     if let Some(manager) = crate::media::get_rtp_server_manager() {
                         match manager
-                            .allocate_udp(&device_tag, &device_tag)
+                            .allocate_udp(&device_tag, &device_tag, "broadcast_voice")
                             .await
                         {
                             Ok((port, allocated_ssrc, _)) => {
@@ -2953,15 +2979,14 @@ impl Gb28181Adapter {
                                         .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap());
 
                                 if let Some(udp_server) = manager.get_udp_server(port).await {
-                                    let socket = udp_server.rtp_socket();
-                                    let transport = Arc::new(
+                                    let transport_ssrc = if ssrc != 0 { ssrc } else { allocated_ssrc };
+                                    let transport =
                                         crate::media::GB28181BroadcastVoiceTransport::new_udp(
-                                            socket,
+                                            udp_server,
                                             peer_addr,
-                                            allocated_ssrc,
+                                            transport_ssrc,
                                             8,
-                                        ),
-                                    );
+                                        );
 
                                     let node_id = crate::media::MediaNodeId::new(
                                         crate::media::MediaNodeType::GB28181_BROADCAST_VOICE,
@@ -3097,20 +3122,19 @@ impl Gb28181Adapter {
                 SetupMode::TcpPassive => {
                     if let Some(manager) = crate::media::get_rtp_server_manager() {
                         match manager
-                            .allocate_tcp(&device_tag, &device_tag)
+                            .allocate_tcp(&device_tag, &device_tag, "broadcast_voice")
                             .await
                         {
                             Ok((port, allocated_ssrc, tcp_server)) => {
                                 let device_tag_clone = device_tag.clone();
                                 let channel_id_clone = channel_id.clone();
-                                let ssrc_clone = allocated_ssrc;
-                                
+                                let transport_ssrc = if ssrc != 0 { ssrc } else { allocated_ssrc };
+
                                 let transport = crate::media::GB28181BroadcastVoiceTransport::new_tcp_passive(
                                     tcp_server.clone(),
-                                    ssrc_clone,
+                                    transport_ssrc,
                                     8,
                                 );
-                                let transport = Arc::new(transport);
                                 
                                 tokio::spawn(async move {
                                     tracing::info!("[GB28181] TCP passive: waiting for device connection on port {}", port);
@@ -3262,15 +3286,15 @@ impl Gb28181Adapter {
                                 
                                 let call_id = Self::get_header(headers, "Call-ID")
                                     .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                                
-                                let transport = Arc::new(
+
+                                let transport_ssrc = if ssrc != 0 { ssrc } else { allocated_ssrc };
+                                let transport =
                                     crate::media::GB28181BroadcastVoiceTransport::new_tcp_active(
                                         server,
                                         peer_addr,
-                                        allocated_ssrc,
+                                        transport_ssrc,
                                         8,
-                                    )
-                                );
+                                    );
                                 
                                 let node_id = MediaNodeId::new(
                                     MediaNodeType::GB28181_BROADCAST_VOICE,
@@ -4243,7 +4267,31 @@ impl SignalAdapter for Gb28181Adapter {
             return Ok(());
         }
 
-        self.stop_audio_talk_v2(&device_tag).await
+        let manager = match crate::media::get_media_session_manager() {
+            Some(m) => m,
+            None => return Ok(()),
+        };
+
+        {
+            let sessions = self.sessions.read().await;
+            if let Some(session) = sessions.iter().find(|s| s.device_tag == device_tag && s.session_type == SessionType::Broadcast) {
+                tracing::info!("[GB28181] Sending BYE to device {} for audio talk stop", device_tag);
+                if let Err(e) = self.send_bye_to_session(session).await {
+                    tracing::warn!("[GB28181] Failed to send BYE: {}", e);
+                }
+            }
+        }
+
+        if let Some(session) = manager.get(&device_tag) {
+            let removed = session.remove_and_stop_node(&node_id).await;
+            tracing::info!(
+                "[GB28181] Broadcast node removed for device {}: {}",
+                device_tag,
+                removed
+            );
+        }
+
+        Ok(())
     }
 }
 
@@ -4773,12 +4821,11 @@ a=ssrc:{}
             if let Some(port) = tcp_server_port {
                 if let Some(manager) = crate::media::get_rtp_server_manager() {
                     if let Some(tcp_server) = manager.get_tcp_server(port).await {
-                        let voice_transport = crate::media::GB28181BroadcastVoiceTransport::new_tcp_passive(
+                        let transport_arc = crate::media::GB28181BroadcastVoiceTransport::new_tcp_passive(
                             tcp_server.clone(),
                             rand::random::<u32>(),
                             codec.payload_type(),
                         );
-                        let transport_arc = Arc::new(voice_transport);
                         let transport_accept = transport_arc.clone();
                         let device_tag_clone = device_tag.to_string();
                         let channel_id_clone = channel_id.clone();
@@ -4837,10 +4884,8 @@ a=ssrc:{}
 
             if let Some(manager) = crate::media::get_rtp_server_manager() {
                 if let Some(udp_server) = manager.get_udp_server(platform_audio_port).await {
-                    let socket = udp_server.rtp_socket();
-
                     let voice_transport = crate::media::GB28181BroadcastVoiceTransport::new_udp(
-                        socket,
+                        udp_server,
                         peer_addr,
                         rand::random::<u32>(),
                         codec.payload_type(),
@@ -4852,7 +4897,7 @@ a=ssrc:{}
                         Some(channel_id.clone()),
                     );
                     let node: Arc<dyn MediaNode> =
-                        Arc::new(BasicMediaNode::new(node_id, Arc::new(voice_transport)));
+                        Arc::new(BasicMediaNode::new(node_id, voice_transport));
 
                     if let Some(mgr) = crate::media::get_media_session_manager() {
                         let session = mgr.get_or_create(device_tag);
@@ -4902,18 +4947,40 @@ a=ssrc:{}
     }
 
     pub async fn stop_audio_talk_v2(&self, device_tag: &str) -> Result<()> {
+        tracing::info!("[GB28181] stop_audio_talk_v2 called for device_tag={}", device_tag);
         let manager = match crate::media::get_media_session_manager() {
             Some(m) => m,
-            None => return Ok(()),
+            None => {
+                tracing::warn!("[GB28181] stop_audio_talk_v2: no manager");
+                return Ok(());
+            }
         };
 
-        if let Some(session) = manager.get(device_tag) {
-            let removed = session.end_all_broadcasts().await;
-            tracing::info!(
-                "[GB28181] Broadcast sessions stopped: {} for device {}",
-                removed,
-                device_tag
-            );
+        {
+            let sessions = self.sessions.read().await;
+            if let Some(session) = sessions.iter().find(|s| s.device_tag == device_tag && s.session_type == SessionType::Broadcast) {
+                tracing::info!("[GB28181] Sending BYE to device {} for audio talk stop", device_tag);
+                if let Err(e) = self.send_bye_to_session(session).await {
+                    tracing::warn!("[GB28181] Failed to send BYE: {}", e);
+                }
+            } else {
+                tracing::warn!("[GB28181] No broadcast session found in self.sessions for {}", device_tag);
+            }
+        }
+
+        match manager.get(device_tag) {
+            Some(session) => {
+                tracing::info!("[GB28181] Found session in manager, calling end_all_broadcasts");
+                let removed = session.end_all_broadcasts().await;
+                tracing::info!(
+                    "[GB28181] Broadcast sessions stopped: {} for device {}",
+                    removed,
+                    device_tag
+                );
+            }
+            None => {
+                tracing::warn!("[GB28181] No session found in manager for device_tag={}", device_tag);
+            }
         }
 
         Ok(())
@@ -5046,27 +5113,104 @@ a=ssrc:{}
             &session.call_id
         );
 
-        match session.transport {
-            TransportType::Tcp => {
-                if let Some(ref write_arc) = self.write {
-                    let mut write = write_arc.write().await;
-                    write
-                        .write_all(sip_msg.as_bytes())
-                        .await
-                        .map_err(|e| AppError::Internal(e.to_string()))?;
-                    let _ = write.flush().await;
+        let send_once = || async {
+            match session.transport {
+                TransportType::Tcp => {
+                    if let Some(ref write_arc) = self.write {
+                        let mut write = write_arc.write().await;
+                        write
+                            .write_all(sip_msg.as_bytes())
+                            .await
+                            .map_err(|e| AppError::Internal(e.to_string()))?;
+                        let _ = write.flush().await;
+                    }
                 }
-            }
-            TransportType::Udp => {
-                if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
-                    let addr = format!("{}:{}", session.device_host, session.device_port);
-                    sender
-                        .send_to(sip_msg.as_bytes(), &addr)
-                        .await
-                        .map_err(|e| AppError::Internal(e.to_string()))?;
+                TransportType::Udp => {
+                    if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
+                        let addr = format!("{}:{}", session.device_host, session.device_port);
+                        sender
+                            .send_to(sip_msg.as_bytes(), &addr)
+                            .await
+                            .map_err(|e| AppError::Internal(e.to_string()))?;
+                    }
                 }
+                _ => unreachable!("GB28181 only supports TCP and UDP transport"),
             }
-            _ => unreachable!("GB28181 only supports TCP and UDP transport"),
+        };
+
+        for attempt in 1..=3 {
+            tracing::info!("[GB28181] BYE attempt {} to {}:{} via {:?}, call_id={}", attempt, session.device_host, session.device_port, session.transport, session.call_id);
+            if let Err(e) = send_once().await {
+                tracing::warn!("[GB28181] BYE attempt {} failed: {}", attempt, e);
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                continue;
+            }
+            tracing::info!("[GB28181] BYE sent successfully on attempt {}", attempt);
+            return Ok(());
+        }
+
+        tracing::warn!("[GB28181] All 3 BYE attempts failed, giving up");
+        Ok(())
+    }
+
+    async fn send_bye_to_clear_session(&self, device_tag: &str) -> Result<()> {
+        let (platform_id, platform_ip, platform_port) =
+            crate::protocol::gb28181::get_gb28181_platform_config()
+                .get()
+                .map(|(id, _, ip, port)| (id.as_str(), ip.as_str(), *port))
+                .unwrap_or(("34020000000000000000", "0.0.0.0", 5060));
+
+        let device = match self.deps.device_lookup.find_by_tag(device_tag).await {
+            Some(d) => d,
+            None => {
+                tracing::warn!("[GB28181] send_bye_to_clear_session: device not found {}", device_tag);
+                return Ok(());
+            }
+        };
+
+        let device_host = device.host.clone();
+        let device_port = device.port;
+        let call_id = uuid::Uuid::new_v4().to_string().replace("-", "");
+        let from_tag = uuid::Uuid::new_v4().to_string().replace("-", "");
+
+        let sip_msg = format!(
+            "BYE sip:{}@{}:{} SIP/2.0\r\n\
+             Via: SIP/2.0/UDP {}:{};branch=z9hG4bK{};rport\r\n\
+             From: <sip:{}@{}:{}>;tag={}\r\n\
+             To: <sip:{}@{}:{}>\r\n\
+             Call-ID: {}\r\n\
+             CSeq: 2 BYE\r\n\
+             User-Agent: RustCam-Media/2.0\r\n\
+             Content-Length: 0\r\n\r\n",
+            device_tag,
+            device_host,
+            device_port,
+            platform_ip,
+            platform_port,
+            &call_id[..7],
+            platform_id,
+            platform_ip,
+            platform_port,
+            from_tag,
+            device_tag,
+            device_host,
+            device_port,
+            call_id
+        );
+
+        if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
+            let addr = format!("{}:{}", device_host, device_port);
+            tracing::info!("[GB28181] Sending BYE to clear session to {}:{}", device_host, device_port);
+            for attempt in 1..=3 {
+                if let Err(e) = sender.send_to(sip_msg.as_bytes(), &addr).await {
+                    tracing::warn!("[GB28181] BYE clear attempt {} failed: {}", attempt, e);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    continue;
+                }
+                tracing::info!("[GB28181] BYE clear sent successfully on attempt {}", attempt);
+                return Ok(());
+            }
+            tracing::warn!("[GB28181] All BYE clear attempts failed");
         }
         Ok(())
     }

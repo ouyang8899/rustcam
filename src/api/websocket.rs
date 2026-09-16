@@ -165,7 +165,8 @@ async fn handle_audio_talk(
             let state = state_clone.clone();
             tracing::debug!("[AudioTalk] Received text message: {}", text);
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                if json.get("action").and_then(|v| v.as_str()) == Some("start_talk") {
+                let action = json.get("action").and_then(|v| v.as_str());
+                if action == Some("start_talk") {
                     tracing::info!("[AudioTalk] start_talk action received, publishing StartAudioTalk event");
                     let event = crate::protocol::event::SignalEvent::StartAudioTalk { node_id };
                     let event_bus = state.app.registry.infra.event_bus.clone();
@@ -174,6 +175,17 @@ async fn handle_audio_talk(
                             tracing::error!("[AudioTalk] Failed to publish StartAudioTalk event: {}", e);
                         } else {
                             tracing::info!("[AudioTalk] StartAudioTalk event published successfully");
+                        }
+                    });
+                } else if action == Some("stop_talk") {
+                    tracing::info!("[AudioTalk] stop_talk action received, publishing StopAudioTalk event");
+                    let event = crate::protocol::event::SignalEvent::StopAudioTalk { node_id };
+                    let event_bus = state.app.registry.infra.event_bus.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = event_bus.publish(event).await {
+                            tracing::error!("[AudioTalk] Failed to publish StopAudioTalk event: {}", e);
+                        } else {
+                            tracing::info!("[AudioTalk] StopAudioTalk event published successfully");
                         }
                     });
                 }
