@@ -2,8 +2,11 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::common_types::Protocol;
 use crate::domain::SessionType;
 use crate::media::MediaNodeId;
+
+pub type ProtocolType = Protocol;
 
 #[async_trait]
 pub trait EventHandler: Send + Sync {
@@ -392,27 +395,6 @@ impl CatalogChannel {
         match self.get_device_type_code() {
             Some(136) | Some(137) => false,
             _ => true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum ProtocolType {
-    Gb28181,
-    Onvif,
-    Rtsp,
-    WebRtc,
-    Custom(String),
-}
-
-impl std::fmt::Display for ProtocolType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProtocolType::Gb28181 => write!(f, "GB28181"),
-            ProtocolType::Onvif => write!(f, "ONVIF"),
-            ProtocolType::Rtsp => write!(f, "RTSP"),
-            ProtocolType::WebRtc => write!(f, "WebRTC"),
-            ProtocolType::Custom(name) => write!(f, "{}", name),
         }
     }
 }

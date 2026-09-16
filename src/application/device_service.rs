@@ -3,18 +3,19 @@ use std::time::Instant;
 use uuid::Uuid;
 use chrono::Utc;
 use async_trait::async_trait;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Mutex};
 use dashmap::DashMap;
 use crate::context::{InfraContext, MediaContext};
 use crate::domain::{Alarm, CreateAlarmRequest, Channel, Device, DeviceStatus, DeviceType, Protocol, CreateDeviceRequest, UpdateDeviceRequest, Stream, StreamConfig, StreamState};
-use crate::domain::traits::{CacheStoreExt, DeviceLookup};
+use crate::domain::traits::{CacheStoreExt, CacheStore, DeviceLookup, StreamManager, EventPublisher};
 use crate::domain::region::{Region, RegionNode};
 use crate::domain::device_group::{DeviceGroup, DeviceGroupNode, CreateGroupRequest, UpdateGroupRequest};
 use crate::domain::ptz::{PtzPreset, PtzControlResult, PtzStatus};
 use crate::error::{AppError, Result};
 use crate::protocol::event::{SignalEvent, ProtocolType, PtzCommand};
 use crate::protocol::onvif::{OnvifPtzService, OnvifDeviceClient};
-use crate::protocol::adapter_manager;
+use crate::protocol::adapter_manager::{self, AdapterEntry};
+use crate::protocol::traits::{ProtocolDeps};
 use crate::domain::{PullUrl, StreamProtocol};
 use crate::application::StreamService;
 
@@ -101,13 +102,7 @@ impl DeviceService {
             SignalEvent::DeviceRegister { device_id, device_tag, name, manufacturer, model, protocol, stream_key } => {
                 tracing::info!("[DeviceService] Device registered: {} via {:?}", name, protocol);
 
-                let proto = match protocol {
-                    ProtocolType::Gb28181 => Protocol::Gb28181,
-                    ProtocolType::Onvif => Protocol::Onvif,
-                    ProtocolType::Rtsp => Protocol::Rtsp,
-                    ProtocolType::WebRtc => Protocol::Rtmp,
-                    ProtocolType::Custom(_) => Protocol::Rtsp,
-                };
+                let proto = protocol.clone();
 
                 let existing = if let Some(ref tag) = device_tag {
                     infra.db.get_device_by_device_tag(tag)
@@ -384,7 +379,7 @@ impl DeviceService {
             }
 
             SignalEvent::PtzControl { device_id, command, speed } => {
-                Self::try_dispatch_ptz(infra, ptz_last_cmd, &device_id, &command, &speed).await;
+                Self::try_dispatch_ptz(infra, media, stream_service, ptz_last_cmd, &device_id, &command, &speed).await;
             }
             SignalEvent::QueryDeviceConfig { device_id, device_tag, config_type } => {
                 tracing::info!("[DeviceService] DeviceConfig query: device_id={} tag={:?} type={}", device_id, device_tag, config_type);
@@ -411,6 +406,8 @@ impl DeviceService {
 
     async fn try_dispatch_ptz(
         infra: &InfraContext,
+        media: &MediaContext,
+        stream_service: &Arc<StreamService>,
         ptz_last_cmd: &Arc<DashMap<i64, Instant>>,
         device_id: &str,
         command: &PtzCommand,
@@ -459,18 +456,18 @@ impl DeviceService {
                 if parent.protocol == Protocol::Onvif {
                     Protocol::Onvif
                 } else {
-                    device.protocol
+                    device.protocol.clone()
                 }
             } else {
-                device.protocol
+                device.protocol.clone()
             }
         } else {
-            device.protocol
+            device.protocol.clone()
         };
 
         match target_protocol {
             Protocol::Onvif => {
-                if let Err(e) = Self::dispatch_onvif_ptz(infra, &device, command, speed).await {
+                if let Err(e) = Self::dispatch_onvif_ptz(infra, media, stream_service, &device, command, speed).await {
                     tracing::error!("[PTZ] ONVIF failed: device={} err={}", device_id, e);
                 }
             }
@@ -487,79 +484,36 @@ impl DeviceService {
 
     async fn dispatch_onvif_ptz(
         infra: &InfraContext,
+        media: &MediaContext,
+        stream_service: &Arc<StreamService>,
         device: &Device,
         command: &PtzCommand,
         speed: &Option<u8>,
     ) -> Result<Option<String>> {
-        let (parent_tag, profile_token) = match (&device.parent_device_tag, &device.extended) {
-            (Some(tag), Some(ext)) => {
-                let token = ext.get("onvif_token")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Profile_1")
-                    .to_string();
-                (tag.clone(), token)
-            }
-            _ => {
-                return Err(AppError::BadRequest(format!("ONVIF 设备 {} 缺少父设备或token配置", device.id)));
-            }
-        };
-
-        let parent = match infra.db.get_device_by_device_tag(&parent_tag) {
-            Some(p) => p,
+        let channel_id = match &device.device_tag {
+            Some(tag) => tag.clone(),
             None => {
-                return Err(AppError::NotFound(format!("ONVIF 父设备 {} 不存在", parent_tag)));
+                return Err(AppError::BadRequest(format!("ONVIF 设备 {} 缺少 device_tag", device.id)));
             }
         };
 
-        let ptz_url = match &parent.extended {
-            Some(ext) => ext.get("capabilities")
-                .and_then(|c| c.get("ptz"))
-                .and_then(|u| u.as_str())
-                .map(|s| s.to_string()),
-            None => None,
+        let parent_tag = match &device.parent_device_tag {
+            Some(tag) => tag.clone(),
+            None => channel_id.clone(),
         };
 
-        let ptz_url = match ptz_url {
-            Some(url) if !url.is_empty() => url,
-            _ => {
-                return Err(AppError::NotFound(format!("设备 {} 未配置PTZ地址", parent_tag)));
+        let adapter = match adapter_manager::get_or_create_adapter(&Protocol::Onvif, &parent_tag) {
+            Some(a) => a,
+            None => {
+                tracing::error!("[PTZ] No adapter factory registered for ONVIF");
+                return Err(AppError::Internal("ONVIF adapter factory not registered".to_string()));
             }
         };
 
-        let client = OnvifPtzService::new(
-            ptz_url,
-            parent.device_username.clone(),
-            parent.device_password.clone(),
-        ).into_client();
+        let mut guard = adapter.lock().await;
+        guard.ptz_control(&channel_id, command, *speed).await?;
 
-        match command {
-            PtzCommand::ContinuousMove { pan, tilt, zoom } => {
-                if pan.abs() < 0.01 && tilt.abs() < 0.01 && zoom.abs() < 0.01 {
-                    client.with_profile(profile_token).stop().await?;
-                } else {
-                    client.with_profile(profile_token).continuous_move(*pan, *tilt, *zoom).await?;
-                }
-            }
-            PtzCommand::Up => { let s = speed.as_ref().map(|v| *v as f64 / 100.0).unwrap_or(0.5); client.with_profile(profile_token).continuous_move(0.0, s, 0.0).await?; }
-            PtzCommand::Down => { let s = speed.as_ref().map(|v| *v as f64 / 100.0).unwrap_or(0.5); client.with_profile(profile_token).continuous_move(0.0, -s, 0.0).await?; }
-            PtzCommand::Left => { let s = speed.as_ref().map(|v| *v as f64 / 100.0).unwrap_or(0.5); client.with_profile(profile_token).continuous_move(-s, 0.0, 0.0).await?; }
-            PtzCommand::Right => { let s = speed.as_ref().map(|v| *v as f64 / 100.0).unwrap_or(0.5); client.with_profile(profile_token).continuous_move(s, 0.0, 0.0).await?; }
-            PtzCommand::ZoomIn => { let s = speed.as_ref().map(|v| *v as f64 / 100.0).unwrap_or(0.5); client.with_profile(profile_token).continuous_move(0.0, 0.0, s).await?; }
-            PtzCommand::ZoomOut => { let s = speed.as_ref().map(|v| *v as f64 / 100.0).unwrap_or(0.5); client.with_profile(profile_token).continuous_move(0.0, 0.0, -s).await?; }
-            PtzCommand::Stop => { client.with_profile(profile_token).stop().await?; }
-            PtzCommand::AbsoluteMove { pan, tilt, zoom } => { client.with_profile(profile_token).absolute_move(*pan, *tilt, *zoom).await?; }
-            PtzCommand::RelativeMove { pan, tilt, zoom } => { client.with_profile(profile_token).relative_move(*pan, *tilt, *zoom).await?; }
-            PtzCommand::GotoPreset { preset_token } => { client.with_profile(profile_token).goto_preset(preset_token).await?; }
-            PtzCommand::SetPreset { preset_name } => {
-                let new_token = client.with_profile(profile_token).set_preset("", preset_name.as_deref()).await
-                    .map_err(|e| AppError::Internal(format!("SetPreset failed: {}", e)))?;
-                tracing::info!("[PTZ] ONVIF SetPreset: device={} token={}", device.id, new_token);
-                return Ok(Some(new_token));
-            }
-            PtzCommand::RemovePreset { preset_token } => { client.with_profile(profile_token).remove_preset(preset_token).await?; }
-            PtzCommand::FocusIn | PtzCommand::FocusOut | PtzCommand::IrisIn | PtzCommand::IrisOut => { return Err(AppError::BadRequest("Focus/Iris not supported for ONVIF".to_string())); }
-        }
-        tracing::debug!("[PTZ] ONVIF sent: device={} cmd={:?}", device.id, command);
+        tracing::debug!("[PTZ] ONVIF sent via adapter: device={} cmd={:?}", channel_id, command);
         Ok(None)
     }
 
@@ -605,18 +559,18 @@ impl DeviceService {
                 if parent.protocol == Protocol::Onvif {
                     Protocol::Onvif
                 } else {
-                    device.protocol
+                    device.protocol.clone()
                 }
             } else {
-                device.protocol
+                device.protocol.clone()
             }
         } else {
-            device.protocol
+            device.protocol.clone()
         };
 
         match target_protocol {
             Protocol::Onvif => {
-                let preset_token = Self::dispatch_onvif_ptz(&self.infra, &device, &command, &speed).await?;
+                let preset_token = Self::dispatch_onvif_ptz(&self.infra, &self.media, &self.stream_service, &device, &command, &speed).await?;
                 tracing::info!("[PTZ] Sent: device={} cmd={:?}", device_id, command);
                 Ok(PtzControlResult {
                     success: true,
@@ -656,13 +610,13 @@ impl DeviceService {
                 if parent.protocol == Protocol::Onvif {
                     Protocol::Onvif
                 } else {
-                    device.protocol
+                    device.protocol.clone()
                 }
             } else {
-                device.protocol
+                device.protocol.clone()
             }
         } else {
-            device.protocol
+            device.protocol.clone()
         };
 
         match target_protocol {
@@ -704,7 +658,7 @@ impl DeviceService {
                 });
             }
             _ => {
-                return Err(AppError::BadRequest(format!("PTZ status not supported for {:?}", device.protocol)));
+                return Err(AppError::BadRequest(format!("PTZ status not supported for {:?}", target_protocol)));
             }
         }
     }
@@ -869,7 +823,7 @@ impl DeviceService {
             return Err(AppError::BadRequest("device_tag is required".to_string()));
         };
 
-        let mut device = Device::new(req.name.clone(), req.protocol);
+        let mut device = Device::new(req.name.clone(), req.protocol.clone());
         device.host = req.host.clone().unwrap_or_default();
         device.port = req.port.unwrap_or(0);
         device.device_username = req.device_username.clone();
@@ -1326,13 +1280,13 @@ impl DeviceService {
                 if parent.protocol == Protocol::Onvif {
                     Protocol::Onvif
                 } else {
-                    device.protocol
+                    device.protocol.clone()
                 }
             } else {
-                device.protocol
+                device.protocol.clone()
             }
         } else {
-            device.protocol
+            device.protocol.clone()
         };
 
         if matches!(target_protocol, Protocol::Onvif) {
@@ -1386,13 +1340,13 @@ impl DeviceService {
                 if parent.protocol == Protocol::Onvif {
                     Protocol::Onvif
                 } else {
-                    device.protocol
+                    device.protocol.clone()
                 }
             } else {
-                device.protocol
+                device.protocol.clone()
             }
         } else {
-            device.protocol
+            device.protocol.clone()
         };
 
         let token = if matches!(target_protocol, Protocol::Onvif) {
@@ -1449,13 +1403,13 @@ impl DeviceService {
                 if parent.protocol == Protocol::Onvif {
                     Protocol::Onvif
                 } else {
-                    device.protocol
+                    device.protocol.clone()
                 }
             } else {
-                device.protocol
+                device.protocol.clone()
             }
         } else {
-            device.protocol
+            device.protocol.clone()
         };
 
         if matches!(target_protocol, Protocol::Onvif) {
@@ -1504,13 +1458,13 @@ impl DeviceService {
                 if parent.protocol == Protocol::Onvif {
                     Protocol::Onvif
                 } else {
-                    device.protocol
+                    device.protocol.clone()
                 }
             } else {
-                device.protocol
+                device.protocol.clone()
             }
         } else {
-            device.protocol
+            device.protocol.clone()
         };
 
         if matches!(target_protocol, Protocol::Onvif) {

@@ -18,3 +18,29 @@ impl std::fmt::Display for TransportType {
         }
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum Protocol {
+    Gb28181,
+    Onvif,
+    Rtsp,
+    Rtmp,
+    Hls,
+    WebRTC,
+    Custom(String),
+}
+
+impl std::fmt::Display for Protocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Protocol::Gb28181 => write!(f, "GB28181"),
+            Protocol::Onvif => write!(f, "ONVIF"),
+            Protocol::Rtsp => write!(f, "RTSP"),
+            Protocol::Rtmp => write!(f, "RTMP"),
+            Protocol::Hls => write!(f, "HLS"),
+            Protocol::WebRTC => write!(f, "WebRTC"),
+            Protocol::Custom(name) => write!(f, "Custom({})", name),
+        }
+    }
+}

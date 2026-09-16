@@ -23,6 +23,7 @@ static NODE_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub enum MediaNodeType {
     GB28181_MEDIA,
     GB28181_BROADCAST_VOICE,
+    ONVIF_BROADCAST_VOICE,
     WebSocket,
     RTSP,
     RTMP,
@@ -38,6 +39,7 @@ impl MediaNodeType {
         match self {
             MediaNodeType::GB28181_MEDIA => "gb28181_media",
             MediaNodeType::GB28181_BROADCAST_VOICE => "gb28181_broadcast_voice",
+            MediaNodeType::ONVIF_BROADCAST_VOICE => "onvif_broadcast_voice",
             MediaNodeType::WebSocket => "websocket",
             MediaNodeType::RTSP => "rtsp",
             MediaNodeType::RTMP => "rtmp",

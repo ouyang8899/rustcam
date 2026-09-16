@@ -431,6 +431,9 @@ pub async fn start_device_handler(
                 message: format!("Stream started: {}", stream_info.play_url),
             })))
         }
+        Protocol::Custom(ref name) => {
+            return Err(AppError::BadRequest(format!("Custom protocol '{}' not supported for stream start", name)));
+        }
     }
 }
 

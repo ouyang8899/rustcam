@@ -180,7 +180,7 @@ impl WebSocketAdapter {
                         stream_key: None,
                         manufacturer: json.get("manufacturer").and_then(|v| v.as_str()).map(String::from),
                         model: json.get("model").and_then(|v| v.as_str()).map(String::from),
-                        protocol: ProtocolType::WebRtc,
+                        protocol: ProtocolType::WebRTC,
                     });
 
                     let response = serde_json::json!({
@@ -352,7 +352,7 @@ impl SignalAdapter for WebSocketAdapter {
         Ok(())
     }
 
-    fn protocol_type(&self) -> ProtocolType { ProtocolType::WebRtc }
+    fn protocol_type(&self) -> ProtocolType { ProtocolType::WebRTC }
     fn name(&self) -> &'static str { "WebSocket" }
     fn keepalive(&self) -> bool { true }
     fn idle_timeout(&self) -> Option<u64> { Some(300) }

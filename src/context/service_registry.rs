@@ -10,8 +10,9 @@ use crate::application::{
     zlmediakit_hook::ZlMediaKitHookHandler, ChannelService,
 };
 use crate::domain::traits::{DeviceLookup, StreamManager, EventPublisher, CacheStore};
+use crate::domain::device::Protocol;
 use crate::protocol::traits::ProtocolDeps;
-use crate::protocol::adapter_manager::{AdapterEntry, set_adapter as am_set, remove_adapter as am_remove};
+use crate::protocol::adapter_manager::{AdapterEntry, set_adapter as am_set, remove_adapter as am_remove, register_adapter_factory, set_default_deps};
 use crate::auth::AuthState;
 pub use crate::auth::casbin::CasbinManager;
 use crate::auth::auth_db::PostgresAuthRepository;
@@ -213,6 +214,9 @@ impl ServiceRegistry {
             infra.redis.clone() as Arc<dyn CacheStore>,
             infra.config.clone(),
         ).with_registration(register_fn, unregister_fn);
+
+        set_default_deps(protocol_deps.clone());
+        register_adapter_factory(Protocol::Onvif, Arc::new(|deps, _key| Box::new(crate::protocol::onvif::OnvifAdapter::new(deps))));
 
         let ws_broadcaster = infra.ws_broadcaster.clone();
         let play_service = media.play_service.clone();

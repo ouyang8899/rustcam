@@ -298,7 +298,6 @@ impl Gb28181Adapter {
             sessions: Arc::new(tokio::sync::RwLock::new(Vec::new())),
             subscriptions: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             pending_audio_talks: Arc::new(tokio::sync::RwLock::new(Vec::new())),
-            last_broadcast_session: None,
             registration_state: RegistrationState::Init,
             wait_timer: None,
             event_handler_name: None,
@@ -4773,12 +4772,7 @@ a=ssrc:{}
             device_tag, channel_tag, device_ip, device_audio_port, transport, node_id.id
         );
 
-        {
-            let mut pending = self.pending_audio_talks.write().await;
-            let entry = PendingAudioTalkEntry { node_id };
-            pending.push(entry);
-            tracing::info!("[GB28181] Saved node_id to pending_audio_talks for device={}, channel={}", device_tag, channel_tag);
-        }
+
 
         self.send_broadcast_notification(device_tag).await?;
 
@@ -5136,6 +5130,7 @@ a=ssrc:{}
                 }
                 _ => unreachable!("GB28181 only supports TCP and UDP transport"),
             }
+            Ok::<(), AppError>(())
         };
 
         for attempt in 1..=3 {

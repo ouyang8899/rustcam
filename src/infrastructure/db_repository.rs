@@ -1230,6 +1230,7 @@ fn protocol_to_str(p: &Protocol) -> &'static str {
         Protocol::Rtmp => "RTMP",
         Protocol::Hls => "HLS",
         Protocol::WebRTC => "WebRTC",
+        Protocol::Custom(name) => Box::leak(name.clone().into_boxed_str()),
     }
 }
 

@@ -1,19 +1,22 @@
 use crate::api::FullState;
 use crate::application::ws_broadcaster::WsBroadcaster;
+use crate::domain::device::Protocol;
+use crate::domain::traits::{CacheStore, DeviceLookup, StreamManager, EventPublisher};
 use crate::error::AppError;
 use crate::media::{
     AudioCodec, BasicMediaNode, DataType, MediaNode, MediaNodeId, MediaNodeType,
     NullTransport, LinearPcmToG711Middleware, SendToReceiversMiddleware,
     WebSocketMediaNodeTransport,
 };
-use crate::protocol::adapter_manager;
+use crate::protocol::adapter_manager::{self, AdapterEntry};
+use crate::protocol::traits::ProtocolDeps;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Path, State, WebSocketUpgrade};
 use bytes::{Bytes, BytesMut};
 use futures_util::{SinkExt, StreamExt};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, Mutex};
 
 /// WebSocket 连接处理器
 pub async fn ws_handler(
@@ -115,23 +118,84 @@ async fn handle_audio_talk(
         channel_id
     );
 
+    let transport = Arc::new(WebSocketMediaNodeTransport::new(tx));
+
+    let device_protocol = {
+        match state.app.registry.device_service.get_device_by_device_tag(&device_tag) {
+            Ok(Some(device)) => {
+                tracing::info!("[AudioTalk] Device {} protocol: {:?}", device_tag, device.protocol);
+                Some(device.protocol)
+            }
+            Ok(None) => {
+                tracing::warn!("[AudioTalk] Device {} not found", device_tag);
+                None
+            }
+            Err(e) => {
+                tracing::error!("[AudioTalk] Failed to get device {}: {}", device_tag, e);
+                None
+            }
+        }
+    };
+
+    let device_protocol = match device_protocol {
+        Some(p) => p,
+        None => {
+            tracing::error!("[AudioTalk] Device {} not found or error, closing connection", device_tag);
+            let resp = serde_json::json!({"status": "error", "message": "设备不存在或无法获取设备信息"});
+            let _ = transport.send_text(&serde_json::to_string(&resp).unwrap()).await;
+            return;
+        }
+    };
+
     let node_id = MediaNodeId::new(MediaNodeType::WebSocket, &device_tag, Some(channel_id.clone()));
     let node_id_for_delete = node_id.clone();
-    let transport = Arc::new(WebSocketMediaNodeTransport::new(tx));
     let ws_node: Arc<dyn MediaNode> =
         Arc::new(BasicMediaNode::new(node_id.clone(), transport.clone()));
 
-    ws_node.add_send_chain(
-        MediaNodeType::GB28181_BROADCAST_VOICE,
-        Box::new(LinearPcmToG711Middleware::new(AudioCodec::Pcma)),
-    );
-    ws_node.add_send_chain(
-        MediaNodeType::GB28181_BROADCAST_VOICE,
-        Box::new(SendToReceiversMiddleware::new(
-            Arc::downgrade(&ws_node),
-            MediaNodeType::GB28181_BROADCAST_VOICE,
-        )),
-    );
+    match device_protocol {
+        Protocol::Gb28181 => {
+            tracing::info!("[AudioTalk] Setting up GB28181 broadcast for device {}", device_tag);
+            ws_node.add_send_chain(
+                MediaNodeType::GB28181_BROADCAST_VOICE,
+                Box::new(LinearPcmToG711Middleware::new(AudioCodec::Pcma)),
+            );
+            ws_node.add_send_chain(
+                MediaNodeType::GB28181_BROADCAST_VOICE,
+                Box::new(SendToReceiversMiddleware::new(
+                    Arc::downgrade(&ws_node),
+                    MediaNodeType::GB28181_BROADCAST_VOICE,
+                )),
+            );
+        }
+        Protocol::Onvif => {
+            tracing::info!("[AudioTalk] Setting up ONVIF broadcast for device {}", device_tag);
+
+            if adapter_manager::get_or_create_adapter(&Protocol::Onvif, &device_tag).is_none() {
+                tracing::error!("[AudioTalk] ONVIF adapter factory not registered");
+                let resp = serde_json::json!({"status": "error", "message": "ONVIF 适配器未注册"});
+                let _ = transport.send_text(&serde_json::to_string(&resp).unwrap()).await;
+                return;
+            }
+
+            ws_node.add_send_chain(
+                MediaNodeType::ONVIF_BROADCAST_VOICE,
+                Box::new(LinearPcmToG711Middleware::new(AudioCodec::Pcma)),
+            );
+            ws_node.add_send_chain(
+                MediaNodeType::ONVIF_BROADCAST_VOICE,
+                Box::new(SendToReceiversMiddleware::new(
+                    Arc::downgrade(&ws_node),
+                    MediaNodeType::ONVIF_BROADCAST_VOICE,
+                )),
+            );
+        }
+        other => {
+            tracing::error!("[AudioTalk] Unsupported protocol {:?} for device {}, closing connection", other, device_tag);
+            let resp = serde_json::json!({"status": "error", "message": format!("设备协议 {:?} 不支持语音广播", other)});
+            let _ = transport.send_text(&serde_json::to_string(&resp).unwrap()).await;
+            return;
+        }
+    }
 
     let manager = match crate::media::get_media_session_manager() {
         Some(m) => m,

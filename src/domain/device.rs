@@ -135,29 +135,7 @@ impl Default for RecordingConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub enum Protocol {
-    Gb28181,
-    Onvif,
-    Rtsp,
-    Rtmp,
-    Hls,
-    WebRTC,
-}
-
-impl fmt::Display for Protocol {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Protocol::Gb28181 => write!(f, "GB28181"),
-            Protocol::Onvif => write!(f, "ONVIF"),
-            Protocol::Rtsp => write!(f, "RTSP"),
-            Protocol::Rtmp => write!(f, "RTMP"),
-            Protocol::Hls => write!(f, "HLS"),
-            Protocol::WebRTC => write!(f, "WebRTC"),
-        }
-    }
-}
+pub use crate::common_types::Protocol;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
