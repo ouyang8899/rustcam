@@ -32,6 +32,14 @@
 | 视频 | flv.js、hls.js、video.js |
 | 构建 | Vite |
 
+### 桌面版 (Qt/C++)
+
+| 类别 | 技术 |
+|------|------|
+| 框架 | Qt 5/6 |
+| 构建 | CMake |
+| 音视频 | FFmpeg |
+
 ## 模块进度
 
 | 模块 | 功能 | 状态 | 说明 |
@@ -69,6 +77,8 @@ RUSTCAM/
 │   ├── protocol/          # 协议实现
 │   └── transport/         # 网络传输
 ├── frontend/              # Vue 前端
+│   └── src/
+├── clientapp/             # Qt 桌面版
 │   └── src/
 ├── sql/                   # 数据库脚本
 └── tests/                 # 测试用例
