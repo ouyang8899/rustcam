@@ -207,6 +207,14 @@ pub enum SignalEvent {
         data: Vec<u8>,
         timestamp: u32,
     },
+    InterleavedMediaData {
+        device_id: i64,
+        device_tag: Option<String>,
+        channel: u8,
+        ssrc: u32,
+        is_rtp: bool,
+        data: Vec<u8>,
+    },
     AudioTalkReady {
         node_id: MediaNodeId,
     },
@@ -283,6 +291,7 @@ impl SignalEvent {
             SignalEvent::StartAudioTalk { .. } => "start_audio_talk".to_string(),
             SignalEvent::StopAudioTalk { .. } => "stop_audio_talk".to_string(),
             SignalEvent::AudioTalkResponse { .. } => "audio_talk_response".to_string(),
+            SignalEvent::InterleavedMediaData { .. } => "interleaved_media_data".to_string(),
         }
     }
 
@@ -319,6 +328,7 @@ impl SignalEvent {
             SignalEvent::AudioBroadcastInvite { device_tag, .. } => device_tag.clone(),
             SignalEvent::AudioBroadcastReady { device_tag, .. } => device_tag.clone(),
             SignalEvent::AudioTalkResponse { node_id, .. } => Some(node_id.device_tag.clone()),
+            SignalEvent::InterleavedMediaData { device_tag, .. } => device_tag.clone(),
             _ => None,
         }
     }

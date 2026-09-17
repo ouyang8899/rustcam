@@ -1,5 +1,12 @@
+//! RTP/RTCP 底层 socket 封装
+//!
+//! 说明：
+//! - UDP：RTP 与 RTCP socket 分端口（rtcp = rtp + 1），`new` 时同步 bind 两个。
+//! - TCP：Passive 模式监听端口，Active 模式 bind 一个未连接的 socket。
+//! - socket 都用 `Arc` 共享；只要有一处引用（如接收任务），socket 就保持打开。
+//!   端口生命周期由上层 `RtpServerManager` 通过冷却机制管理。
+
 use crate::media::errors::{MediaError, Result};
-use crate::media::node::{MediaRtpPacket, RtpPacketCallback};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -32,6 +39,10 @@ pub struct RtpSession {
     pub active_at: std::time::Instant,
 }
 
+// ═══════════════════════════════════════════════════════════
+// UDP
+// ═══════════════════════════════════════════════════════════
+
 pub struct UDPRtpServer {
     rtp_socket: Arc<tokio::net::UdpSocket>,
     rtcp_socket: Arc<tokio::net::UdpSocket>,
@@ -44,16 +55,25 @@ pub struct UDPRtpServer {
 }
 
 impl UDPRtpServer {
-    pub async fn new(bind_addr: &str, port: u16) -> Result<Self> {
+    pub async fn new(bind_addr: &str, port: u16, port_range: &RtpPortRange) -> Result<Self> {
+        if port + 1 > port_range.end {
+            return Err(MediaError::Transport(format!(
+                "RTP port {} + 1 超出范围 {}",
+                port,
+                port_range.end
+            )));
+        }
+
         let rtp_socket = tokio::net::UdpSocket::bind(format!("{}:{}", bind_addr, port))
             .await
-            .map_err(|e| MediaError::Transport(format!("RTP bind failed: {}", e)))?;
+            .map_err(|e| MediaError::Transport(format!("RTP bind {}:{} failed: {}", bind_addr, port, e)))?;
+
         let rtcp_socket = tokio::net::UdpSocket::bind(format!("{}:{}", bind_addr, port + 1))
             .await
-            .map_err(|e| MediaError::Transport(format!("RTCP bind failed: {}", e)))?;
+            .map_err(|e| MediaError::Transport(format!("RTCP bind {}:{} failed: {}", bind_addr, port + 1, e)))?;
 
         tracing::info!(
-            "[UDPRtpServer] Created on {}:{} / {}",
+            "[UDPRtpServer] Created on {}:{} (RTCP {})",
             bind_addr,
             port,
             port + 1
@@ -75,6 +95,10 @@ impl UDPRtpServer {
         self.port
     }
 
+    pub fn rtcp_port(&self) -> u16 {
+        self.port + 1
+    }
+
     pub fn rtp_socket(&self) -> Arc<tokio::net::UdpSocket> {
         self.rtp_socket.clone()
     }
@@ -88,35 +112,27 @@ impl UDPRtpServer {
     }
 
     pub async fn allocate(&self, ssrc: u32, device_tag: String, channel_tag: String) -> bool {
-        let mut ssrc_guard = self.ssrc.write().await;
-        if ssrc_guard.is_some() {
-            tracing::warn!(
-                "[UDPRtpServer] Port {} already allocated for SSRC {:?}",
-                self.port,
-                *ssrc_guard
-            );
-            return false;
+        {
+            let mut ssrc_guard = self.ssrc.write().await;
+            if ssrc_guard.is_some() {
+                tracing::warn!(
+                    "[UDPRtpServer] Port {} already allocated for SSRC {:?}",
+                    self.port,
+                    *ssrc_guard
+                );
+                return false;
+            }
+            *ssrc_guard = Some(ssrc);
         }
-        *ssrc_guard = Some(ssrc);
-        drop(ssrc_guard);
+        *self.device_tag.write().await = Some(device_tag.clone());
+        *self.channel_tag.write().await = Some(channel_tag.clone());
 
-        let mut tag_guard = self.device_tag.write().await;
-        *tag_guard = Some(device_tag.clone());
-        drop(tag_guard);
-
-        let mut channel_guard = self.channel_tag.write().await;
-        *channel_guard = Some(channel_tag.clone());
-        drop(channel_guard);
-
-        let mut time_guard = self.allocated_at.write().await;
-        *time_guard = Some(std::time::Instant::now());
-        drop(time_guard);
-
-        let mut active_guard = self.active_at.write().await;
-        *active_guard = Some(std::time::Instant::now());
+        let now = std::time::Instant::now();
+        *self.allocated_at.write().await = Some(now);
+        *self.active_at.write().await = Some(now);
 
         tracing::info!(
-            "[UDPRtpServer] Port {} allocated for SSRC {} / {}/{}",
+            "[UDPRtpServer] Port {} allocated SSRC={} device={} channel={}",
             self.port,
             ssrc,
             device_tag,
@@ -126,19 +142,15 @@ impl UDPRtpServer {
     }
 
     pub async fn release(&self) {
-        let ssrc = {
-            let mut guard = self.ssrc.write().await;
-            guard.take()
-        };
+        let ssrc = { self.ssrc.write().await.take() };
+        let tag = { self.device_tag.write().await.take() };
+        self.channel_tag.write().await.take();
+        self.allocated_at.write().await.take();
+        self.active_at.write().await.take();
+
         if let Some(ssrc) = ssrc {
-            let tag = {
-                let mut guard = self.device_tag.write().await;
-                guard.take()
-            };
-            let mut time_guard = self.allocated_at.write().await;
-            time_guard.take();
             tracing::info!(
-                "[UDPRtpServer] Port {} released from SSRC {} / device {}",
+                "[UDPRtpServer] Port {} released SSRC={} device={}",
                 self.port,
                 ssrc,
                 tag.unwrap_or_default()
@@ -152,11 +164,6 @@ impl UDPRtpServer {
 
     pub async fn is_allocated(&self) -> bool {
         self.ssrc.read().await.is_some()
-    }
-
-    pub async fn touch_active(&self) {
-        let mut guard = self.active_at.write().await;
-        *guard = Some(std::time::Instant::now());
     }
 
     pub async fn get_session(&self) -> Option<RtpSession> {
@@ -182,22 +189,24 @@ impl UDPRtpServer {
 #[async_trait::async_trait]
 impl RtpServerActive for UDPRtpServer {
     async fn touch_active(&self) {
-        let mut guard = self.active_at.write().await;
-        *guard = Some(std::time::Instant::now());
+        *self.active_at.write().await = Some(std::time::Instant::now());
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UdpRtpPacket {
     pub data: Vec<u8>,
     pub ssrc: u32,
     pub payload_type: u8,
 }
 
+// ═══════════════════════════════════════════════════════════
+// TCP
+// ═══════════════════════════════════════════════════════════
+
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::Mutex as TokioMutex;
 
 pub enum TcpMode {
     Passive,
@@ -208,7 +217,7 @@ pub struct TcpRtpServer {
     port: u16,
     mode: TcpMode,
     listener: Option<tokio::net::TcpListener>,
-    socket: Arc<tokio::sync::Mutex<Option<tokio::net::TcpSocket>>>,
+    socket: Arc<TokioMutex<Option<tokio::net::TcpSocket>>>,
     ssrc: RwLock<Option<u32>>,
     device_tag: RwLock<Option<String>>,
     channel_tag: RwLock<Option<String>>,
@@ -221,19 +230,15 @@ impl TcpRtpServer {
     pub async fn new_passive(bind_addr: &str, port: u16) -> Result<Self> {
         let listener = tokio::net::TcpListener::bind(format!("{}:{}", bind_addr, port))
             .await
-            .map_err(|e| MediaError::Transport(format!("TCP RTP bind failed: {}", e)))?;
+            .map_err(|e| MediaError::Transport(format!("TCP RTP bind {}:{} failed: {}", bind_addr, port, e)))?;
 
-        tracing::info!(
-            "[TcpRtpServer] Passive mode created on {}:{}",
-            bind_addr,
-            port
-        );
+        tracing::info!("[TcpRtpServer] Passive created on {}:{}", bind_addr, port);
 
         Ok(Self {
             port,
             mode: TcpMode::Passive,
             listener: Some(listener),
-            socket: Arc::new(tokio::sync::Mutex::new(None)),
+            socket: Arc::new(TokioMutex::new(None)),
             ssrc: RwLock::new(None),
             device_tag: RwLock::new(None),
             channel_tag: RwLock::new(None),
@@ -249,23 +254,19 @@ impl TcpRtpServer {
 
         let addr: std::net::SocketAddr = format!("{}:{}", bind_addr, port)
             .parse()
-            .map_err(|e| MediaError::Transport(format!("Invalid address: {}", e)))?;
+            .map_err(|e| MediaError::Transport(format!("Invalid address {}:{}: {}", bind_addr, port, e)))?;
 
         socket
             .bind(addr)
-            .map_err(|e| MediaError::Transport(format!("TCP bind failed: {}", e)))?;
+            .map_err(|e| MediaError::Transport(format!("TCP bind {} failed: {}", addr, e)))?;
 
-        tracing::info!(
-            "[TcpRtpServer] Active mode created on {}:{}",
-            bind_addr,
-            port
-        );
+        tracing::info!("[TcpRtpServer] Active created on {}:{}", bind_addr, port);
 
         Ok(Self {
             port,
             mode: TcpMode::Active,
             listener: None,
-            socket: Arc::new(tokio::sync::Mutex::new(Some(socket))),
+            socket: Arc::new(TokioMutex::new(Some(socket))),
             ssrc: RwLock::new(None),
             device_tag: RwLock::new(None),
             channel_tag: RwLock::new(None),
@@ -292,35 +293,27 @@ impl TcpRtpServer {
     }
 
     pub async fn allocate(&self, ssrc: u32, device_tag: String, channel_tag: String) -> bool {
-        let mut ssrc_guard = self.ssrc.write().await;
-        if ssrc_guard.is_some() {
-            tracing::warn!(
-                "[TcpRtpServer] Port {} already allocated for SSRC {:?}",
-                self.port,
-                *ssrc_guard
-            );
-            return false;
+        {
+            let mut ssrc_guard = self.ssrc.write().await;
+            if ssrc_guard.is_some() {
+                tracing::warn!(
+                    "[TcpRtpServer] Port {} already allocated for SSRC {:?}",
+                    self.port,
+                    *ssrc_guard
+                );
+                return false;
+            }
+            *ssrc_guard = Some(ssrc);
         }
-        *ssrc_guard = Some(ssrc);
-        drop(ssrc_guard);
+        *self.device_tag.write().await = Some(device_tag.clone());
+        *self.channel_tag.write().await = Some(channel_tag.clone());
 
-        let mut tag_guard = self.device_tag.write().await;
-        *tag_guard = Some(device_tag.clone());
-        drop(tag_guard);
-
-        let mut channel_guard = self.channel_tag.write().await;
-        *channel_guard = Some(channel_tag.clone());
-        drop(channel_guard);
-
-        let mut time_guard = self.allocated_at.write().await;
-        *time_guard = Some(std::time::Instant::now());
-        drop(time_guard);
-
-        let mut active_guard = self.active_at.write().await;
-        *active_guard = Some(std::time::Instant::now());
+        let now = std::time::Instant::now();
+        *self.allocated_at.write().await = Some(now);
+        *self.active_at.write().await = Some(now);
 
         tracing::info!(
-            "[TcpRtpServer] Port {} allocated for SSRC {} / device {}",
+            "[TcpRtpServer] Port {} allocated SSRC={} device={}",
             self.port,
             ssrc,
             device_tag
@@ -329,27 +322,20 @@ impl TcpRtpServer {
     }
 
     pub async fn release(&self) {
-        let ssrc = {
-            let mut guard = self.ssrc.write().await;
-            guard.take()
-        };
+        let ssrc = { self.ssrc.write().await.take() };
+        let tag = { self.device_tag.write().await.take() };
+        self.channel_tag.write().await.take();
+        self.allocated_at.write().await.take();
+        self.active_at.write().await.take();
+
         if let Some(ssrc) = ssrc {
-            let tag = {
-                let mut guard = self.device_tag.write().await;
-                guard.take()
-            };
             tracing::info!(
-                "[TcpRtpServer] Port {} released from SSRC {} / device {}",
+                "[TcpRtpServer] Port {} released SSRC={} device={}",
                 self.port,
                 ssrc,
                 tag.unwrap_or_default()
             );
         }
-    }
-
-    pub async fn touch_active(&self) {
-        let mut guard = self.active_at.write().await;
-        *guard = Some(std::time::Instant::now());
     }
 
     pub async fn get_session(&self) -> Option<RtpSession> {
@@ -382,23 +368,23 @@ impl TcpRtpServer {
     }
 
     pub async fn connect(&self, remote: std::net::SocketAddr) -> std::io::Result<TcpStream> {
-        let socket = match self.socket.lock().await.take() {
-            Some(socket) => socket,
-            None => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Socket already used or not in active mode",
-                ))
-            }
+        let socket = {
+            let mut guard = self.socket.lock().await;
+            guard.take()
         };
-        socket.connect(remote).await
+        match socket {
+            Some(socket) => socket.connect(remote).await,
+            None => Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Socket already used or not in active mode",
+            )),
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl RtpServerActive for TcpRtpServer {
     async fn touch_active(&self) {
-        let mut guard = self.active_at.write().await;
-        *guard = Some(std::time::Instant::now());
+        *self.active_at.write().await = Some(std::time::Instant::now());
     }
 }

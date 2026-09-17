@@ -29,3 +29,5 @@ rustcam-plan.md
 /camera-test.txt
 /build_log.txt
 /docs
+/clientapp/document
+/clientapp/build-vs2019

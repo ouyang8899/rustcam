@@ -1,6 +1,6 @@
 use crate::media::errors::{MediaError, Result};
 use crate::media::node::{DataType, MediaNode, MediaTransportCallback};
-use crate::media::rtp_server::{TcpRtpServer, UDPRtpServer};
+use crate::media::rtp_server::{TcpRtpServer, UDPRtpServer, RtpServerActive};
 use async_trait::async_trait;
 use bytes::BytesMut;
 use std::collections::HashMap;

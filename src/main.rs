@@ -176,7 +176,7 @@ async fn main() -> anyhow::Result<()> {
         signaling_config.rtp_port_end,
         signaling_config.rtp_bind_addr.clone(),
         signaling_config.rtp_idle_timeout_secs,
-    ).await;
+    )?;
 
     // 9.5 Media Session 管理器
     rustcam_media::init_media_session_manager().await;

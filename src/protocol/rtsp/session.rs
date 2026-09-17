@@ -1,5 +1,7 @@
+use crate::media::rtp_server::UDPRtpServer;
 use crate::protocol::rtsp::sdp::{SdpInfo, SdpTrack};
 use dashmap::DashMap;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -18,13 +20,66 @@ pub enum RtspSessionState {
     Paused,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum TransportMode {
+    #[default]
+    Tcp,
+    Udp,
+}
+
+#[derive(Clone)]
+pub struct TrackTransport {
+    pub track_id: String,
+    pub channel_rtp: u8,
+    pub channel_rtcp: u8,
+    pub rtp_port: Option<u16>,
+    pub rtcp_port: Option<u16>,
+    pub client_addr: Option<SocketAddr>,
+    pub local_ssrc: Option<u32>,
+    pub client_rtp: Option<u16>,
+    pub client_rtcp: Option<u16>,
+    pub server: Option<Arc<UDPRtpServer>>,
+}
+
+impl TrackTransport {
+    pub fn new_tcp(track_id: String, channel_rtp: u8, channel_rtcp: u8) -> Self {
+        Self {
+            track_id,
+            channel_rtp,
+            channel_rtcp,
+            rtp_port: None,
+            rtcp_port: None,
+            client_addr: None,
+            local_ssrc: None,
+            client_rtp: None,
+            client_rtcp: None,
+            server: None,
+        }
+    }
+
+    pub fn new_udp(track_id: String, rtp_port: u16, rtcp_port: u16) -> Self {
+        Self {
+            track_id,
+            channel_rtp: 0,
+            channel_rtcp: 0,
+            rtp_port: Some(rtp_port),
+            rtcp_port: Some(rtcp_port),
+            client_addr: None,
+            local_ssrc: None,
+            client_rtp: None,
+            client_rtcp: None,
+            server: None,
+        }
+    }
+}
+
 impl Default for RtspSessionState {
     fn default() -> Self {
         RtspSessionState::Init
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RtspSession {
     pub session_id: String,
     pub stream_key: String,
@@ -34,7 +89,9 @@ pub struct RtspSession {
     pub device_sdp: Option<SdpInfo>,
     pub rtp_port: Option<u16>,
     pub media_server_name: Option<String>,
+    pub transport_mode: TransportMode,
     pub tracks: Vec<SdpTrack>,
+    pub track_transports: HashMap<String, TrackTransport>,
     pub created_at: std::time::Instant,
     pub last_activity: std::time::Instant,
 }
@@ -51,7 +108,9 @@ impl RtspSession {
             device_sdp: None,
             rtp_port: None,
             media_server_name: None,
+            transport_mode: TransportMode::default(),
             tracks: Vec::new(),
+            track_transports: HashMap::new(),
             created_at: std::time::Instant::now(),
             last_activity: std::time::Instant::now(),
         }

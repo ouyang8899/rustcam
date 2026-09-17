@@ -1,0 +1,31 @@
+{
+    "app": {
+        "name": "rustcam Client",
+        "version": "1.0.0"
+    },
+    "server": {
+        "host": "localhost",
+        "port": 8080,
+        "protocol": "websocket"
+    },
+    "ui": {
+        "theme": "midnight",
+        "language": "zh_CN",
+        "showTrayIcon": true,
+        "startMinimized": false
+    },
+    "video": {
+        "defaultLayout": 4,
+        "autoConnect": true,
+        "bufferMs": 500
+    },
+    "log": {
+        "level": "info",
+        "maxFileSizeMB": 100,
+        "maxFiles": 7
+    },
+    "update": {
+        "checkOnStartup": true,
+        "autoDownload": false
+    }
+}

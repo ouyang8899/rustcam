@@ -1,13 +1,23 @@
+//! RTP 端口/服务器分配管理器
+//!
+//! 关键修复：
+//! - 端口释放后进入冷却期（`PORT_COOLDOWN_SECS`），冷却后才会被重新分配，
+//!   避免上层仍持有 socket 引用时的 bind 冲突。
+//! - 端口分配关键区加锁，消除并发分配竞态。
+//! - 超时清理按 `active_at` 而非 `allocated_at`。
+
 use crate::media::errors::{MediaError, Result};
 use crate::media::node::RtpPacketCallback;
 use crate::media::rtp_server::{RtpPortRange, TcpRtpServer, UDPRtpServer};
-use crate::media::transport::gb28181_broadcast::GB28181BroadcastVoiceTransport;
 use crate::protocol::event::TransportType;
 use dashmap::DashMap;
 use once_cell::sync::OnceCell;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::time::{Duration, Instant};
+use tokio::sync::{Mutex, RwLock};
+
+const PORT_COOLDOWN_SECS: u64 = 5;
 
 #[derive(Debug, Clone)]
 pub struct PortInfo {
@@ -15,12 +25,12 @@ pub struct PortInfo {
     pub device_tag: String,
     pub channel_tag: String,
     pub ssrc: Option<u32>,
-    pub allocated_at: std::time::Instant,
+    pub allocated_at: Instant,
     pub actor: String,
-    pub active_at: std::time::Instant,
+    pub active_at: Instant,
 }
 
-#[derive(Eq, Hash, PartialEq)]
+#[derive(Eq, Hash, PartialEq, Clone, Copy)]
 struct PortKey(u16, TransportType);
 
 pub struct RtpServerManager {
@@ -29,9 +39,12 @@ pub struct RtpServerManager {
     udp_servers: DashMap<u16, Arc<UDPRtpServer>>,
     tcp_servers: DashMap<u16, Arc<TcpRtpServer>>,
     ports: DashMap<PortKey, PortInfo>,
-    free_udp_ports: RwLock<Vec<(u16, u16)>>, // (rtp_port, rtcp_port) 成对
-    free_tcp_ports: RwLock<Vec<u16>>,
+    free_udp_ports: RwLock<Vec<(u16, u16, Instant)>>,
+    free_tcp_ports: RwLock<Vec<(u16, Instant)>>,
     next_udp_port: AtomicU16,
+    next_tcp_port: AtomicU16,
+    allocation_lock: Mutex<()>,
+    ssrc_counter: AtomicU32,
     timeout_secs: u64,
 }
 
@@ -39,11 +52,12 @@ impl RtpServerManager {
     pub fn new(port_range: RtpPortRange, bind_addr: String, timeout_secs: u64) -> Self {
         let start = port_range.start;
         tracing::info!(
-            "[RtpServerManager] Created with port range {}-{}, bind {}, timeout {}s",
+            "[RtpServerManager] Created range {}-{}, bind {}, timeout {}s, cooldown {}s",
             port_range.start,
             port_range.end,
             bind_addr,
-            timeout_secs
+            timeout_secs,
+            PORT_COOLDOWN_SECS
         );
         Self {
             port_range,
@@ -54,30 +68,40 @@ impl RtpServerManager {
             free_udp_ports: RwLock::new(Vec::new()),
             free_tcp_ports: RwLock::new(Vec::new()),
             next_udp_port: AtomicU16::new(start),
+            next_tcp_port: AtomicU16::new(start),
+            allocation_lock: Mutex::new(()),
+            ssrc_counter: AtomicU32::new(1),
             timeout_secs,
         }
     }
 
-    async fn get_next_udp_port(&self) -> Option<(u16, u16)> {
-        // 优先从空闲队列获取 (rtp_port, rtcp_port) 对
+    async fn pick_udp_port(&self) -> Option<(u16, u16)> {
+        let now = Instant::now();
         {
             let mut free = self.free_udp_ports.write().await;
-            if let Some(pair) = free.pop() {
-                if !self.udp_servers.contains_key(&pair.0) {
-                    return Some(pair);
-                }
+            let ready_idx = free.iter().position(|(p, _, at)| {
+                now.duration_since(*at).as_secs() >= PORT_COOLDOWN_SECS
+                    && !self.udp_servers.contains_key(p)
+            });
+            if let Some(idx) = ready_idx {
+                let (p, rp, _) = free.swap_remove(idx);
+                return Some((p, rp));
             }
         }
 
-        // 空闲队列为空，生成新端口对
-        let max_attempts = (self.port_range.end - self.port_range.start) / 2 + 1;
-        let start = self.port_range.start;
-        let end = self.port_range.end;
+        let start = self.port_range.start | 1;
+        let start = start & !1;
+        let end = self.port_range.end & !1;
+        let span = end.saturating_sub(start);
+        if span < 2 {
+            return None;
+        }
+        let max_attempts = (span / 2) + 1;
 
         for _ in 0..max_attempts {
             let port = self.next_udp_port.fetch_add(2, Ordering::SeqCst);
-            let port = if port > end || port == 0 {
-                self.next_udp_port.store(start, Ordering::SeqCst);
+            let port = if port > end || port < start {
+                self.next_udp_port.store(start + 2, Ordering::SeqCst);
                 start
             } else {
                 port
@@ -86,42 +110,71 @@ impl RtpServerManager {
             if self.udp_servers.contains_key(&port) {
                 continue;
             }
-
+            let cooling = {
+                let free = self.free_udp_ports.read().await;
+                free.iter().any(|(p, _, _)| *p == port)
+            };
+            if cooling {
+                continue;
+            }
             return Some((port, port + 1));
         }
         None
     }
 
-    async fn get_next_tcp_port(&self) -> Option<u16> {
-        // 优先从空闲队列获取
+    async fn pick_tcp_port(&self) -> Option<u16> {
+        let now = Instant::now();
         {
             let mut free = self.free_tcp_ports.write().await;
-            if let Some(port) = free.pop() {
-                if !self.tcp_servers.contains_key(&port) {
-                    return Some(port);
-                }
+            let ready_idx = free.iter().position(|(p, at)| {
+                now.duration_since(*at).as_secs() >= PORT_COOLDOWN_SECS
+                    && !self.tcp_servers.contains_key(p)
+            });
+            if let Some(idx) = ready_idx {
+                let (p, _) = free.swap_remove(idx);
+                return Some(p);
             }
         }
 
-        // 空闲队列为空，生成新端口
-        let port_range_end = self.port_range.end.max(self.port_range.start + 100);
-        let mut port = self.port_range.start;
-        while port <= port_range_end {
-            if !self.tcp_servers.contains_key(&port) {
-                return Some(port);
+        let start = self.port_range.start;
+        let end = self.port_range.end;
+
+        for _ in 0..(end.saturating_sub(start) + 1) {
+            let port = self.next_tcp_port.fetch_add(1, Ordering::SeqCst);
+            let port = if port > end || port < start {
+                self.next_tcp_port.store(start + 1, Ordering::SeqCst);
+                start
+            } else {
+                port
+            };
+
+            if self.tcp_servers.contains_key(&port) {
+                continue;
             }
-            port += 1;
+            let cooling = {
+                let free = self.free_tcp_ports.read().await;
+                free.iter().any(|(p, _)| *p == port)
+            };
+            if cooling {
+                continue;
+            }
+            return Some(port);
         }
         None
     }
 
-    fn generate_ssrc() -> u32 {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        (nanos as u32) ^ (rand_simple() as u32)
+    fn generate_ssrc(&self) -> u32 {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u32)
+            .unwrap_or(0);
+        let counter = self.ssrc_counter.fetch_add(1, Ordering::Relaxed);
+        let mixed = (nanos << 12) ^ counter;
+        if mixed == 0 {
+            1
+        } else {
+            mixed
+        }
     }
 
     pub async fn allocate(
@@ -130,7 +183,6 @@ impl RtpServerManager {
         channel_tag: &str,
         actor: &str,
         protocol: TransportType,
-
         _callback: Arc<dyn RtpPacketCallback>,
     ) -> Result<(u16, u32)> {
         match protocol {
@@ -142,7 +194,10 @@ impl RtpServerManager {
                 let (port, ssrc, _) = self.allocate_tcp(device_tag, channel_tag, actor).await?;
                 Ok((port, ssrc))
             }
-            _ => unreachable!("RtpServerManager only supports UDP and TCP"),
+            _ => Err(MediaError::Transport(format!(
+                "RtpServerManager 不支持的协议: {:?}",
+                protocol
+            ))),
         }
     }
 
@@ -152,26 +207,28 @@ impl RtpServerManager {
         channel_tag: &str,
         actor: &str,
     ) -> Result<(u16, u32, Arc<UDPRtpServer>)> {
-        let ssrc = Self::generate_ssrc();
+        let _guard = self.allocation_lock.lock().await;
 
         let (rtp_port, _rtcp_port) = self
-            .get_next_udp_port()
+            .pick_udp_port()
             .await
-            .ok_or_else(|| MediaError::PortAllocation("No available UDP ports".into()))?;
+            .ok_or_else(|| MediaError::PortAllocation("无可用 UDP 端口".into()))?;
 
-        let server = Arc::new(UDPRtpServer::new(&self.bind_addr, rtp_port).await?);
+        let server = Arc::new(UDPRtpServer::new(&self.bind_addr, rtp_port, &self.port_range).await?);
+        let ssrc = self.generate_ssrc();
 
         if !server
             .allocate(ssrc, device_tag.to_string(), channel_tag.to_string())
             .await
         {
             return Err(MediaError::PortAllocation(format!(
-                "Port {} already allocated",
+                "UDP 端口 {} 已被分配",
                 rtp_port
             )));
         }
 
         self.udp_servers.insert(rtp_port, server.clone());
+        let now = Instant::now();
         self.ports.insert(
             PortKey(rtp_port, TransportType::Udp),
             PortInfo {
@@ -179,14 +236,14 @@ impl RtpServerManager {
                 device_tag: device_tag.to_string(),
                 channel_tag: channel_tag.to_string(),
                 ssrc: Some(ssrc),
-                allocated_at: std::time::Instant::now(),
+                allocated_at: now,
                 actor: actor.to_string(),
-                active_at: std::time::Instant::now(),
+                active_at: now,
             },
         );
 
         tracing::info!(
-            "[RtpServerManager] Allocated UDP port {} (SSRC {}) for {}/{}",
+            "[RtpServerManager] Allocated UDP {} (SSRC {}) for {}/{}",
             rtp_port,
             ssrc,
             device_tag,
@@ -201,26 +258,28 @@ impl RtpServerManager {
         channel_tag: &str,
         actor: &str,
     ) -> Result<(u16, u32, Arc<TcpRtpServer>)> {
-        let ssrc = Self::generate_ssrc();
+        let _guard = self.allocation_lock.lock().await;
 
         let port = self
-            .get_next_tcp_port()
+            .pick_tcp_port()
             .await
-            .ok_or_else(|| MediaError::PortAllocation("No available TCP ports".into()))?;
+            .ok_or_else(|| MediaError::PortAllocation("无可用 TCP 端口".into()))?;
 
         let server = Arc::new(TcpRtpServer::new_passive(&self.bind_addr, port).await?);
+        let ssrc = self.generate_ssrc();
 
         if !server
             .allocate(ssrc, device_tag.to_string(), channel_tag.to_string())
             .await
         {
             return Err(MediaError::PortAllocation(format!(
-                "TCP Port {} already allocated",
+                "TCP 端口 {} 已被分配",
                 port
             )));
         }
 
         self.tcp_servers.insert(port, server.clone());
+        let now = Instant::now();
         self.ports.insert(
             PortKey(port, TransportType::Tcp),
             PortInfo {
@@ -228,14 +287,14 @@ impl RtpServerManager {
                 device_tag: device_tag.to_string(),
                 channel_tag: channel_tag.to_string(),
                 ssrc: Some(ssrc),
-                allocated_at: std::time::Instant::now(),
+                allocated_at: now,
                 actor: actor.to_string(),
-                active_at: std::time::Instant::now(),
+                active_at: now,
             },
         );
 
         tracing::info!(
-            "[RtpServerManager] Allocated TCP port {} (SSRC {}) for {}/{}",
+            "[RtpServerManager] Allocated TCP {} (SSRC {}) for {}/{}",
             port,
             ssrc,
             device_tag,
@@ -245,16 +304,18 @@ impl RtpServerManager {
     }
 
     pub async fn allocate_tcp_active(&self) -> Result<(u16, u32, Arc<TcpRtpServer>)> {
-        let ssrc = Self::generate_ssrc();
+        let _guard = self.allocation_lock.lock().await;
 
         let port = self
-            .get_next_tcp_port()
+            .pick_tcp_port()
             .await
-            .ok_or_else(|| MediaError::PortAllocation("No available TCP ports".into()))?;
+            .ok_or_else(|| MediaError::PortAllocation("无可用 TCP 端口".into()))?;
 
         let server = Arc::new(TcpRtpServer::new_active(&self.bind_addr, port).await?);
+        let ssrc = self.generate_ssrc();
 
         self.tcp_servers.insert(port, server.clone());
+        let now = Instant::now();
         self.ports.insert(
             PortKey(port, TransportType::Tcp),
             PortInfo {
@@ -262,14 +323,14 @@ impl RtpServerManager {
                 device_tag: String::new(),
                 channel_tag: String::new(),
                 ssrc: Some(ssrc),
+                allocated_at: now,
                 actor: String::new(),
-                allocated_at: std::time::Instant::now(),
-                active_at: std::time::Instant::now(),
+                active_at: now,
             },
         );
 
         tracing::info!(
-            "[RtpServerManager] Allocated TCP active server on port {} (SSRC {})",
+            "[RtpServerManager] Allocated TCP active {} (SSRC {})",
             port,
             ssrc
         );
@@ -280,16 +341,13 @@ impl RtpServerManager {
         let key = PortKey(port, protocol);
 
         if let Some(info) = self.ports.get(&key) {
-            let device_tag = info.device_tag.clone();
-            let channel_tag = info.channel_tag.clone();
-            let ssrc = info.ssrc;
             tracing::info!(
-                "[RtpServerManager] Release port {} ({:?}) for {}/{} (was SSRC {:?})",
+                "[RtpServerManager] Release {} ({:?}) for {}/{} SSRC={:?}",
                 port,
                 protocol,
-                device_tag,
-                channel_tag,
-                ssrc
+                info.device_tag,
+                info.channel_tag,
+                info.ssrc
             );
         }
         self.ports.remove(&key);
@@ -299,17 +357,30 @@ impl RtpServerManager {
                 if let Some((_, server)) = self.udp_servers.remove(&port) {
                     server.release().await;
                 }
+                let now = Instant::now();
                 let mut free = self.free_udp_ports.write().await;
-                free.push((port, port + 1));
+                if let Some(entry) = free.iter_mut().find(|(p, _, _)| *p == port) {
+                    entry.2 = now;
+                } else {
+                    free.push((port, port + 1, now));
+                }
             }
             TransportType::Tcp => {
                 if let Some((_, server)) = self.tcp_servers.remove(&port) {
                     server.release().await;
                 }
+                let now = Instant::now();
                 let mut free = self.free_tcp_ports.write().await;
-                free.push(port);
+                if let Some(entry) = free.iter_mut().find(|(p, _)| *p == port) {
+                    entry.1 = now;
+                } else {
+                    free.push((port, now));
+                }
             }
-            _ => unreachable!("RtpServerManager only supports UDP and TCP"),
+            _ => tracing::warn!(
+                "[RtpServerManager] release 收到不支持的协议: {:?}",
+                protocol
+            ),
         }
     }
 
@@ -320,16 +391,21 @@ impl RtpServerManager {
         actor: &str,
         protocol: TransportType,
     ) {
-        for entry in self.ports.iter() {
-            let (k, info) = entry.pair();
-            if info.device_tag == device_tag
-                && info.channel_tag == channel_tag
-                && info.actor == actor
-                && k.1 == protocol
-            {
-                self.release(k.0, protocol).await;
-                return;
-            }
+        let matches: Vec<(u16, TransportType)> = self
+            .ports
+            .iter()
+            .filter(|e| {
+                let (k, info) = e.pair();
+                k.1 == protocol
+                    && info.device_tag == device_tag
+                    && info.channel_tag == channel_tag
+                    && info.actor == actor
+            })
+            .map(|e| (e.key().0, e.key().1))
+            .collect();
+
+        for (port, proto) in matches {
+            self.release(port, proto).await;
         }
     }
 
@@ -348,52 +424,42 @@ impl RtpServerManager {
     }
 
     pub async fn cleanup_timed_out(&self) {
-        let timeout = std::time::Duration::from_secs(self.timeout_secs);
-        let now = std::time::Instant::now();
+        let timeout = Duration::from_secs(self.timeout_secs);
+        let now = Instant::now();
 
-        let timed_out: Vec<(u16, TransportType)> = {
-            let mut to_release = Vec::new();
-            for entry in self.ports.iter() {
-                let (key, info) = entry.pair();
-                let port = key.0;
-                let proto = key.1;
+        let snapshot: Vec<(u16, TransportType)> = self
+            .ports
+            .iter()
+            .map(|e| (e.key().0, e.key().1))
+            .collect();
 
-                let is_timed_out = match info.protocol {
-                    TransportType::Udp => {
-                        if let Some(server) = self.udp_servers.get(&port) {
-                            if let Some(session) = server.get_session().await {
-                                now.duration_since(session.allocated_at) > timeout
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    }
-                    TransportType::Tcp => {
-                        if let Some(server) = self.tcp_servers.get(&port) {
-                            if let Some(session) = server.get_session().await {
-                                now.duration_since(session.allocated_at) > timeout
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    }
-                    _ => false,
-                };
+        let mut to_release = Vec::new();
 
-                if is_timed_out {
-                    to_release.push((port, proto));
-                }
+        for (port, proto) in snapshot {
+            let session = match proto {
+                TransportType::Udp => match self.udp_servers.get(&port) {
+                    Some(server) => server.get_session().await,
+                    None => None,
+                },
+                TransportType::Tcp => match self.tcp_servers.get(&port) {
+                    Some(server) => server.get_session().await,
+                    None => None,
+                },
+                _ => None,
+            };
+
+            let Some(session) = session else {
+                continue;
+            };
+
+            if now.duration_since(session.active_at) > timeout {
+                to_release.push((port, proto));
             }
-            to_release
-        };
+        }
 
-        for (port, proto) in timed_out {
+        for (port, proto) in to_release {
             tracing::warn!(
-                "[RtpServerManager] Timeout cleanup for port {} ({:?})",
+                "[RtpServerManager] Timeout cleanup {} ({:?})",
                 port,
                 proto
             );
@@ -406,42 +472,44 @@ impl RtpServerManager {
     }
 }
 
-fn rand_simple() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-}
-
 static RTP_SERVER_MANAGER: OnceCell<Arc<RtpServerManager>> = OnceCell::new();
 
-pub async fn init_rtp_server_manager(
+pub fn init_rtp_server_manager(
     port_start: u16,
     port_end: u16,
     bind_addr: String,
     timeout_secs: u64,
-) {
+) -> Result<()> {
+    if RTP_SERVER_MANAGER.get().is_some() {
+        tracing::info!("[RtpServerManager] 已初始化，跳过重复调用");
+        return Ok(());
+    }
+
     let manager = Arc::new(RtpServerManager::new(
         RtpPortRange::new(port_start, port_end),
         bind_addr,
         timeout_secs,
     ));
-    RTP_SERVER_MANAGER.set(manager.clone()).ok();
+
+    RTP_SERVER_MANAGER
+        .set(manager.clone())
+        .map_err(|_| MediaError::Transport("RtpServerManager 初始化失败（已被其他线程初始化）".into()))?;
 
     let manager_for_task = manager.clone();
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+            tokio::time::sleep(Duration::from_secs(10)).await;
             manager_for_task.cleanup_timed_out().await;
         }
     });
 
     tracing::info!(
-        "[RtpServerManager] Initialized with port range {}-{}",
+        "[RtpServerManager] Initialized range {}-{} bind={}",
         port_start,
-        port_end
+        port_end,
+        manager.bind_addr
     );
+    Ok(())
 }
 
 pub fn get_rtp_server_manager() -> Option<&'static Arc<RtpServerManager>> {

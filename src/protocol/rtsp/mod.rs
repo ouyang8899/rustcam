@@ -1,11 +1,13 @@
 pub mod adapter;
 pub mod auth;
+pub mod common;
 pub mod sdp;
 pub mod response;
 pub mod session;
 pub mod server_adapter;
 
 pub use auth::{RtspAuthContext, authenticate};
+pub use common::{RtspError, RequestBuilder, RtspRequest};
 pub use sdp::{SdpParser, SdpInfo, SdpTrack};
 pub use response::RtspResponse;
 pub use session::{

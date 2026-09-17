@@ -1,0 +1,40 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 120
+AccessModifierOffset: -4
+NamespaceIndentation: None
+PointerAlignment: Left
+ReferenceAlignment: Left
+SortIncludes: false
+IncludeBlocks: Preserve
+
+BreakBeforeBraces: K&R
+
+SpacesInParentheses: false
+SpacesInAngles: false
+SpacesInCStyleCastParentheses: false
+SpacesInContainerLiterals: false
+
+IndentCaseLabels: false
+IndentPPDirectives: AfterHash
+FixNamespaceComments: false
+
+DerivePointerAlignment: false
+PointerBindsToType: false
+
+MacroBlockBegin: "^#"
+MacroBlockEnd: "^#"
+
+IncludeCategories:
+  - Regex: '^"(?!common|interfaces|core)'
+    Priority: 1
+  - Regex: '^<.*\.h>'
+    Priority: 2
+  - Regex: '^"(common|interfaces|core)/'
+    Priority: 3
+  - Regex: '^<mavsdk/.*>'
+    Priority: 4
+  - Regex: '^<ffmpeg/.*>'
+    Priority: 4
+  - Regex: '^<.*>'
+    Priority: 5

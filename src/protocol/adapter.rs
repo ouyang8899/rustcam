@@ -24,6 +24,10 @@ pub trait SignalAdapter: Send + Sync {
 
     async fn send(&mut self, data: &[u8]) -> Result<()>;
 
+    async fn send_interleaved(&mut self, channel: u8, payload: &[u8]) -> Result<()> {
+        Ok(())
+    }
+
     fn protocol_type(&self) -> ProtocolType;
 
     fn name(&self) -> &'static str;
