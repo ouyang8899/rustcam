@@ -50,7 +50,7 @@
 | **GB28181** | 语音对讲 | ✅ 完成 | 平台广播通知|
 | **ONVIF** | 设备发现 | ✅ 完成 | WS-Discovery 广播探测 |
 | **ONVIF** | 云台控制 | ✅ 完成 | ContinuousMove/AbsoluteMove/预置位 |
-| **ONVIF** | 语音对讲 | 🔄 进行中 | 双向语音通信 |
+| **ONVIF** | 语音对讲 | ✅ 完成 | 双向语音通信，WebSocket 触发，设备端 RTSP backchannel |
 | **RTSP** | 流接收 | ✅ 完成 | TCP/UDP 模式，支持 RTP over RTSP |
 | **流媒体** | ZLMediaKit | ✅ 完成 | 集群管理、Hook 事件处理 |
 | **流媒体** | SRS | 🔄 进行中 | 部分实现 |
