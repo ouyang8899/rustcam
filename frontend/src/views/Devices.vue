@@ -149,7 +149,7 @@
                   </el-table-column>
                   <el-table-column label="地址" min-width="140">
                     <template #default="{ row }">
-                      <code class="stream-key" style="font-size: 11px">{{ row.host ? `${row.host}:${row.port}` : '-' }}</code>
+                      <code class="stream-key" style="font-size: 11px">{{ row.host ? (row.port ? `${row.host}:${row.port}` : row.host) : '-' }}</code>
                     </template>
                   </el-table-column>
                   <el-table-column label="流源" width="110">
@@ -160,7 +160,20 @@
                     </template>
                   </el-table-column>
                   <el-table-column label="观看" prop="view_count" width="80" align="center" />
-                  <el-table-column label="媒体服务器" prop="media_server_name" min-width="120" show-overflow-tooltip />
+                  <el-table-column label="媒体服务器" width="160" align="center">
+                    <template #default="{ row }">
+                      <span v-if="row.media_server_name">
+                        <el-tag size="small" :type="row.media_server_online ? 'success' : 'danger'" style="margin-right: 4px">
+                          {{ row.media_server_online ? '在线' : '离线' }}
+                        </el-tag>
+                        {{ row.media_server_name }}
+                      </span>
+                      <span v-else-if="row.media_server_tag" style="color: #E6A23C">
+                        {{ row.media_server_tag }}
+                      </span>
+                      <span v-else>-</span>
+                    </template>
+                  </el-table-column>
                   <el-table-column label="操作" width="220" align="center">
                     <template #default="{ row }">
                       <el-button v-if="row.has_stream" size="small" type="primary" plain @click="router.push('/streams')">流</el-button>

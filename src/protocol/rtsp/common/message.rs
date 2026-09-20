@@ -1,3 +1,5 @@
+pub const RTSP_USER_AGENT: &str = concat!("RustCam-Media/", env!("CARGO_PKG_VERSION"));
+
 #[derive(Debug, Clone)]
 pub struct RtspRequest {
     pub method: String,
@@ -99,5 +101,9 @@ impl RequestBuilder {
 
     pub fn uri(&self) -> &str {
         &self.uri
+    }
+
+    pub fn headers(&self) -> &[(String, String)] {
+        &self.headers
     }
 }

@@ -20,6 +20,7 @@ pub struct DeviceRow {
     pub parent_device_tag: Option<String>,
     pub is_public: bool,
     pub created_at: RbatisDateTime,
+    pub device_username: Option<String>,
     pub device_password: Option<String>,
     pub playback_username: Option<String>,
     pub playback_password: Option<String>,
@@ -152,8 +153,8 @@ impl TryFrom<DeviceRow> for Device {
             created_at,
             host: if row.host.is_empty() { get_str("host").unwrap_or_default() } else { row.host },
             port: row.port.unwrap_or(0) as u16,
-            device_username: get_str("device_username"),
-            device_password: row.device_password.or_else(|| get_str("device_password")),
+            device_username: row.device_username.clone(),
+            device_password: row.device_password.clone(),
             push_urls: get_push_urls(),
             pull_urls: get_pull_urls(),
             playback_username: row.playback_username.or_else(|| get_str("playback_username")),
@@ -216,6 +217,7 @@ pub async fn device_insert(
     parent_device_tag: Option<&str>,
     is_public: Option<bool>,
     created_at: Option<RbatisDateTime>,
+    device_username: Option<&str>,
     device_password: Option<&str>,
     playback_username: Option<&str>,
     playback_password: Option<&str>,
@@ -247,6 +249,7 @@ pub async fn device_update(
     device_tag: Option<&str>,
     parent_device_tag: Option<&str>,
     is_public: Option<bool>,
+    device_username: Option<&str>,
     device_password: Option<&str>,
     playback_username: Option<&str>,
     playback_password: Option<&str>,
@@ -296,6 +299,7 @@ pub async fn device_update_by_device_tag(
     device_tag: Option<&str>,
     parent_device_tag: Option<&str>,
     is_public: Option<bool>,
+    device_username: Option<&str>,
     device_password: Option<&str>,
     playback_username: Option<&str>,
     playback_password: Option<&str>,
@@ -531,6 +535,26 @@ pub struct SessionRow {
     pub expires_at: Option<RbatisDateTime>,
     pub bytes_sent: i64,
     pub bytes_received: i64,
+}
+
+#[html_sql("sql/session.html")]
+pub async fn session_select_paginated(
+    rb: &dyn rbatis::Executor,
+    search: Option<String>,
+    state: Option<String>,
+    limit: i64,
+    offset: i64,
+) -> rbatis::Result<Vec<SessionRow>> {
+    impled!()
+}
+
+#[html_sql("sql/session.html")]
+pub async fn session_count(
+    rb: &dyn rbatis::Executor,
+    search: Option<String>,
+    state: Option<String>,
+) -> rbatis::Result<i64> {
+    impled!()
 }
 
 #[sql("SELECT id, session_type, device_tag, channel_tag, user_id, state, client_ip, client_type, media_server_tag, protocol, created_at, last_activity, expires_at, bytes_sent, bytes_received FROM sessions ORDER BY created_at DESC")]
@@ -867,6 +891,26 @@ impl Stream {
             created_at: RbatisDateTime::from_timestamp_millis(self.created_at.timestamp_millis()),
         }
     }
+}
+
+#[html_sql("sql/stream.html")]
+pub async fn stream_select_paginated(
+    rb: &dyn rbatis::Executor,
+    search: Option<String>,
+    state: Option<String>,
+    limit: i64,
+    offset: i64,
+) -> rbatis::Result<Vec<StreamRow>> {
+    impled!()
+}
+
+#[html_sql("sql/stream.html")]
+pub async fn stream_count(
+    rb: &dyn rbatis::Executor,
+    search: Option<String>,
+    state: Option<String>,
+) -> rbatis::Result<i64> {
+    impled!()
 }
 
 #[sql("SELECT id, device_tag, channel_tag, media_server_tag, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams ORDER BY created_at DESC")]
@@ -1357,6 +1401,24 @@ pub async fn channel_select_by_device_tag_and_channel_tag(
 pub async fn channel_select_all(
     rb: &dyn rbatis::Executor,
 ) -> rbatis::Result<Vec<ChannelRow>> { impled!() }
+
+#[html_sql("sql/channel.html")]
+pub async fn channel_select_paginated(
+    rb: &dyn rbatis::Executor,
+    device_tag: Option<String>,
+    search: Option<String>,
+    status: Option<String>,
+    limit: i64,
+    offset: i64,
+) -> rbatis::Result<Vec<ChannelRow>> { impled!() }
+
+#[html_sql("sql/channel.html")]
+pub async fn channel_count(
+    rb: &dyn rbatis::Executor,
+    device_tag: Option<String>,
+    search: Option<String>,
+    status: Option<String>,
+) -> rbatis::Result<i64> { impled!() }
 
 #[html_sql("sql/channel.html")]
 pub async fn channel_insert(

@@ -211,7 +211,7 @@ function validate() {
 }
 
 function getData() {
-  return { ...localForm }
+  return { ...localForm, protocol: 'Rtsp' }
 }
 
 async function loadData(deviceTag) {

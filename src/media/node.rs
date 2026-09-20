@@ -809,6 +809,12 @@ impl MediaSession {
             .any(|n| n.value().node_type() == MediaNodeType::GB28181_BROADCAST_VOICE)
     }
 
+    pub fn has_node_of_type(&self, node_type: MediaNodeType) -> bool {
+        self.nodes
+            .iter()
+            .any(|n| n.value().node_type() == node_type)
+    }
+
     pub fn start_broadcast(&self, channel_tag: &str, node: Arc<dyn MediaNode>) {
         let node_id = node.id().clone();
         self.nodes.insert(node_id.clone(), node.clone());

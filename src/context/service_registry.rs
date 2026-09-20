@@ -174,6 +174,7 @@ impl ServiceRegistry {
             media.cluster.clone(),
             infra.config().session.expiration_secs,
             recording_service.clone(),
+            stream_service.clone(),
         ));
 
         // ZLMediaKit Hook 处理器

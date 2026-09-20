@@ -1,5 +1,6 @@
 pub mod adapter;
 pub mod auth;
+pub mod client;
 pub mod common;
 pub mod sdp;
 pub mod response;
@@ -7,6 +8,7 @@ pub mod session;
 pub mod server_adapter;
 
 pub use auth::{RtspAuthContext, authenticate};
+pub use client::types::{MediaDirection, MediaTrack, MediaType, RtpTransportMode, TrackState, TrackTransport};
 pub use common::{RtspError, RequestBuilder, RtspRequest};
 pub use sdp::{SdpParser, SdpInfo, SdpTrack};
 pub use response::RtspResponse;

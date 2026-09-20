@@ -11,6 +11,34 @@ FROM sessions
 WHERE id = #{id}
 </select>
 
+<select id="session_select_paginated">
+SELECT id, session_type, device_tag, channel_tag, user_id, state, client_ip, client_type, media_server_tag, protocol, created_at, last_activity, expires_at, bytes_sent, bytes_received
+FROM sessions
+<where>
+<if test="search != null">
+(device_tag ILIKE '%' || #{search} || '%' OR user_id ILIKE '%' || #{search} || '%' OR client_ip ILIKE '%' || #{search} || '%')
+</if>
+<if test="state != null">
+AND state = #{state}
+</if>
+</where>
+ORDER BY id DESC
+LIMIT #{limit} OFFSET #{offset}
+</select>
+
+<select id="session_count">
+SELECT COUNT(*)
+FROM sessions
+<where>
+<if test="search != null">
+(device_tag ILIKE '%' || #{search} || '%' OR user_id ILIKE '%' || #{search} || '%' OR client_ip ILIKE '%' || #{search} || '%')
+</if>
+<if test="state != null">
+AND state = #{state}
+</if>
+</where>
+</select>
+
 <select id="session_select_active_paginated">
 SELECT id, session_type, device_tag, channel_tag, user_id, state, client_ip, client_type, media_server_tag, protocol, created_at, last_activity, expires_at, bytes_sent, bytes_received
 FROM sessions

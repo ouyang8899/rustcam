@@ -42,3 +42,9 @@ pub struct DeviceAddress {
     pub scopes: Vec<String>,
     pub epr_address: Option<String>,
 }
+
+#[derive(Debug, Clone)]
+pub struct AudioOutput {
+    pub token: String,
+    pub name: Option<String>,
+}

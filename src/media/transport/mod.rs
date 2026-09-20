@@ -21,11 +21,13 @@ pub mod udp;
 pub mod tcp;
 pub mod gb28181_broadcast;
 pub mod websocket;
+pub mod onvif_backchannel;
 
 pub use udp::UdpTransport;
 pub use tcp::{TcpTransport, Gb28181TcpTransport};
 pub use gb28181_broadcast::GB28181BroadcastVoiceTransport;
 pub use websocket::{WebSocketMediaTransport, WebSocketMediaNodeTransport};
+pub use onvif_backchannel::OnvifBackchannelTransport;
 
 pub struct NullTransport;
 

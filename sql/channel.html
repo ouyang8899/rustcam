@@ -14,6 +14,35 @@ SELECT id, device_tag, channel_tag, name, status, device_type, device_type_code,
 FROM channels ORDER BY created_at DESC
 </select>
 
+<select id="channel_select_paginated">
+SELECT id, device_tag, channel_tag, name, status, device_type, device_type_code, channel_extended, is_default, parent_channel_tag, civil_code, address, ip_address, port, manufacturer, model, parental, extended, created_at, updated_at
+FROM channels
+<where>
+<if test="device_tag != null">device_tag = #{device_tag}</if>
+<if test="search != null">
+AND (name ILIKE '%' || #{search} || '%' OR device_tag ILIKE '%' || #{search} || '%' OR channel_tag ILIKE '%' || #{search} || '%')
+</if>
+<if test="status != null">
+AND status = #{status}
+</if>
+</where>
+ORDER BY created_at DESC
+LIMIT #{limit} OFFSET #{offset}
+</select>
+
+<select id="channel_count">
+SELECT COUNT(*) FROM channels
+<where>
+<if test="device_tag != null">device_tag = #{device_tag}</if>
+<if test="search != null">
+AND (name ILIKE '%' || #{search} || '%' OR device_tag ILIKE '%' || #{search} || '%' OR channel_tag ILIKE '%' || #{search} || '%')
+</if>
+<if test="status != null">
+AND status = #{status}
+</if>
+</where>
+</select>
+
 <insert id="channel_insert">
 INSERT INTO channels
 <trim prefix="(" suffix=")" prefixOverrides=",">

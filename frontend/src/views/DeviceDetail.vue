@@ -27,7 +27,7 @@
                       <span class="status-dot" :class="getStatusClass(device.status)" style="margin-right: 6px" />{{ device.status }}
                     </el-descriptions-item>
                     <el-descriptions-item label="设备类型">{{ device.device_type || 'Other' }}</el-descriptions-item>
-                    <el-descriptions-item label="主机地址">{{ device.host || '-' }}:{{ device.port || '-' }}</el-descriptions-item>
+                    <el-descriptions-item label="主机地址">{{ device.host ? (device.port ? `${device.host}:${device.port}` : device.host) : '-' }}</el-descriptions-item>
                     <el-descriptions-item label="媒体服务器">{{ device.media_server_name || '-' }}</el-descriptions-item>
                     <el-descriptions-item label="应用名称">{{ device.app || '-' }}</el-descriptions-item>
                     <el-descriptions-item label="维护模式">

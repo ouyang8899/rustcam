@@ -31,8 +31,16 @@
                   <el-tag size="small">{{ sessionTypeLabel(row.session_type) }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="设备标识" prop="device_tag" width="120" align="center" />
-              <el-table-column label="流标识" prop="stream_id" min-width="180" show-overflow-tooltip />
+              <el-table-column label="设备标识" prop="device_tag" width="140" align="center">
+                <template #default="{ row }">
+                  <code class="stream-key">{{ row.device_tag || '-' }}</code>
+                </template>
+              </el-table-column>
+              <el-table-column label="流标识" min-width="180">
+                <template #default="{ row }">
+                  <code class="stream-key">{{ row.device_tag }}_{{ row.channel_tag }}</code>
+                </template>
+              </el-table-column>
               <el-table-column label="用户ID" prop="user_id" width="100" align="center" />
               <el-table-column label="客户端IP" width="130" align="center">
                 <template #default="{ row }">
@@ -45,6 +53,20 @@
               <el-table-column label="状态" width="100" align="center">
                 <template #default="{ row }">
                   <el-tag :type="sessionStateType(row.state)" size="small">{{ sessionStateLabel(row.state) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="媒体服务器" width="160" align="center">
+                <template #default="{ row }">
+                  <span v-if="row.media_server_name">
+                    <el-tag size="small" :type="row.media_server_online ? 'success' : 'danger'" style="margin-right: 4px">
+                      {{ row.media_server_online ? '在线' : '离线' }}
+                    </el-tag>
+                    {{ row.media_server_name }}
+                  </span>
+                  <span v-else-if="row.media_server_tag" style="color: #E6A23C">
+                    {{ row.media_server_tag }}
+                  </span>
+                  <span v-else>-</span>
                 </template>
               </el-table-column>
               <el-table-column label="创建时间" width="180" align="center">

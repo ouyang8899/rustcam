@@ -17,14 +17,15 @@ use crate::protocol::rtsp::auth::{
     authenticate, build_www_authenticate, generate_nonce, RtspAuthContext,
 };
 use crate::protocol::rtsp::common::{
-    parse_interleaved_channels, InterleavedBuilder, InterleavedFrame, InterleavedStats, RtcpPacket,
+    parse_interleaved_channels, InterleavedBuilder, InterleavedFrame, InterleavedStats, RtcpPacket, RTSP_USER_AGENT,
 };
 use crate::protocol::rtsp::response::RtspResponse;
 use crate::protocol::rtsp::sdp::SdpParser;
 use crate::protocol::rtsp::session::{
     create_session, get_session, get_session_by_stream_key, remove_session, RtspSessionState,
-    TrackTransport, TransportMode,
+    TrackTransport,
 };
+use crate::protocol::rtsp::RtpTransportMode;
 use crate::protocol::traits::ProtocolDeps;
 
 const UDP_EVENT_QUEUE_CAPACITY: usize = 4096;
@@ -211,6 +212,8 @@ impl RtspServerAdapter {
             clock_rate: 90000,
             fmtp: Some("packetization-mode=1".to_string()),
             control: Some("trackID=0".to_string()),
+            direction: crate::protocol::rtsp::sdp::SdpDirection::RecvOnly,
+            attributes: std::collections::HashMap::new(),
         }]
     }
 
@@ -321,7 +324,7 @@ impl RtspServerAdapter {
 
         let tracks: Vec<(String, TrackTransport)> = {
             let s = sess.read().await;
-            if s.transport_mode != TransportMode::Udp {
+            if s.transport_mode != RtpTransportMode::Udp {
                 return;
             }
             s.track_transports
@@ -765,7 +768,7 @@ impl RtspServerAdapter {
                         let mut s = sess.write().await;
                         s.update_activity();
                         s.state = RtspSessionState::Ready;
-                        s.transport_mode = TransportMode::Tcp;
+                        s.transport_mode = RtpTransportMode::Tcp;
                         s.track_transports.insert(
                             track_id.clone(),
                             TrackTransport::new_tcp(track_id.clone(), ch_rtp, ch_rtcp),
@@ -798,7 +801,7 @@ impl RtspServerAdapter {
                         let mut s = sess.write().await;
                         s.update_activity();
                         s.state = RtspSessionState::Ready;
-                        s.transport_mode = TransportMode::Udp;
+                        s.transport_mode = RtpTransportMode::Udp;
                         s.rtp_port = Some(rtp_port);
 
                         let mut tt =
@@ -858,10 +861,9 @@ impl RtspServerAdapter {
                 if self.device_id.is_none() {
                     self.device_id = Some(Self::device_id_from_key(&stream_key));
                 }
-                let device_id = self.device_id.unwrap_or(0);
 
-                if transport_mode == TransportMode::Udp {
-                    self.start_udp_tracks(device_id).await;
+                if transport_mode == RtpTransportMode::Udp {
+                    self.start_udp_tracks(self.device_id.unwrap_or(0)).await;
                 }
 
                 let rtp_info = format!(
@@ -875,13 +877,12 @@ impl RtspServerAdapter {
                     .unwrap_or_else(|| format!("rtsp_{}", chrono::Utc::now().timestamp_millis()));
 
                 events.push(SignalEvent::StartPlay {
-                    device_id,
                     device_tag: self.device_tag.clone(),
                     session_id,
                     channel_id: Some(stream_key.clone()),
                     transport: match transport_mode {
-                        TransportMode::Tcp => TransportType::Tcp,
-                        TransportMode::Udp => TransportType::Udp,
+                        RtpTransportMode::Tcp => TransportType::Tcp,
+                        RtpTransportMode::Udp => TransportType::Udp,
                     },
                     media_server_name: None,
                     session_type: SessionType::Play,
@@ -960,7 +961,6 @@ impl RtspServerAdapter {
                     .unwrap_or_else(|| sess_id.to_string());
 
                 events.push(SignalEvent::StopPlay {
-                    device_id,
                     device_tag: self.device_tag.clone(),
                     session_id,
                     session_type: SessionType::Play,
@@ -1145,7 +1145,7 @@ impl SignalAdapter for RtspServerAdapter {
     }
 
     fn name(&self) -> &'static str {
-        "RTSP-Server"
+        RTSP_USER_AGENT
     }
 
     fn keepalive(&self) -> bool {

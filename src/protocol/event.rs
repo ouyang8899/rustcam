@@ -69,6 +69,11 @@ pub enum SignalEvent {
         stream_key: String,
         reason: Option<String>,
     },
+    StreamCreated {
+        device_id: i64,
+        device_tag: String,
+        channel_tag: String,
+    },
     StreamRecover {
         device_id: i64,
         stream_key: String,
@@ -84,7 +89,6 @@ pub enum SignalEvent {
         stream_key: String,
     },
     StartPlay {
-        device_id: i64,
         device_tag: Option<String>,
         session_id: String,
         channel_id: Option<String>,
@@ -93,7 +97,6 @@ pub enum SignalEvent {
         session_type: SessionType,
     },
     StopPlay {
-        device_id: i64,
         device_tag: Option<String>,
         session_id: String,
         session_type: SessionType,
@@ -118,7 +121,6 @@ pub enum SignalEvent {
         timestamp: DateTime<Utc>,
     },
     QueryDeviceInfo {
-        device_id: i64,
         device_tag: Option<String>,
     },
     QueryDeviceStatus {
@@ -257,6 +259,7 @@ impl SignalEvent {
             SignalEvent::DeviceOnline { .. } => "device_online".to_string(),
             SignalEvent::StreamStart { .. } => "stream_start".to_string(),
             SignalEvent::StreamStop { .. } => "stream_stop".to_string(),
+            SignalEvent::StreamCreated { .. } => "stream_created".to_string(),
             SignalEvent::StreamRecover { .. } => "stream_recover".to_string(),
             SignalEvent::StreamRetriesExhausted { .. } => "stream_retries_exhausted".to_string(),
             SignalEvent::StreamRestart { .. } => "stream_restart".to_string(),
@@ -396,16 +399,7 @@ impl CatalogChannel {
     }
 
     pub fn is_video_channel(&self) -> bool {
-        if let Some(ref model) = self.model {
-            let model_upper = model.to_uppercase();
-            if model_upper.contains("AUDIO") || model_upper.contains("SPEAKER") || model_upper.contains("MIC") || model_upper.contains("INPUT") {
-                return false;
-            }
-        }
-        match self.get_device_type_code() {
-            Some(136) | Some(137) => false,
-            _ => true,
-        }
+        !self.is_audio_channel()
     }
 }
 

@@ -26,8 +26,23 @@ impl AuthHandler {
         }
     }
 
+    pub fn set_basic_auth(&mut self) {
+        self.auth_method = Some(AuthMethod::Basic);
+    }
+
+    pub fn build_basic_authorization(&self, uri: &str) -> Result<String, RtspError> {
+        use base64::Engine;
+        let credentials = format!(
+            "{}:{}",
+            self.credentials.username, self.credentials.password
+        );
+        let encoded = base64::engine::general_purpose::STANDARD.encode(credentials);
+        Ok(format!("Basic {}", encoded))
+    }
+
     pub fn parse_www_authenticate(&mut self, header: &str) -> Result<(), RtspError> {
         let header = header.trim();
+        eprintln!("[Auth] parse_www_authenticate: {}", header);
         if header.starts_with("Digest ") {
             let params = Self::parse_digest_params(&header[7..]);
             let realm = params
@@ -36,6 +51,8 @@ impl AuthHandler {
             let nonce = params
                 .get("nonce")
                 .ok_or_else(|| RtspError::AuthFailed("Missing nonce in Digest auth".into()))?;
+            let qop = params.get("qop").map(|s| s.as_str());
+            eprintln!("[Auth] Parsed Digest: realm=\"{}\" nonce=\"{}\" qop={:?}", realm, nonce, qop);
             self.auth_method = Some(AuthMethod::Digest {
                 realm: realm.clone(),
                 nonce: nonce.clone(),
@@ -80,7 +97,7 @@ impl AuthHandler {
                 Ok(format!("Basic {}", encoded))
             }
             Some(AuthMethod::Digest { realm, nonce }) => {
-                use md5::{Digest, Md5};
+                use md5::Context;
                 let response = Self::calc_digest_response(
                     &self.credentials.username,
                     realm,
@@ -89,10 +106,14 @@ impl AuthHandler {
                     nonce,
                     method,
                 );
-                Ok(format!(
+                let auth_header = format!(
                     "Digest username=\"{}\", realm=\"{}\", nonce=\"{}\", uri=\"{}\", response=\"{}\"",
                     self.credentials.username, realm, nonce, uri, response
-                ))
+                );
+                eprintln!("[Auth] Building Digest auth: username=\"{}\" realm=\"{}\" nonce=\"{}\" uri=\"{}\" method={}",
+                    self.credentials.username, realm, nonce, uri, method);
+                eprintln!("[Auth] Full Digest header: {}", auth_header);
+                Ok(auth_header)
             }
             None => Err(RtspError::AuthFailed(
                 "No auth method selected".into(),
@@ -108,18 +129,34 @@ impl AuthHandler {
         nonce: &str,
         method: &str,
     ) -> String {
-        use md5::{Digest, Md5};
-        let ha1 = format!(
-            "{}:{}:{}",
-            username,
-            realm,
-            password
-        );
-        let ha1 = format!("{:x}", Md5::new().chain_update(ha1.as_bytes()));
-        let ha2 = format!("{}:{}", method, uri);
-        let ha2 = format!("{:x}", Md5::new().chain_update(ha2.as_bytes()));
-        let response = format!("{}:{}:{}", ha1, nonce, ha2);
-        format!("{:x}", Md5::new().chain_update(response.as_bytes()))
+        use md5::Context;
+        let ha1_input = format!("{}:{}:{}", username, realm, password);
+        eprintln!("[Auth] calc_digest: ha1_input = {}", ha1_input);
+        let ha1 = format!("{:x}", {
+            let mut ctx = Context::new();
+            ctx.consume(ha1_input.as_bytes());
+            ctx.compute()
+        });
+        eprintln!("[Auth] calc_digest: ha1 = {}", ha1);
+
+        let ha2_input = format!("{}:{}", method, uri);
+        eprintln!("[Auth] calc_digest: ha2_input = {}", ha2_input);
+        let ha2 = format!("{:x}", {
+            let mut ctx = Context::new();
+            ctx.consume(ha2_input.as_bytes());
+            ctx.compute()
+        });
+        eprintln!("[Auth] calc_digest: ha2 = {}", ha2);
+
+        let response_input = format!("{}:{}:{}", ha1, nonce, ha2);
+        eprintln!("[Auth] calc_digest: response_input = {}", response_input);
+        let response = format!("{:x}", {
+            let mut ctx = Context::new();
+            ctx.consume(response_input.as_bytes());
+            ctx.compute()
+        });
+        eprintln!("[Auth] calc_digest: response = {}", response);
+        response
     }
 
     pub fn has_auth_method(&self) -> bool {

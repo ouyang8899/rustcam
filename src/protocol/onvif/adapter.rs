@@ -1,18 +1,46 @@
-use std::net::SocketAddr;
 use async_trait::async_trait;
-use tokio::net::tcp::OwnedWriteHalf;
-use tokio::io::AsyncWriteExt;
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::{Arc, Weak};
+use tokio::io::AsyncWriteExt;
+use tokio::net::tcp::OwnedWriteHalf;
+use tokio::sync::RwLock;
 
 use crate::domain::SessionType;
+use crate::error::{AppError, Result};
+use crate::media::transport::OnvifBackchannelTransport;
+use crate::media::{
+    get_media_session_manager, BasicMediaNode, MediaNode, MediaNodeId, MediaNodeType,
+};
 use crate::protocol::adapter::SignalAdapter;
-use crate::protocol::event::{SignalEvent, ProtocolType, TransportType, PtzCommand};
-use crate::protocol::traits::ProtocolDeps;
+use crate::protocol::event::{
+    ProtocolType, PtzCommand, SignalEvent, TalkResponseStatus, TransportType,
+};
 use crate::protocol::onvif::auth::UsernameToken;
 use crate::protocol::onvif::events::PullPointServer;
 use crate::protocol::onvif::ptz_client::OnvifPtzClient;
-use crate::error::{Result, AppError};
+use crate::protocol::traits::ProtocolDeps;
+
+const MAX_HEADER_BYTES: usize = 64 * 1024;
+const MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
+const MAX_BUFFER_BYTES: usize = MAX_HEADER_BYTES + MAX_BODY_BYTES;
+
+fn xml_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
 
 // ═══════════════════════════════════════════════════════════════
 // 辅助函数
@@ -105,32 +133,65 @@ impl OnvifAdapter {
     // 消息解析
     // ═══════════════════════════════════════════════════════
 
-    fn extract_message(buffer: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
-        let header_end = memchr::memmem::find(buffer, b"\r\n\r\n")?;
-        let header_str = String::from_utf8_lossy(&buffer[..header_end]);
+    fn extract_message(buffer: &[u8]) -> std::result::Result<Option<(usize, usize)>, &'static str> {
+        let header_end = match memchr::memmem::find(buffer, b"\r\n\r\n") {
+            Some(p) => p,
+            None => {
+                if buffer.len() > MAX_HEADER_BYTES {
+                    return Err("header too large");
+                }
+                return Ok(None);
+            }
+        };
 
-        let content_length = header_str
-            .lines()
-            .find(|l| l.to_lowercase().starts_with("content-length:"))
-            .and_then(|l| l.split(':').nth(1))
-            .and_then(|v| v.trim().parse::<usize>().ok())
-            .unwrap_or(0);
+        if header_end > MAX_HEADER_BYTES {
+            return Err("header too large");
+        }
+
+        let header_str = String::from_utf8_lossy(&buffer[..header_end]);
+        let mut content_length: usize = 0;
+        for line in header_str.lines() {
+            if let Some((k, v)) = line.split_once(':') {
+                if k.trim().eq_ignore_ascii_case("content-length") {
+                    let parsed = v
+                        .trim()
+                        .parse::<usize>()
+                        .map_err(|_| "bad content-length")?;
+                    if parsed > MAX_BODY_BYTES {
+                        return Err("body too large");
+                    }
+                    content_length = parsed;
+                    break;
+                }
+            }
+        }
 
         let body_start = header_end + 4;
         let total_len = body_start + content_length;
+
         if buffer.len() < total_len {
-            return None;
+            if total_len > MAX_BUFFER_BYTES {
+                return Err("total message too large");
+            }
+            return Ok(None);
         }
 
-        Some((buffer[..total_len].to_vec(), buffer[total_len..].to_vec()))
+        Ok(Some((body_start, total_len)))
     }
 
     fn get_soap_action(headers: &str) -> Option<String> {
-        headers
-            .lines()
-            .find(|l| l.to_lowercase().starts_with("soapaction:"))
-            .and_then(|l| l.split(':').nth(1))
-            .map(|v| v.trim().trim_matches('"').to_string())
+        for line in headers.lines() {
+            if let Some((k, v)) = line.split_once(':') {
+                if k.trim().eq_ignore_ascii_case("soapaction") {
+                    return Some(v.trim().trim_matches('"').to_string());
+                }
+            }
+        }
+        None
+    }
+
+    fn action_name(soap_action: &str) -> &str {
+        soap_action.rsplit('/').next().unwrap_or(soap_action).trim()
     }
 
     // ═══════════════════════════════════════════════════════
@@ -476,7 +537,9 @@ impl OnvifAdapter {
     async fn send_raw(&self, data: &[u8]) -> Result<()> {
         if let Some(ref write_arc) = self.write {
             let mut write = write_arc.write().await;
-            write.write_all(data).await
+            write
+                .write_all(data)
+                .await
                 .map_err(|e| AppError::Internal(format!("TCP write error: {}", e)))?;
             let _ = write.flush().await;
         }
@@ -488,29 +551,29 @@ impl OnvifAdapter {
     // ═══════════════════════════════════════════════════════
 
     fn handle_soap_action(&self, action: &str, data: &[u8]) -> Option<String> {
-        if action.contains("GetDeviceInformation") {
+        if Self::action_name(action).contains("GetDeviceInformation") {
             Some(self.build_get_device_info_response())
-        } else if action.contains("GetCapabilities") {
+        } else if Self::action_name(action).contains("GetCapabilities") {
             Some(self.build_get_capabilities_response())
-        } else if action.contains("GetProfiles") {
+        } else if Self::action_name(action).contains("GetProfiles") {
             Some(self.build_get_profiles_response())
-        } else if action.contains("GetStreamUri") {
+        } else if Self::action_name(action).contains("GetStreamUri") {
             let profile = Self::extract_profile_token(data);
             Some(self.build_get_stream_uri_response(&profile))
-        } else if action.contains("GetSnapshotUri") {
+        } else if Self::action_name(action).contains("GetSnapshotUri") {
             Some(self.build_get_snapshot_uri_response())
-        } else if action.contains("GetVideoSources") {
+        } else if Self::action_name(action).contains("GetVideoSources") {
             Some(self.build_get_video_sources_response())
-        } else if action.contains("ContinuousMove")
-            || action.contains("AbsoluteMove")
-            || action.contains("RelativeMove")
-            || action.contains("Stop")
+        } else if Self::action_name(action).contains("ContinuousMove")
+            || Self::action_name(action).contains("AbsoluteMove")
+            || Self::action_name(action).contains("RelativeMove")
+            || Self::action_name(action).contains("Stop")
         {
             Some(Self::build_ptz_response())
-        } else if action.contains("GetPresets") {
+        } else if Self::action_name(action).contains("GetPresets") {
             let presets = self.pull_point_server.get_presets();
             Some(PullPointServer::build_get_presets_response(&presets))
-        } else if action.contains("SetPreset") {
+        } else if Self::action_name(action).contains("SetPreset") {
             let name = Self::extract_element_text(data, "PresetName")
                 .unwrap_or_else(|| "Preset".to_string());
             let token = self.pull_point_server.save_preset(name);
@@ -519,18 +582,17 @@ impl OnvifAdapter {
                 token
             );
             Some(Self::build_soap_response(&body))
-        } else if action.contains("RemovePreset") {
-            let token =
-                Self::extract_element_text(data, "PresetToken").unwrap_or_default();
+        } else if Self::action_name(action).contains("RemovePreset") {
+            let token = Self::extract_element_text(data, "PresetToken").unwrap_or_default();
             self.pull_point_server.remove_preset(&token);
             Some(Self::build_soap_response(
                 r#"<RemovePresetResponse xmlns="http://www.onvif.org/ver20/ptz/wsdl"/>"#,
             ))
-        } else if action.contains("GotoPreset") {
+        } else if Self::action_name(action).contains("GotoPreset") {
             Some(Self::build_soap_response(
                 r#"<GotoPresetResponse xmlns="http://www.onvif.org/ver20/ptz/wsdl"/>"#,
             ))
-        } else if action.contains("GetStatus") {
+        } else if Self::action_name(action).contains("GetStatus") {
             let status = r#"<GetStatusResponse xmlns="http://www.onvif.org/ver20/ptz/wsdl">
   <PTZStatus>
     <Position><PanTilt x="0.0" y="0.0"/><Zoom x="1.0"/></Position>
@@ -538,7 +600,7 @@ impl OnvifAdapter {
   </PTZStatus>
 </GetStatusResponse>"#;
             Some(Self::build_soap_response(status))
-        } else if action.contains("CreatePullPointSubscription") {
+        } else if Self::action_name(action).contains("CreatePullPointSubscription") {
             let timeout = Self::extract_element_text(data, "TerminationTime")
                 .as_deref()
                 .map(Self::parse_duration_hours)
@@ -549,19 +611,18 @@ impl OnvifAdapter {
             Some(PullPointServer::build_create_subscription_response(
                 &sub_ref,
             ))
-        } else if action.contains("PullMessages") {
+        } else if Self::action_name(action).contains("PullMessages") {
             let sub_ref = Self::extract_element_text(data, "SubscriptionReference")
                 .unwrap_or_else(|| "urn:uuid:unknown".to_string());
             let messages = self.pull_point_server.pull_messages(&sub_ref, 100, 5);
             Some(PullPointServer::build_pull_messages_response(
-                &messages,
-                &sub_ref,
+                &messages, &sub_ref,
             ))
-        } else if action.contains("GetEventProperties") {
+        } else if Self::action_name(action).contains("GetEventProperties") {
             Some(PullPointServer::build_get_event_properties_response())
-        } else if action.contains("Renew") {
-            let sub_ref = Self::extract_element_text(data, "SubscriptionReference")
-                .unwrap_or_default();
+        } else if Self::action_name(action).contains("Renew") {
+            let sub_ref =
+                Self::extract_element_text(data, "SubscriptionReference").unwrap_or_default();
             if let Some(termination) = self.pull_point_server.renew_subscription(&sub_ref, 24) {
                 Some(PullPointServer::build_renew_response(&termination))
             } else {
@@ -571,22 +632,26 @@ impl OnvifAdapter {
                     "Subscription not found",
                 ))
             }
-        } else if action.contains("Unsubscribe") {
-            let sub_ref = Self::extract_element_text(data, "SubscriptionReference")
-                .unwrap_or_default();
+        } else if Self::action_name(action).contains("Unsubscribe") {
+            let sub_ref =
+                Self::extract_element_text(data, "SubscriptionReference").unwrap_or_default();
             self.pull_point_server.unsubscribe(&sub_ref);
             Some(PullPointServer::build_unsubscribe_response())
-        } else if action.contains("GetSystemDateAndTime") {
+        } else if Self::action_name(action).contains("GetSystemDateAndTime") {
             Some(self.build_get_system_date_time_response())
-        } else if action.contains("GetNetworkInterfaces") {
+        } else if Self::action_name(action).contains("GetNetworkInterfaces") {
             Some(self.build_get_network_interfaces_response())
-        } else if action.contains("GetUsers") {
+        } else if Self::action_name(action).contains("GetUsers") {
             Some(self.build_get_users_response())
-        } else if action.contains("CreateUsers") || action.contains("DeleteUsers") {
+        } else if Self::action_name(action).contains("CreateUsers") {
             Some(Self::build_soap_response(
                 r#"<CreateUsersResponse xmlns="http://www.onvif.org/ver10/device/wsdl"/>"#,
             ))
-        } else if action.contains("GetNetworkDefaultSettings") {
+        } else if Self::action_name(action).contains("DeleteUsers") {
+            Some(Self::build_soap_response(
+                r#"<DeleteUsersResponse xmlns="http://www.onvif.org/ver10/device/wsdl"/>"#,
+            ))
+        } else if Self::action_name(action).contains("GetNetworkDefaultSettings") {
             Some(Self::build_soap_response(
                 r#"<GetNetworkDefaultSettingsResponse xmlns="http://www.onvif.org/ver10/device/wsdl">
   <IPv4><Enabled>true</Enabled><Config><DHCP>true</DHCP></Config></IPv4>
@@ -602,10 +667,7 @@ impl OnvifAdapter {
         }
     }
 
-    fn parse_message(
-        &mut self,
-        data: &[u8],
-    ) -> Result<(Vec<SignalEvent>, Option<Vec<u8>>)> {
+    fn parse_message(&mut self, data: &[u8]) -> Result<(Vec<SignalEvent>, Option<Vec<u8>>)> {
         let header_end = memchr::memmem::find(data, b"\r\n\r\n")
             .ok_or_else(|| AppError::Internal("ONVIF: no header end".to_string()))?;
         let header_str = String::from_utf8_lossy(&data[..header_end]);
@@ -644,16 +706,18 @@ impl OnvifAdapter {
 
         // 生成事件
         if let Some(action) = soap_action.as_deref() {
-            if action.contains("GetDeviceInformation") || action.contains("GetCapabilities") {
+            if Self::action_name(action).contains("GetDeviceInformation")
+                || Self::action_name(action).contains("GetCapabilities")
+            {
                 events.push(SignalEvent::QueryDeviceInfo {
-                    device_id: 0,
-                    device_tag: None,
+                    device_tag: self.device_id.clone(),
                 });
             }
-            if action.contains("GetStreamUri") || action.contains("GetSnapshotUri") {
+            if Self::action_name(action).contains("GetStreamUri")
+                || Self::action_name(action).contains("GetSnapshotUri")
+            {
                 events.push(SignalEvent::StartPlay {
-                    device_id: 0,
-                    device_tag: None,
+                    device_tag: self.device_id.clone(),
                     session_id: format!("onvif_{}", chrono::Utc::now().timestamp_millis()),
                     channel_id: Some(Self::extract_profile_token(data)),
                     transport: TransportType::Tcp,
@@ -661,7 +725,7 @@ impl OnvifAdapter {
                     session_type: SessionType::Play,
                 });
             }
-            if action.contains("ContinuousMove") {
+            if Self::action_name(action).contains("ContinuousMove") {
                 let (pan, tilt, zoom) = Self::parse_ptz_velocity(data);
                 let speed =
                     ((pan.abs().max(tilt.abs()).max(zoom.abs()) * 100.0) as u8).clamp(1, 100);
@@ -671,7 +735,7 @@ impl OnvifAdapter {
                     speed: Some(speed),
                 });
             }
-            if action.contains("AbsoluteMove") {
+            if Self::action_name(action).contains("AbsoluteMove") {
                 let (pan, tilt, zoom) = Self::parse_ptz_velocity(data);
                 events.push(SignalEvent::PtzControl {
                     device_id: device_id.clone(),
@@ -679,7 +743,7 @@ impl OnvifAdapter {
                     speed: Some(50),
                 });
             }
-            if action.contains("RelativeMove") {
+            if Self::action_name(action).contains("RelativeMove") {
                 let (pan, tilt, zoom) = Self::parse_ptz_velocity(data);
                 events.push(SignalEvent::PtzControl {
                     device_id: device_id.clone(),
@@ -687,7 +751,7 @@ impl OnvifAdapter {
                     speed: Some(50),
                 });
             }
-            if action.contains("Stop") {
+            if Self::action_name(action).contains("Stop") {
                 events.push(SignalEvent::PtzControl {
                     device_id: device_id.clone(),
                     command: PtzCommand::Stop,
@@ -708,15 +772,32 @@ impl OnvifAdapter {
 impl SignalAdapter for OnvifAdapter {
     async fn parse(&mut self, data: &[u8]) -> Result<Vec<SignalEvent>> {
         self.recv_buffer.extend_from_slice(data);
+
+        if self.recv_buffer.len() > MAX_BUFFER_BYTES {
+            tracing::error!(
+                "[ONVIF] recv_buffer exceeded limit ({} bytes)",
+                self.recv_buffer.len()
+            );
+            self.recv_buffer.clear();
+            return Err(AppError::Internal("ONVIF: buffer overflow".into()));
+        }
+
         let mut events = Vec::new();
 
         loop {
-            let buffer = self.recv_buffer.clone();
-            let (msg, remainder) = match Self::extract_message(&buffer) {
-                Some((msg, rem)) if !msg.is_empty() => (msg, rem),
-                _ => break,
+            let (body_start, total_len) = match Self::extract_message(&self.recv_buffer) {
+                Ok(Some(v)) => v,
+                Ok(None) => break,
+                Err(e) => {
+                    tracing::error!("[ONVIF] extract_message error: {}", e);
+                    self.recv_buffer.clear();
+                    return Err(AppError::Internal(format!("ONVIF: {}", e)));
+                }
             };
-            self.recv_buffer = remainder;
+
+            let msg = self.recv_buffer[..total_len].to_vec();
+            self.recv_buffer.drain(..total_len);
+            let _ = body_start;
 
             let (msg_events, response) = self.parse_message(&msg)?;
             events.extend(msg_events);
@@ -738,11 +819,14 @@ impl SignalAdapter for OnvifAdapter {
     async fn on_disconnected(&mut self) -> Result<()> {
         let device_id = self.device_id.as_deref().unwrap_or("unknown");
         tracing::info!("[ONVIF] Device {} disconnected", device_id);
-        let _ = self
-            .deps
-            .device_lookup
-            .set_offline(device_id, Some("Connection closed"))
-            .await;
+        self.recv_buffer.clear();
+        if self.device_id.is_some() {
+            let _ = self
+                .deps
+                .device_lookup
+                .set_offline(device_id, Some("Connection closed"))
+                .await;
+        }
         Ok(())
     }
 
@@ -770,9 +854,16 @@ impl SignalAdapter for OnvifAdapter {
         self.write = Some(std::sync::Arc::new(tokio::sync::RwLock::new(write)));
     }
 
-    async fn start(&mut self, _device_tag: &str, _channel_tag: &str) -> Result<()> { Ok(()) }
-    
-    async fn ptz_control(&mut self, channel_id: &str, command: &PtzCommand, speed: Option<u8>) -> Result<()> {
+    async fn start(&mut self, _device_tag: &str, _channel_tag: &str) -> Result<()> {
+        Ok(())
+    }
+
+    async fn ptz_control(
+        &mut self,
+        channel_id: &str,
+        command: &PtzCommand,
+        speed: Option<u8>,
+    ) -> Result<()> {
         let device = match self.deps.device_lookup.find_by_tag(channel_id).await {
             Some(d) => d,
             None => {
@@ -784,7 +875,10 @@ impl SignalAdapter for OnvifAdapter {
         let parent_tag = match &device.parent_device_tag {
             Some(tag) => tag.clone(),
             None => {
-                tracing::debug!("[ONVIF] PTZ device {} has no parent, using itself", channel_id);
+                tracing::debug!(
+                    "[ONVIF] PTZ device {} has no parent, using itself",
+                    channel_id
+                );
                 channel_id.to_string()
             }
         };
@@ -798,10 +892,17 @@ impl SignalAdapter for OnvifAdapter {
         };
 
         let ptz_url = match &parent.extended {
-            Some(ext) => ext.get("capabilities")
+            Some(ext) => ext
+                .get("capabilities")
                 .and_then(|c| c.get("ptz"))
                 .and_then(|u| u.as_str())
-                .and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) }),
+                .and_then(|s| {
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(s.to_string())
+                    }
+                }),
             None => None,
         };
 
@@ -814,7 +915,8 @@ impl SignalAdapter for OnvifAdapter {
         };
 
         let profile_token = match &parent.extended {
-            Some(ext) => ext.get("onvif_token")
+            Some(ext) => ext
+                .get("onvif_token")
                 .and_then(|v| v.as_str())
                 .unwrap_or("Profile_1")
                 .to_string(),
@@ -825,7 +927,8 @@ impl SignalAdapter for OnvifAdapter {
             ptz_url,
             parent.device_username.clone(),
             parent.device_password.clone(),
-        ).with_profile(profile_token);
+        )
+        .with_profile(profile_token);
 
         match command {
             PtzCommand::ContinuousMove { pan, tilt, zoom } => {
@@ -866,11 +969,15 @@ impl SignalAdapter for OnvifAdapter {
                 let _ = client.goto_preset(preset_token).await;
             }
             PtzCommand::SetPreset { preset_name } => {
-                let _ = client.set_preset("", preset_name.as_deref()).await
+                let _ = client
+                    .set_preset("", preset_name.as_deref())
+                    .await
                     .map_err(|e| tracing::warn!("[ONVIF] SetPreset failed: {}", e));
             }
             PtzCommand::RemovePreset { preset_token } => {
-                let _ = client.remove_preset(preset_token).await
+                let _ = client
+                    .remove_preset(preset_token)
+                    .await
                     .map_err(|e| tracing::warn!("[ONVIF] RemovePreset failed: {}", e));
             }
             _ => {
@@ -879,6 +986,168 @@ impl SignalAdapter for OnvifAdapter {
         }
 
         tracing::debug!("[ONVIF] PTZ sent: channel={} cmd={:?}", channel_id, command);
+        Ok(())
+    }
+
+    async fn start_audio_talk_internal(
+        &mut self,
+        device_tag: &str,
+        requester_node_id: MediaNodeId,
+    ) -> Result<()> {
+        tracing::info!(
+            "[ONVIF] start_audio_talk_internal: device_tag={} requester_node_id={}",
+            device_tag,
+            requester_node_id.id
+        );
+
+        let try_send_error = |msg: &str| {
+            let resp = SignalEvent::AudioTalkResponse {
+                node_id: requester_node_id.clone(),
+                status: TalkResponseStatus::Error,
+                message: Some(msg.to_string()),
+            };
+            let _ = self.deps.event_publisher.clone().publish(resp);
+        };
+        //不能保证重复生成媒体节点的安全，心里安慰
+        if let Some(mgr) = get_media_session_manager() {
+            let session = mgr.get_or_create(device_tag);
+            if session.has_node_of_type(MediaNodeType::ONVIF_BROADCAST_VOICE) {
+                tracing::info!(
+                    "[ONVIF] ONVIF_BROADCAST_VOICE node already exists for device {}, sending ready",
+                    device_tag
+                );
+                let event = SignalEvent::AudioTalkReady {
+                    node_id: requester_node_id.clone(),
+                };
+                let _ = self.deps.event_publisher.clone().publish(event);
+                return Ok(());
+            }
+        }
+
+        let device = match self.deps.device_lookup.find_by_tag(device_tag).await {
+            Some(d) => d,
+            None => {
+                tracing::error!("[ONVIF] Device not found: {}", device_tag);
+                try_send_error(&format!("Device not found: {}", device_tag));
+                return Ok(());
+            }
+        };
+
+        let rtsp_url = match device
+            .pull_urls
+            .iter()
+            .find(|p| p.protocol == crate::domain::StreamProtocol::Rtsp)
+            .map(|p| p.url.clone())
+        {
+            Some(url) => url,
+            None => {
+                tracing::error!("[ONVIF] No RTSP pull_url for device {}", device_tag);
+                try_send_error(&format!("No RTSP pull_url for device {}", device_tag));
+                return Ok(());
+            }
+        };
+
+        let username = device.device_username.clone().unwrap_or_default();
+        let password = device.device_password.clone().unwrap_or_default();
+
+        tracing::info!(
+            "[ONVIF] Creating backchannel transport: url={} user={}",
+            rtsp_url,
+            username
+        );
+
+        let node_id = MediaNodeId::new(MediaNodeType::ONVIF_BROADCAST_VOICE, device_tag, None);
+
+        let transport = OnvifBackchannelTransport::new(rtsp_url, username, password);
+
+        let node: Arc<dyn MediaNode> =
+            Arc::new(BasicMediaNode::new(node_id.clone(), transport.clone()));
+
+        node.add_send_chain(
+            MediaNodeType::WebSocket,
+            Box::new(crate::media::node::SendToReceiversMiddleware::new(
+                Arc::downgrade(&node),
+                MediaNodeType::WebSocket,
+            )),
+        );
+
+        transport.set_node(node.clone());
+
+        tracing::info!("[ONVIF] Connecting backchannel transport first to verify support...");
+        if let Err(e) = transport.connect().await {
+            tracing::error!("[ONVIF] Backchannel transport connect failed: {}", e);
+            try_send_error(&format!("Backchannel connect failed: {}", e));
+            return Ok(());
+        }
+
+        tracing::info!(
+            "[ONVIF] Backchannel connected successfully, now adding node to mediasession..."
+        );
+
+        if let Some(mgr) = get_media_session_manager() {
+            let session = mgr.get_or_create(device_tag);
+            if session.has_node_of_type(MediaNodeType::ONVIF_BROADCAST_VOICE) {
+                tracing::info!(
+                    "[ONVIF] ONVIF_BROADCAST_VOICE node already exists for device {}, skipping",
+                    device_tag
+                );
+                return Ok(());
+            }
+            if let Err(e) = session.add_node(node.clone()) {
+                tracing::error!("[ONVIF] Failed to add node to session: {}", e);
+                try_send_error(&format!("Failed to add node: {}", e));
+                return Ok(());
+            }
+            tracing::info!(
+                "[ONVIF] MediaNode added to session: {}_{}",
+                device_tag,
+                node_id.id
+            );
+        }
+
+        tracing::info!(
+            "[ONVIF] Backchannel ready, sending AudioTalkReady for requester_node_id={}",
+            requester_node_id.id
+        );
+        let event = SignalEvent::AudioTalkReady {
+            node_id: requester_node_id.clone(),
+        };
+        if let Err(e) = self.deps.event_publisher.publish(event).await {
+            tracing::error!("[ONVIF] Failed to publish AudioTalkReady: {}", e);
+        }
+
+        Ok(())
+    }
+
+    async fn stop_audio_talk_internal(&mut self, node_id: MediaNodeId) -> Result<()> {
+        let device_tag = &node_id.device_tag;
+        tracing::info!("[ONVIF] stop_audio_talk_internal: node_id={} device_tag={}", node_id.id, device_tag);
+
+        let manager = match get_media_session_manager() {
+            Some(m) => m,
+            None => {
+                tracing::warn!("[ONVIF] Media session manager not available");
+                return Ok(());
+            }
+        };
+
+        if let Some(session) = manager.get(device_tag) {
+            let bc_node_id = session
+                .nodes_iter()
+                .find(|n| n.node_type() == MediaNodeType::ONVIF_BROADCAST_VOICE)
+                .map(|n| n.id().clone());
+
+            if let Some(bc_node_id) = bc_node_id {
+                tracing::info!("[ONVIF] Found ONVIF_BROADCAST_VOICE node={}, removing and stopping", bc_node_id.id);
+                let removed = session.remove_and_stop_node(&bc_node_id).await;
+                tracing::info!("[ONVIF] ONVIF_BROADCAST_VOICE node removed: {}", removed);
+            } else {
+                tracing::warn!("[ONVIF] No ONVIF_BROADCAST_VOICE node found in session for device {}", device_tag);
+            }
+        } else {
+            tracing::warn!("[ONVIF] No media session found for device {}", device_tag);
+        }
+
         Ok(())
     }
 }

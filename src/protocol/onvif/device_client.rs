@@ -375,6 +375,78 @@ impl OnvifDeviceClient {
         Ok(result)
     }
 
+    pub async fn get_audio_outputs(&mut self) -> anyhow::Result<Vec<crate::protocol::onvif::types::AudioOutput>> {
+        tracing::info!("[ONVIF Client] Calling GetAudioOutputs on {}", self.x_addr);
+        let body = r#"<GetAudioOutputs xmlns="http://www.onvif.org/ver10/media/wsdl"/>"#;
+        let xml = self.send_soap_internal(body).await?;
+
+        let bytes = xml.as_bytes();
+        let mut reader = quick_xml::Reader::from_reader(bytes);
+        reader.config_mut().trim_text(true);
+
+        let mut outputs = Vec::new();
+        let mut current_output: Option<crate::protocol::onvif::types::AudioOutput> = None;
+        let mut current_element = String::new();
+
+        loop {
+            use quick_xml::events::Event;
+            match reader.read_event() {
+                Ok(Event::Start(ref e)) => {
+                    current_element = e.name().local_name().into_inner().to_string();
+                    let name = &current_element;
+
+                    if name == "AudioOutput" {
+                        let mut token = None;
+                        for attr in e.attributes().flatten() {
+                            let key = attr.key.into_inner();
+                            if key == "token" {
+                                token = Some(attr.value.to_string());
+                                break;
+                            }
+                        }
+                        if let Some(t) = token {
+                            current_output = Some(crate::protocol::onvif::types::AudioOutput {
+                                token: t,
+                                name: None,
+                            });
+                        }
+                    }
+                }
+                Ok(Event::Text(ref e)) => {
+                    if let Some(ref mut output) = current_output {
+                        let text = (&*e).to_string();
+                        let trimmed = text.trim();
+                        if !trimmed.is_empty() {
+                            match current_element.as_str() {
+                                "Name" => {
+                                    output.name = Some(trimmed.to_string());
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let name = e.name().local_name().into_inner().to_string();
+                    if name == "AudioOutput" {
+                        if let Some(output) = current_output.take() {
+                            outputs.push(output);
+                        }
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    tracing::warn!("[ONVIF] XML parsing error at position {}: {:?}", reader.error_position(), e);
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        tracing::info!("[ONVIF Client] GetAudioOutputs result: {} audio outputs found", outputs.len());
+        Ok(outputs)
+    }
+
     pub async fn get_profiles(&mut self) -> anyhow::Result<Vec<OnvifProfile>> {
         tracing::info!("[ONVIF Client] Calling GetProfiles on {}", self.x_addr);
         let body = r#"<GetProfiles xmlns="http://www.onvif.org/ver10/media/wsdl"/>"#;

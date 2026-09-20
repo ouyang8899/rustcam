@@ -77,88 +77,107 @@ impl StreamService {
             cache.iter().find(|r| r.key() == &cache_key).map(|r| r.value().clone())
         };
 
-        if let Some(existing) = existing_in_cache {
-            tracing::info!("[StreamService] Stream {}/{} found in cache for {}/{}, syncing state", app, stream_key, device_tag, channel_tag);
-
-            let mut needs_update = false;
-            let mut updated_stream = existing.clone();
-
-            if existing.app != app {
-                tracing::info!("[StreamService] Stream app changed: {} -> {}", existing.app, app);
-                updated_stream.app = app.clone();
-                needs_update = true;
+        let on_media_server = match server.is_stream_online(&app, &stream_key).await {
+            Ok(true) => {
+                tracing::info!("[StreamService] Stream {} exists on media server {}", stream_key, server_tag);
+                true
             }
-
-            if needs_update {
-                updated_stream.start();
-                self.infra.db.update_stream(&updated_stream).await?;
-            } else if updated_stream.state != crate::domain::StreamState::Active {
-                updated_stream.start();
-                self.infra.db.update_stream(&updated_stream).await?;
+            Ok(false) => {
+                tracing::info!("[StreamService] Stream {} not on media server {}, will create", stream_key, server_tag);
+                false
             }
+            Err(e) => {
+                tracing::warn!("[StreamService] is_stream_online failed: {}, assuming not exists", e);
+                false
+            }
+        };
 
-            self.start_recording_for_channel(device_tag, channel_tag, &server_tag, &app, &stream_key).await;
-        } else {
-            let on_media_server = match server.is_stream_online(&app, &stream_key).await {
-                Ok(true) => {
-                    tracing::info!("[StreamService] Stream {} exists on media server {}", stream_key, server_tag);
-                    true
-                }
-                Ok(false) => {
-                    tracing::info!("[StreamService] Stream {} not on media server {}, will create", stream_key, server_tag);
-                    false
-                }
-                Err(e) => {
-                    tracing::warn!("[StreamService] is_stream_online failed: {}, assuming not exists", e);
-                    false
-                }
-            };
-
-            if !on_media_server {
-                let rtsp_url_with_auth = if let (Some(user), Some(pass)) = (&device.device_username, &device.device_password) {
-                    if rtsp_url.starts_with("rtsp://") && !rtsp_url.contains('@') {
-                        if let Some(stripped) = rtsp_url.strip_prefix("rtsp://") {
-                            format!("rtsp://{}:{}@{}", user, pass, stripped)
-                        } else {
-                            rtsp_url.to_string()
-                        }
+        let proxy_added = if !on_media_server {
+            let rtsp_url_with_auth = if let (Some(user), Some(pass)) = (&device.device_username, &device.device_password) {
+                if rtsp_url.starts_with("rtsp://") && !rtsp_url.contains('@') {
+                    if let Some(stripped) = rtsp_url.strip_prefix("rtsp://") {
+                        format!("rtsp://{}:{}@{}", user, pass, stripped)
                     } else {
                         rtsp_url.to_string()
                     }
                 } else {
                     rtsp_url.to_string()
-                };
-                let stream_info = server.add_stream_proxy(&app, &stream_key, &rtsp_url_with_auth).await
-                    .map_err(|e| {
-                        tracing::error!("[StreamService] add_stream_proxy failed for {}: {}", stream_key, e);
-                        AppError::MediaServerError(format!("Media server error: {}", e))
-                    })?;
-
-                if let Err(e) = self.infra.redis.set_stream_info(&stream_key, &stream_info).await {
-                    tracing::warn!("[StreamService] set_stream_info failed: {}", e);
+                }
+            } else {
+                rtsp_url.to_string()
+            };
+            match server.add_stream_proxy(&app, &stream_key, &rtsp_url_with_auth).await {
+                Ok(stream_info) => {
+                    if let Err(e) = self.infra.redis.set_stream_info(&stream_key, &stream_info).await {
+                        tracing::warn!("[StreamService] set_stream_info failed: {}", e);
+                    }
+                    true
+                }
+                Err(e) => {
+                    tracing::error!("[StreamService] add_stream_proxy failed for {}: {}", stream_key, e);
+                    false
                 }
             }
-            let existing_in_cache = {
-                let cache = self.infra.db.streams_cache();
-                cache.iter().find(|r| r.key() == &cache_key).map(|r| r.value().clone())
-            };
-            if let Some(mut c) = existing_in_cache{
-                tracing::info!("steam_key {} exist in streams!",stream_key);
-                c.start();
-                if let Err(e) = self.infra.db.update_stream(&c).await {
+        } else {
+            false
+        };
+
+        if let Some(existing) = existing_in_cache {
+            tracing::info!("[StreamService] Stream {}/{} found in cache, state depends on proxy result", device_tag, channel_tag);
+            let mut updated_stream = existing.clone();
+            if existing.app != app {
+                updated_stream.app = app.clone();
+            }
+            if on_media_server {
+                updated_stream.start();
+            } else if proxy_added {
+                updated_stream.state = crate::domain::StreamState::Starting;
+            } else {
+                updated_stream.state = crate::domain::StreamState::Error;
+            }
+            self.infra.db.update_stream(&updated_stream).await?;
+            if updated_stream.state == crate::domain::StreamState::Active {
+                self.start_recording_for_channel(device_tag, channel_tag, &server_tag, &app, &stream_key).await;
+            }
+        } else {
+            let streams = self.infra.db.list_streams().await;
+            if let Some(existing) = streams.iter().find(|s| s.device_tag.as_deref() == Some(device_tag) && s.channel_tag.as_deref() == Some(channel_tag)) {
+                tracing::info!("stream {}/{} exists in DB, state depends on proxy result", device_tag, channel_tag);
+                let mut updated = existing.clone();
+                if on_media_server {
+                    updated.start();
+                } else if proxy_added {
+                    updated.state = crate::domain::StreamState::Starting;
+                } else {
+                    updated.state = crate::domain::StreamState::Error;
+                }
+                updated.retry_count = 0;
+                updated.last_error = None;
+                updated.media_server_tag = server_tag.clone();
+                let should_record = updated.state == crate::domain::StreamState::Active;
+                if let Err(e) = self.infra.db.update_stream(&updated).await {
                     tracing::warn!("[StreamService] update_stream failed: {}", e);
                 }
-            } else{
+                if should_record {
+                    self.start_recording_for_channel(device_tag, channel_tag, &server_tag, &app, &stream_key).await;
+                }
+            } else {
                 let token = Uuid::new_v4().to_string();
                 let mut stream = Stream::new(server_tag.clone(), device_tag.to_string(), channel_tag.to_string(), app.clone(), token);
-                stream.start();
+                if on_media_server {
+                    stream.start();
+                } else if proxy_added {
+                    stream.state = crate::domain::StreamState::Starting;
+                } else {
+                    stream.state = crate::domain::StreamState::Error;
+                }
                 if let Err(e) = self.infra.db.create_stream(&stream).await {
                     tracing::warn!("[StreamService] create_stream failed: {}", e);
                 }
+                if stream.state == crate::domain::StreamState::Active {
+                    self.start_recording_for_channel(device_tag, channel_tag, &server_tag, &app, &stream_key).await;
+                }
             }
-            
-            self.sync_device_status(device_tag, StreamState::Active).await;
-            self.start_recording_for_channel(device_tag, channel_tag, &server_tag, &app, &stream_key).await;
         }
 
         let play_url = server.get_play_url(&app, &stream_key, crate::adapter::media_server::Protocol::Rtsp).await
@@ -517,13 +536,16 @@ impl StreamService {
     }
 
     /// 分页获取流列表
-    pub async fn list_streams_paginated(&self, limit: usize, offset: usize) -> Vec<Stream> {
-        self.infra.db.list_streams_paginated(limit, offset).await
+    pub async fn list_streams_paginated(&self, search: Option<&str>, state: Option<&str>, limit: usize, offset: usize) -> Vec<Stream> {
+        tracing::debug!("list_streams_paginated called with search={:?}, state={:?}, limit={}, offset={}", search, state, limit, offset);
+        let streams = self.infra.db.list_streams_paginated(search, state, limit, offset).await;
+        tracing::debug!("list_streams_paginated returned {} streams", streams.len());
+        streams
     }
 
     /// 获取流总数
-    pub async fn count_streams(&self) -> usize {
-        self.infra.db.count_streams().await
+    pub async fn count_streams(&self, search: Option<&str>, state: Option<&str>) -> usize {
+        self.infra.db.count_streams(search, state).await
     }
 
     /// 获取活跃流
@@ -552,6 +574,11 @@ impl StreamService {
             .filter(|r| r.key() == &cache_key)
             .map(|r| r.value().clone())
             .collect()
+    }
+
+    pub fn find_stream(&self, device_tag: &str, channel_tag: &str) -> Option<Stream> {
+        let cache_key = format!("{}/{}", device_tag, channel_tag);
+        self.infra.db.streams_cache().get(&cache_key).map(|s| s.value().clone())
     }
 
     /// 获取播放 URL
@@ -771,25 +798,25 @@ impl StreamManager for StreamService {
     async fn start_pull_stream(
         &self, device_tag: &str, channel_tag: &str, rtsp_url: &str,
     ) -> Result<StreamInfo> {
-        self.start_pull_stream(device_tag, channel_tag, rtsp_url).await
+        StreamService::start_pull_stream(self, device_tag, channel_tag, rtsp_url).await
     }
 
     async fn start_gb28181_stream(
         &self, device_tag: &str, channel_tag: &str, stream_key: &str,
     ) -> Result<StreamInfo> {
-        self.start_gb28181_stream(device_tag, channel_tag, stream_key).await
+        StreamService::start_gb28181_stream(self, device_tag, channel_tag, stream_key).await
     }
 
     async fn stop_stream(&self, app: &str, stream_key: &str) -> Result<()> {
-        self.stop_stream(app, stream_key).await
+        StreamService::stop_stream(self, app, stream_key).await
     }
 
     async fn stop_streams_by_device(&self, device_tag: &str) -> Result<()> {
-        self.stop_streams_by_device(device_tag).await
+        StreamService::stop_streams_by_device(self, device_tag).await
     }
 
     async fn stop_streams_by_channel(&self, device_tag: &str, channel_tag: &str) -> Result<()> {
-        self.stop_streams_by_channel(device_tag, channel_tag).await
+        StreamService::stop_streams_by_channel(self, device_tag, channel_tag).await
     }
 
     async fn generate_token(&self, device_id: &str) -> Result<String> {

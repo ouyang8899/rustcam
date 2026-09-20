@@ -8,6 +8,7 @@ use crate::infrastructure::RedisStore;
 use crate::infrastructure::cluster::ClusterManager;
 use crate::error::{AppError, Result};
 use crate::application::RecordingService;
+use crate::application::StreamService;
 
 /// Hook 处理结果
 #[derive(Debug, Clone)]
@@ -348,6 +349,8 @@ pub struct HookService {
     session_expiry_secs: i64,
     /// 录制服务
     recording_service: Arc<RecordingService>,
+    /// 流服务
+    stream_service: Arc<StreamService>,
 }
 
 impl HookService {
@@ -364,6 +367,7 @@ impl HookService {
         cluster: Arc<ClusterManager>,
         session_expiry_secs: i64,
         recording_service: Arc<RecordingService>,
+        stream_service: Arc<StreamService>,
     ) -> Self {
         Self {
             repo,
@@ -371,23 +375,31 @@ impl HookService {
             cluster,
             session_expiry_secs,
             recording_service,
+            stream_service,
         }
     }
 
     /// 从 InfraContext 和 MediaContext 创建 Hook 服务
     ///
     /// 便捷构造函数，自动从上下文中提取所需组件。
+    #[allow(dead_code)]
     pub fn from_context(
         infra: &InfraContext,
         media: &MediaContext,
         recording_service: Arc<RecordingService>,
     ) -> Self {
+        let stream_service = Arc::new(StreamService::new(
+            infra.clone(),
+            media.clone(),
+            recording_service.clone(),
+        ));
         Self {
             repo: infra.db.clone(),
             redis: infra.redis.clone(),
             cluster: media.cluster.clone(),
             session_expiry_secs: infra.config().session.expiration_secs,
             recording_service,
+            stream_service,
         }
     }
 
@@ -940,7 +952,8 @@ impl HookService {
 
     /// 根据 stream_key 查找流
     fn find_stream_by_stream_key(&self, stream_key: &str) -> Option<crate::domain::Stream> {
-        let cache_key = stream_key.replace('_', "/");
+        let (device_tag, channel_tag) = crate::domain::parse_stream_key(stream_key)?;
+        let cache_key = format!("{}/{}", device_tag, channel_tag);
         self.repo.streams_cache()
             .get(&cache_key)
             .map(|s| s.clone())
@@ -990,12 +1003,6 @@ impl HookService {
     ///
     /// 尝试从 stream_id 匹配设备（stream_key 或 push_urls），若匹配则关联 device_id。
     async fn register_push_stream(&self, media_server_id: &str, stream_id: &str, device_tag_from_params: Option<&str>, channel_tag_from_params: Option<&str>) -> Result<()> {
-        let device_id = if let Some(dt) = device_tag_from_params {
-            Some(dt.to_string())
-        } else {
-            self.find_device_by_push_stream(stream_id)
-        };
-
         let (final_device_tag, final_channel_tag) = if let (Some(dt), Some(ct)) = (device_tag_from_params, channel_tag_from_params) {
             (dt.to_string(), ct.to_string())
         } else {
@@ -1003,42 +1010,22 @@ impl HookService {
                 .unwrap_or_else(|| (stream_id.to_string(), stream_id.to_string()))
         };
 
-        if let Some(s) = self.find_stream_by_stream_key(stream_id) {
-            let mut s = s;
-            s.update_keepalive();
-            if s.state == crate::domain::StreamState::Idle || s.state == crate::domain::StreamState::Error {
-                s.start();
+        let mut stream = match self.stream_service.find_stream(&final_device_tag, &final_channel_tag) {
+            Some(s) => s,
+            None => {
+                tracing::warn!("[Hook] on_publish: push stream not found for device_tag={}, channel_tag={}", final_device_tag, final_channel_tag);
+                return Ok(());
             }
-            self.repo.update_stream(&s).await?;
-            tracing::info!("[Hook] on_publish: updated push stream {} (device_tag={})", stream_id, s.device_tag.as_deref().unwrap_or("unknown"));
-        } else {
-            let token = uuid::Uuid::new_v4().to_string();
-            let app = device_id
-                .as_ref()
-                .and_then(|id| self.repo.devices_cache().get(id))
-                .map(|d| d.app.clone().unwrap_or_else(|| "live".to_string()))
-                .unwrap_or_else(|| "live".to_string());
-            let mut stream = crate::domain::Stream::new(
-                media_server_id.to_string(),
-                final_device_tag.clone(),
-                final_channel_tag.clone(),
-                app,
-                token,
-            );
-            stream.start();
-            self.repo.create_stream(&stream).await?;
-            tracing::info!("[Hook] on_publish: registered push stream {} on server {} (device_tag={})",
-                stream_id, media_server_id, final_device_tag);
-        }
+        };
 
-        if let Some(ref did) = device_id {
-            if let Some(device) = self.repo.devices_cache().get(did) {
-                let mut device = (*device).clone();
-                device.set_online();
-                self.repo.update_device(&device).await?;
-                tracing::info!("[Hook] on_publish: device {} is now online", did);
-            }
+        stream.update_keepalive();
+        if stream.state == crate::domain::StreamState::Idle || stream.state == crate::domain::StreamState::Error {
+            stream.start();
         }
+        stream.media_server_tag = media_server_id.to_string();
+        self.repo.update_stream(&stream).await?;
+        tracing::info!("[Hook] on_publish: registered push stream {} on server {} (device_tag={})",
+            stream_id, media_server_id, final_device_tag);
 
         Ok(())
     }

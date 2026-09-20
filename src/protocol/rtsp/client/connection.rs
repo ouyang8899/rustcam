@@ -1,20 +1,12 @@
-//! RTSP/TCP 连接层
-//!
-//! 设计要点：
-//! - 单个 `TcpStream`，读由唯一后台任务负责，写通过 `write_lock` 串行化。
-//! - RTSP 请求响应通过 `cseq → oneshot` 路由，避免"请求/响应"与"RTP 数据"抢流。
-//! - 接收侧维护一个 `read_buf`，按字节流边界解析 interleaved 帧与 RTSP 响应，
-//!   不做 lossy 字符串切片，避免非 UTF-8 body 导致越界。
-//! - 断开时清空 `pending_responses`，唤醒所有等待者。
-
-use crate::protocol::rtsp::client::types::ReceivedData;
 use crate::protocol::rtsp::common::{
-    InterleavedBuilder, RtcpPacket, RtcpReportType, RtspError,
+    InterleavedBuilder, ReceivedData, RtcpPacket, RtcpReportType, RtspError,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::{oneshot, Mutex};
 
@@ -25,9 +17,10 @@ const WRITE_TIMEOUT_SECS: u64 = 10;
 const RESPONSE_TIMEOUT_SECS: u64 = 10;
 
 pub struct TcpConnection {
-    stream: Arc<TcpStream>,
-    write_lock: Mutex<()>,
+    read_half: Arc<tokio::sync::Mutex<OwnedReadHalf>>,
+    write_half: Arc<tokio::sync::Mutex<OwnedWriteHalf>>,
     pending_responses: Mutex<HashMap<u32, oneshot::Sender<String>>>,
+    closed: AtomicBool,
 }
 
 #[derive(Debug)]
@@ -38,49 +31,73 @@ enum ParsedMessage {
 
 impl TcpConnection {
     pub async fn connect(addr: SocketAddr) -> Result<Self, RtspError> {
-        let stream = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            TcpStream::connect(addr),
-        )
-        .await
-        .map_err(|_| RtspError::Timeout("连接超时".into()))?
-        .map_err(|e| RtspError::ConnectionFailed(e.to_string()))?;
+        tracing::info!("[RTSP Connection] Connecting to {}", addr);
+        let stream =
+            tokio::time::timeout(std::time::Duration::from_secs(5), TcpStream::connect(addr))
+                .await
+                .map_err(|_| RtspError::Timeout("连接超时".into()))?
+                .map_err(|e| RtspError::ConnectionFailed(e.to_string()))?;
 
         let _ = stream.set_nodelay(true);
+        tracing::info!("[RTSP Connection] TCP connected to {}", addr);
 
+        let (read_half, write_half) = stream.into_split();
         Ok(Self {
-            stream: Arc::new(stream),
-            write_lock: Mutex::new(()),
+            read_half: Arc::new(tokio::sync::Mutex::new(read_half)),
+            write_half: Arc::new(tokio::sync::Mutex::new(write_half)),
             pending_responses: Mutex::new(HashMap::new()),
+            closed: AtomicBool::new(false),
         })
     }
 
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
+    }
+
+    pub fn mark_closed(&self) {
+        eprintln!(
+            "[Connection] mark_closed called, thread_id={:?}",
+            std::thread::current().id()
+        );
+        self.closed.store(true, Ordering::Release);
+    }
+
     pub async fn send(&self, data: &[u8]) -> Result<(), RtspError> {
-        let _guard = self.write_lock.lock().await;
-        let mut stream: &TcpStream = &*self.stream;
-        tokio::time::timeout(
-            std::time::Duration::from_secs(WRITE_TIMEOUT_SECS),
-            stream.write_all(data),
-        )
-        .await
-        .map_err(|_| RtspError::Timeout("写入超时".into()))?
-        .map_err(|e| RtspError::ConnectionFailed(e.to_string()))
+        if self.is_closed() {
+            return Err(RtspError::ConnectionFailed("连接已关闭".into()));
+        }
+        let data_str = String::from_utf8_lossy(data);
+        eprintln!("[Connection] send {} bytes:\n{}", data.len(), data_str);
+        let mut write_half = self.write_half.lock().await;
+        write_half
+            .write_all(data)
+            .await
+            .map_err(|e| RtspError::ConnectionFailed(e.to_string()))
     }
 
     pub async fn send_interleaved(&self, channel: u8, data: &[u8]) -> Result<(), RtspError> {
+        if self.is_closed() {
+            return Err(RtspError::ConnectionFailed("连接已关闭".into()));
+        }
         let frame = InterleavedBuilder::build_frame(channel, data);
-        let _guard = self.write_lock.lock().await;
-        let mut stream: &TcpStream = &*self.stream;
-        tokio::time::timeout(
-            std::time::Duration::from_secs(WRITE_TIMEOUT_SECS),
-            stream.write_all(&frame),
-        )
-        .await
-        .map_err(|_| RtspError::Timeout("写入 interleaved 超时".into()))?
-        .map_err(|e| RtspError::ConnectionFailed(e.to_string()))
+        let mut write_half = self.write_half.lock().await;
+        write_half
+            .write_all(&frame)
+            .await
+            .map_err(|e| RtspError::ConnectionFailed(e.to_string()))
     }
 
     pub async fn send_request(&self, data: &[u8], cseq: u32) -> Result<String, RtspError> {
+        if self.is_closed() {
+            eprintln!("[Connection] send_request: connection is closed!");
+            return Err(RtspError::ConnectionFailed("连接已关闭".into()));
+        }
+
+        eprintln!(
+            "[Connection] send_request: sending cseq={}, is_closed={}",
+            cseq,
+            self.is_closed()
+        );
         let (tx, rx) = oneshot::channel::<String>();
         {
             let mut pending = self.pending_responses.lock().await;
@@ -93,35 +110,62 @@ impl TcpConnection {
             pending.insert(cseq, tx);
         }
 
+        let data_str = String::from_utf8_lossy(data);
+        eprintln!(
+            "[Connection] send_request: cseq={}, sending {} bytes",
+            cseq,
+            data.len()
+        );
+
         if let Err(e) = self.send(data).await {
             self.pending_responses.lock().await.remove(&cseq);
+            eprintln!(
+                "[Connection] send_request: cseq={} send FAILED: {}",
+                cseq, e
+            );
             return Err(e);
         }
 
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(RESPONSE_TIMEOUT_SECS),
-            rx,
-        )
-        .await
+        eprintln!(
+            "[Connection] send_request: cseq={} sent successfully, waiting for response...",
+            cseq
+        );
+
+        match tokio::time::timeout(std::time::Duration::from_secs(RESPONSE_TIMEOUT_SECS), rx).await
         {
-            Ok(Ok(response)) => Ok(response),
+            Ok(Ok(response)) => {
+                eprintln!(
+                    "[Connection] send_request: cseq={} got response, len={}",
+                    cseq,
+                    response.len()
+                );
+                Ok(response)
+            }
             Ok(Err(_)) => {
                 self.pending_responses.lock().await.remove(&cseq);
+                eprintln!(
+                    "[Connection] send_request: cseq={} channel CLOSED (rx returned Err)",
+                    cseq
+                );
                 Err(RtspError::ConnectionFailed("连接已关闭".into()))
             }
             Err(_) => {
                 self.pending_responses.lock().await.remove(&cseq);
-                Err(RtspError::Timeout(format!(
-                    "等待 CSeq {} 响应超时",
-                    cseq
-                )))
+                eprintln!(
+                    "[Connection] send_request: cseq={} TIMEOUT after {}s",
+                    cseq, RESPONSE_TIMEOUT_SECS
+                );
+                Err(RtspError::Timeout(format!("等待 CSeq {} 响应超时", cseq)))
             }
         }
     }
 
-    pub async fn start_receive_loop(
+    /// 唯一的 TCP 读循环。从连接到断开，永不切换。
+    pub async fn run_receive_loop(
         self: Arc<Self>,
         on_data: Arc<dyn Fn(ReceivedData) + Send + Sync>,
+        on_closed: Arc<dyn Fn() + Send + Sync>,
+        mut shutdown_rx: oneshot::Receiver<()>,
     ) {
         let mut read_buf: Vec<u8> = Vec::with_capacity(8192);
         let mut chunk = [0u8; 16 * 1024];
@@ -132,14 +176,14 @@ impl TcpConnection {
                     Some(ParsedMessage::Interleaved { channel, payload }) => {
                         match Self::build_interleaved_message(channel, payload) {
                             Ok(data) => on_data(data),
-                            Err(e) => tracing::warn!(
-                                "[TCP Receiver] 解析 interleaved 帧失败: {}",
-                                e
-                            ),
+                            Err(e) => {
+                                tracing::warn!("[TCP Receiver] 解析 interleaved 帧失败: {}", e)
+                            }
                         }
                     }
                     Some(ParsedMessage::Rtsp(response)) => {
                         let cseq = Self::extract_cseq(&response);
+                        eprintln!("[TCP Receiver] 收到 RTSP 响应, cseq={:?}", cseq);
                         match cseq {
                             Some(cseq) => {
                                 let tx = {
@@ -148,55 +192,78 @@ impl TcpConnection {
                                 };
                                 match tx {
                                     Some(tx) => {
+                                        eprintln!(
+                                            "[TCP Receiver] 发送响应到等待的请求 cseq={}",
+                                            cseq
+                                        );
                                         let _ = tx.send(response);
                                     }
-                                    None => tracing::warn!(
-                                        "[TCP Receiver] 收到未知 CSeq={} 的响应",
-                                        cseq
-                                    ),
+                                    None => {
+                                        eprintln!("[TCP Receiver] 收到未知 CSeq={} 的响应", cseq)
+                                    }
                                 }
                             }
-                            None => tracing::warn!(
-                                "[TCP Receiver] RTSP 响应缺少 CSeq 头"
-                            ),
+                            None => eprintln!("[TCP Receiver] RTSP 响应缺少 CSeq 头"),
                         }
                     }
-                    None => break,
+                    None => {
+                        tracing::debug!(
+                            "[TCP Receiver] 数据不完整，需要更多数据, read_buf.len={}",
+                            read_buf.len()
+                        );
+                        break;
+                    }
                 }
             }
 
             if read_buf.len() > MAX_READ_BUF_SIZE {
-                tracing::error!(
-                    "[TCP Receiver] 缓冲区超限 ({} 字节)，断开",
-                    read_buf.len()
-                );
+                tracing::error!("[TCP Receiver] 缓冲区超限 ({} 字节)，断开", read_buf.len());
+                self.mark_closed();
                 break 'outer;
             }
 
-            let mut stream: &TcpStream = &*self.stream;
-            let read_result = tokio::time::timeout(
-                std::time::Duration::from_secs(READ_IDLE_TIMEOUT_SECS),
-                stream.read(&mut chunk),
-            )
-            .await;
+            let mut read_half = self.read_half.lock().await;
+            tracing::debug!(
+                "[TCP Receiver] 等待读取数据... read_buf.len={}",
+                read_buf.len()
+            );
 
-            match read_result {
-                Ok(Ok(0)) => {
-                    tracing::info!("[TCP Receiver] 对端关闭连接");
-                    break 'outer;
+            tokio::select! {
+                readable = read_half.readable() => {
+                    match readable {
+                        Ok(()) => {
+                            match read_half.read(&mut chunk).await {
+                                Ok(0) => {
+                                    eprintln!("[TCP Receiver] 服务器关闭连接 (EOF)");
+                                    self.mark_closed();
+                                    break 'outer;
+                                }
+                                Ok(n) => {
+                                    eprintln!("[TCP Receiver] 读取 {} 字节, read_buf.len={}", n, read_buf.len());
+                                    read_buf.extend_from_slice(&chunk[..n]);
+                                }
+                                Err(e) => {
+                                    eprintln!("[TCP Receiver] 读错误: {}", e);
+                                    self.mark_closed();
+                                    break 'outer;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[TCP Receiver] readable 错误: {}", e);
+                            self.mark_closed();
+                            break 'outer;
+                        }
+                    }
                 }
-                Ok(Ok(n)) => read_buf.extend_from_slice(&chunk[..n]),
-                Ok(Err(e)) => {
-                    tracing::error!("[TCP Receiver] 读错误: {}", e);
+                _ = &mut shutdown_rx => {
+                    eprintln!("[TCP Receiver] 收到关闭信号");
                     break 'outer;
-                }
-                Err(_) => {
-                    tracing::trace!("[TCP Receiver] 读空闲");
-                    continue;
                 }
             }
         }
 
+        self.mark_closed();
         let cancelled = {
             let mut pending = self.pending_responses.lock().await;
             let n = pending.len();
@@ -204,11 +271,9 @@ impl TcpConnection {
             n
         };
         if cancelled > 0 {
-            tracing::warn!(
-                "[TCP Receiver] 连接断开，取消 {} 个等待中的请求",
-                cancelled
-            );
+            tracing::warn!("[TCP Receiver] 连接断开，取消 {} 个等待中的请求", cancelled);
         }
+        on_closed();
         tracing::info!("[TCP Receiver] Stopped");
     }
 
@@ -216,6 +281,17 @@ impl TcpConnection {
         if buf.is_empty() {
             return None;
         }
+
+        let first_byte_display = if buf[0] == 0x24 {
+            format!("0x24 (RTP)")
+        } else {
+            format!("0x{:02x} ('{}')", buf[0], buf[0] as char)
+        };
+        eprintln!(
+            "[TCP Receiver] try_parse_message: first byte={}, buf.len()={}",
+            first_byte_display,
+            buf.len()
+        );
 
         if buf[0] == 0x24 {
             if buf.len() < 4 {
@@ -245,13 +321,31 @@ impl TcpConnection {
     }
 
     fn try_parse_response(buf: &mut Vec<u8>) -> Option<String> {
-        let header_end = buf.windows(4).position(|w| w == b"\r\n\r\n")? + 4;
+        let header_end = match buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            Some(pos) => pos + 4,
+            None => {
+                eprintln!("[TCP Receiver] try_parse_response: no header end found");
+                return None;
+            }
+        };
+
+        eprintln!(
+            "[TCP Receiver] try_parse_response: header_end={}, buf.len()={}",
+            header_end,
+            buf.len()
+        );
 
         let header_str = std::str::from_utf8(&buf[..header_end]).ok()?;
+        eprintln!("[TCP Receiver] header:\n{}", header_str);
         let content_length = Self::find_content_length(header_str);
 
         let total_len = header_end + content_length;
         if buf.len() < total_len {
+            eprintln!(
+                "[TCP Receiver] try_parse_response: buf.len()={} < total_len={}",
+                buf.len(),
+                total_len
+            );
             return None;
         }
 
@@ -286,10 +380,7 @@ impl TcpConnection {
         None
     }
 
-    fn build_interleaved_message(
-        channel: u8,
-        payload: Vec<u8>,
-    ) -> Result<ReceivedData, RtspError> {
+    fn build_interleaved_message(channel: u8, payload: Vec<u8>) -> Result<ReceivedData, RtspError> {
         let track_id = format!("trackID={}", channel / 2);
         if channel % 2 == 0 {
             Ok(ReceivedData::RtpData {

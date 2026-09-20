@@ -5,7 +5,7 @@ use axum::{
 };
 use serde::Deserialize;
 use crate::api::response::ApiResponse;
-use crate::api::http::handlers::device_handler::PaginatedResponse;
+use crate::api::http::handlers::device_handler::{PaginatedResponse, StreamWithMediaServer};
 use crate::error::AppError;
 use crate::domain::Stream;
 use crate::adapter::media_server::StreamInfo;
@@ -16,11 +16,15 @@ use crate::api::state::FullState;
 pub struct PaginationQuery {
     pub limit: Option<usize>,
     pub offset: Option<usize>,
+    pub search: Option<String>,
+    pub state: Option<String>,
 }
 
 impl PaginationQuery {
     pub fn limit(&self) -> usize { self.limit.unwrap_or(50).min(500) }
     pub fn offset(&self) -> usize { self.offset.unwrap_or(0) }
+    pub fn search(&self) -> Option<&str> { self.search.as_deref() }
+    pub fn state(&self) -> Option<&str> { self.state.as_deref() }
 }
 
 /// 设备流查询
@@ -52,13 +56,15 @@ pub struct StreamPlayQuery {
 pub async fn list_streams_handler(
     State(state): State<Arc<FullState>>,
     Query(q): Query<PaginationQuery>,
-) -> Result<Json<ApiResponse<PaginatedResponse<Stream>>>, AppError> {
+) -> Result<Json<ApiResponse<PaginatedResponse<StreamWithMediaServer>>>, AppError> {
     let registry = &state.app.registry;
-    let streams = registry.stream_service.list_streams_paginated(q.limit(), q.offset()).await;
-    let total = registry.stream_service.count_streams().await;
+    let streams = registry.stream_service.list_streams_paginated(
+        q.search(), q.state(), q.limit(), q.offset()
+    ).await;
+    let total = registry.stream_service.count_streams(q.search(), q.state()).await;
 
     Ok(Json(ApiResponse::success(PaginatedResponse {
-        items: streams,
+        items: streams.into_iter().map(|s| StreamWithMediaServer::from_stream(s, registry)).collect(),
         total,
         limit: q.limit(),
         offset: q.offset(),

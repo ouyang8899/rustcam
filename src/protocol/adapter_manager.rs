@@ -48,10 +48,8 @@ pub fn set_default_deps(deps: ProtocolDeps) {
 }
 
 pub fn get_or_create_adapter(protocol: &Protocol, key: &str) -> Option<AdapterEntry> {
-    let full_key = format!("{:?}_{}", protocol, key);
-
     use dashmap::mapref::entry::Entry;
-    match ADAPTER_MAP.entry(full_key.clone()) {
+    match ADAPTER_MAP.entry(key.to_string()) {
         Entry::Occupied(entry) => Some(entry.get().clone()),
         Entry::Vacant(entry) => {
             let deps = DEFAULT_DEPS.read().unwrap().clone()?;

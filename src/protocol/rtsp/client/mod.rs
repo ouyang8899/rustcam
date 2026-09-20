@@ -5,5 +5,8 @@ pub mod auth;
 pub mod connection;
 pub mod client;
 
+#[cfg(test)]
+mod tests;
+
 pub use types::*;
 pub use errors::*;

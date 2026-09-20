@@ -1,4 +1,5 @@
 use crate::media::rtp_server::UDPRtpServer;
+use crate::protocol::rtsp::client::types::RtpTransportMode;
 use crate::protocol::rtsp::sdp::{SdpInfo, SdpTrack};
 use dashmap::DashMap;
 use std::collections::HashMap;
@@ -18,13 +19,6 @@ pub enum RtspSessionState {
     Ready,
     Playing,
     Paused,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum TransportMode {
-    #[default]
-    Tcp,
-    Udp,
 }
 
 #[derive(Clone)]
@@ -89,7 +83,7 @@ pub struct RtspSession {
     pub device_sdp: Option<SdpInfo>,
     pub rtp_port: Option<u16>,
     pub media_server_name: Option<String>,
-    pub transport_mode: TransportMode,
+    pub transport_mode: RtpTransportMode,
     pub tracks: Vec<SdpTrack>,
     pub track_transports: HashMap<String, TrackTransport>,
     pub created_at: std::time::Instant,
@@ -108,7 +102,7 @@ impl RtspSession {
             device_sdp: None,
             rtp_port: None,
             media_server_name: None,
-            transport_mode: TransportMode::default(),
+            transport_mode: RtpTransportMode::default(),
             tracks: Vec::new(),
             track_transports: HashMap::new(),
             created_at: std::time::Instant::now(),

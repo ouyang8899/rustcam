@@ -12,7 +12,7 @@ use crate::domain::player_layout::PlayerLayout;
 use crate::error::AppError;
 use crate::error::Result;
 use crate::sql_mappers::{
-    device_select_all, server_select_all, session_select_all, stream_select_all,
+    device_select_all, server_select_all, session_select_all, session_select_paginated, session_count, stream_select_all, stream_select_paginated, stream_count,
     recording_select_all, recording_select_paginated, recording_count_all, recording_select_by_id, recording_select_by_device_tag, device_insert, device_update, device_delete_by_id,
     device_delete_by_device_tag, device_select_by_parent_device_tag, device_select_paginated_tags,
     group_select_all, group_insert, group_update, group_delete,
@@ -23,7 +23,7 @@ use crate::sql_mappers::{
     recording_insert, recording_update, recording_delete_by_id,
     alarm_insert, alarm_select_by_device, alarm_select_all,
     alarm_count_by_device, alarm_count_all, alarm_mark_processed,
-    channel_insert, channel_update, channel_select_all,
+    channel_insert, channel_update, channel_select_all, channel_select_paginated, channel_count,
     channel_select_by_device_tag, channel_select_by_device_tag_and_channel_tag,
     channel_delete_by_device_tag, channel_delete_by_device_tag_and_channel_tag,
     ServerRow, GroupRow, SessionRow,
@@ -285,6 +285,9 @@ impl DbRepository {
     }
 
     pub async fn create_device(&self, device: &Device) -> Result<i64> {
+        let device_tag = device.device_tag.as_ref().filter(|s| !s.is_empty()).map(|s| s.to_lowercase());
+        let parent_device_tag = device.parent_device_tag.as_ref().filter(|s| !s.is_empty()).map(|s| s.to_lowercase());
+
         // 从 extended 中提取协议特有字段
         let rtsp_url = device.extended.as_ref()
             .and_then(|e| e.get("rtsp_full_url"))
@@ -320,10 +323,11 @@ impl DbRepository {
             Some(&device.host),
             Some(device.port as i32),
             rtsp_url.as_deref(),
-            device.device_tag.as_deref(),
-            device.parent_device_tag.as_deref(),
+            device_tag.as_deref(),
+            parent_device_tag.as_deref(),
             Some(device.is_public),
             Some(RbatisDateTime::from_timestamp_millis(device.created_at.timestamp_millis())),
+            device.device_username.as_deref(),
             device.device_password.as_deref(),
             device.playback_username.as_deref(),
             device.playback_password.as_deref(),
@@ -340,7 +344,7 @@ impl DbRepository {
             device.device_type_code.as_deref(),
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
 
-        if let Some(ref tag) = device.device_tag {
+        if let Some(ref tag) = device_tag {
             if let Ok(Some(db_device)) = self.fetch_device_by_tag(tag).await {
                 self.devices_cache.insert(tag.clone(), db_device.clone());
                 self.recalculate_device_stats();
@@ -495,6 +499,9 @@ impl DbRepository {
     }
 
     pub async fn update_device(&self, device: &Device) -> Result<()> {
+        let device_tag = device.device_tag.as_ref().filter(|s| !s.is_empty()).map(|s| s.to_lowercase());
+        let parent_device_tag = device.parent_device_tag.as_ref().filter(|s| !s.is_empty()).map(|s| s.to_lowercase());
+
         let mut extended_json = device.extended.clone().unwrap_or(serde_json::Value::Object(Default::default()));
         if let Some(stream_config) = &device.stream_config {
             if let Some(obj) = extended_json.as_object_mut() {
@@ -529,9 +536,10 @@ impl DbRepository {
             Some(&device.host),
             Some(device.port as i32),
             rtsp_url.as_deref(),
-            device.device_tag.as_deref(),
-            device.parent_device_tag.as_deref(),
+            device_tag.as_deref(),
+            parent_device_tag.as_deref(),
             Some(device.is_public),
+            device.device_username.as_deref(),
             device.device_password.as_deref(),
             device.playback_username.as_deref(),
             device.playback_password.as_deref(),
@@ -550,8 +558,11 @@ impl DbRepository {
             device.device_type_code.as_deref(),
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
 
-        if let Some(ref tag) = device.device_tag {
-            self.devices_cache.insert(tag.clone(), device.clone());
+        if let Some(ref tag) = device_tag {
+            let mut dev = device.clone();
+            dev.device_tag = device_tag.clone();
+            dev.parent_device_tag = parent_device_tag;
+            self.devices_cache.insert(tag.clone(), dev);
         }
         self.recalculate_device_stats();
         Ok(())
@@ -582,22 +593,29 @@ impl DbRepository {
     // ─── Channel methods ────────────────────────────────────────────────
 
     pub async fn create_channel(&self, channel: &Channel) -> Result<i64> {
+        let device_tag = if channel.device_tag.is_empty() { None } else { Some(channel.device_tag.to_lowercase()) };
+        let channel_tag = if channel.channel_tag.is_empty() { None } else { Some(channel.channel_tag.to_lowercase()) };
+        let parent_channel_tag = channel.parent_channel_tag.as_ref().filter(|s| !s.is_empty()).map(|s| s.to_lowercase());
         let status_str = channel.status.to_string();
         let device_type_str = channel.device_type.to_string();
         let channel_extended_json = channel.channel_extended.clone();
         let extended_json = channel.extended.clone().unwrap_or(serde_json::Value::Object(Default::default()));
+        let mut channel_clone = channel.clone();
+        channel_clone.device_tag = device_tag.clone().unwrap_or_default();
+        channel_clone.channel_tag = channel_tag.clone().unwrap_or_default();
+        channel_clone.parent_channel_tag = parent_channel_tag.clone();
 
         let result = channel_insert(
             self.rb.acquire().await?.rb_ref(),
-            Some(&channel.device_tag),
-            Some(&channel.channel_tag),
+            device_tag.as_deref(),
+            channel_tag.as_deref(),
             Some(&channel.name),
             Some(&status_str),
             Some(&device_type_str),
             channel.device_type_code.as_deref(),
             channel_extended_json,
             Some(channel.is_default),
-            channel.parent_channel_tag.as_deref(),
+            parent_channel_tag.as_deref(),
             channel.civil_code.as_deref(),
             channel.address.as_deref(),
             channel.ip_address.as_deref(),
@@ -611,28 +629,38 @@ impl DbRepository {
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
 
         let id = result.last_insert_id.as_i64().unwrap_or(0);
-        let key = format_cache_key(Some(&channel.device_tag), Some(&channel.channel_tag));
-        self.channels_cache.insert(key, channel.clone());
+        let key = format_cache_key(device_tag.as_deref(), channel_tag.as_deref());
+        let cache = self.channels_cache.clone();
+        tokio::spawn(async move {
+            cache.insert(key, channel_clone);
+        });
         Ok(id)
     }
 
     pub async fn update_channel(&self, channel: &Channel) -> Result<()> {
+        let device_tag = if channel.device_tag.is_empty() { String::new() } else { channel.device_tag.to_lowercase() };
+        let channel_tag = if channel.channel_tag.is_empty() { String::new() } else { channel.channel_tag.to_lowercase() };
+        let parent_channel_tag = channel.parent_channel_tag.as_ref().filter(|s| !s.is_empty()).map(|s| s.to_lowercase());
         let status_str = channel.status.to_string();
         let device_type_str = channel.device_type.to_string();
         let channel_extended_json = channel.channel_extended.clone();
         let extended_json = channel.extended.clone().unwrap_or(serde_json::Value::Object(Default::default()));
+        let mut channel_clone = channel.clone();
+        channel_clone.device_tag = device_tag.clone();
+        channel_clone.channel_tag = channel_tag.clone();
+        channel_clone.parent_channel_tag = parent_channel_tag.clone();
 
         channel_update(
             self.rb.acquire().await?.rb_ref(),
-            &channel.device_tag,
-            &channel.channel_tag,
+            &device_tag,
+            &channel_tag,
             Some(&channel.name),
             Some(&status_str),
             Some(&device_type_str),
             channel.device_type_code.as_deref(),
             channel_extended_json,
             Some(channel.is_default),
-            channel.parent_channel_tag.as_deref(),
+            parent_channel_tag.as_deref(),
             channel.civil_code.as_deref(),
             channel.address.as_deref(),
             channel.ip_address.as_deref(),
@@ -644,8 +672,11 @@ impl DbRepository {
             Some(RbatisDateTime::from_timestamp_millis(chrono::Utc::now().timestamp_millis())),
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
 
-        let key = format_cache_key(Some(&channel.device_tag), Some(&channel.channel_tag));
-        self.channels_cache.insert(key, channel.clone());
+        let key = format_cache_key(Some(&device_tag), Some(&channel_tag));
+        let cache = self.channels_cache.clone();
+        tokio::spawn(async move {
+            cache.insert(key, channel_clone);
+        });
 
         Ok(())
     }
@@ -657,11 +688,13 @@ impl DbRepository {
     }
 
     pub async fn get_channel(&self, device_tag: &str, channel_tag: &str) -> Result<Option<Channel>> {
+        let device_tag = device_tag.to_lowercase();
+        let channel_tag = channel_tag.to_lowercase();
         tracing::debug!("[DB] get_channel: device_tag={}, channel_tag={}", device_tag, channel_tag);
         let rows = channel_select_by_device_tag_and_channel_tag(
             self.rb.acquire().await?.rb_ref(),
-            device_tag,
-            channel_tag,
+            &device_tag,
+            &channel_tag,
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
         tracing::debug!("[DB] get_channel result: {} rows", rows.len());
         Ok(rows.into_iter().filter_map(|r| Channel::try_from(r).ok()).next())
@@ -682,13 +715,49 @@ impl DbRepository {
     }
 
     pub fn list_all_channels_cached(&self) -> Vec<Channel> {
-        self.channels_cache.iter().map(|r| r.clone()).collect()
+        let mut channels: Vec<Channel> = self.channels_cache.iter().map(|r| r.clone()).collect();
+        channels.sort_by(|a, b| b.id.cmp(&a.id));
+        channels
     }
 
     pub async fn list_all_channels(&self) -> Result<Vec<Channel>> {
         let rows = channel_select_all(self.rb.acquire().await?.rb_ref())
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(rows.into_iter().filter_map(|r| Channel::try_from(r).ok()).collect())
+    }
+
+    pub async fn list_channels_paginated(
+        &self,
+        device_tag: Option<&str>,
+        search: Option<&str>,
+        status: Option<&str>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<Channel>> {
+        let rows = channel_select_paginated(
+            self.rb.acquire().await?.rb_ref(),
+            device_tag.map(String::from),
+            search.map(String::from),
+            status.map(String::from),
+            limit as i64,
+            offset as i64,
+        ).await.map_err(|e| AppError::Internal(e.to_string()))?;
+        Ok(rows.into_iter().filter_map(|r| Channel::try_from(r).ok()).collect())
+    }
+
+    pub async fn count_channels(
+        &self,
+        device_tag: Option<&str>,
+        search: Option<&str>,
+        status: Option<&str>,
+    ) -> Result<usize> {
+        let count = channel_count(
+            self.rb.acquire().await?.rb_ref(),
+            device_tag.map(String::from),
+            search.map(String::from),
+            status.map(String::from),
+        ).await.map_err(|e| AppError::Internal(e.to_string()))?;
+        Ok(count as usize)
     }
 
     pub async fn delete_channel(&self, device_tag: &str, channel_tag: &str) -> Result<()> {
@@ -886,16 +955,45 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
         Ok(())
     }
 
-    pub async fn list_sessions_paginated(&self, limit: usize, offset: usize) -> Vec<Session> {
-        self.sessions_cache.iter()
-            .skip(offset)
-            .take(limit)
-            .map(|r| r.clone())
-            .collect()
+    pub async fn list_sessions_paginated(&self, search: Option<&str>, state: Option<&str>, limit: usize, offset: usize) -> Vec<Session> {
+        let conn = match self.rb.acquire().await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("list_sessions_paginated acquire: {}", e);
+                return Vec::new();
+            }
+        };
+        let rows = match session_select_paginated(
+            conn.rb_ref(),
+            search.map(String::from),
+            state.map(String::from),
+            limit as i64,
+            offset as i64,
+        ).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("list_sessions_paginated: {}", e);
+                return Vec::new();
+            }
+        };
+
+        rows.into_iter().filter_map(|row| {
+            Session::try_from(row).ok()
+        }).collect()
     }
 
-    pub async fn count_sessions(&self) -> usize {
-        self.sessions_cache.len()
+    pub async fn count_sessions(&self, search: Option<&str>, state: Option<&str>) -> usize {
+        match session_count(
+            self.rb.rb_ref(),
+            search.map(String::from),
+            state.map(String::from),
+        ).await {
+            Ok(count) => count as usize,
+            Err(e) => {
+                tracing::error!("count_sessions: {}", e);
+                self.sessions_cache.len()
+            }
+        }
     }
 
     pub async fn delete_session(&self, id: i64) -> Result<()> {
@@ -912,10 +1010,12 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
     }
 
     pub async fn create_stream(&self, stream: &Stream) -> Result<()> {
+        let device_tag = stream.device_tag.as_ref().filter(|s| !s.is_empty()).map(|s| s.to_lowercase());
+        let channel_tag = stream.channel_tag.as_ref().filter(|s| !s.is_empty()).map(|s| s.to_lowercase());
         let id = stream_insert(
             self.rb.acquire().await?.rb_ref(),
-            stream.device_tag.as_deref(),
-            stream.channel_tag.as_deref(),
+            device_tag.as_deref(),
+            channel_tag.as_deref(),
             Some(stream.media_server_tag.clone()),
             &stream.app,
             Some(&stream.token),
@@ -932,6 +1032,8 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
         let id = id.ok_or_else(|| AppError::Internal("stream insert returned no id".to_string()))?;
         let mut stream = stream.clone();
         stream.id = id;
+        stream.device_tag = device_tag;
+        stream.channel_tag = channel_tag;
         let cache_key = format_cache_key(stream.device_tag.as_deref(), stream.channel_tag.as_deref());
         self.streams_cache.insert(cache_key, stream);
         Ok(())
@@ -953,29 +1055,30 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
     }
 
     pub async fn update_stream(&self, stream: &Stream) -> Result<()> {
-        let conn = self.rb.acquire().await?;
-        let update_result = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            stream_update(
-                conn.rb_ref(),
-                stream.device_tag.as_deref(),
-                stream.channel_tag.as_deref(),
-                Some(stream.media_server_tag.clone()),
-                Some(&stream.state.to_string()),
-                Some(stream.retry_count as i32),
-                Some(stream.max_retries as i32),
-                stream.last_error.clone(),
-                Some(stream.viewer_count as i32),
-                Some(stream.bandwidth_in as i64),
-                Some(stream.bandwidth_out as i64),
-                Some(RbatisDateTime::from_timestamp_millis(stream.last_keepalive_at.timestamp_millis())),
-                stream.id,
-            )
-        ).await;
-        update_result.map_err(|_| AppError::Internal("update_stream timeout".to_string()))?
-            .map_err(|e| AppError::Internal(e.to_string()))?;
-        let cache_key = format_cache_key(stream.device_tag.as_deref(), stream.channel_tag.as_deref());
-        self.streams_cache.insert(cache_key, stream.clone());
+        let device_tag = stream.device_tag.as_ref().filter(|s| !s.is_empty()).map(|s| s.to_lowercase());
+        let channel_tag = stream.channel_tag.as_ref().filter(|s| !s.is_empty()).map(|s| s.to_lowercase());
+        let cache_key = format_cache_key(device_tag.as_deref(), channel_tag.as_deref());
+
+        stream_update(
+            self.rb.acquire().await?.rb_ref(),
+            device_tag.as_deref(),
+            channel_tag.as_deref(),
+            Some(stream.media_server_tag.clone()),
+            Some(&stream.state.to_string()),
+            Some(stream.retry_count as i32),
+            Some(stream.max_retries as i32),
+            stream.last_error.clone(),
+            Some(stream.viewer_count as i32),
+            Some(stream.bandwidth_in as i64),
+            Some(stream.bandwidth_out as i64),
+            Some(RbatisDateTime::from_timestamp_millis(stream.last_keepalive_at.timestamp_millis())),
+            stream.id,
+        ).await.map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let mut stream = stream.clone();
+        stream.device_tag = device_tag;
+        stream.channel_tag = channel_tag;
+        self.streams_cache.insert(cache_key, stream);
         Ok(())
     }
 
@@ -994,16 +1097,60 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
         self.streams_cache.iter().map(|r| r.clone()).collect()
     }
 
-    pub async fn list_streams_paginated(&self, limit: usize, offset: usize) -> Vec<Stream> {
-        self.streams_cache.iter()
-            .skip(offset)
-            .take(limit)
-            .map(|r| r.clone())
-            .collect()
+    pub async fn list_streams_paginated(&self, search: Option<&str>, state: Option<&str>, limit: usize, offset: usize) -> Vec<Stream> {
+        tracing::debug!("[DB] list_streams_paginated: search={:?}, state={:?}, limit={}, offset={}", search, state, limit, offset);
+        let conn = match self.rb.acquire().await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("list_streams_paginated acquire: {}", e);
+                return Vec::new();
+            }
+        };
+        let rows = match stream_select_paginated(
+            conn.rb_ref(),
+            search.map(String::from),
+            state.map(String::from),
+            limit as i64,
+            offset as i64,
+        ).await {
+            Ok(r) => {
+                tracing::debug!("[DB] stream_select_paginated returned {} rows", r.len());
+                r
+            }
+            Err(e) => {
+                tracing::error!("list_streams_paginated: {}", e);
+                return Vec::new();
+            }
+        };
+
+        let cache = self.streams_cache.clone();
+        rows.into_iter().filter_map(|row| {
+            let mut stream = Stream::try_from(row).ok()?;
+            let cache_key = format_cache_key(stream.device_tag.as_deref(), stream.channel_tag.as_deref());
+            if let Some(cached) = cache.get(&cache_key) {
+                stream.state = cached.state;
+                stream.last_keepalive_at = cached.last_keepalive_at;
+                stream.last_error = cached.last_error.clone();
+                stream.viewer_count = cached.viewer_count;
+                stream.bandwidth_in = cached.bandwidth_in;
+                stream.bandwidth_out = cached.bandwidth_out;
+            }
+            Some(stream)
+        }).collect()
     }
 
-    pub async fn count_streams(&self) -> usize {
-        self.streams_cache.len()
+    pub async fn count_streams(&self, search: Option<&str>, state: Option<&str>) -> usize {
+        match stream_count(
+            self.rb.rb_ref(),
+            search.map(String::from),
+            state.map(String::from),
+        ).await {
+            Ok(count) => count as usize,
+            Err(e) => {
+                tracing::error!("count_streams: {}", e);
+                self.streams_cache.len()
+            }
+        }
     }
 
     // ─── Recording methods ─────────────────────────────────────────────

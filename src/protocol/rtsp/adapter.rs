@@ -64,8 +64,7 @@ impl RtspAdapter {
                 line.starts_with("SETUP ") || line.starts_with("PLAY ") ||
                 line.starts_with("TEARDOWN ") {
                 events.push(SignalEvent::StartPlay {
-                    device_id: 0,
-                    device_tag: None,
+                    device_tag: self.device_id.clone(),
                     session_id: self.session.clone().unwrap_or_else(|| format!("rtsp_{}", chrono::Utc::now().timestamp())),
                     channel_id: Some("0".to_string()),
                     transport: crate::protocol::event::TransportType::Tcp,

@@ -211,7 +211,7 @@
                   <span class="status-dot" :class="device.status?.toLowerCase()" />
                   {{ device.status }}
                 </el-descriptions-item>
-                <el-descriptions-item label="设备地址">{{ device.host }}:{{ device.port }}</el-descriptions-item>
+                <el-descriptions-item label="设备地址">{{ device.host ? (device.port ? `${device.host}:${device.port}` : device.host) : '-' }}</el-descriptions-item>
                 <el-descriptions-item label="媒体服务器">{{ device.media_server_tag || '-' }}</el-descriptions-item>
                 <el-descriptions-item label="应用">{{ device.app || '-' }}</el-descriptions-item>
                 <el-descriptions-item label="流标识">{{ device.stream_key || '-' }}</el-descriptions-item>

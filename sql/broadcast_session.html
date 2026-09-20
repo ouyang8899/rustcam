@@ -1,0 +1,42 @@
+<mapper>
+<select id="broadcast_session_select_by_device_tag">
+SELECT id, device_tag, channel_id, call_id, from_tag, to_tag, device_host, device_port, transport, created_at
+FROM broadcast_sessions WHERE device_tag = #{device_tag}
+</select>
+
+<select id="broadcast_session_select_all">
+SELECT id, device_tag, channel_id, call_id, from_tag, to_tag, device_host, device_port, transport, created_at
+FROM broadcast_sessions ORDER BY created_at DESC
+</select>
+
+<insert id="broadcast_session_insert">
+INSERT INTO broadcast_sessions
+<trim prefix="(" suffix=")" prefixOverrides=",">
+<if test="device_tag != null">device_tag</if>
+<if test="channel_id != null">, channel_id</if>
+<if test="call_id != null">, call_id</if>
+<if test="from_tag != null">, from_tag</if>
+<if test="to_tag != null">, to_tag</if>
+<if test="device_host != null">, device_host</if>
+<if test="device_port != null">, device_port</if>
+<if test="transport != null">, transport</if>
+<if test="created_at != null">, created_at</if>
+</trim>
+VALUES
+<trim prefix="(" suffix=")" prefixOverrides=",">
+<if test="device_tag != null">#{device_tag}</if>
+<if test="channel_id != null">, #{channel_id}</if>
+<if test="call_id != null">, #{call_id}</if>
+<if test="from_tag != null">, #{from_tag}</if>
+<if test="to_tag != null">, #{to_tag}</if>
+<if test="device_host != null">, #{device_host}</if>
+<if test="device_port != null">, #{device_port}</if>
+<if test="transport != null">, #{transport}</if>
+<if test="created_at != null">, #{created_at}</if>
+</trim>
+</insert>
+
+<delete id="broadcast_session_delete_by_device_tag">
+DELETE FROM broadcast_sessions WHERE device_tag = #{device_tag}
+</delete>
+</mapper>

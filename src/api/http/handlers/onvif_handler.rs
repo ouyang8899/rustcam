@@ -97,6 +97,7 @@ pub async fn onvif_capabilities_handler(
             "ptz": caps.capabilities.ptz,
             "events": caps.capabilities.events,
             "imaging": caps.capabilities.imaging,
+            "has_audio": caps.capabilities.has_audio,
         },
         "profiles": caps.profiles,
     });

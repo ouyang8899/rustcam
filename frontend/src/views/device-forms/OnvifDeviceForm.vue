@@ -359,7 +359,7 @@ async function onFetchProfiles() {
     }
     capabilities.value = {
       ptz: !!(capsData?.capabilities?.ptz),
-      audio: !!(capsData?.capabilities?.events),
+      audio: capsData?.capabilities?.has_audio || false,
     }
   } catch (e) {
     ElMessage.error('获取能力失败: ' + (e?.message || e))
@@ -381,6 +381,7 @@ async function onConfirmDevice() {
     
     localForm.name = parentName
     localForm.host = address
+    localForm.protocol = 'Onvif'
     localForm.device_username = authUsername.value || ''
     localForm.device_password = authPassword.value || ''
     
@@ -418,9 +419,9 @@ async function loadData(deviceTag) {
     const fullDevice = res.data?.data || res.data || {}
     const ext = fullDevice.extended || {}
     const devStreamConfig = ext.stream_config || {}
-    
+
     localForm.name = fullDevice.name || ''
-    localForm.host = fullDevice.host || ''
+    localForm.host = fullDevice.host || ext.x_addr || ''
     localForm.device_username = fullDevice.device_username || ''
     localForm.device_password = fullDevice.device_password || ''
     localForm.media_server_tag = fullDevice.media_server_tag || ''

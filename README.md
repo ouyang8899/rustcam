@@ -27,7 +27,7 @@
 | 类别 | 技术 |
 |------|------|
 | 框架 | Vue 3 + Element Plus |
-| 状态 | Pinia |
+| 状态 | Vuex |
 | 图表 | ECharts + Vue-ECharts |
 | 视频 | flv.js、hls.js、video.js |
 | 构建 | Vite |

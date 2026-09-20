@@ -40,7 +40,7 @@
             </el-table-column>
             <el-table-column label="主机" width="180" show-overflow-tooltip>
               <template #default="{ row }">
-                <code class="stream-key">{{ row.host }}:{{ row.port }}</code>
+                <code class="stream-key">{{ row.port ? `${row.host}:${row.port}` : row.host }}</code>
               </template>
             </el-table-column>
             <el-table-column label="观看次数" width="100" align="center">
@@ -74,7 +74,7 @@
         <el-descriptions-item label="状态">
           <span class="status-dot" :class="previewCameraData?.status?.toLowerCase() === 'online' ? 'online' : 'offline'" style="margin-right: 6px" />{{ previewCameraData?.status }}
         </el-descriptions-item>
-        <el-descriptions-item label="主机">{{ previewCameraData?.host || '-' }}:{{ previewCameraData?.port || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="主机">{{ previewCameraData?.host ? (previewCameraData?.port ? `${previewCameraData?.host}:${previewCameraData?.port}` : previewCameraData?.host) : '-' }}</el-descriptions-item>
         <el-descriptions-item label="观看次数">{{ previewCameraData?.view_count }} 次</el-descriptions-item>
       </el-descriptions>
     </el-dialog>

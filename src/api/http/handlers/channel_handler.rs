@@ -11,12 +11,14 @@ use crate::application::ChannelService;
 use crate::domain::{Channel, DeviceStatus, DeviceType, Protocol};
 use crate::error::AppError;
 use crate::protocol::adapter_manager;
+use crate::api::http::handlers::device_handler::ChannelWithMediaServer;
 
 #[derive(Debug, Deserialize)]
 pub struct ChannelPaginationQuery {
     pub limit: Option<usize>,
     pub offset: Option<usize>,
     pub device_tag: Option<String>,
+    pub search: Option<String>,
     pub status: Option<String>,
 }
 
@@ -30,28 +32,31 @@ pub struct PaginatedChannels {
     pub total: usize,
     pub limit: usize,
     pub offset: usize,
-    pub items: Vec<Channel>,
+    pub items: Vec<ChannelWithMediaServer>,
 }
 
 pub async fn list_channels_handler(
     State(state): State<Arc<FullState>>,
     Query(q): Query<ChannelPaginationQuery>,
 ) -> Result<Json<ApiResponse<PaginatedChannels>>, AppError> {
-    let all_channels = state.app.registry.channel_service.list_channels_cached();
-    
-    let filtered: Vec<Channel> = if let Some(ref dt) = q.device_tag {
-        all_channels.iter()
-            .filter(|c| &c.device_tag == dt)
-            .cloned()
-            .collect()
-    } else {
-        all_channels
-    };
+    let registry = &state.app.registry;
 
-    let total = filtered.len();
-    let items: Vec<Channel> = filtered.into_iter()
-        .skip(q.offset())
-        .take(q.limit())
+    let channels = registry.channel_service.list_channels_paginated_db(
+        q.device_tag.as_deref(),
+        q.search.as_deref(),
+        q.status.as_deref(),
+        q.limit(),
+        q.offset(),
+    ).await?;
+
+    let total = registry.channel_service.count_channels_db(
+        q.device_tag.as_deref(),
+        q.search.as_deref(),
+        q.status.as_deref(),
+    ).await?;
+
+    let items: Vec<ChannelWithMediaServer> = channels.into_iter()
+        .map(|c| ChannelWithMediaServer::from_channel(c, registry))
         .collect();
 
     Ok(Json(ApiResponse::success(PaginatedChannels {

@@ -25,6 +25,8 @@ pub fn get_gb28181_platform_config() -> &'static OnceCell<(String, String, Strin
     &GB28181_PLATFORM_CONFIG
 }
 
+pub const GB28181_USER_AGENT: &str = concat!("RustCam-Media/", env!("CARGO_PKG_VERSION"));
+
 pub fn detect_local_ip(remote_ip: &str) -> Option<String> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect(format!("{}:5060", remote_ip)).ok()?;

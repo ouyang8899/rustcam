@@ -10,6 +10,8 @@ use tokio::net::tcp::OwnedWriteHalf;
 use chrono::{DateTime, Utc};
 use roxmltree::Document;
 
+use crate::protocol::gb28181::GB28181_USER_AGENT;
+
 /// GB28181 播放错误类型
 #[derive(Debug, Clone)]
 pub enum PlaybackError {
@@ -823,7 +825,7 @@ impl Gb28181Adapter {
              CSeq: {sn} MESSAGE\r\n\
              Content-Type: Application/MANSCDP+xml\r\n\
              Max-Forwards: 70\r\n\
-             User-Agent: RustCam-Media/2.0\r\n\
+             User-Agent: {user_agent}\r\n\
              Content-Length: {body_len}\r\n\
              \r\n\
              {body}",
@@ -834,7 +836,8 @@ impl Gb28181Adapter {
             call_id = call_id,
             sn = sn,
             body_len = body_len,
-            body = body
+            body = body,
+            user_agent = GB28181_USER_AGENT
         )
     }
 
@@ -914,7 +917,7 @@ impl Gb28181Adapter {
             .header("call-id", &call_id)
             .header("CSeq", &format!("{} MESSAGE", sn))
             .header("content-type", "Application/MANSCDP+xml")
-            .header("user-agent", "RustCam-Media/2.0")
+            .header("user-agent", GB28181_USER_AGENT)
             .set_body(&body);
 
         msg.to_string().into_bytes()
@@ -1104,7 +1107,7 @@ impl Gb28181Adapter {
              CSeq: {}\r\n\
              Call-ID: {}\r\n\
              {}\
-             {}User-Agent: RustCam-Media/2.0\r\n\
+             {}User-Agent: {}\r\n\
              {}{}",
             status_code,
             status_text,
@@ -1119,6 +1122,7 @@ impl Gb28181Adapter {
             expires_line,
             content_type_line,
             content_length_line,
+            user_agent = GB28181_USER_AGENT
         )
     }
 
@@ -1146,7 +1150,7 @@ impl Gb28181Adapter {
              To: <{}>{}\r\n\
              CSeq: {}\r\n\
              Call-ID: {}\r\n\
-             User-Agent: RustCam-Media/2.0\r\n\
+             User-Agent: {}\r\n\
              WWW-Authenticate: {}\r\n\
              Content-Length: 0\r\n\r\n",
             self.via_header(via_branch),
@@ -1156,6 +1160,7 @@ impl Gb28181Adapter {
             self.to_tag_param(),
             cseq_line,
             self.call_id_str(),
+            GB28181_USER_AGENT,
             www_auth
         );
         tracing::info!("[GB28181] 401 response:\n{}", response);
@@ -1178,7 +1183,7 @@ impl Gb28181Adapter {
              To: <{}>{}\r\n\
              CSeq: {}\r\n\
              Call-ID: {}\r\n\
-             User-Agent: RustCam-Media/2.0\r\n\
+             User-Agent: {}\r\n\
              Content-Length: 0\r\n\r\n",
             self.via_header(via_branch),
             from_uri,
@@ -1186,7 +1191,8 @@ impl Gb28181Adapter {
             from_uri,
             self.to_tag_param(),
             cseq_line,
-            self.call_id_str()
+            self.call_id_str(),
+            GB28181_USER_AGENT
         )
     }
 
@@ -1205,13 +1211,14 @@ impl Gb28181Adapter {
              To: {}\r\n\
              CSeq: {}\r\n\
              Call-ID: {}\r\n\
-             User-Agent: RustCam-Media/2.0\r\n\
+             User-Agent: {}\r\n\
              Content-Length: 0\r\n\r\n",
             self.via_header(via_branch),
             from_hdr,
             to_hdr,
             cseq_line,
-            call_id_hdr
+            call_id_hdr,
+            GB28181_USER_AGENT
         )
     }
 
@@ -1726,18 +1733,26 @@ impl Gb28181Adapter {
                 Some(d.device_tag.unwrap_or_default()),
             ),
             None => {
-                tracing::warn!("[GB28181] Device not found: {}", device_id);
-                return (None, Some(self.build_403_response(&via_branch, &cseq)));
+                tracing::warn!("[GB28181] Device not found: {}, sending 401 to trigger re-registration", device_id);
+                let server_realm = super::get_gb28181_platform_config()
+                    .get()
+                    .map(|c| c.1.clone())
+                    .unwrap_or_else(|| device_id.clone());
+                return (None, Some(self.build_401_response(&via_branch, &cseq, &server_realm)));
             }
         };
         tracing::info!("[GB28181] Device found: username={}", username);
         if auth_params.username != username {
             tracing::warn!(
-                "[GB28181] Username mismatch: auth={} vs db={}",
+                "[GB28181] Username mismatch: auth={} vs db={}, sending 401 to trigger re-registration",
                 auth_params.username,
                 username
             );
-            return (None, Some(self.build_403_response(&via_branch, &cseq)));
+            let server_realm = super::get_gb28181_platform_config()
+                .get()
+                .map(|c| c.1.clone())
+                .unwrap_or_else(|| device_id.clone());
+            return (None, Some(self.build_401_response(&via_branch, &cseq, &server_realm)));
         }
 
         match verify_sip_digest(&auth_params, &password, "REGISTER") {
@@ -2027,7 +2042,6 @@ impl Gb28181Adapter {
             );
             return (
                 Some(SignalEvent::QueryDeviceInfo {
-                    device_id: self.device_id_i64(),
                     device_tag: Some(device_tag.clone()),
                 }),
                 Some(resp),
@@ -2041,7 +2055,6 @@ impl Gb28181Adapter {
             );
             return (
                 Some(SignalEvent::QueryDeviceInfo {
-                    device_id: self.device_id_i64(),
                     device_tag: Some(device_tag.clone()),
                 }),
                 Some(resp),
@@ -2272,7 +2285,6 @@ impl Gb28181Adapter {
                 self.sessions.write().await.retain(|s| s.call_id != call_id);
                 return (
                     Some(SignalEvent::StopPlay {
-                        device_id: self.device_id_i64(),
                         device_tag: Some(session.channel_id.clone()),
                         session_id: session.stream_key.clone(),
                         session_type: session.session_type.clone(),
@@ -2300,7 +2312,6 @@ impl Gb28181Adapter {
             self.sessions.write().await.retain(|s| s.call_id != call_id);
             return (
                 Some(SignalEvent::StopPlay {
-                    device_id: self.device_id_i64(),
                     device_tag: Some(session.channel_id.clone()),
                     session_id: session.stream_key.clone(),
                     session_type: session.session_type.clone(),
@@ -2670,7 +2681,7 @@ impl Gb28181Adapter {
              Call-ID: {call_id}\r\n\
              CSeq: {seq} ACK\r\n\
              Max-Forwards: 70\r\n\
-             User-Agent: RustCam-Media/2.0\r\n\
+             User-Agent: {user_agent}\r\n\
              Content-Length: 0\r\n\
              \r\n",
             ack_target = ack_target,
@@ -2680,7 +2691,8 @@ impl Gb28181Adapter {
             to_uri = ack_to_uri,
             to_tag = to_tag_part,
             call_id = session.call_id,
-            seq = session.seq
+            seq = session.seq,
+            user_agent = GB28181_USER_AGENT
         );
 
         tracing::info!(
@@ -2769,7 +2781,6 @@ impl Gb28181Adapter {
 
         (
             Some(SignalEvent::StartPlay {
-                device_id: self.device_id_i64(),
                 device_tag: Some(session.channel_id.clone()),
                 session_id: session.stream_key.clone(),
                 channel_id: Some(session.channel_id.clone()),
@@ -2852,7 +2863,7 @@ impl Gb28181Adapter {
              CSeq: {} SUBSCRIBE\r\n\
              Expires: {}\r\n\
              Contact: <sip:{}>\r\n\
-             User-Agent: RustCam-Media/2.0\r\n\
+             User-Agent: {}\r\n\
              Content-Length: 0\r\n\r\n",
             self.via_header(&via_branch),
             device_tag,
@@ -2861,7 +2872,8 @@ impl Gb28181Adapter {
             Self::get_header(headers, "Call-ID").unwrap_or_default(),
             cseq,
             expires,
-            device_tag
+            device_tag,
+            GB28181_USER_AGENT
         );
 
         (
@@ -3428,10 +3440,6 @@ impl Gb28181Adapter {
         self.device_id.unwrap_or(0)
     }
 
-    fn device_id_str(&self) -> Option<String> {
-        self.device_id.map(|i| i.to_string())
-    }
-
     fn has_timed_out(&self) -> bool {
         if let Some(timeout_secs) = self.idle_timeout() {
             if let Some(last_msg) = self.last_message_at {
@@ -3869,7 +3877,7 @@ impl SignalAdapter for Gb28181Adapter {
              To: <sip:{to_uri}>\r\n\
              Call-ID: {call_id}\r\n\
              CSeq: {sn} INVITE\r\n\
-             User-Agent: RustCam-Media/2.0\r\n\
+             User-Agent: {user_agent}\r\n\
              Subject: {subject}\r\n\
              Content-Type: application/sdp\r\n\
              Content-Length: {sdp_len}\r\n\
@@ -3883,7 +3891,8 @@ impl SignalAdapter for Gb28181Adapter {
             sn = sn,
             subject = subject,
             sdp_len = sdp_len,
-            sdp = sdp
+            sdp = sdp,
+            user_agent = GB28181_USER_AGENT
         );
 
         tracing::info!("[GB28181] Sending INVITE to device={}, stream={}, rtp={}, local_ip={}\n--- INVITE START ---\n{}\n--- INVITE END ---",
@@ -4032,7 +4041,7 @@ impl SignalAdapter for Gb28181Adapter {
              To: <sip:{to_uri}>\r\n\
              Call-ID: {call_id}\r\n\
              CSeq: {sn} INVITE\r\n\
-             User-Agent: RustCam-Media/2.0\r\n\
+             User-Agent: {user_agent}\r\n\
              Subject: {subject}\r\n\
              Content-Type: application/sdp\r\n\
              Content-Length: {sdp_len}\r\n\
@@ -4046,7 +4055,8 @@ impl SignalAdapter for Gb28181Adapter {
             sn = sn,
             subject = subject,
             sdp_len = sdp_len,
-            sdp = sdp
+            sdp = sdp,
+            user_agent = GB28181_USER_AGENT
         );
 
         tracing::info!(
@@ -4182,7 +4192,7 @@ impl SignalAdapter for Gb28181Adapter {
              To: <sip:{to_uri}>;tag={to_tag}\r\n\
              Call-ID: {call_id}\r\n\
              CSeq: {sn} NOTIFY\r\n\
-             User-Agent: RustCam-Media/2.0\r\n\
+             User-Agent: {user_agent}\r\n\
              Event: {event_type}\r\n\
              Content-Type: Application/MANSCDP+xml\r\n\
              Content-Length: {content_len}\r\n\
@@ -4198,7 +4208,8 @@ impl SignalAdapter for Gb28181Adapter {
             sn = sn,
             event_type = event_type,
             content_len = content.len(),
-            content = content
+            content = content,
+            user_agent = GB28181_USER_AGENT
         );
 
         tracing::info!(
@@ -4335,7 +4346,7 @@ impl Gb28181Adapter {
              To: <sip:{to_uri}>\r\n\
              Call-ID: {call_id}\r\n\
              CSeq: {sn} REGISTER\r\n\
-             User-Agent: RustCam-Media/2.0\r\n\
+             User-Agent: {user_agent}\r\n\
              Expires: 0\r\n\
              Content-Length: 0\r\n\r\n",
             to_uri = to_uri,
@@ -4344,7 +4355,8 @@ impl Gb28181Adapter {
             server_gb_domain = server_gb_domain,
             from_tag = from_tag,
             call_id = call_id,
-            sn = sn
+            sn = sn,
+            user_agent = GB28181_USER_AGENT
         );
 
         tracing::info!(
@@ -4429,7 +4441,7 @@ impl Gb28181Adapter {
              Call-ID: {call_id}\r\n\
              CSeq: {sn} MESSAGE\r\n\
              Content-Type: Application/MANSCDP+xml\r\n\
-             User-Agent: RustCam-Media/2.0\r\n\
+             User-Agent: {user_agent}\r\n\
              Content-Length: {content_len}\r\n\
              \r\n\
              {content}",
@@ -4441,7 +4453,8 @@ impl Gb28181Adapter {
             call_id = call_id,
             sn = sn,
             content_len = content.len(),
-            content = content
+            content = content,
+            user_agent = GB28181_USER_AGENT
         );
 
         tracing::info!("[GB28181]   ============================================");
@@ -5087,7 +5100,7 @@ a=ssrc:{}
              To: <sip:{}@{}:{}>;tag={}\r\n\
              Call-ID: {}\r\n\
              CSeq: 2 BYE\r\n\
-             User-Agent: RustCam-Media/2.0\r\n\
+             User-Agent: {}\r\n\
              Content-Length: 0\r\n\r\n",
             device_tag,
             session.device_host,
@@ -5104,7 +5117,8 @@ a=ssrc:{}
             session.device_host,
             session.device_port,
             session.to_tag.as_deref().unwrap_or(""),
-            &session.call_id
+            &session.call_id,
+            GB28181_USER_AGENT
         );
 
         let send_once = || async {
@@ -5175,7 +5189,7 @@ a=ssrc:{}
              To: <sip:{}@{}:{}>\r\n\
              Call-ID: {}\r\n\
              CSeq: 2 BYE\r\n\
-             User-Agent: RustCam-Media/2.0\r\n\
+             User-Agent: {}\r\n\
              Content-Length: 0\r\n\r\n",
             device_tag,
             device_host,
@@ -5190,7 +5204,8 @@ a=ssrc:{}
             device_tag,
             device_host,
             device_port,
-            call_id
+            call_id,
+            GB28181_USER_AGENT
         );
 
         if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
@@ -5310,7 +5325,7 @@ mod tests {
     #[test]
     fn test_build_ptz_xml_compound() {
         let result =
-            Gb28181Adapter::build_ptz_xml_compound("34020000001110000001", 0.5, 0.5, 0.0, 50);
+            Gb28181Adapter::build_ptz_xml_compound("34020000001110000001", 0.5, 0.5, 0.0);
         assert!(result.contains("34020000001110000001"));
         assert!(result.contains("PTZCmd"));
     }

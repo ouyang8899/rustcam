@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::api::state::FullState;
 use crate::api::response::ApiResponse;
 use crate::error::AppError;
-use crate::domain::{Device, CreateDeviceRequest, UpdateDeviceRequest, Protocol, DeviceWithChildren};
+use crate::domain::{Device, CreateDeviceRequest, UpdateDeviceRequest, Protocol, DeviceWithChildren, Stream, Session, Channel};
 use crate::auth::CurrentUser;
 use crate::protocol::onvif::OnvifDeviceClient;
 
@@ -63,13 +63,13 @@ pub struct PlayRequest {
 pub async fn list_devices_handler(
     State(state): State<Arc<FullState>>,
     Query(q): Query<PaginationQuery>,
-) -> Result<Json<ApiResponse<PaginatedResponse<Device>>>, AppError> {
+) -> Result<Json<ApiResponse<PaginatedResponse<DeviceWithMediaServer>>>, AppError> {
     let registry = &state.app.registry;
     let devices = registry.device_service.list_devices_paginated(q.limit(), q.offset(), q.search.as_deref()).await;
     let total = registry.device_service.count_devices_filtered(q.search.as_deref()).await;
 
     Ok(Json(ApiResponse::success(PaginatedResponse {
-        items: devices,
+        items: devices.into_iter().map(|d| DeviceWithMediaServer::from_device(d, registry)).collect(),
         total,
         limit: q.limit(),
         offset: q.offset(),
@@ -99,6 +99,7 @@ pub async fn create_device_handler(
     Json(req): Json<CreateDeviceRequest>,
 ) -> Result<Json<ApiResponse<Device>>, AppError> {
     let device = state.app.registry.device_service.create_device(req).await?;
+
     Ok(Json(ApiResponse::success(device)))
 }
 
@@ -461,4 +462,112 @@ pub struct PaginatedResponse<T> {
 pub struct StartDeviceResult {
     pub success: bool,
     pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeviceWithMediaServer {
+    #[serde(flatten)]
+    pub device: Device,
+    pub media_server_name: Option<String>,
+    pub media_server_online: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StreamWithMediaServer {
+    #[serde(flatten)]
+    pub stream: Stream,
+    pub media_server_name: Option<String>,
+    pub media_server_online: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SessionWithMediaServer {
+    #[serde(flatten)]
+    pub session: Session,
+    pub media_server_name: Option<String>,
+    pub media_server_online: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChannelWithMediaServer {
+    #[serde(flatten)]
+    pub channel: Channel,
+    pub media_server_name: Option<String>,
+    pub media_server_tag: Option<String>,
+    pub media_server_online: bool,
+}
+
+impl DeviceWithMediaServer {
+    pub fn from_device(device: Device, registry: &crate::context::ServiceRegistry) -> Self {
+        let (media_server_name, media_server_online) = if let Some(ref tag) = device.media_server_tag {
+            let server = registry.media_server_service.get(tag);
+            let name = server.map(|s| s.name);
+            let online = registry.media.cluster.get_server(tag).is_some();
+            (name, online)
+        } else {
+            (None, false)
+        };
+        DeviceWithMediaServer {
+            device,
+            media_server_name,
+            media_server_online,
+        }
+    }
+}
+
+impl StreamWithMediaServer {
+    pub fn from_stream(stream: Stream, registry: &crate::context::ServiceRegistry) -> Self {
+        let tag = &stream.media_server_tag;
+        let server = registry.media_server_service.get(tag);
+        let name = server.map(|s| s.name);
+        let online = registry.media.cluster.get_server(tag).is_some();
+        StreamWithMediaServer {
+            stream,
+            media_server_name: name,
+            media_server_online: online,
+        }
+    }
+}
+
+impl SessionWithMediaServer {
+    pub fn from_session(session: Session, registry: &crate::context::ServiceRegistry) -> Self {
+        let (media_server_name, media_server_online) = if let Some(ref tag) = session.media_server_tag {
+            let server = registry.media_server_service.get(tag);
+            let name = server.map(|s| s.name);
+            let online = registry.media.cluster.get_server(tag).is_some();
+            (name, online)
+        } else {
+            (None, false)
+        };
+        SessionWithMediaServer {
+            session,
+            media_server_name,
+            media_server_online,
+        }
+    }
+}
+
+impl ChannelWithMediaServer {
+    pub fn from_channel(channel: Channel, registry: &crate::context::ServiceRegistry) -> Self {
+        let (media_server_name, media_server_tag, media_server_online) = {
+            if let Some(device) = registry.infra.db.get_device_by_device_tag(&channel.device_tag) {
+                if let Some(ref tag) = device.media_server_tag {
+                    let server = registry.media_server_service.get(tag);
+                    let name = server.map(|s| s.name);
+                    let online = registry.media.cluster.get_server(tag).is_some();
+                    (name, Some(tag.clone()), online)
+                } else {
+                    (None, None, false)
+                }
+            } else {
+                (None, None, false)
+            }
+        };
+        ChannelWithMediaServer {
+            channel,
+            media_server_name,
+            media_server_tag,
+            media_server_online,
+        }
+    }
 }

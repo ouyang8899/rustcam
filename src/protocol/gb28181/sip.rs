@@ -1,6 +1,8 @@
 use rsip::{message::HasHeaders, Header as RsipHeader, SipMessage as RsipSipMessage};
 use std::collections::HashMap;
 
+use crate::protocol::gb28181::GB28181_USER_AGENT;
+
 #[derive(Debug, Clone)]
 pub struct SipVia {
     pub protocol_name: String,
@@ -1313,7 +1315,7 @@ mod tests {
         .header("to", "<sip:64010000002000000001@192.168.1.100:5060>")
         .header("call-id", "call123")
         .header("cseq", "1 INVITE")
-        .header("user-agent", "RustCam-Media/2.0")
+        .header("user-agent", GB28181_USER_AGENT)
         .header("subject", "10000000001320000001:64010000001000000001:0")
         .set_content_type("application/sdp")
         .set_body("v=0\r\n");

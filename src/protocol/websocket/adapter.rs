@@ -200,10 +200,8 @@ impl WebSocketAdapter {
 
             "start_play" => {
                 if let Some(device_id_str) = json.get("device_id").and_then(|v| v.as_str()) {
-                    let device_id = device_id_str.parse().unwrap_or(0);
                     events.push(SignalEvent::StartPlay {
-                        device_id,
-                        device_tag: None,
+                        device_tag: Some(device_id_str.to_string()),
                         session_id: json.get("session_id").and_then(|v| v.as_str()).unwrap_or("ws_session").to_string(),
                         channel_id: json.get("channel").and_then(|v| v.as_str()).map(String::from),
                         transport: TransportType::WebSocket,
@@ -215,10 +213,8 @@ impl WebSocketAdapter {
 
             "stop_play" => {
                 if let Some(device_id_str) = json.get("device_id").and_then(|v| v.as_str()) {
-                    let device_id = device_id_str.parse().unwrap_or(0);
                     events.push(SignalEvent::StopPlay {
-                        device_id,
-                        device_tag: None,
+                        device_tag: Some(device_id_str.to_string()),
                         session_id: json.get("session_id").and_then(|v| v.as_str()).unwrap_or("ws_session").to_string(),
                         session_type: SessionType::Play,
                     });

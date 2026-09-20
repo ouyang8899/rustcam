@@ -39,7 +39,7 @@
           <el-table-column label="ID" prop="id" width="80" align="center" />
           <el-table-column label="流标识" min-width="200">
             <template #default="{ row }">
-              <code class="stream-key">{{ row.stream_key || row.id }}</code>
+              <code class="stream-key">{{ row.device_tag }}_{{ row.channel_tag }}</code>
             </template>
           </el-table-column>
           <el-table-column label="设备标识" prop="device_tag" width="120" align="center" />
@@ -56,9 +56,18 @@
               </span>
             </template>
           </el-table-column>
-          <el-table-column label="媒体服务器" width="150" align="center">
+          <el-table-column label="媒体服务器" width="160" align="center">
             <template #default="{ row }">
-              {{ row.media_server_tag || '-' }}
+              <span v-if="row.media_server_name">
+                <el-tag size="small" :type="row.media_server_online ? 'success' : 'danger'" style="margin-right: 4px">
+                  {{ row.media_server_online ? '在线' : '离线' }}
+                </el-tag>
+                {{ row.media_server_name }}
+              </span>
+              <span v-else-if="row.media_server_tag" style="color: #E6A23C">
+                {{ row.media_server_tag }}
+              </span>
+              <span v-else>-</span>
             </template>
           </el-table-column>
           <el-table-column label="创建时间" width="180" align="center">

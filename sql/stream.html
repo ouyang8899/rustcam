@@ -11,6 +11,33 @@ FROM streams
 ORDER BY created_at DESC
 </select>
 
+<select id="stream_select_paginated">
+SELECT id, device_tag, channel_tag, media_server_tag, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at
+FROM streams
+<where>
+<if test="search != null">
+(device_tag ILIKE '%' || #{search} || '%' OR channel_tag ILIKE '%' || #{search} || '%' OR app ILIKE '%' || #{search} || '%')
+</if>
+<if test="state != null">
+AND state = #{state}
+</if>
+</where>
+ORDER BY id DESC
+LIMIT #{limit} OFFSET #{offset}
+</select>
+
+<select id="stream_count">
+SELECT COUNT(*) FROM streams
+<where>
+<if test="search != null">
+(device_tag ILIKE '%' || #{search} || '%' OR channel_tag ILIKE '%' || #{search} || '%' OR app ILIKE '%' || #{search} || '%')
+</if>
+<if test="state != null">
+AND state = #{state}
+</if>
+</where>
+</select>
+
 <select id="stream_select_active_paginated">
 SELECT id, device_tag, channel_tag, media_server_tag, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at
 FROM streams

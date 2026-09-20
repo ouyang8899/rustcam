@@ -1,4 +1,5 @@
 pub mod alarm;
+pub mod channel;
 pub mod device;
 pub mod device_group;
 pub mod gb28181_ref;
@@ -15,6 +16,7 @@ pub mod traits;
 pub use traits::*;
 
 pub use alarm::*;
+pub use channel::*;
 pub use device::*;
 pub use ptz::*;
 pub use recording::*;

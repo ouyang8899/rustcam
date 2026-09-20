@@ -807,7 +807,19 @@ impl ZlMediaKitHookHandler {
                 let device_tag = s.device_tag.clone();
                 let channel_tag = s.channel_tag.clone();
                 let mut s = s;
-                s.stopped();
+                if let Some(ref dt) = device_tag {
+                    if let Some(device) = self.repo.devices_cache().get(dt) {
+                        if device.status == crate::domain::DeviceStatus::Maintaining {
+                            s.stopped();
+                        } else {
+                            s.error("stream closed by media server");
+                        }
+                    } else {
+                        s.error("stream closed by media server");
+                    }
+                } else {
+                    s.error("stream closed by media server");
+                }
                 if let Err(e) = self.repo.update_stream(&s).await {
                     tracing::warn!("[ZlMediaKit Hook] on_stream_changed: failed to stop stream: {}", e);
                 }
@@ -836,11 +848,15 @@ impl ZlMediaKitHookHandler {
                 tracing::warn!("[ZlMediaKit Hook] on_stream_changed: failed to update stream: {}", e);
             }
             if let Some(ref dt) = device_tag {
+                tracing::debug!("[ZlMediaKit Hook] on_stream_changed: looking for channel device_tag={}, channel_tag={}", dt, channel_tag.as_deref().unwrap_or(dt));
                 if let Ok(Some(mut channel)) = self.repo.get_channel(dt, channel_tag.as_deref().unwrap_or(dt)).await {
+                    tracing::info!("[ZlMediaKit Hook] on_stream_changed: found channel, updating status to Online");
                     channel.status = crate::domain::DeviceStatus::Online;
                     if let Err(e) = self.repo.update_channel(&channel).await {
                         tracing::warn!("[ZlMediaKit Hook] on_stream_changed: failed to update channel status: {}", e);
                     }
+                } else {
+                    tracing::warn!("[ZlMediaKit Hook] on_stream_changed: channel not found device_tag={}, channel_tag={}", dt, channel_tag.as_deref().unwrap_or(dt));
                 }
                 self.sync_device_status_by_channels(dt).await;
             }
@@ -862,14 +878,7 @@ impl ZlMediaKitHookHandler {
     }
 
     async fn on_server_started(&self, media_server_tag: &str) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_server_started: server={}, restarting streams directly", media_server_tag);
-
-        if let Some(ref svc) = self.stream_recovery_service {
-            svc.restart_streams_for_media_server(media_server_tag).await;
-        } else {
-            tracing::warn!("[ZlMediaKit Hook] on_server_started: stream_recovery_service not available");
-        }
-
+        tracing::info!("[ZlMediaKit Hook] on_server_started: server={}, stream recovery will handle streams", media_server_tag);
         HookResponse::allow()
     }
 
@@ -903,10 +912,24 @@ impl ZlMediaKitHookHandler {
     // ============== 辅助方法 ==============
 
     fn find_stream_by_stream_key(&self, stream_key: &str) -> Option<crate::domain::Stream> {
+        if let Some((device_tag, channel_tag)) = crate::domain::parse_stream_key(stream_key) {
+            let cache_key = format!("{}/{}", device_tag, channel_tag);
+            tracing::debug!("[ZlMediaKit Hook] find_stream_by_stream_key: stream_key={} -> cache_key={}", stream_key, cache_key);
+            if let Some(s) = self.repo.streams_cache().get(&cache_key) {
+                return Some(s.clone());
+            }
+        }
+        // Fallback: try stream_key directly (for cases where device_tag == channel_tag)
+        if let Some(s) = self.repo.streams_cache().get(stream_key) {
+            return Some(s.clone());
+        }
+        // Try replacing _ with / as last resort
         let cache_key = stream_key.replace('_', "/");
-        self.repo.streams_cache()
-            .get(&cache_key)
-            .map(|s| s.clone())
+        if let Some(s) = self.repo.streams_cache().get(&cache_key) {
+            return Some(s.clone());
+        }
+        tracing::warn!("[ZlMediaKit Hook] find_stream_by_stream_key: not found for stream_key={}", stream_key);
+        None
     }
 
     fn find_device_by_stream_key(&self, stream_key: &str) -> Option<crate::domain::Device> {
@@ -976,44 +999,34 @@ impl ZlMediaKitHookHandler {
     }
 
     async fn register_push_stream(&self, media_server_tag: &str, stream_id: &str) -> Result<()> {
-        let device_id = self.find_device_by_push_stream(stream_id);
+        let (device_tag, channel_tag) = crate::domain::parse_stream_key(stream_id)
+            .unwrap_or((stream_id.to_string(), stream_id.to_string()));
 
-        if let Some(s) = self.find_stream_by_stream_key(stream_id) {
-            let mut s = s;
+        let cache_key = format!("{}/{}", device_tag, channel_tag);
+        if let Some(mut s) = self.repo.streams_cache().get(&cache_key) {
+            let mut s = s.value().clone();
             s.update_keepalive();
             if s.state == crate::domain::StreamState::Idle || s.state == crate::domain::StreamState::Error {
                 s.start();
             }
             self.repo.update_stream(&s).await?;
-            tracing::info!("[ZlMediaKit Hook] on_publish: updated push stream {} (device_tag={})", stream_id, s.device_tag.as_deref().unwrap_or("unknown"));
-        } else {
-            let (device_tag, channel_tag) = crate::domain::parse_stream_key(stream_id)
-                .unwrap_or((stream_id.to_string(), stream_id.to_string()));
-            let app = device_id
-                .as_ref()
-                .and_then(|id| self.repo.devices_cache().get(id))
-                .map(|d| d.app.clone().unwrap_or_else(|| "live".to_string()))
-                .unwrap_or_else(|| "live".to_string());
-            let mut stream = crate::domain::Stream::new(
-                media_server_tag.to_string(),
-                device_tag,
-                channel_tag,
-                app,
-                uuid::Uuid::new_v4().to_string(),
-            );
-            stream.start();
-            self.repo.create_stream(&stream).await?;
-            tracing::info!("[ZlMediaKit Hook] on_publish: registered push stream {} on server {}", stream_id, media_server_tag);
+            tracing::info!("[ZlMediaKit Hook] on_publish: updated push stream {} (device_tag={})", stream_id, device_tag);
+            return Ok(());
         }
 
-        if let Some(ref did) = device_id {
-            if let Some(device) = self.repo.devices_cache().get(did) {
-                let mut device = (*device).clone();
-                device.set_online();
-                self.repo.update_device(&device).await?;
-                tracing::info!("[ZlMediaKit Hook] on_publish: device {} is now online", did);
-            }
-        }
+        let app = self.repo.devices_cache().get(&device_tag)
+            .map(|d| d.app.clone().unwrap_or_else(|| "live".to_string()))
+            .unwrap_or_else(|| "live".to_string());
+        let mut stream = crate::domain::Stream::new(
+            media_server_tag.to_string(),
+            device_tag.clone(),
+            channel_tag,
+            app,
+            uuid::Uuid::new_v4().to_string(),
+        );
+        stream.start();
+        self.repo.create_stream(&stream).await?;
+        tracing::info!("[ZlMediaKit Hook] on_publish: registered push stream {} on server {}", stream_id, media_server_tag);
 
         Ok(())
     }

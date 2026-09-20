@@ -46,7 +46,7 @@ pub fn get_tcp_rtsp_rtp_server() -> Option<&'static Arc<TcpRtspRtpServer>> {
 pub use errors::{MediaError, Result};
 pub use rtp::{RtpHeader, RtpPacket, PAYLOAD_TYPE_PCMU, PAYLOAD_TYPE_PCMA};
 pub use rtcp::{SenderReport, ReceiverReport, RtcpGoodbye, RtcpPacket};
-pub use transport::{DataTransport, Gb28181TcpTransport, GB28181BroadcastVoiceTransport, WebSocketMediaTransport, WebSocketMediaNodeTransport, DataTransportAdapter, NullTransport};
+pub use transport::{DataTransport, Gb28181TcpTransport, GB28181BroadcastVoiceTransport, WebSocketMediaTransport, WebSocketMediaNodeTransport, DataTransportAdapter, NullTransport, OnvifBackchannelTransport};
 pub use codec::{G711, AudioCodec};
 pub use tcp_rtsp_rtp_server::{TcpRtspRtpServer, TcpRtspRtpServerConfig, TcpRtpEvent};
 pub use node::{MediaNodeType, MediaNodeId, MediaNode, BasicMediaNode, MediaSession as NodeMediaSession, MediaSessionKey, MediaSessionManager, MediaTransport as MediaNodeTransport, NodeMiddleware, BasicMiddleware, G711ToLinearPcmMiddleware, LinearPcmToG711Middleware, RtpSendMiddleware, SendToReceiversMiddleware, NodeMediaContext, init_media_session_manager, get_media_session_manager, DataType};

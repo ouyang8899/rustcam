@@ -143,7 +143,7 @@ function validate() {
 }
 
 function getData() {
-  return { ...localForm }
+  return { ...localForm, protocol: 'Rtmp' }
 }
 
 async function loadData(deviceTag) {

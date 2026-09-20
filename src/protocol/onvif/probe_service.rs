@@ -41,6 +41,8 @@ pub struct CapabilityUrls {
     pub ptz: Option<String>,
     pub events: Option<String>,
     pub imaging: Option<String>,
+    #[serde(default)]
+    pub has_audio: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -99,6 +101,16 @@ impl OnvifProbeService {
             .map_err(|e| { tracing::error!("[ONVIF] get_profiles failed: x_addr={}, error={}", x_addr, e); e })?;
         tracing::debug!("[ONVIF Probe] get_profiles success: count={}", profiles.len());
 
+        let audio_outputs = match client.get_audio_outputs().await {
+            Ok(outputs) => outputs,
+            Err(e) => {
+                tracing::warn!("[ONVIF] get_audio_outputs failed: x_addr={}, error={}", x_addr, e);
+                Vec::new()
+            }
+        };
+        let has_audio = !audio_outputs.is_empty();
+        tracing::debug!("[ONVIF Probe] get_audio_outputs success: has_audio={}, count={}", has_audio, audio_outputs.len());
+
         Ok(CapabilitiesResult {
             device_info: DeviceInfo {
                 manufacturer: device_info.manufacturer,
@@ -112,6 +124,7 @@ impl OnvifProbeService {
                 ptz: caps.ptz,
                 events: caps.events,
                 imaging: caps.imaging,
+                has_audio,
             },
             profiles: profiles.into_iter().map(|p| ProfileInfo {
                 token: p.token,

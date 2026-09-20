@@ -25,4 +25,7 @@ pub enum RtspError {
 
     #[error("RTP 发送失败: {0}")]
     RtpSendFailed(String),
+
+    #[error("设备不支持背频道 (551)")]
+    BackchannelNotSupported,
 }

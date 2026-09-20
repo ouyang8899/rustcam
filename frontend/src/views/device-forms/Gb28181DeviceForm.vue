@@ -392,6 +392,7 @@ function getData() {
   
   return {
     ...localForm,
+    protocol: 'Gb28181',
     device_tag: deviceTag,
     region_code: sipIdPrefix.value || null,
     extended: {

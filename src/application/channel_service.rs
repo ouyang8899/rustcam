@@ -28,8 +28,28 @@ impl ChannelService {
         all.into_iter().skip(offset).take(limit).collect()
     }
 
+    pub async fn list_channels_paginated_db(
+        &self,
+        device_tag: Option<&str>,
+        search: Option<&str>,
+        status: Option<&str>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<Channel>> {
+        self.repo.list_channels_paginated(device_tag, search, status, limit, offset).await
+    }
+
     pub fn count_channels(&self) -> usize {
         self.repo.list_all_channels_cached().len()
+    }
+
+    pub async fn count_channels_db(
+        &self,
+        device_tag: Option<&str>,
+        search: Option<&str>,
+        status: Option<&str>,
+    ) -> Result<usize> {
+        self.repo.count_channels(device_tag, search, status).await
     }
 
     pub fn get_channels_by_device(&self, device_tag: &str) -> Vec<Channel> {

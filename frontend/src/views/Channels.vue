@@ -53,13 +53,27 @@
             </el-table-column>
             <el-table-column label="地址" min-width="140">
               <template #default="{ row }">
-                <span v-if="row.ip_address">{{ row.ip_address }}:{{ row.port }}</span>
+                <span v-if="row.ip_address">{{ row.port ? `${row.ip_address}:${row.port}` : row.ip_address }}</span>
                 <span v-else>-</span>
               </template>
             </el-table-column>
             <el-table-column label="厂商/型号" min-width="140">
               <template #default="{ row }">
                 <span>{{ [row.manufacturer, row.model].filter(Boolean).join(' ') || '-' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="媒体服务器" width="160" align="center">
+              <template #default="{ row }">
+                <span v-if="row.media_server_name">
+                  <el-tag size="small" :type="row.media_server_online ? 'success' : 'danger'" style="margin-right: 4px">
+                    {{ row.media_server_online ? '在线' : '离线' }}
+                  </el-tag>
+                  {{ row.media_server_name }}
+                </span>
+                <span v-else-if="row.media_server_tag" style="color: #E6A23C">
+                  {{ row.media_server_tag }}
+                </span>
+                <span v-else>-</span>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="180" align="center">

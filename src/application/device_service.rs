@@ -39,10 +39,100 @@ impl DeviceService {
     }
 
     fn embed_rtsp_auth(rtsp_url: &str, username: &str, password: &str) -> String {
+        if username.is_empty() || password.is_empty() {
+            return rtsp_url.to_string();
+        }
         if let Some(stripped) = rtsp_url.strip_prefix("rtsp://") {
             format!("rtsp://{}:{}@{}", username, password, stripped)
         } else {
             rtsp_url.to_string()
+        }
+    }
+
+    pub async fn start_device(&self, device_tag: &str) -> Result<()> {
+        let device = self.infra.db.get_device_by_device_tag(device_tag)
+            .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
+
+        let tag = device.device_tag.as_deref().unwrap_or(device_tag);
+
+        match device.protocol {
+            Protocol::Onvif => {
+                if let Some((_, raw_url)) = device.select_source() {
+                    let uname = device.device_username.as_deref().unwrap_or("");
+                    let pwd = device.device_password.as_deref().unwrap_or("");
+                    let full_url = Self::embed_rtsp_auth(&raw_url, uname, pwd);
+                    match self.stream_service.start_pull_stream(tag, tag, &full_url).await {
+                        Ok(stream_info) => {
+                            tracing::info!("[DeviceService] ONVIF started: play_url={}", stream_info.play_url);
+                            Ok(())
+                        }
+                        Err(e) => Err(e),
+                    }
+                } else {
+                    Err(AppError::BadRequest("ONVIF device has no pull_urls configured".to_string()))
+                }
+            }
+            Protocol::Rtsp => {
+                let raw_url = device.select_source()
+                    .map(|(_, url)| url)
+                    .ok_or_else(|| AppError::BadRequest("RTSP device has no stream source".to_string()))?;
+                let uname = device.device_username.as_deref().unwrap_or("");
+                let pwd = device.device_password.as_deref().unwrap_or("");
+                let full_url = Self::embed_rtsp_auth(&raw_url, uname, pwd);
+                match self.stream_service.start_pull_stream(tag, tag, &full_url).await {
+                    Ok(stream_info) => {
+                        tracing::info!("[DeviceService] RTSP started: play_url={}", stream_info.play_url);
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            Protocol::Gb28181 => {
+                let adapter_key = device.parent_device_tag.clone().unwrap_or_else(|| tag.to_string());
+                let adapter = adapter_manager::get_adapter(&adapter_key)
+                    .ok_or_else(|| AppError::NotFound(format!("GB28181 device {} is offline", device_tag)))?;
+                let mut inner = adapter.lock().await;
+                (&mut *inner).start(tag, "").await
+                    .map_err(|e| AppError::Internal(format!("INVITE failed: {}", e)))?;
+                tracing::info!("[DeviceService] GB28181 started: {}", device_tag);
+                Ok(())
+            }
+            Protocol::Rtmp => {
+                Err(AppError::BadRequest("RTMP device requires push from device".to_string()))
+            }
+            Protocol::Hls | Protocol::WebRTC => {
+                let url = device.select_source()
+                    .map(|(_, url)| url)
+                    .ok_or_else(|| AppError::BadRequest(format!("{} device has no stream source", device.protocol)))?;
+                match self.stream_service.start_pull_stream(tag, tag, &url).await {
+                    Ok(stream_info) => {
+                        tracing::info!("[DeviceService] {} started: play_url={}", device.protocol, stream_info.play_url);
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            Protocol::Custom(ref name) => {
+                Err(AppError::BadRequest(format!("Custom protocol '{}' not supported", name)))
+            }
+        }
+    }
+
+    pub async fn start_all_devices(&self) {
+        let devices = self.infra.db.devices_cache();
+        for device in devices.iter() {
+            let tag = match device.device_tag.as_deref() {
+                Some(t) => t,
+                None => continue,
+            };
+            if matches!(device.protocol, Protocol::Onvif | Protocol::Rtsp | Protocol::Gb28181) {
+                match self.start_device(tag).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!("[DeviceService] Failed to start device {}: {}", tag, e);
+                    }
+                }
+            }
         }
     }
 
@@ -251,8 +341,8 @@ impl DeviceService {
                         tracing::debug!("[DeviceService] Processing device from catalog: {} (parent={})", ch.device_id, parent_id);
                         
                         if parent_id != catalog_sender {
-                            let mut current_parent = parent_id;
-                            while infra.db.get_device_by_device_tag(current_parent).is_none() {
+                            let current_parent = parent_id;
+                            if infra.db.get_device_by_device_tag(current_parent).is_none() {
                                 let (manufacturer, model) = parent_device_attrs.get(current_parent).copied().unwrap_or(("", ""));
                                 tracing::debug!("[DeviceService] Parent device {} not found, creating placeholder", current_parent);
                                 let mut parent_device = Device::new(current_parent.to_string(), Protocol::Gb28181);
@@ -263,9 +353,7 @@ impl DeviceService {
                                 }));
                                 if let Err(e) = infra.db.create_device(&parent_device).await {
                                     tracing::error!("[DeviceService] Create parent device {} failed: {}", current_parent, e);
-                                    break;
                                 }
-                                break;
                             }
                         }
                         
@@ -311,6 +399,11 @@ impl DeviceService {
                         });
 
                         let status = if ch.is_online() { DeviceStatus::Online } else { DeviceStatus::Offline };
+
+                        if !ch.is_video_channel() {
+                            tracing::debug!("[DeviceService] Skipping non-video channel: {} (model={:?})", ch.device_id, ch.model);
+                            continue;
+                        }
 
                         if let Ok(Some(mut channel)) = infra.db.get_channel(parent_id, &ch.device_id).await {
                             channel.name = ch.name.clone();
@@ -802,6 +895,82 @@ impl DeviceService {
         }))
     }
 
+    async fn upsert_channel_and_stream(&self, device: &Device) -> Result<()> {
+        let device_tag = match device.device_tag.as_ref() {
+            Some(t) => t,
+            None => return Ok(()),
+        };
+
+        if !matches!(device.protocol, Protocol::Rtsp | Protocol::Rtmp | Protocol::Onvif) {
+            return Ok(());
+        }
+
+        tracing::debug!("[DeviceService] upsert_channel_and_stream: device_tag={}", device_tag);
+        let channel_tag = device_tag;
+        let existing_channel = self.infra.db.get_channel(device_tag, channel_tag).await?;
+        tracing::debug!("[DeviceService] upsert_channel_and_stream: got channel, exists={}", existing_channel.is_some());
+        if let Some(mut channel) = existing_channel {
+            channel.name = device.name.clone();
+            channel.ip_address = Some(device.host.clone());
+            channel.port = device.port;
+            channel.status = device.status;
+            self.infra.db.update_channel(&channel).await?;
+            tracing::info!("[DeviceService] Updated channel: {}/{}", device_tag, channel_tag);
+        } else {
+            let mut channel = Channel::new(
+                device_tag.clone(),
+                channel_tag.clone(),
+                device.name.clone(),
+            );
+            channel.ip_address = Some(device.host.clone());
+            channel.port = device.port;
+            self.infra.db.create_channel(&channel).await?;
+            tracing::info!("[DeviceService] Created channel: {}/{}", device_tag, channel_tag);
+        }
+
+        if !device.pull_urls.is_empty() {
+            let app = device.app.clone().unwrap_or_else(|| "live".to_string());
+            let server_tag = device.media_server_tag.clone().unwrap_or_else(|| "default".to_string());
+            let cache_key = format!("{}/{}", device_tag, channel_tag);
+            let existing_in_cache = self.infra.db.streams_cache()
+                .iter()
+                .find(|r| r.key() == &cache_key)
+                .map(|r| r.value().clone());
+
+            if existing_in_cache.is_none() {
+                let streams = self.infra.db.list_streams().await;
+                let stream_exists = streams.iter().any(|s| 
+                    s.device_tag.as_deref() == Some(device_tag) && 
+                    s.channel_tag.as_deref() == Some(channel_tag)
+                );
+                if !stream_exists {
+                    let token = uuid::Uuid::new_v4().to_string();
+                    let mut stream = crate::domain::Stream::new(
+                        server_tag,
+                        device_tag.to_string(),
+                        channel_tag.to_string(),
+                        app,
+                        token,
+                    );
+                    stream.state = crate::domain::StreamState::Idle;
+                    if let Err(e) = self.infra.db.create_stream(&stream).await {
+                        tracing::warn!("[DeviceService] create_stream failed: {}", e);
+                    } else {
+                        tracing::info!("[DeviceService] Created stream with state=Idle: {}/{}", device_tag, channel_tag);
+                        // Notify StreamRecoveryService to start the idle stream
+                        let _ = self.infra.event_bus.publish(SignalEvent::StreamCreated {
+                            device_id: device.id,
+                            device_tag: device_tag.to_string(),
+                            channel_tag: channel_tag.to_string(),
+                        }).await;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     // ── Device CRUD ──
 
     pub async fn create_device(&self, req: CreateDeviceRequest) -> Result<Device> {
@@ -813,10 +982,11 @@ impl DeviceService {
         }
 
         let device_tag = if let Some(ref tag) = req.device_tag {
-            if self.infra.db.get_device_by_device_tag(tag).is_some() {
+            let tag_lower = tag.to_lowercase();
+            if self.infra.db.get_device_by_device_tag(&tag_lower).is_some() {
                 return Err(AppError::BadRequest(format!("device_tag '{}' already exists", tag)));
             }
-            tag.clone()
+            tag_lower
         } else if matches!(req.protocol, Protocol::Rtsp | Protocol::Rtmp | Protocol::Onvif) {
             Self::generate_device_tag(&req.protocol, req.port.unwrap_or(0))
         } else {
@@ -850,22 +1020,7 @@ impl DeviceService {
         self.infra.db.create_device(&device).await?;
         tracing::info!("[DeviceService] Created device: id={}, name={}", device.id, device.name);
 
-        if matches!(req.protocol, Protocol::Rtsp | Protocol::Rtmp) {
-            if let Some(ref device_tag) = device.device_tag {
-                let mut channel = Channel::new(
-                    device_tag.clone(),
-                    device_tag.clone(),
-                    device.name.clone(),
-                );
-                channel.ip_address = Some(device.host.clone());
-                channel.port = device.port;
-                if let Err(e) = self.infra.db.create_channel(&channel).await {
-                    tracing::warn!("[DeviceService] Failed to create channel for device {}: {}", device.id, e);
-                } else {
-                    tracing::info!("[DeviceService] Created channel for device: {}", device.id);
-                }
-            }
-        }
+        self.upsert_channel_and_stream(&device).await?;
 
         Ok(device)
     }
@@ -875,6 +1030,7 @@ impl DeviceService {
     }
 
     pub async fn update_device(&self, id: i64, req: UpdateDeviceRequest) -> Result<Device> {
+        tracing::debug!("[DeviceService] update_device: id={}", id);
         let mut device = self.infra.db.get_device_by_id(id).await?
             .ok_or_else(|| AppError::NotFound(format!("Device id {} not found", id)))?;
 
@@ -944,12 +1100,12 @@ impl DeviceService {
                         .collect();
                     
                     for (mut stream, old_key) in stream_updates {
+                        let new_key = format!("{}/{}", new_device_tag, stream.channel_tag.as_ref().unwrap_or(&String::new()));
                         if let Err(e) = self.infra.db.update_stream(&stream).await {
                             tracing::warn!("[DeviceService] Failed to update stream: {}", e);
                         }
-                        self.infra.db.streams_cache().remove(&old_key);
-                        let new_key = format!("{}/{}", new_device_tag, stream.channel_tag.as_ref().unwrap_or(&String::new()));
                         self.infra.db.streams_cache().insert(new_key, stream);
+                        self.infra.db.streams_cache().remove(&old_key);
                     }
                     
                     for (mut child, child_tag) in child_device_updates {
@@ -965,8 +1121,8 @@ impl DeviceService {
                         if let Err(e) = self.infra.db.update_channel(&channel).await {
                             tracing::warn!("[DeviceService] Failed to update channel: {}", e);
                         }
-                        self.infra.db.channels_cache().remove(&old_key);
                         self.infra.db.channels_cache().insert(new_key, channel);
+                        self.infra.db.channels_cache().remove(&old_key);
                     }
                     
                     for session_id in session_ids {
@@ -1016,39 +1172,13 @@ impl DeviceService {
 
         self.infra.db.update_device(&device).await?;
 
-        if matches!(device.protocol, Protocol::Rtsp | Protocol::Rtmp) {
-            if let Some(ref device_tag) = device.device_tag {
-                match self.infra.db.get_channel(device_tag, device_tag).await {
-                    Ok(Some(mut channel)) => {
-                        channel.name = device.name.clone();
-                        channel.status = device.status;
-                        channel.ip_address = Some(device.host.clone());
-                        channel.port = device.port;
-                        if let Err(e) = self.infra.db.update_channel(&channel).await {
-                            tracing::warn!("[DeviceService] Failed to update channel for device {}: {}", device_tag, e);
-                        }
-                    }
-                    Ok(None) => {
-                        let mut channel = Channel::new(
-                            device_tag.clone(),
-                            device_tag.clone(),
-                            device.name.clone(),
-                        );
-                        channel.ip_address = Some(device.host.clone());
-                        channel.port = device.port;
-                        channel.status = device.status;
-                        if let Err(e) = self.infra.db.create_channel(&channel).await {
-                            tracing::warn!("[DeviceService] Failed to create channel for device {}: {}", device_tag, e);
-                        } else {
-                            tracing::info!("[DeviceService] Created channel for device {} during update", device_tag);
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("[DeviceService] Failed to get channel for device {}: {}", device_tag, e);
-                    }
-                }
+        if matches!(device.protocol, Protocol::Rtsp | Protocol::Rtmp | Protocol::Onvif) {
+            if let Err(e) = self.upsert_channel_and_stream(&device).await {
+                tracing::warn!("[DeviceService] Failed to upsert channel/stream for device {}: {}", device.id, e);
             }
-        } else if matches!(device.protocol, Protocol::Onvif) {
+        }
+
+        if matches!(device.protocol, Protocol::Onvif) {
             if let Some(ref device_tag) = device.device_tag {
                 let channels = self.infra.db.get_channels_by_device_tag_cached(device_tag);
                 for mut channel in channels {
@@ -1603,6 +1733,6 @@ impl DeviceService {
             _ => "unknown",
         };
         let uuid = uuid::Uuid::new_v4().to_string().replace("-", "");
-        format!("{}_{}_{}", prefix, port, &uuid[..16])
+        format!("{}-{}{}", prefix, port, uuid)
     }
 }

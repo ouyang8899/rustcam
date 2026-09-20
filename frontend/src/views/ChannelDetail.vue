@@ -183,7 +183,7 @@
                 <el-tag size="small" :type="statusType">{{ channel.status }}</el-tag>
               </el-descriptions-item>
               <el-descriptions-item label="类型">{{ channel.device_type }}</el-descriptions-item>
-              <el-descriptions-item label="地址">{{ channel.ip_address || '-' }}:{{ channel.port || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="地址">{{ channel.ip_address ? (channel.port ? `${channel.ip_address}:${channel.port}` : channel.ip_address) : '-' }}</el-descriptions-item>
               <el-descriptions-item label="厂商">{{ channel.manufacturer || '-' }}</el-descriptions-item>
               <el-descriptions-item label="型号">{{ channel.model || '-' }}</el-descriptions-item>
               <el-descriptions-item label="创建时间">{{ formatDate(channel.created_at) }}</el-descriptions-item>

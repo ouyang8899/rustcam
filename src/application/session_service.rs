@@ -77,20 +77,22 @@ impl SessionService {
         event: &SignalEvent,
     ) -> anyhow::Result<()> {
         match event {
-            SignalEvent::StartPlay { device_id, session_id, session_type, .. } => {
-                tracing::info!("[SessionService] StartPlay: device={} session={} type={}", device_id, session_id, session_type);
+            SignalEvent::StartPlay { device_tag, session_id, channel_id, session_type, .. } => {
+                tracing::info!("[SessionService] StartPlay: session={} type={} device={:?} channel={:?}", session_id, session_type, device_tag, channel_id);
                 if *session_type == SessionType::Broadcast {
                     tracing::info!("[SessionService] Broadcast session - skipping DB session creation (managed by signaling)");
                     return Ok(());
                 }
-                let session = Session::new(*session_type, 0i64);
+                let mut session = Session::new(*session_type, 0i64);
+                session.device_tag = device_tag.clone();
+                session.channel_tag = channel_id.clone();
                 infra.db.sessions_cache().insert(session.id, session.clone());
                 if let Err(e) = infra.db.create_session(&session).await {
                     tracing::error!("[SessionService] Failed to persist session: {}", e);
                 }
             }
 
-            SignalEvent::StopPlay { device_id: _, session_id, session_type, .. } => {
+            SignalEvent::StopPlay { session_id, session_type, .. } => {
                 tracing::info!("[SessionService] StopPlay: session={} type={}", session_id, session_type);
                 if *session_type == SessionType::Broadcast {
                     tracing::info!("[SessionService] Broadcast session - skipping DB session deletion (managed by signaling)");
@@ -183,12 +185,12 @@ impl SessionService {
             .count()
     }
 
-    pub async fn list_sessions_paginated(&self, limit: usize, offset: usize) -> Vec<Session> {
-        self.infra.db.list_sessions_paginated(limit, offset).await
+    pub async fn list_sessions_paginated(&self, search: Option<&str>, state: Option<&str>, limit: usize, offset: usize) -> Vec<Session> {
+        self.infra.db.list_sessions_paginated(search, state, limit, offset).await
     }
 
-    pub async fn count_sessions(&self) -> usize {
-        self.infra.db.count_sessions().await
+    pub async fn count_sessions(&self, search: Option<&str>, state: Option<&str>) -> usize {
+        self.infra.db.count_sessions(search, state).await
     }
 
     async fn cleanup_expired_sessions(
