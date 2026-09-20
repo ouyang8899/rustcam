@@ -62,7 +62,7 @@
 | **认证** | JWT + RBAC | ✅ 完成 | 角色权限动态分配 |
 | **传输** | TCP Server | ✅ 完成 | TCP传输模式 |
 | **传输** | UDP Server | ✅ 完成 | UDP传输模式 |
-| **传输** | TLS/SSL | 🔄 待开发 | HTTPS/WSS 支持 |
+| **传输** | TLS/SSL | ✅ 完成 | HTTPS/WSS 支持，rustls 实现 |
 
 ## 项目结构
 
@@ -94,7 +94,7 @@ RUSTCAM/
 - [x] 统一 API 响应格式 (中文错误消息)
 - [ ] SRS 流媒体支持
 - [ ] XIU 流媒体支持
-- [ ] HTTPS/WSS 加密传输
+- [x] HTTPS/WSS 加密传输
 
 ## 截图预览
 
