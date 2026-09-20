@@ -7,6 +7,8 @@ edition = "2021"
 host = "0.0.0.0"
 port = 8081
 tls_enabled = false
+default_username = "admin"
+default_password = "admin"
 
 [database]
 url = "postgres://postgres:123456@127.0.0.1:5435/rustcam?options=-c%20client_encoding=UTF8"
@@ -54,8 +56,6 @@ scopes = ["onvif://www.onvif.org/Profile/Streaming", "onvif://www.onvif.org/Prof
 [rtsp_auth]
 enabled = true
 realm = "RustCam"
-default_username = "admin"
-default_password = "admin"
 
 [signaling_server]
 server_gb_id = "31011500001000000001"

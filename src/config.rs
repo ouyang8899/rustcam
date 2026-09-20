@@ -62,6 +62,10 @@ pub struct ServerConfig {
     pub tls_cert: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tls_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_password: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
@@ -213,8 +217,6 @@ impl Default for OnvifConfig {
 pub struct RtspAuthConfig {
     pub enabled: bool,
     pub realm: String,
-    pub default_username: Option<String>,
-    pub default_password: Option<String>,
 }
 
 impl Default for RtspAuthConfig {
@@ -222,8 +224,6 @@ impl Default for RtspAuthConfig {
         Self {
             enabled: true,
             realm: "RustCam".to_string(),
-            default_username: Some("admin".to_string()),
-            default_password: Some("admin".to_string()),
         }
     }
 }
@@ -332,6 +332,8 @@ impl Default for ServerConfig {
             tls_enabled: false,
             tls_cert: None,
             tls_key: None,
+            default_username: Some("admin".to_string()),
+            default_password: Some("admin".to_string()),
         }
     }
 }

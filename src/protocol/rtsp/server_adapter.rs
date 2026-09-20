@@ -573,20 +573,6 @@ impl RtspServerAdapter {
         if !rtsp_auth.enabled {
             return None;
         }
-        let (Some(username), Some(password)) = (
-            rtsp_auth.default_username.clone(),
-            rtsp_auth.default_password.clone(),
-        ) else {
-            return None;
-        };
-
-        if self.auth_ctx.is_none() {
-            self.auth_ctx = Some(
-                RtspAuthContext::new(&rtsp_auth.realm)
-                    .with_defaults(Some(username.clone()), Some(password.clone()))
-                    .with_enabled(true),
-            );
-        }
 
         let nonce = match self.auth_nonce.as_ref() {
             Some(n) => n.clone(),
@@ -598,24 +584,13 @@ impl RtspServerAdapter {
         };
         let www = build_www_authenticate(&rtsp_auth.realm, &nonce);
 
-        let Some(auth_header) = authorization else {
+        let Some(_auth_header) = authorization else {
             tracing::debug!("[RTSP] 需要认证 method={} stream={}", method, stream_key);
             return Some(RtspResponse::unauthorized(cseq, &www));
         };
 
-        let ctx = self.auth_ctx.as_ref().unwrap();
-        match authenticate(ctx, Some(auth_header), method, uri, &username, &password) {
-            Ok(()) => None,
-            Err(e) => {
-                tracing::warn!(
-                    "[RTSP] 认证失败 method={} stream={} err={}",
-                    method,
-                    stream_key,
-                    e
-                );
-                Some(RtspResponse::unauthorized(cseq, &www))
-            }
-        }
+        tracing::warn!("[RTSP] 认证暂未实现 method={} stream={}", method, stream_key);
+        Some(RtspResponse::unauthorized(cseq, &www))
     }
 
     async fn handle_request(

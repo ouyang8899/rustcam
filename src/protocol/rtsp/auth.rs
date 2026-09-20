@@ -46,8 +46,6 @@ pub enum AuthHeader {
 #[derive(Debug, Clone)]
 pub struct RtspAuthContext {
     pub realm: String,
-    pub default_username: Option<String>,
-    pub default_password: Option<String>,
     pub enabled: bool,
 }
 
@@ -55,16 +53,8 @@ impl RtspAuthContext {
     pub fn new(realm: &str) -> Self {
         Self {
             realm: realm.to_string(),
-            default_username: None,
-            default_password: None,
             enabled: true,
         }
-    }
-
-    pub fn with_defaults(mut self, username: Option<String>, password: Option<String>) -> Self {
-        self.default_username = username;
-        self.default_password = password;
-        self
     }
 
     pub fn with_enabled(mut self, enabled: bool) -> Self {
@@ -349,8 +339,7 @@ mod tests {
 
     #[test]
     fn test_authenticate_success() {
-        let ctx = RtspAuthContext::new("RustCam")
-            .with_defaults(Some("admin".to_string()), Some("secret".to_string()));
+        let ctx = RtspAuthContext::new("RustCam");
         let encoded = base64::engine::general_purpose::STANDARD.encode("admin:secret");
         let result = authenticate(
             &ctx,

@@ -248,8 +248,10 @@ impl ServiceRegistry {
     /// 获取认证状态
     pub async fn get_auth_state(&self) -> anyhow::Result<AuthState> {
         let jwt_config = self.infra.config().jwt.clone();
+        let default_username = self.infra.config().server.default_username.as_deref().unwrap_or("admin");
+        let default_password = self.infra.config().server.default_password.as_deref().unwrap_or("admin");
         let auth_repo = Arc::new(
-            PostgresAuthRepository::new(&self.infra.config().database.url).await?
+            PostgresAuthRepository::new(&self.infra.config().database.url, default_username, default_password).await?
         );
         let casbin = Arc::new(
             CasbinManager::new(auth_repo.clone()).await

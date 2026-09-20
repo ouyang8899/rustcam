@@ -14,12 +14,12 @@ pub struct PostgresAuthRepository {
 }
 
 impl PostgresAuthRepository {
-    pub async fn new(database_url: &str) -> anyhow::Result<Self> {
+    pub async fn new(database_url: &str, default_username: &str, default_password: &str) -> anyhow::Result<Self> {
         let rb = RBatis::new();
         rb.init(PgDriver {}, database_url).ok();
         let repo = Self { rb };
         repo.init_tables().await;
-        repo.seed_default_data().await;
+        repo.seed_default_data(default_username, default_password).await;
         Ok(repo)
     }
 
@@ -39,8 +39,8 @@ impl PostgresAuthRepository {
         tracing::info!("[AuthDB] init_tables completed");
     }
 
-    async fn seed_default_data(&self) {
-        let count: Vec<Value> = match self.rb.exec_decode("SELECT COUNT(*) as c FROM users WHERE username = 'admin'", vec![]).await {
+    async fn seed_default_data(&self, default_username: &str, default_password: &str) {
+        let count: Vec<Value> = match self.rb.exec_decode("SELECT COUNT(*) as c FROM users", vec![]).await {
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!("[AuthDB] seed_default_data skipped (table not ready): {}", e);
@@ -59,7 +59,7 @@ impl PostgresAuthRepository {
         }
 
         let salt = password_hash::phc::SaltString::generate();
-        let hash = match argon2::Argon2::default().hash_password("admin123".as_bytes()) {
+        let hash = match argon2::Argon2::default().hash_password(default_password.as_bytes()) {
             Ok(h) => h.to_string(),
             Err(e) => {
                 tracing::warn!("[AuthDB] seed_default_data (hash failed): {}", e);
@@ -68,7 +68,7 @@ impl PostgresAuthRepository {
         };
 
         if let Err(e) = self.rb.exec("INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES ($1::uuid, $2, $3, $4, $5)",
-                     vec![rbs::value![admin_user_id.to_string(), "admin", hash, now.clone(), now.clone()]]).await {
+                     vec![rbs::value![admin_user_id.to_string(), default_username, hash, now.clone(), now.clone()]]).await {
             tracing::warn!("[AuthDB] seed_default_data (user may exist): {}", e);
         }
 

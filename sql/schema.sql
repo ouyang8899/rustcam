@@ -1,6 +1,7 @@
--- RustCam Database Schema (Alternative/Fresh Install)
+-- RustCam Database Schema
 -- PostgreSQL 14+
--- Run this script to initialize database tables
+-- Consolidated schema: run this script to initialize all database tables
+-- This is the definitive schema synchronized with domain models
 
 BEGIN;
 
@@ -36,32 +37,27 @@ CREATE INDEX IF NOT EXISTS idx_device_groups_parent ON device_groups(parent_id);
 -- ============================================
 CREATE TABLE IF NOT EXISTS devices (
     id BIGSERIAL PRIMARY KEY,
-    device_tag VARCHAR(50) NOT NULL UNIQUE,    -- Global unique identifier
+    device_tag VARCHAR(50) NOT NULL UNIQUE,
     name VARCHAR(255) NOT NULL,
-    protocol VARCHAR(50) NOT NULL,             -- ONVIF / GB28181 / RTSP
-    
-    -- Hierarchy
-    parent_device_tag VARCHAR(50),            -- Parent device's device_tag
-    is_channel BOOLEAN DEFAULT FALSE,          -- Core: is this a channel?
-    
-    -- Device Type
-    device_type VARCHAR(50) DEFAULT 'Other', -- NVR / IPC / DVR / Camera / Platform / Other
-    device_type_code VARCHAR(10),             -- GB28181 raw type code (111/112/118/131/132)
-    
-    -- Device Info (used when is_channel = false)
+    protocol VARCHAR(50) NOT NULL,
+
+    parent_device_tag VARCHAR(50),
+    is_channel BOOLEAN DEFAULT FALSE,
+
+    device_type VARCHAR(50) DEFAULT 'Other',
+    device_type_code VARCHAR(10),
+
     host VARCHAR(255) DEFAULT '',
     port INTEGER DEFAULT 0,
     device_username VARCHAR(255),
     device_password VARCHAR(255),
     playback_username VARCHAR(255),
     playback_password VARCHAR(255),
-    
-    -- Channel Info (used when is_channel = true)
-    channel_id VARCHAR(50),                   -- Protocol channel identifier
-    channel_extended JSONB DEFAULT '{}',      -- Channel attributes (baud_rate, resolution, codec, fps)
-    is_default BOOLEAN DEFAULT FALSE,         -- Default channel for playback
-    
-    -- Common
+
+    channel_id VARCHAR(50),
+    channel_extended JSONB DEFAULT '{}',
+    is_default BOOLEAN DEFAULT FALSE,
+
     status VARCHAR(50) NOT NULL DEFAULT 'offline',
     app VARCHAR(255),
     media_server_tag VARCHAR(255),
@@ -124,6 +120,7 @@ CREATE TABLE IF NOT EXISTS streams (
 );
 CREATE INDEX IF NOT EXISTS idx_streams_device_tag ON streams(device_tag);
 CREATE INDEX IF NOT EXISTS idx_streams_state ON streams(state);
+CREATE INDEX IF NOT EXISTS idx_streams_token ON streams(token);
 
 -- ============================================
 -- Sessions Table
@@ -148,6 +145,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_device_tag ON sessions(device_tag);
 CREATE INDEX IF NOT EXISTS idx_sessions_state ON sessions(state);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 
 -- ============================================
 -- Recordings Table
@@ -171,6 +169,7 @@ CREATE TABLE IF NOT EXISTS recordings (
 );
 CREATE INDEX IF NOT EXISTS idx_recordings_device_tag ON recordings(device_tag);
 CREATE INDEX IF NOT EXISTS idx_recordings_state ON recordings(state);
+CREATE INDEX IF NOT EXISTS idx_recordings_created_at ON recordings(created_at);
 
 -- ============================================
 -- Regions Table
@@ -187,6 +186,8 @@ CREATE TABLE IF NOT EXISTS regions (
     device_count INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_regions_parent ON regions(parent_code);
+CREATE INDEX IF NOT EXISTS idx_regions_level ON regions(level);
+CREATE INDEX IF NOT EXISTS idx_regions_gb28181 ON regions(gb28181_code);
 
 -- ============================================
 -- PTZ Presets Table
@@ -221,6 +222,7 @@ CREATE TABLE IF NOT EXISTS ptz_control_logs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_ptz_logs_device_id ON ptz_control_logs(device_id);
+CREATE INDEX IF NOT EXISTS idx_ptz_logs_user_id ON ptz_control_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_ptz_logs_created_at ON ptz_control_logs(created_at DESC);
 
 -- ============================================
@@ -238,7 +240,6 @@ CREATE TABLE IF NOT EXISTS player_window_layouts (
 );
 CREATE INDEX IF NOT EXISTS idx_player_layouts_name ON player_window_layouts(name);
 
--- Insert default layout
 INSERT INTO player_window_layouts (name, rows, cols, layout_json, is_default)
 VALUES (
     'Default 2x2',
@@ -248,7 +249,7 @@ VALUES (
 ) ON CONFLICT DO NOTHING;
 
 -- ============================================
--- Alarms Table (通用告警表，支持多协议)
+-- Alarms Table
 -- ============================================
 CREATE TABLE IF NOT EXISTS alarms (
     id BIGSERIAL PRIMARY KEY,
@@ -264,5 +265,81 @@ CREATE TABLE IF NOT EXISTS alarms (
 );
 CREATE INDEX IF NOT EXISTS idx_alarms_device_time ON alarms(device_id, alarm_time DESC);
 CREATE INDEX IF NOT EXISTS idx_alarms_processed ON alarms(processed) WHERE NOT processed;
+
+-- ============================================
+-- GB28181 Reference Data Tables
+-- ============================================
+CREATE TABLE IF NOT EXISTS gb_device_types (
+    code VARCHAR(10) PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    name_en VARCHAR(100),
+    category VARCHAR(50) NOT NULL,
+    description TEXT,
+    can_have_children BOOLEAN DEFAULT FALSE,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS gb_industry_codes (
+    code VARCHAR(10) PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    name_en VARCHAR(100),
+    description TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS gb_network_codes (
+    code VARCHAR(10) PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    name_en VARCHAR(100),
+    description TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_gb_device_types_category ON gb_device_types(category);
+CREATE INDEX IF NOT EXISTS idx_gb_device_types_sort ON gb_device_types(sort_order);
+CREATE INDEX IF NOT EXISTS idx_gb_industry_codes_sort ON gb_industry_codes(sort_order);
+CREATE INDEX IF NOT EXISTS idx_gb_network_codes_sort ON gb_network_codes(sort_order);
+
+-- Insert GB28181 reference data
+INSERT INTO gb_device_types (code, name, name_en, category, description, can_have_children, sort_order) VALUES
+('111', '数字视频录像机', 'DVR', 'frontend_device', 'DVR', FALSE, 10),
+('112', '视频服务器', 'Video Server', 'frontend_device', '视频服务器', FALSE, 11),
+('113', '编码器', 'Encoder', 'frontend_device', '编码器', FALSE, 12),
+('118', '网络视频录像机(NVR)', 'NVR', 'frontend_device', '网络视频录像机(NVR)', FALSE, 17),
+('131', '摄像机', 'Camera', 'frontend_peripheral', '摄像机', FALSE, 30),
+('132', '网络摄像机(IPC)', 'IPC', 'frontend_peripheral', '网络摄像机(IPC)', FALSE, 31),
+('200', '中心信令控制服务器', 'Central Signaling', 'platform', '中心信令控制服务器', FALSE, 50),
+('201', 'Web应用服务器', 'Web App Server', 'platform', 'Web应用服务器', FALSE, 51),
+('500', '视频图像信息综合应用平台', 'Video Platform', 'platform_external', '视频图像信息综合应用平台', FALSE, 90)
+ON CONFLICT (code) DO UPDATE SET
+    name = EXCLUDED.name,
+    name_en = EXCLUDED.name_en,
+    category = EXCLUDED.category,
+    description = EXCLUDED.description,
+    can_have_children = EXCLUDED.can_have_children,
+    sort_order = EXCLUDED.sort_order;
+
+INSERT INTO gb_industry_codes (code, name, name_en, description, sort_order) VALUES
+('00', '社会治安路面接入', 'Social Security Road Access', '社会治安路面接入', 0),
+('01', '社会治安社区接入', 'Social Security Community Access', '社会治安社区接入', 1),
+('02', '社会治安内部接入', 'Social Security Internal Access', '社会治安内部接入', 2)
+ON CONFLICT (code) DO UPDATE SET
+    name = EXCLUDED.name,
+    name_en = EXCLUDED.name_en,
+    description = EXCLUDED.description,
+    sort_order = EXCLUDED.sort_order;
+
+INSERT INTO gb_network_codes (code, name, name_en, description, sort_order) VALUES
+('0', '公安视频传输网0', 'Police Video Network 0', '公安视频传输网0', 0),
+('1', '公安视频传输网1', 'Police Video Network 1', '公安视频传输网1', 1),
+('2', '行业专网', 'Industry Private Network', '行业专网', 2)
+ON CONFLICT (code) DO UPDATE SET
+    name = EXCLUDED.name,
+    name_en = EXCLUDED.name_en,
+    description = EXCLUDED.description,
+    sort_order = EXCLUDED.sort_order;
 
 COMMIT;
