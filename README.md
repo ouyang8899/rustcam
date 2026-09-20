@@ -50,7 +50,7 @@
 | **GB28181** | 语音对讲 | ✅ 完成 | 平台广播通知|
 | **ONVIF** | 设备发现 | ✅ 完成 | WS-Discovery 广播探测 |
 | **ONVIF** | 云台控制 | ✅ 完成 | ContinuousMove/AbsoluteMove/预置位 |
-| **ONVIF** | 语音对讲 | ✅ 完成 | 双向语音通信，WebSocket 触发，设备端 RTSP backchannel |
+| **ONVIF** | 语音对讲 | ✅ 完成 | 双向语音通信|
 | **RTSP** | 流接收 | ✅ 完成 | TCP/UDP 模式，支持 RTP over RTSP |
 | **流媒体** | ZLMediaKit | ✅ 完成 | 集群管理、Hook 事件处理 |
 | **流媒体** | SRS | 🔄 进行中 | 部分实现 |
@@ -82,6 +82,112 @@ RUSTCAM/
 │   └── src/
 ├── sql/                   # 数据库脚本
 └── tests/                 # 测试用例
+```
+
+## 部署
+
+### 环境要求
+
+| 组件 | 要求 |
+|------|------|
+| Rust | 1.70+ |
+| PostgreSQL | 14+ |
+| Redis | 6+ |
+| Node.js | 18+ (前端构建) |
+
+### 配置文件
+
+编辑 `config.toml`:
+
+```toml
+[server]
+host = "0.0.0.0"
+port = 8080
+tls_enabled = false                    # 启用 TLS
+tls_cert = "/path/to/cert.pem"        # TLS 证书
+tls_key = "/path/to/key.pem"          # TLS 私钥
+
+[database]
+url = "postgres://user:pass@localhost:5432/rustcam"
+max_connections = 10
+
+[redis]
+url = "redis://localhost:6379"
+pool_size = 5
+
+[[media_servers]]
+name = "zlmediakit"
+url = "http://localhost:8085"
+api_key = "your_api_key"
+server_type = "ZLMediaKit"
+enabled = true
+```
+
+### 数据库初始化
+
+```bash
+# 创建数据库
+psql -U postgres -c "CREATE DATABASE rustcam;"
+psql -U postgres -d rustcam -f sql/schema.sql
+psql -U postgres -d rustcam -f sql/init.sql
+```
+
+### 构建与运行
+
+```bash
+# 构建后端
+cargo build --release
+./target/release/rustcam-media
+
+# 或开发模式
+cargo run
+```
+
+### TLS/HTTPS 部署
+
+1. 生成自签名证书（测试用）:
+```bash
+openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -nodes \
+  -subj "/CN=localhost"
+```
+
+2. 或使用 Let's Encrypt 证书（生产用）:
+```bash
+certbot certonly --nginx -d yourdomain.com
+```
+
+3. 配置 `config.toml`:
+```toml
+[server]
+tls_enabled = true
+tls_cert = "/etc/letsencrypt/live/yourdomain.com/fullchain.pem"
+tls_key = "/etc/letsencrypt/live/yourdomain.com/privkey.pem"
+```
+
+### Docker 部署（可选）
+
+```bash
+# PostgreSQL
+docker run -d --name postgres \
+  -e POSTGRES_DB=rustcam \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=your_password \
+  -v postgres_data:/var/lib/postgresql/data \
+  postgres:14
+
+# Redis
+docker run -d --name redis \
+  -v redis_data:/data \
+  redis:7-alpine
+
+# RustCam
+docker build -t rustcam .
+docker run -d --name rustcam \
+  --link postgres \
+  --link redis \
+  -p 8080:8080 \
+  -v $(pwd)/config.toml:/app/config.toml \
+  rustcam
 ```
 
 ## 项目进度
