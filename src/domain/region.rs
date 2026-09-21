@@ -23,6 +23,9 @@ pub struct RegionNode {
     #[serde(default)]
     pub parent_code: Option<String>,
     pub children: Vec<RegionNode>,
+    #[serde(default)]
+    pub own_device_count: u32,
+    #[serde(default)]
     pub device_count: u32,
 }
 
@@ -62,6 +65,7 @@ impl RegionRow {
             gb28181_code: self.gb28181_code.clone().unwrap_or_default(),
             parent_code: self.parent_code.clone(),
             children: Vec::new(),
+            own_device_count: self.device_count.unwrap_or(0) as u32,
             device_count: self.device_count.unwrap_or(0) as u32,
         }
     }

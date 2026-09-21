@@ -48,6 +48,16 @@
                     <el-text truncated style="flex: 1">{{ data.name }}</el-text>
                     <el-tag size="small">{{ data.device.protocol }}</el-tag>
                   </div>
+                  <div
+                    v-else-if="data.isChannel"
+                    class="channel-item"
+                    draggable="true"
+                    @dragstart="onChannelDragStart($event, data.device, data.channel)"
+                    @dragend="onDragEnd"
+                  >
+                    <VideoPlay style="width: 12px; height: 12px; margin-right: 4px" />
+                    <el-text truncated style="flex: 1">{{ data.name }}</el-text>
+                  </div>
                   <span v-else>{{ data.name }} ({{ data.deviceCount || 0 }})</span>
                 </template>
               </el-tree>
@@ -90,6 +100,9 @@
                     :liveSrc="bindings[item.id]?.flvUrl"
                     :isLive="true"
                     :autoplay="true"
+                    :deviceTag="bindings[item.id]?.deviceTag"
+                    :channelTag="bindings[item.id]?.channelTag"
+                    :enableBroadcast="true"
                     type="wsflv"
                   />
                   <div class="cell-label">{{ bindings[item.id]?.name }}</div>
@@ -191,14 +204,14 @@
                         @mousedown.prevent="ptzActiveDir = 'zoom_in'; ptzCmd('zoom_in')"
                         @mouseup="ptzActiveDir = null; ptzStop()"
                         @mouseleave="ptzActiveDir === 'zoom_in' && ptzStop()"
-                      ><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35M11 8v6M8 11h6"/></svg></button>
+                      >+</button>
                       <button class="ptz-opt-btn"
                         :class="{ on: ptzActiveDir === 'zoom_out' }"
                         :disabled="!ptzSupported"
                         @mousedown.prevent="ptzActiveDir = 'zoom_out'; ptzCmd('zoom_out')"
                         @mouseup="ptzActiveDir = null; ptzStop()"
                         @mouseleave="ptzActiveDir === 'zoom_out' && ptzStop()"
-                      ><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35M8 11h6"/></svg></button>
+                      >−</button>
                     </div>
                   </div>
                   <div class="ptz-opt-group">
@@ -210,16 +223,46 @@
                         @mousedown.prevent="ptzActiveDir = 'focus_in'; ptzCmd('focus_in')"
                         @mouseup="ptzActiveDir = null; ptzStop()"
                         @mouseleave="ptzActiveDir === 'focus_in' && ptzStop()"
-                      ><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M3 12h3M18 12h3M12 3v3M12 18v3"/></svg></button>
+                      >+</button>
                       <button class="ptz-opt-btn"
                         :class="{ on: ptzActiveDir === 'focus_out' }"
                         :disabled="!ptzSupported"
                         @mousedown.prevent="ptzActiveDir = 'focus_out'; ptzCmd('focus_out')"
                         @mouseup="ptzActiveDir = null; ptzStop()"
                         @mouseleave="ptzActiveDir === 'focus_out' && ptzStop()"
-                      ><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><path d="M3 12h3M18 12h3M12 3v3M12 18v3"/></svg></button>
+                      >−</button>
                     </div>
                   </div>
+                  <div class="ptz-opt-group">
+                    <div class="ptz-opt-label">IRIS</div>
+                    <div class="ptz-opt-row">
+                      <button class="ptz-opt-btn"
+                        :class="{ on: ptzActiveDir === 'iris_in' }"
+                        :disabled="!ptzSupported"
+                        @mousedown.prevent="ptzActiveDir = 'iris_in'; ptzCmd('iris_in')"
+                        @mouseup="ptzActiveDir = null; ptzStop()"
+                        @mouseleave="ptzActiveDir === 'iris_in' && ptzStop()"
+                      >+</button>
+                      <button class="ptz-opt-btn"
+                        :class="{ on: ptzActiveDir === 'iris_out' }"
+                        :disabled="!ptzSupported"
+                        @mousedown.prevent="ptzActiveDir = 'iris_out'; ptzCmd('iris_out')"
+                        @mouseup="ptzActiveDir = null; ptzStop()"
+                        @mouseleave="ptzActiveDir === 'iris_out' && ptzStop()"
+                      >−</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="ptz-joystick-area" ref="joystickRef" @mousedown="startJoystick" @touchstart.prevent="startJoystick">
+                  <div class="joystick-base">
+                    <div class="joystick-stick" :style="joystickStyle"></div>
+                  </div>
+                </div>
+
+                <div class="ptz-position" v-if="ptzStatus?.position">
+                  <span class="pos-label">位置</span>
+                  <span class="pos-value">P:{{ ptzStatus.position.pan?.toFixed(2) }} T:{{ ptzStatus.position.tilt?.toFixed(2) }} Z:{{ ptzStatus.position.zoom?.toFixed(2) }}</span>
                 </div>
 
                 <div class="ptz-sep">
@@ -275,6 +318,7 @@ import { usePlayerLayoutStore } from '../stores/playerLayoutStore'
 import { useDeviceStore } from '../stores/deviceStore'
 import { useRegionStore } from '../stores/regionStore'
 import { useGroupStore } from '../stores/groupStore'
+import { useChannelStore } from '../stores/channelStore'
 import { useToast } from '../composables/useToast'
 import { request } from '../utils/request'
 
@@ -282,6 +326,7 @@ const layoutStore = usePlayerLayoutStore()
 const deviceStore = useDeviceStore()
 const regionStore = useRegionStore()
 const groupStore = useGroupStore()
+const channelStore = useChannelStore()
 const toast = useToast()
 
 const groupMode = ref('region')
@@ -308,13 +353,11 @@ function buildRegionTree() {
   for (const device of deviceStore.devices) {
     const region = map.get(device.region_code)
     if (region) {
-      region.children.push({ name: device.name, key: `device_${device.device_tag}`, isDevice: true, device, children: [] })
+      region.children.push(buildDeviceNode(device))
     }
   }
   calcDeviceCount(roots)
-  const allDevices = deviceStore.devices.map(d => ({
-    name: d.name, key: `device_${d.device_tag}`, isDevice: true, device: d, children: []
-  }))
+  const allDevices = deviceStore.devices.map(d => buildDeviceNode(d))
   return [{ name: '全部', key: 'all', children: allDevices }, ...roots]
 }
 
@@ -332,14 +375,25 @@ function buildGroupTree() {
   for (const device of deviceStore.devices) {
     const group = map.get(device.group_id)
     if (group) {
-      group.children.push({ name: device.name, key: `device_${device.device_tag}`, isDevice: true, device, children: [] })
+      group.children.push(buildDeviceNode(device))
     }
   }
   calcDeviceCount(roots)
-  const allDevices = deviceStore.devices.map(d => ({
-    name: d.name, key: `device_${d.device_tag}`, isDevice: true, device: d, children: []
-  }))
+  const allDevices = deviceStore.devices.map(d => buildDeviceNode(d))
   return [{ name: '全部', key: 'all', children: allDevices }, ...roots]
+}
+
+function buildDeviceNode(device) {
+  const channels = deviceChannelsMap.value[device.device_tag] || []
+  const children = channels.map(ch => ({
+    name: ch.name || ch.channel_tag,
+    key: `channel_${device.device_tag}_${ch.channel_tag}`,
+    isChannel: true,
+    device,
+    channel: ch,
+    children: []
+  }))
+  return { name: device.name, key: `device_${device.device_tag}`, isDevice: true, device, children }
 }
 
 function calcDeviceCount(nodes) {
@@ -362,17 +416,33 @@ let presetsTimer = null
 
 const ptzPanelVisible = ref(false)
 const ptzActiveDir = ref(null)
-const selectedBinding = computed(() => {
-  if (!selectedSlot.value || !bindings.value[selectedSlot.value]) return null
-  const binding = bindings.value[selectedSlot.value]
-  const device = deviceStore.devices.find(d => d.id === binding.deviceId)
-  return device ? { ...binding, protocol: device.protocol } : null
-})
+const joystickRef = ref(null)
+const joystickActive = ref(false)
+const joystickDelta = ref({ x: 0, y: 0 })
+const ptzStatus = ref(null)
+let ptzStatusTimer = null
+
+const joystickStyle = computed(() => ({
+  transform: `translate(${joystickDelta.value.x * 30}px, ${joystickDelta.value.y * 30}px)`
+}))
 
 const ptzSupported = computed(() => {
   if (!selectedBinding.value) return false
   const proto = (selectedBinding.value.protocol || '').toLowerCase()
   return proto === 'onvif' || proto === 'gb28181'
+})
+
+const selectedBinding = computed(() => {
+  if (!selectedSlot.value || !bindings.value[selectedSlot.value]) return null
+  const binding = bindings.value[selectedSlot.value]
+  const device = deviceStore.devices.find(d => d.device_tag === binding.deviceTag)
+  if (!device) return null
+  return {
+    ...binding,
+    deviceId: device.id,
+    protocol: device.protocol,
+    device
+  }
 })
 
 let draggingDeviceId = null
@@ -409,30 +479,100 @@ function itemStyle(item) {
   }
 }
 
-async function getFlvUrl(deviceTag) {
+async function getFlvUrl(deviceTag, channelTag = null) {
   try {
-    const linksRes = await request.get(`/channels/${deviceTag}/${deviceTag}/play-links`)
-    const links = linksRes.data.data || {}
-    if (links.web_flv) return links.web_flv
-    if (links.flv) return links.flv
+    // 1. 如果指定了 channelTag，直接使用
+    if (channelTag) {
+      const linksRes = await request.get(`/channels/${deviceTag}/${channelTag}/play-links`).catch(() => null)
+      if (linksRes?.data?.data) {
+        const links = linksRes.data.data || {}
+        if (links.web_flv) return links.web_flv
+        if (links.flv) return links.flv
+      }
+      // 如果有 channelTag 但没找到 FLV，回退到 deviceTag 作为 channelTag（IPC 场景）
+      if (channelTag !== deviceTag) {
+        const linksRes2 = await request.get(`/channels/${deviceTag}/${deviceTag}/play-links`).catch(() => null)
+        if (linksRes2?.data?.data) {
+          const links = linksRes2.data.data || {}
+          if (links.web_flv) return links.web_flv
+          if (links.flv) return links.flv
+        }
+      }
+    } else {
+      // 2. 没有指定 channelTag，尝试用 deviceTag 作为 channelTag
+      const linksRes = await request.get(`/channels/${deviceTag}/${deviceTag}/play-links`).catch(() => null)
+      if (linksRes?.data?.data) {
+        const links = linksRes.data.data || {}
+        if (links.web_flv) return links.web_flv
+        if (links.flv) return links.flv
+      }
+      // 3. 对于 NVR，尝试获取通道列表，使用第一个通道
+      const channelsRes = await request.get(`/devices/${deviceTag}/channels`).catch(() => null)
+      if (channelsRes?.data?.data?.length > 0) {
+        const firstChannel = channelsRes.data.data[0]
+        const chTag = firstChannel.channel_tag
+        const linksRes2 = await request.get(`/channels/${deviceTag}/${chTag}/play-links`).catch(() => null)
+        if (linksRes2?.data?.data) {
+          const links = linksRes2.data.data || {}
+          if (links.web_flv) return links.web_flv
+          if (links.flv) return links.flv
+        }
+      }
+    }
+    // 4. 回退：查找 active stream
     const streamsRes = await request.get(`/streams/by-device/${deviceTag}`)
     const streams = streamsRes.data.data || []
-    const stream = streams.find(s => s.device_tag === deviceTag && s.state === 'Active')
+    let stream = streams.find(s => s.device_tag === deviceTag && s.state === 'Active')
+    // 5. 如果没有 active stream，尝试启动 RTSP 设备的流
+    if (!stream) {
+      try {
+        await request.post(`/devices/${deviceTag}/play`)
+        // 等待一下让流启动
+        await new Promise(r => setTimeout(r, 1000))
+        const streamsRes2 = await request.get(`/streams/by-device/${deviceTag}`)
+        const streams2 = streamsRes2.data.data || []
+        stream = streams2.find(s => s.device_tag === deviceTag && s.state === 'Active')
+      } catch {}
+    }
     if (!stream) return null
     const flvRes = await request.get(`/streams/${stream.id}/play`, { params: { protocol: 'wsflv' } })
     return flvRes.data.data
   } catch { return null }
 }
 
+const deviceChannelsMap = ref({})
+
 onMounted(async () => {
   await deviceStore.fetchDevices(500, 0)
   await regionStore.fetchRegionTree()
   await groupStore.fetchGroupTree()
   await layoutStore.fetchLayouts()
+  await fetchDeviceChannels()
   if (layoutStore.defaultLayout) { selectedLayoutId.value = layoutStore.defaultLayout.id; layout.value = layoutStore.defaultLayout }
+  document.addEventListener('mousemove', updateJoystick)
+  document.addEventListener('mouseup', stopJoystick)
 })
 
-onUnmounted(() => { stopAll() })
+async function fetchDeviceChannels() {
+  const channelsMap = {}
+  for (const device of deviceStore.devices) {
+    try {
+      const res = await request.get(`/devices/${device.device_tag}/channels`)
+      const channels = res.data.data || []
+      if (channels.length > 0) {
+        channelsMap[device.device_tag] = channels
+      }
+    } catch {}
+  }
+  deviceChannelsMap.value = channelsMap
+}
+
+onUnmounted(() => {
+  stopAll()
+  stopPtzStatusPolling()
+  document.removeEventListener('mousemove', updateJoystick)
+  document.removeEventListener('mouseup', stopJoystick)
+})
 
 async function onLayoutChange() {
   stopAll()
@@ -454,22 +594,45 @@ async function onDragStart(event, device) {
   } catch (err) { console.warn('[PlayerWallFlv] pre-fetch flv url failed:', err) }
 }
 
+async function onChannelDragStart(event, device, channel) {
+  const deviceTag = device.device_tag
+  const channelTag = channel.channel_tag
+  draggingDeviceId = deviceTag; draggingDevice = device; draggingFlvUrl = null
+  const name = channel.name || channelTag
+  event.dataTransfer.setData('application/json', JSON.stringify({ deviceTag, channelTag, name, flvUrl: null }))
+  event.dataTransfer.effectAllowed = 'copy'
+  try {
+    const linksRes = await request.get(`/channels/${deviceTag}/${channelTag}/play-links`)
+    const links = linksRes.data.data || {}
+    const flvUrl = links.web_flv || links.flv || null
+    if (flvUrl) {
+      draggingFlvUrl = flvUrl
+      event.dataTransfer.setData('application/json', JSON.stringify({ deviceTag, channelTag, name, flvUrl }))
+    }
+  } catch (err) { console.warn('[PlayerWallFlv] pre-fetch channel flv url failed:', err) }
+}
+
 function onDragEnd() { draggingDeviceId = null; draggingDevice = null; draggingFlvUrl = null }
-function onCellDragOver(event, slotId) { event.dataTransfer.dropEffect = 'copy' }
+function onCellDragOver(event, slotId) {
+  event.preventDefault()
+  event.stopPropagation()
+  event.dataTransfer.dropEffect = 'copy'
+}
 
 async function onCellDrop(event, slotId) {
   event.preventDefault()
+  event.stopPropagation()
   const rawData = event.dataTransfer.getData('application/json')
   if (!rawData) return
-  let deviceTag, deviceName, flvUrl
+  let deviceTag, channelTag, deviceName, flvUrl
   try {
     const data = JSON.parse(rawData)
-    deviceTag = data.deviceTag; deviceName = data.name; flvUrl = data.flvUrl
+    deviceTag = data.deviceTag; channelTag = data.channelTag; deviceName = data.name; flvUrl = data.flvUrl
   } catch { toast.error('数据格式错误'); return }
-  if (!flvUrl) flvUrl = await getFlvUrl(deviceTag)
+  if (!flvUrl) flvUrl = await getFlvUrl(deviceTag, channelTag)
   if (!flvUrl) { toast.error('该设备无可用 FLV 播放地址'); return }
   if (bindings.value[slotId]) toast.info('该格子已有播放，替换中...')
-  bindings.value[slotId] = { deviceTag, name: deviceName, flvUrl, slotId }
+  bindings.value[slotId] = { deviceTag, channelTag, name: deviceName, flvUrl, slotId }
 }
 
 async function onDrop(event) {
@@ -477,16 +640,16 @@ async function onDrop(event) {
   if (!layout.value || layoutItems.value.length === 0) return
   const rawData = event.dataTransfer.getData('application/json')
   if (!rawData) return
-  let deviceTag, deviceName, flvUrl
+  let deviceTag, channelTag, deviceName, flvUrl
   try {
     const data = JSON.parse(rawData)
-    deviceTag = data.deviceTag; deviceName = data.name; flvUrl = data.flvUrl
+    deviceTag = data.deviceTag; channelTag = data.channelTag; deviceName = data.name; flvUrl = data.flvUrl
   } catch { return }
-  if (!flvUrl) flvUrl = await getFlvUrl(deviceTag)
+  if (!flvUrl) flvUrl = await getFlvUrl(deviceTag, channelTag)
   if (!flvUrl) { toast.error('该设备无可用 FLV 播放地址'); return }
   const emptySlot = layoutItems.value.find(item => !bindings.value[item.id])
   const targetSlot = emptySlot || layoutItems.value[0]
-  bindings.value[targetSlot.id] = { deviceTag, name: deviceName, flvUrl, slotId: targetSlot.id }
+  bindings.value[targetSlot.id] = { deviceTag, channelTag, name: deviceName, flvUrl, slotId: targetSlot.id }
 }
 
 function stopSlot(slotId) { delete bindings.value[slotId] }
@@ -499,7 +662,8 @@ async function ptzCmd(cmd) {
   if (!selectedBinding.value) return
   clearTimeout(ptzTimers[selectedSlot.value])
   try {
-    await deviceStore.ptzControl(selectedBinding.value.deviceId, cmd, ptzSpeed.value)
+    const channelTag = selectedBinding.value.channelTag || selectedBinding.value.deviceTag
+    await request.post(`/channels/${selectedBinding.value.deviceTag}/${channelTag}/ptz`, { command: cmd, speed: ptzSpeed.value })
   } catch (e) { toast.error('PTZ控制失败') }
 }
 
@@ -507,8 +671,84 @@ function ptzStop() {
   if (!selectedBinding.value) return
   clearTimeout(ptzTimers[selectedSlot.value])
   ptzTimers[selectedSlot.value] = setTimeout(async () => {
-    try { await deviceStore.ptzControl(selectedBinding.value.deviceId, 'stop', ptzSpeed.value) } catch {}
+    try {
+      const channelTag = selectedBinding.value.channelTag || selectedBinding.value.deviceTag
+      await request.post(`/channels/${selectedBinding.value.deviceTag}/${channelTag}/ptz`, { command: 'stop', speed: ptzSpeed.value })
+    } catch {}
   }, 200)
+}
+
+function startJoystick(e) {
+  joystickActive.value = true
+  updateJoystick(e)
+}
+
+function updateJoystick(e) {
+  if (!joystickActive.value || !joystickRef.value) return
+
+  const rect = joystickRef.value.getBoundingClientRect()
+  const centerX = rect.left + rect.width / 2
+  const centerY = rect.top + rect.height / 2
+
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY
+
+  let dx = (clientX - centerX) / (rect.width / 2)
+  let dy = (clientY - centerY) / (rect.height / 2)
+
+  const dist = Math.sqrt(dx * dx + dy * dy)
+  if (dist > 1) {
+    dx /= dist
+    dy /= dist
+  }
+
+  joystickDelta.value = { x: dx, y: dy }
+
+  if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
+    const channelTag = selectedBinding.value?.channelTag || selectedBinding.value?.deviceTag
+    if (channelTag && selectedBinding.value?.deviceTag) {
+      request.post(`/channels/${selectedBinding.value.deviceTag}/${channelTag}/ptz`, {
+        command: 'continuous',
+        speed: ptzSpeed.value,
+        pan: dx,
+        tilt: -dy,
+        zoom: 0
+      }).catch(() => {})
+    }
+  }
+}
+
+function stopJoystick() {
+  if (!joystickActive.value) return
+  joystickActive.value = false
+  joystickDelta.value = { x: 0, y: 0 }
+  const channelTag = selectedBinding.value?.channelTag || selectedBinding.value?.deviceTag
+  if (channelTag && selectedBinding.value?.deviceTag) {
+    request.post(`/channels/${selectedBinding.value.deviceTag}/${channelTag}/ptz`, { command: 'stop', speed: ptzSpeed.value }).catch(() => {})
+  }
+}
+
+async function fetchPtzStatus() {
+  if (!selectedBinding.value) return
+  const channelTag = selectedBinding.value.channelTag || selectedBinding.value.deviceTag
+  try {
+    const res = await request.get(`/channels/${selectedBinding.value.deviceTag}/${channelTag}/ptz/status`)
+    ptzStatus.value = res.data.data
+  } catch { ptzStatus.value = null }
+}
+
+function startPtzStatusPolling() {
+  fetchPtzStatus()
+  if (ptzStatusTimer) clearInterval(ptzStatusTimer)
+  ptzStatusTimer = setInterval(fetchPtzStatus, 5000)
+}
+
+function stopPtzStatusPolling() {
+  if (ptzStatusTimer) {
+    clearInterval(ptzStatusTimer)
+    ptzStatusTimer = null
+  }
+  ptzStatus.value = null
 }
 
 async function fetchPresets() {
@@ -516,7 +756,8 @@ async function fetchPresets() {
   const proto = selectedBinding.value.protocol?.toLowerCase()
   if (proto !== 'onvif' && proto !== 'gb28181') { presets.value = []; return }
   try {
-    const res = await request.get(`/devices/${selectedBinding.value.deviceId}/ptz/presets`)
+    const channelTag = selectedBinding.value.channelTag || selectedBinding.value.deviceTag
+    const res = await request.get(`/channels/${selectedBinding.value.deviceTag}/${channelTag}/ptz/presets`)
     presets.value = res.data.data || []
   } catch { presets.value = [] }
 }
@@ -525,7 +766,8 @@ async function savePreset() {
   if (!selectedBinding.value) return
   const name = `预置 ${Date.now()}`
   try {
-    await request.post(`/devices/${selectedBinding.value.deviceId}/ptz/presets`, { name })
+    const channelTag = selectedBinding.value.channelTag || selectedBinding.value.deviceTag
+    await request.post(`/channels/${selectedBinding.value.deviceTag}/${channelTag}/ptz/presets`, { name })
     toast.success('预制位已保存')
     await fetchPresets()
   } catch (e) { toast.error('保存失败') }
@@ -534,24 +776,33 @@ async function savePreset() {
 async function gotoPreset(preset) {
   if (!selectedBinding.value) return
   try {
-    await deviceStore.ptzControl(selectedBinding.value.deviceId, 'goto_preset', ptzSpeed.value, preset.token)
+    const channelTag = selectedBinding.value.channelTag || selectedBinding.value.deviceTag
+    await request.post(`/channels/${selectedBinding.value.deviceTag}/${channelTag}/ptz`, {
+      command: 'goto_preset',
+      speed: ptzSpeed.value,
+      move_type: 'goto_preset',
+      preset_token: preset.token
+    })
   } catch (e) { toast.error('调用预制位失败') }
 }
 
 async function removePreset(preset) {
   if (!selectedBinding.value) return
   try {
-    await request.delete(`/devices/${selectedBinding.value.deviceId}/ptz/presets/${preset.token}`)
+    const channelTag = selectedBinding.value.channelTag || selectedBinding.value.deviceTag
+    await request.delete(`/channels/${selectedBinding.value.deviceTag}/${channelTag}/ptz/presets/${preset.token}`)
     toast.success('已删除')
     await fetchPresets()
   } catch (e) { toast.error('删除失败') }
 }
 
 watch(selectedSlot, async (slotId) => {
+  stopPtzStatusPolling()
   if (slotId && bindings.value[slotId]) {
     ptzPanelVisible.value = true
     if (ptzSupported.value) {
       await fetchPresets()
+      startPtzStatusPolling()
     } else {
       presets.value = []
     }
@@ -745,7 +996,7 @@ async function deleteLayout() {
 .ptz-sep-ln { flex: 1; height: 1px; background: var(--ptz-divider); }
 .ptz-sep-txt { font-size: 8px; letter-spacing: 2px; color: var(--ptz-text-dim); }
 
-.ptz-zone-opt { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ptz-zone-opt { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 .ptz-opt-group {}
 .ptz-opt-label { font-size: 8px; letter-spacing: 1.5px; color: var(--ptz-text-dim); margin-bottom: 4px; text-align: center; }
 .ptz-opt-row { display: flex; gap: 4px; }
@@ -814,6 +1065,53 @@ async function deleteLayout() {
 .ptz-ft-st { font-size: 9px; letter-spacing: 1px; transition: color 0.15s; }
 .st-run { color: var(--color-accent); text-shadow: 0 0 8px var(--color-accent-glow); }
 .st-idle { color: var(--ptz-text-dim); }
+
+.ptz-joystick-area {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.ptz-joystick-area .joystick-base {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: var(--el-fill-color-light);
+  border: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.ptz-joystick-area .joystick-stick {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--el-color-primary-light-3) 0%, var(--el-color-primary) 100%);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  transition: transform 0.05s ease-out;
+  pointer-events: none;
+}
+.ptz-position {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  background: var(--el-fill-color-dark);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  margin-top: 8px;
+}
+.pos-label {
+  font-size: 9px;
+  color: var(--ptz-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.pos-value {
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
 
 .player-grid { display: grid; gap: 4px; width: 100%; height: 100%; }
 .grid-cell { border: 1px dashed var(--border); border-radius: 4px; overflow: hidden; position: relative; background: var(--video-bg); display: flex; align-items: center; justify-content: center; cursor: pointer; }

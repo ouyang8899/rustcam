@@ -64,6 +64,16 @@ WHERE device_tag = #{device_tag}
 ORDER BY created_at DESC
 </select>
 
+<select id="select_active_by_stream">
+SELECT id, device_tag, channel_tag, media_server_name, state, format,
+       output_path, file_size, duration_secs,
+       created_at, started_at, stopped_at,
+       error_message, labels, filename
+FROM recordings
+WHERE state IN ('recording', 'starting')
+ORDER BY created_at DESC
+</select>
+
 <delete id="delete_by_id">
 DELETE FROM recordings WHERE id = #{id}
 </delete>

@@ -144,8 +144,7 @@ impl OnvifDeviceClient {
         let username = self.username.as_deref().unwrap_or("");
         let password = self.password.as_deref().unwrap_or("");
 
-        let mut cnonce_bytes = [0u8; 16];
-        getrandom::getrandom(&mut cnonce_bytes).expect("failed to get random bytes");
+        let cnonce_bytes: [u8; 16] = rand::random();
         let cnonce = STANDARD.encode(cnonce_bytes);
 
         let ha1 = format!("{}:{}:{}", username, realm, password);

@@ -387,6 +387,34 @@ pub async fn device_select_paginated_tags(
 }
 
 #[html_sql("sql/device.html")]
+pub async fn device_select_paginated(
+    rb: &dyn rbatis::Executor,
+    search: Option<&str>,
+    region_code: Option<&str>,
+    protocol: Option<&str>,
+    status: Option<&str>,
+    device_type: Option<&str>,
+    group_id: Option<i64>,
+    limit: i64,
+    offset: i64,
+) -> rbatis::Result<Vec<DeviceRow>> {
+    impled!()
+}
+
+#[html_sql("sql/device.html")]
+pub async fn device_count(
+    rb: &dyn rbatis::Executor,
+    search: Option<&str>,
+    region_code: Option<&str>,
+    protocol: Option<&str>,
+    status: Option<&str>,
+    device_type: Option<&str>,
+    group_id: Option<i64>,
+) -> rbatis::Result<i64> {
+    impled!()
+}
+
+#[html_sql("sql/device.html")]
 pub async fn device_count_top_level(
     rb: &dyn rbatis::Executor,
 ) -> rbatis::Result<i64> {
@@ -753,6 +781,13 @@ pub async fn recording_select_by_id(
     impled!()
 }
 
+#[sql("SELECT id, device_tag, channel_tag, media_server_name, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename FROM recordings WHERE state IN ('recording', 'starting') ORDER BY created_at DESC")]
+pub async fn recording_select_active(
+    rb: &dyn rbatis::Executor,
+) -> rbatis::Result<Vec<RecordingRow>> {
+    impled!()
+}
+
 #[sql("SELECT id, device_tag, channel_tag, media_server_name, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename FROM recordings WHERE device_tag = $1 ORDER BY created_at DESC")]
 pub async fn recording_select_by_device_tag(
     rb: &dyn rbatis::Executor,
@@ -1008,17 +1043,17 @@ impl From<ServerRow> for crate::config::MediaServerConfig {
 }
 
 #[sql("SELECT code, name, level, parent_code, province_name, city_name, district_name, gb28181_code, 0 as device_count
-       FROM gb28181_regions WHERE level = 1 ORDER BY code")]
+       FROM gb28181_regions WHERE level = 1 ORDER BY name")]
 pub async fn region_select_provinces(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<RegionRow>> { impled!() }
 
 #[sql("SELECT code, name, level, parent_code, province_name, city_name, district_name, gb28181_code,
-              (SELECT count(*) FROM devices d WHERE d.extended->>'region_code' = r.code) as device_count
-       FROM gb28181_regions r WHERE parent_code = $1 ORDER BY code")]
+              (SELECT count(*) FROM devices d WHERE d.region_code = r.code) as device_count
+       FROM gb28181_regions r WHERE parent_code = $1 ORDER BY name")]
 pub async fn region_select_children(rb: &dyn rbatis::Executor, parent_code: &str) -> rbatis::Result<Vec<RegionRow>> { impled!() }
 
 #[sql("SELECT code, name, level, parent_code, province_name, city_name, district_name, gb28181_code,
-              (SELECT count(*) FROM devices d WHERE d.extended->>'region_code' = r.code) as device_count
-       FROM gb28181_regions r WHERE level <= 3 ORDER BY code")]
+              (SELECT count(*) FROM devices d WHERE d.region_code = r.code) as device_count
+       FROM gb28181_regions r WHERE level <= 3 ORDER BY name")]
 pub async fn region_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<RegionRow>> { impled!() }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -1040,6 +1075,7 @@ impl TryFrom<GroupRow> for crate::domain::device_group::DeviceGroupNode {
             name: row.name,
             parent_id: row.parent_id,
             sort_order: row.sort_order.unwrap_or(0),
+            own_device_count: row.device_count.unwrap_or(0) as u32,
             device_count: row.device_count.unwrap_or(0) as u32,
             children: Vec::new(),
         })
@@ -1057,6 +1093,7 @@ impl TryFrom<GroupRow> for crate::domain::device_group::DeviceGroup {
             sort_order: row.sort_order.unwrap_or(0),
             created_at: chrono::DateTime::from_timestamp(row.created_at.unix_timestamp(), 0)
                 .unwrap_or_else(chrono::Utc::now),
+            own_device_count: row.device_count.unwrap_or(0) as u32,
             device_count: row.device_count.unwrap_or(0) as u32,
         })
     }

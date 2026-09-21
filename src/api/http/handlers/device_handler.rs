@@ -37,6 +37,11 @@ pub struct PaginationQuery {
     pub limit: Option<usize>,
     pub offset: Option<usize>,
     pub search: Option<String>,
+    pub region_code: Option<String>,
+    pub protocol: Option<String>,
+    pub status: Option<String>,
+    pub device_type: Option<String>,
+    pub group_id: Option<i64>,
 }
 
 impl PaginationQuery {
@@ -65,8 +70,24 @@ pub async fn list_devices_handler(
     Query(q): Query<PaginationQuery>,
 ) -> Result<Json<ApiResponse<PaginatedResponse<DeviceWithMediaServer>>>, AppError> {
     let registry = &state.app.registry;
-    let devices = registry.device_service.list_devices_paginated(q.limit(), q.offset(), q.search.as_deref()).await;
-    let total = registry.device_service.count_devices_filtered(q.search.as_deref()).await;
+    let devices = registry.device_service.list_devices_paginated(
+        q.limit(),
+        q.offset(),
+        q.search.as_deref(),
+        q.region_code.as_deref(),
+        q.protocol.as_deref(),
+        q.status.as_deref(),
+        q.device_type.as_deref(),
+        q.group_id,
+    ).await?;
+    let total = registry.device_service.count_devices_filtered(
+        q.search.as_deref(),
+        q.region_code.as_deref(),
+        q.protocol.as_deref(),
+        q.status.as_deref(),
+        q.device_type.as_deref(),
+        q.group_id,
+    ).await?;
 
     Ok(Json(ApiResponse::success(PaginatedResponse {
         items: devices.into_iter().map(|d| DeviceWithMediaServer::from_device(d, registry)).collect(),

@@ -3,22 +3,25 @@
     <div class="page-header">
       <h1 class="page-title">设备管理</h1>
       <div class="page-toolbar">
-        <el-input v-model="searchQuery" placeholder="搜索设备..." clearable style="max-width: 200px">
+        <el-input v-model="searchQuery" placeholder="搜索设备..." clearable style="max-width: 200px" @change="onFilterChange">
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
-        <el-select v-model="protocolFilter" clearable placeholder="全部协议" style="width: 110px">
+        <el-select v-model="protocolFilter" clearable placeholder="全部协议" style="width: 110px" @change="onFilterChange">
+          <el-option value="" label="全部协议" />
           <el-option value="Rtsp" label="RTSP" />
           <el-option value="Gb28181" label="GB28181" />
           <el-option value="Onvif" label="ONVIF" />
           <el-option value="Rtmp" label="RTMP" />
         </el-select>
-        <el-select v-model="statusFilter" clearable placeholder="全部状态" style="width: 120px">
+        <el-select v-model="statusFilter" clearable placeholder="全部状态" style="width: 120px" @change="onFilterChange">
+          <el-option value="" label="全部状态" />
           <el-option value="Online" label="在线" />
           <el-option value="Offline" label="离线" />
           <el-option value="Maintaining" label="维护中" />
           <el-option value="Error" label="错误" />
         </el-select>
-        <el-select v-model="deviceTypeFilter" clearable placeholder="全部类型" style="width: 100px">
+        <el-select v-model="deviceTypeFilter" clearable placeholder="全部类型" style="width: 100px" @change="onFilterChange">
+          <el-option value="" label="全部类型" />
           <el-option value="NVR" label="NVR" />
           <el-option value="IPC" label="IPC" />
           <el-option value="DVR" label="DVR" />
@@ -44,7 +47,7 @@
             </div>
             <div class="data-card__body" v-if="groupMode === 'region'">
               <el-skeleton animated :rows="3" :loading="regionLoading">
-                <div class="region-all-item" :class="{ active: selectedRegion === '' }" @click="onRegionAllClick">
+                <div class="region-all-item" :class="{ active: selectedRegion === null }" @click="onRegionAllClick">
                   全部 <span class="count">{{ deviceStore.total }}</span>
                 </div>
                 <el-tree
@@ -54,7 +57,6 @@
                   node-key="gb28181_code"
                   :default-expand-all="false"
                   :expand-on-click-node="false"
-                  highlight-current
                   @node-click="onRegionNodeClick"
                 >
                   <template #default="{ data }">
@@ -67,7 +69,7 @@
             <div class="data-card__body" v-else>
               <el-button size="small" :icon="Plus" style="margin-bottom: 8px" @click="addRootGroup">新建分组</el-button>
               <el-skeleton animated :rows="3" :loading="groupLoading">
-                <div class="region-all-item" :class="{ active: selectedGroup === '' }" @click="onGroupAllClick">
+                <div class="region-all-item" :class="{ active: selectedGroup === null }" @click="onGroupAllClick">
                   全部 <span class="count">{{ deviceStore.total }}</span>
                 </div>
                 <el-tree
@@ -75,6 +77,7 @@
                   :data="groupStore.groupTree"
                   :props="{ label: 'name', children: 'children' }"
                   node-key="id"
+                  :current-node-key="selectedGroup > 0 ? selectedGroup : undefined"
                   :default-expand-all="false"
                   :expand-on-click-node="false"
                   highlight-current
@@ -390,9 +393,9 @@ watch(sipGbCode, (val) => {
   }
 })
 
-const selectedRegion = ref('')
+const selectedRegion = ref(null)
 const groupMode = ref('region')
-const selectedGroup = ref('')
+const selectedGroup = ref(null)
 const regionTreeRef = ref(null)
 const groupTreeRef = ref(null)
 const contextmenuVisible = ref(false)
@@ -402,10 +405,6 @@ const contextmenuNode = ref(null)
 const expandedGroupIds = ref(new Set())
 
 const currentPage = ref(Math.floor(deviceStore.offset / deviceStore.limit) + 1)
-
-watch(currentPage, (page) => {
-  deviceStore.offset = (page - 1) * deviceStore.limit
-})
 
 let copiedTimer = null
 
@@ -470,11 +469,14 @@ function onGbRegionChange(val) {
 
 
 function onRegionAllClick() {
-  selectedRegion.value = ''
+  selectedRegion.value = null
+  currentPage.value = 1
+  deviceStore.offset = 0
+  fetchDevices()
 }
 
 function onGroupAllClick() {
-  selectedGroup.value = ''
+  selectedGroup.value = null
 }
 
 const rtspPushServer = computed(() => {
@@ -525,20 +527,7 @@ const availablePlayLinks = computed(() => {
 })
 
 const filteredDevices = computed(() => {
-  return deviceStore.devices.filter(device => {
-    const matchesSearch = !searchQuery.value || device.name.toLowerCase().includes(searchQuery.value.toLowerCase())
-    const matchesProtocol = !protocolFilter.value || device.protocol === protocolFilter.value
-    const matchesStatus = !statusFilter.value || device.status === statusFilter.value
-    const matchesDeviceType = !deviceTypeFilter.value || device.device_type === deviceTypeFilter.value
-    const inRegionMode = groupMode.value === 'region'
-    if (inRegionMode) {
-      const matchesRegion = !selectedRegion.value || device.region_code === selectedRegion.value
-      return matchesSearch && matchesProtocol && matchesStatus && matchesDeviceType && matchesRegion
-    } else {
-      const matchesGroup = !selectedGroup.value || device.group_id === selectedGroup.value
-      return matchesSearch && matchesProtocol && matchesStatus && matchesDeviceType && matchesGroup
-    }
-  })
+  return deviceStore.devices
 })
 
 const defaultForm = () => ({
@@ -674,7 +663,14 @@ onMounted(async () => {
 })
 
 async function fetchDevices() {
-  await deviceStore.fetchDevices(deviceStore.limit, deviceStore.offset)
+  const regionCode = groupMode.value === 'region' ? selectedRegion.value : null
+  const groupId = groupMode.value === 'custom' ? selectedGroup.value : null
+  const search = searchQuery.value || null
+  const protocol = protocolFilter.value || null
+  const status = statusFilter.value || null
+  const deviceType = deviceTypeFilter.value || null
+  console.log('[fetchDevices] regionCode:', regionCode, 'groupId:', groupId, 'search:', search, 'protocol:', protocol, 'status:', status, 'deviceType:', deviceType)
+  await deviceStore.fetchDevices(deviceStore.limit, deviceStore.offset, regionCode, search, protocol, status, deviceType, groupId)
 }
 
 async function fetchRegionTree() {
@@ -685,10 +681,32 @@ async function fetchGroupTree() {
   await groupStore.fetchGroupTree()
 }
 
-watch(groupMode, () => { selectedRegion.value = ''; selectedGroup.value = '' })
+watch(groupMode, () => {
+  selectedRegion.value = null
+  selectedGroup.value = null
+  currentPage.value = 1
+  deviceStore.offset = 0
+  fetchDevices()
+})
 
-function onRegionNodeClick(data) { selectedRegion.value = selectedRegion.value === data.code ? '' : data.code }
-function onGroupNodeClick(data) { selectedGroup.value = selectedGroup.value === data.id ? '' : data.id }
+function onRegionNodeClick(data) {
+  console.log('[onRegionNodeClick] data:', data)
+  selectedRegion.value = data.code
+  currentPage.value = 1
+  deviceStore.offset = 0
+  fetchDevices()
+}
+function onFilterChange() {
+  currentPage.value = 1
+  deviceStore.offset = 0
+  fetchDevices()
+}
+function onGroupNodeClick(data) {
+  selectedGroup.value = data.id
+  currentPage.value = 1
+  deviceStore.offset = 0
+  fetchDevices()
+}
 
 function onGroupContextmenu(e, data) {
   selectedGroup.value = data.id
@@ -790,7 +808,7 @@ async function deleteGroup(node) {
     await ElMessageBox.confirm(msg, '确认删除', { type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消' })
     const chain = findParentChain(node.id, groupStore.groupTree, [])
     await groupStore.deleteGroup(node.id)
-    if (selectedGroup.value === node.id) selectedGroup.value = ''
+    if (selectedGroup.value === node.id) selectedGroup.value = null
     ElMessage.success('分组已删除')
     await fetchGroupTree()
     restoreGroupExpanded(chain)
@@ -898,6 +916,19 @@ async function submitDevice() {
       stream_mode: data.stream_config.stream_mode || null,
     }
   }
+
+  // 录像配置 (所有协议通用)
+  if (data.enable_recording) {
+    payload.extended.recording = {
+      enabled: true,
+      format: data.recording?.format || 'Mp4',
+      max_duration_secs: data.recording?.max_duration_secs || 0,
+      max_file_size_mb: data.recording?.max_file_size_mb || 0,
+    }
+  } else {
+    payload.extended.recording = { enabled: false }
+  }
+
   if (isEdit.value) {
     await deviceStore.updateDevice(editingId.value, payload, data.device_tag)
     await fetchDevices(); closeModal()

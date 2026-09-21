@@ -172,6 +172,7 @@ impl ServiceRegistry {
             infra.db.clone(),
             infra.redis.clone(),
             media.cluster.clone(),
+            infra.event_bus.clone(),
             infra.config().session.expiration_secs,
             recording_service.clone(),
             stream_service.clone(),

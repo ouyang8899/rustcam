@@ -13,8 +13,9 @@ use crate::error::AppError;
 use crate::error::Result;
 use crate::sql_mappers::{
     device_select_all, server_select_all, session_select_all, session_select_paginated, session_count, stream_select_all, stream_select_paginated, stream_count,
-    recording_select_all, recording_select_paginated, recording_count_all, recording_select_by_id, recording_select_by_device_tag, device_insert, device_update, device_delete_by_id,
+    recording_select_all, recording_select_paginated, recording_count_all, recording_select_by_id, recording_select_by_device_tag, recording_select_active, device_insert, device_update, device_delete_by_id,
     device_delete_by_device_tag, device_select_by_parent_device_tag, device_select_paginated_tags,
+    device_select_paginated, device_count,
     group_select_all, group_insert, group_update, group_delete,
     region_select_all, region_select_children,
     server_insert, server_update, server_delete_by_id, server_select_by_tag,
@@ -230,7 +231,7 @@ impl DbRepository {
         let mut region_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
         let mut group_counts: std::collections::HashMap<i64, u32> = std::collections::HashMap::new();
 
-        let region_codes: Vec<String> = self.regions_cache.iter().map(|r| r.key().clone()).collect();
+        tracing::info!("[recalculate_device_stats] devices_cache size: {}", self.devices_cache.len());
 
         for device in self.devices_cache.iter() {
             let device = device.value();
@@ -240,22 +241,22 @@ impl DbRepository {
 
             if let Some(ref device_region) = device.region_code {
                 if !device_region.is_empty() {
-                    for region_code in &region_codes {
-                        if device_region.starts_with(region_code) {
-                            *region_counts.entry(region_code.clone()).or_insert(0) += 1;
-                        }
+                    tracing::info!("[recalculate_device_stats] device_tag={:?} region_code={}", device.device_tag, device_region);
+                    if let Some(count) = region_counts.get_mut(device_region) {
+                        *count += 1;
+                    } else {
+                        region_counts.insert(device_region.clone(), 1);
                     }
                 }
             }
-
-            if let Some(group_id) = device.group_id {
-                *group_counts.entry(group_id).or_insert(0) += 1;
-            }
         }
+
+        tracing::info!("[recalculate_device_stats] region_counts: {:?}", region_counts);
 
         for (code, count) in region_counts {
             if let Some(mut region) = self.regions_cache.get_mut(&code) {
                 region.device_count = count;
+                tracing::info!("[recalculate_device_stats] set region {} own_device_count = {}", code, count);
             }
         }
 
@@ -400,57 +401,20 @@ impl DbRepository {
             .collect()
     }
 
-    pub async fn list_devices_paginated(&self, limit: usize, offset: usize, search: Option<&str>) -> Vec<Device> {
-        let search_lower = search.map(|s| s.to_lowercase());
+    pub async fn list_devices_paginated(&self, limit: usize, offset: usize, search: Option<&str>, region_code: Option<&str>, protocol: Option<&str>, status: Option<&str>, device_type: Option<&str>, group_id: Option<i64>) -> anyhow::Result<Vec<Device>> {
+        let search_pattern = search.map(|s| format!("%{}%", s.to_lowercase()));
+        let rows = device_select_paginated(self.rb.acquire().await?.rb_ref(), search_pattern.as_deref(), region_code, protocol, status, device_type, group_id, limit as i64, offset as i64).await.map_err(|e| anyhow::anyhow!("query devices: {}", e))?;
+        let mut devices: Vec<Device> = rows.into_iter().filter_map(|row| Device::try_from(row).ok()).collect();
 
-        if search_lower.is_some() {
-            let mut devices: Vec<Device> = self.devices_cache.iter()
-                .filter(|d| {
-                    if let Some(ref q) = search_lower {
-                        d.name.to_lowercase().contains(q)
-                            || d.host.to_lowercase().contains(q)
-                            || d.device_tag.as_ref().map(|t| t.to_lowercase().contains(q)).unwrap_or(false)
-                    } else {
-                        true
-                    }
-                })
-                .map(|d| {
-                    let mut device = d.clone();
-                    if let Some(ref tag) = device.device_tag {
-                        device.has_stream = self.device_has_active_stream(tag);
-                    }
-                    device
-                })
-                .collect();
-            devices.sort_by(|a, b| b.id.cmp(&a.id));
-            return devices.into_iter().skip(offset).take(limit).collect();
+        for device in &mut devices {
+            if let Some(ref tag) = device.device_tag {
+                if let Some(cache_device) = self.devices_cache.get(tag) {
+                    device.is_online = cache_device.is_online;
+                }
+                device.has_stream = self.device_has_active_stream(tag);
+            }
         }
-
-        let conn = match self.rb.acquire().await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("list_devices_paginated acquire: {}", e);
-                return Vec::new();
-            }
-        };
-        let rows = match device_select_paginated_tags(conn.rb_ref(), limit as i64, offset as i64).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::error!("list_devices_paginated: {}", e);
-                return Vec::new();
-            }
-        };
-
-        rows.into_iter()
-            .filter_map(|row| {
-                let tag = row.device_tag.as_ref()?;
-                self.devices_cache.get(tag).map(|d| {
-                    let mut device = d.value().clone();
-                    device.has_stream = self.device_has_active_stream(tag);
-                    device
-                })
-            })
-            .collect()
+        Ok(devices)
     }
 
     pub fn device_has_active_stream(&self, device_tag: &str) -> bool {
@@ -458,19 +422,10 @@ impl DbRepository {
             .any(|s| s.device_tag.as_deref() == Some(device_tag) && s.state.is_alive())
     }
 
-    pub async fn count_devices_filtered(&self, search: Option<&str>) -> usize {
-        let search_lower = search.map(|s| s.to_lowercase());
-        self.devices_cache.iter()
-            .filter(|d| {
-                if let Some(ref q) = search_lower {
-                    d.name.to_lowercase().contains(q)
-                        || d.host.to_lowercase().contains(q)
-                        || d.device_tag.as_ref().map(|t| t.to_lowercase().contains(q)).unwrap_or(false)
-                } else {
-                    true
-                }
-            })
-            .count()
+    pub async fn count_devices_filtered(&self, search: Option<&str>, region_code: Option<&str>, protocol: Option<&str>, status: Option<&str>, device_type: Option<&str>, group_id: Option<i64>) -> anyhow::Result<usize> {
+        let search_pattern = search.map(|s| format!("%{}%", s.to_lowercase()));
+        let count = device_count(self.rb.acquire().await?.rb_ref(), search_pattern.as_deref(), region_code, protocol, status, device_type, group_id).await.map_err(|e| anyhow::anyhow!("count devices: {}", e))?;
+        Ok(count as usize)
     }
 
     pub async fn count_devices(&self) -> usize {
@@ -808,6 +763,7 @@ impl DbRepository {
                 name: g.value().name.clone(),
                 parent_id: g.value().parent_id,
                 sort_order: g.value().sort_order,
+                own_device_count: g.value().device_count,
                 device_count: g.value().device_count,
                 children: Vec::new(),
             })
@@ -836,11 +792,49 @@ impl DbRepository {
                 level: r.value().level,
                 gb28181_code: r.value().gb28181_code.clone(),
                 parent_code: r.value().parent_code.clone(),
+                own_device_count: r.value().device_count,
                 device_count: r.value().device_count,
                 children: Vec::new(),
             })
             .collect();
         build_region_tree_from_nodes(nodes)
+    }
+
+    pub fn get_region_descendant_codes(&self, region_code: &str) -> Vec<String> {
+        let nodes: Vec<RegionNode> = self.regions_cache.iter()
+            .map(|r| RegionNode {
+                code: r.value().code.clone(),
+                name: r.value().name.clone(),
+                level: r.value().level,
+                gb28181_code: r.value().gb28181_code.clone(),
+                parent_code: r.value().parent_code.clone(),
+                own_device_count: r.value().device_count,
+                device_count: r.value().device_count,
+                children: Vec::new(),
+            })
+            .collect();
+        let tree = build_region_tree_from_nodes(nodes);
+
+        fn find_and_collect(node: &RegionNode, target: &str) -> Vec<String> {
+            if node.code == target {
+                return collect_descendant_codes(node);
+            }
+            for child in &node.children {
+                let result = find_and_collect(child, target);
+                if !result.is_empty() {
+                    return result;
+                }
+            }
+            Vec::new()
+        }
+
+        for root in &tree {
+            let codes = find_and_collect(root, region_code);
+            if !codes.is_empty() {
+                return codes;
+            }
+        }
+        vec![region_code.to_string()]
     }
 
     // ─── Server methods ───────────────────────────────────────────────
@@ -1212,15 +1206,11 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
     }
 
     pub async fn find_active_recording_by_stream_key(&self, stream_key: &str) -> Result<Option<Recording>> {
-        let rows = recording_select_all(self.rb.acquire().await?.rb_ref())
+        let rows = recording_select_active(self.rb.acquire().await?.rb_ref())
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         let recording = rows.into_iter()
             .filter_map(|r| Recording::try_from(r).ok())
-            .find(|r| {
-                r.stream_key() == stream_key
-                    && (r.state == crate::domain::recording::RecordingState::Recording
-                        || r.state == crate::domain::recording::RecordingState::Starting)
-            });
+            .find(|r| r.stream_key() == stream_key);
         Ok(recording)
     }
 
@@ -1410,6 +1400,7 @@ fn build_group_tree_from_nodes(nodes: Vec<DeviceGroupNode>) -> Vec<DeviceGroupNo
                 visited.insert(n.id);
                 let mut node = n.clone();
                 node.children = build_children(nodes, Some(n.id), visited);
+                node.device_count = calculate_group_recursive_count(&node);
                 visited.remove(&n.id);
                 result.push(node);
             }
@@ -1417,33 +1408,56 @@ fn build_group_tree_from_nodes(nodes: Vec<DeviceGroupNode>) -> Vec<DeviceGroupNo
         result
     }
 
-    build_children(&nodes, None, &mut Default::default())
+    let roots = build_children(&nodes, None, &mut Default::default());
+    roots
 }
 
 fn build_region_tree_from_nodes(nodes: Vec<RegionNode>) -> Vec<RegionNode> {
     fn build_children(nodes: &[RegionNode], parent_code: &str, visited: &mut std::collections::HashSet<String>) -> Vec<RegionNode> {
-        let mut result = Vec::new();
-        for n in nodes.iter() {
-            if n.parent_code.as_deref() == Some(parent_code) && !visited.contains(&n.code) {
-                visited.insert(n.code.clone());
-                let mut node = n.clone();
-                node.children = build_children(nodes, &n.code, visited);
-                visited.remove(&n.code);
-                result.push(node);
-            }
+        let mut result: Vec<RegionNode> = nodes.iter()
+            .filter(|n| n.parent_code.as_deref() == Some(parent_code) && !visited.contains(&n.code))
+            .cloned()
+            .collect();
+        result.sort_by(|a, b| a.name.cmp(&b.name));
+
+        for n in result.iter_mut() {
+            visited.insert(n.code.clone());
+            n.children = build_children(nodes, &n.code, visited);
+            n.device_count = calculate_recursive_count(n);
+            visited.remove(&n.code);
         }
         result
     }
 
-    let roots: Vec<RegionNode> = nodes.iter()
+    let mut roots: Vec<RegionNode> = nodes.iter()
         .filter(|n| n.parent_code.is_none())
         .cloned()
-        .map(|mut n| {
-            n.children = build_children(&nodes, &n.code, &mut Default::default());
-            n
-        })
         .collect();
+    roots.sort_by(|a, b| a.name.cmp(&b.name));
+
+    for n in roots.iter_mut() {
+        n.children = build_children(&nodes, &n.code, &mut Default::default());
+        n.device_count = calculate_recursive_count(n);
+    }
     roots
+}
+
+fn calculate_recursive_count(node: &RegionNode) -> u32 {
+    let children_sum: u32 = node.children.iter().map(|c| calculate_recursive_count(c)).sum();
+    node.own_device_count + children_sum
+}
+
+fn calculate_group_recursive_count(node: &DeviceGroupNode) -> u32 {
+    let children_sum: u32 = node.children.iter().map(|c| calculate_group_recursive_count(c)).sum();
+    node.own_device_count + children_sum
+}
+
+fn collect_descendant_codes(node: &RegionNode) -> Vec<String> {
+    let mut codes = vec![node.code.clone()];
+    for child in &node.children {
+        codes.extend(collect_descendant_codes(child));
+    }
+    codes
 }
 
 impl TryFrom<SessionRow> for Session {

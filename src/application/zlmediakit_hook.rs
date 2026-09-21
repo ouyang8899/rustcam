@@ -5,8 +5,10 @@ use crate::context::{InfraContext, MediaContext};
 use crate::infrastructure::DbRepository;
 use crate::infrastructure::RedisStore;
 use crate::infrastructure::cluster::ClusterManager;
+use crate::infrastructure::EventBus;
 use crate::error::{AppError, Result};
 use crate::application::RecordingService;
+use crate::protocol::event::SignalEvent;
 
 /// Hook 基础响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -491,6 +493,7 @@ pub struct ZlMediaKitHookHandler {
     repo: Arc<DbRepository>,
     redis: Arc<RedisStore>,
     cluster: Arc<ClusterManager>,
+    event_bus: Arc<EventBus>,
     session_expiry_secs: i64,
     recording_service: Arc<RecordingService>,
     secret: Option<String>,
@@ -502,11 +505,12 @@ impl ZlMediaKitHookHandler {
         repo: Arc<DbRepository>,
         redis: Arc<RedisStore>,
         cluster: Arc<ClusterManager>,
+        event_bus: Arc<EventBus>,
         session_expiry_secs: i64,
         recording_service: Arc<RecordingService>,
         secret: Option<String>,
     ) -> Self {
-        Self { repo, redis, cluster, session_expiry_secs, recording_service, secret, stream_recovery_service: None }
+        Self { repo, redis, cluster, event_bus, session_expiry_secs, recording_service, secret, stream_recovery_service: None }
     }
 
     pub fn with_stream_recovery_service(mut self, stream_recovery_service: Arc<crate::application::StreamRecoveryService>) -> Self {
@@ -524,6 +528,7 @@ impl ZlMediaKitHookHandler {
             infra.db.clone(),
             infra.redis.clone(),
             media.cluster.clone(),
+            infra.event_bus.clone(),
             infra.config().session.expiration_secs,
             recording_service,
             secret,
@@ -794,8 +799,8 @@ impl ZlMediaKitHookHandler {
     }
 
     async fn on_shell_login(&self, media_server_tag: &str, ip: Option<&String>, user_name: Option<&str>) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_shell_login: server={}, user={:?}", media_server_tag, user_name);
-        HookResponse::allow()
+        tracing::warn!("[ZlMediaKit Hook] on_shell_login: server={}, user={:?} - denying shell login", media_server_tag, user_name);
+        HookResponse::deny("Shell login not allowed")
     }
 
     async fn on_stream_changed(&self, media_server_tag: &str, app: &str, stream: &str, regist: bool) -> HookResponse {

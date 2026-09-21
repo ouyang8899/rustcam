@@ -248,6 +248,30 @@ pub enum SignalEvent {
         device_tag: Option<String>,
         port: u16,
     },
+    HookPlay {
+        media_server_tag: String,
+        stream_id: String,
+        client_ip: Option<String>,
+    },
+    HookPublish {
+        media_server_tag: String,
+        stream_id: String,
+        client_ip: Option<String>,
+        device_tag: Option<String>,
+        channel_tag: Option<String>,
+    },
+    HookUnpublish {
+        media_server_tag: String,
+        stream_id: String,
+    },
+    HookStreamUpdate {
+        media_server_tag: String,
+        stream_id: String,
+        regist: bool,
+        reader_count: Option<u32>,
+        total_reader_count: Option<u32>,
+        bytes_speed: Option<u64>,
+    },
 }
 impl SignalEvent {
     /// 获取事件类型字符串
@@ -295,6 +319,10 @@ impl SignalEvent {
             SignalEvent::StopAudioTalk { .. } => "stop_audio_talk".to_string(),
             SignalEvent::AudioTalkResponse { .. } => "audio_talk_response".to_string(),
             SignalEvent::InterleavedMediaData { .. } => "interleaved_media_data".to_string(),
+            SignalEvent::HookPlay { .. } => "hook_play".to_string(),
+            SignalEvent::HookPublish { .. } => "hook_publish".to_string(),
+            SignalEvent::HookUnpublish { .. } => "hook_unpublish".to_string(),
+            SignalEvent::HookStreamUpdate { .. } => "hook_stream_update".to_string(),
         }
     }
 

@@ -7,6 +7,7 @@ use axum::{
     extract::Request,
 };
 use crate::api::state::FullState;
+use crate::domain::traits::CacheStoreExt;
 use crate::api::http::handlers::{
     alarm_handler,
     dashboard,
@@ -207,6 +208,8 @@ fn public_routes(state: Arc<FullState>) -> Router {
         .route("/ws/audio-talk/{device_id}/{channel_id}", get(crate::api::websocket::audio_talk_handler))
         // HTTP trace layer (logs incoming requests at TRACE level)
         .layer(axum::middleware::from_fn(trace_layer))
+        // 报警接收 HTTP Hook：/alarm/{stream_key}
+        .route("/alarm/{stream_key}", post(alarm_hook_handler))
         .with_state(state)
 }
 
@@ -328,4 +331,62 @@ async fn stats_handler(
         "devices": device_stats,
         "streams": stream_stats,
     }))
+}
+
+async fn alarm_hook_handler(
+    State(state): State<Arc<FullState>>,
+    Path(stream_key): Path<String>,
+    Json(payload): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    tracing::info!("[AlarmHook] Received alarm for stream_key={}, payload={}", stream_key, serde_json::to_string(&payload).unwrap_or_default());
+
+    let (device_tag, channel_tag) = crate::domain::parse_stream_key(&stream_key)
+        .unwrap_or_else(|| (stream_key.clone(), stream_key.clone()));
+
+    let device_id = state.app.registry.infra.db.devices_cache()
+        .get(&device_tag)
+        .map(|d| d.value().id)
+        .unwrap_or(0);
+
+    let alarm_type = payload.get("alarm_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("http_hook")
+        .to_string();
+
+    let message = payload.get("message")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let create_req = crate::domain::alarm::CreateAlarmRequest {
+        device_id,
+        device_tag: device_tag.clone(),
+        alarm_type: alarm_type.clone(),
+        alarm_time: chrono::Utc::now(),
+        alarm_method: Some(2),
+        alarm_priority: Some(
+            payload.get("priority")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32)
+                .unwrap_or(0)
+        ),
+        description: Some(message.clone()),
+    };
+
+    if let Err(e) = state.app.registry.infra.db.save_alarm(&create_req).await {
+        tracing::error!("[AlarmHook] Failed to save alarm: {}", e);
+    }
+
+    if let Err(e) = state.app.registry.infra.redis.publish_event("alarm", &serde_json::json!({
+        "device_id": device_id,
+        "device_tag": device_tag,
+        "alarm_type": alarm_type,
+        "message": message,
+    })).await {
+        tracing::warn!("[AlarmHook] Failed to publish alarm event: {}", e);
+    }
+
+    state.app.registry.ws_broadcaster.alarm(device_id, &alarm_type, &message);
+
+    Json(serde_json::json!({ "code": 0, "msg": "ok" }))
 }

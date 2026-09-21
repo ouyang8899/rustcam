@@ -5,6 +5,7 @@ pub mod stream_recovery_service;
 pub mod media_server_service;
 pub mod hook_service;
 pub mod zlmediakit_hook;
+pub mod hook_event_handler;
 pub mod play_service;
 pub mod ws_broadcaster;
 pub mod ws_service;

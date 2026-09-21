@@ -259,7 +259,33 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
 
         Ok(())
     }
-    async fn is_recording(&self, _stream_key: &str, _format: &str) -> anyhow::Result<bool> { Ok(false) }
+    async fn is_recording(&self, stream_key: &str, _format: &str) -> anyhow::Result<bool> {
+        #[derive(Deserialize)]
+        struct Resp {
+            code: i32,
+            data: Option<RecordStatus>,
+        }
+        #[derive(Deserialize)]
+        struct RecordStatus {
+            status: Option<i32>,
+        }
+
+        let app = "live".to_string();
+        let vhost = "__defaultVhost__".to_string();
+        let stream_str = stream_key.to_string();
+        let params: Vec<(&str, &String)> = vec![
+            ("vhost", &vhost),
+            ("app", &app),
+            ("stream", &stream_str),
+        ];
+
+        let resp: Resp = self.client.get_with_params("/index/api/getRecordStatus", &params).await?;
+        if resp.code != 0 {
+            return Ok(false);
+        }
+
+        Ok(resp.data.map(|d| d.status == Some(1)).unwrap_or(false))
+    }
     async fn list_recordings(&self, app: &str, stream_key: &str) -> anyhow::Result<Vec<RecordingFile>> {
         #[derive(Deserialize)]
         struct Resp {

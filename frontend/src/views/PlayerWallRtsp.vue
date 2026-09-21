@@ -253,12 +253,23 @@ async function onLayoutChange() {
 async function onDragStart(event, device) {
   const deviceTag = device.device_tag
   draggingDeviceId = deviceTag; draggingDevice = device; draggingRtspUrl = null
-  const channelTag = deviceTag
+  let channelTag = deviceTag
   const payload = JSON.stringify({ deviceTag, name: device.name, rtspUrl: null })
   event.dataTransfer.setData('application/json', payload); event.dataTransfer.effectAllowed = 'copy'
   try {
-    const links = await getPlayLinks(deviceTag, channelTag)
+    // 1. 尝试直接用 deviceTag 作为 channelTag（适用于 IPC）
+    let links = await getPlayLinks(deviceTag, channelTag).catch(() => ({}))
     let rtspUrl = links.rtsp_signaling || links.rtsp_media || null
+    // 2. 对于 NVR，尝试获取通道列表，使用第一个通道
+    if (!rtspUrl) {
+      const channelsRes = await request.get(`/devices/${deviceTag}/channels`).catch(() => null)
+      if (channelsRes?.data?.data?.length > 0) {
+        channelTag = channelsRes.data.data[0].channel_tag
+        links = await getPlayLinks(deviceTag, channelTag).catch(() => ({}))
+        rtspUrl = links.rtsp_signaling || links.rtsp_media || null
+      }
+    }
+    // 3. 回退：查找 active stream
     if (!rtspUrl) rtspUrl = await getStreamRtspUrl(deviceTag)
     if (rtspUrl) {
       draggingRtspUrl = rtspUrl

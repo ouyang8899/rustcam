@@ -182,8 +182,7 @@ impl UsernameToken {
     }
 
     pub fn build_digest(_username: &str, password: &str) -> (String, String, String) {
-        let mut nonce_bytes = [0u8; 16];
-        getrandom::getrandom(&mut nonce_bytes).expect("failed to get random bytes");
+        let nonce_bytes: [u8; 16] = rand::random();
         let nonce_b64 = STANDARD.encode(nonce_bytes);
         let created = chrono::Utc::now().to_rfc3339();
         let mut hasher = Sha1::new();

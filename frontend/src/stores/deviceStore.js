@@ -13,11 +13,11 @@ export const useDeviceStore = defineStore('devices', {
   }),
 
   actions: {
-    async fetchDevices(limit = 50, offset = 0) {
+    async fetchDevices(limit = 50, offset = 0, regionCode = null, search = null, protocol = null, status = null, deviceType = null, groupId = null) {
       this.loading = true
       this.error = null
       try {
-        const data = await api.getDevices({ limit, offset })
+        const data = await api.getDevices({ limit, offset, region_code: regionCode, search, protocol, status, device_type: deviceType, group_id: groupId })
         this.devices = data.items
         this.total = data.total
         this.limit = data.limit

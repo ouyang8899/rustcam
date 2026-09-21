@@ -9,6 +9,8 @@ pub struct DeviceGroup {
     pub sort_order: i32,
     pub created_at: DateTime<Utc>,
     #[serde(default)]
+    pub own_device_count: u32,
+    #[serde(default)]
     pub device_count: u32,
 }
 
@@ -32,6 +34,8 @@ pub struct DeviceGroupNode {
     pub name: String,
     pub parent_id: Option<i64>,
     pub sort_order: i32,
+    #[serde(default)]
+    pub own_device_count: u32,
     pub device_count: u32,
     pub children: Vec<DeviceGroupNode>,
 }

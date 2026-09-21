@@ -61,11 +61,7 @@
       </el-radio-group>
     </el-form-item>
 
-    <el-form-item label="流名称 (StreamKey) *" required>
-      <el-input v-model="localForm.stream_key" placeholder="my-stream" />
-    </el-form-item>
-
-    <el-form-item v-if="pushAddressPreview" label="推送地址预览">
+    <el-form-item label="推送地址预览">
       <el-input :model-value="pushAddressPreview" disabled placeholder="请先在基础设置中选择媒体服务器" />
     </el-form-item>
     <el-form-item v-if="!localForm.media_server_tag" label="&nbsp;">
@@ -73,6 +69,36 @@
         请在「基础设置」中选择媒体服务器，推送地址将自动生成
       </el-alert>
     </el-form-item>
+
+    <el-divider>录像配置</el-divider>
+    <el-form-item label="启用自动录像">
+      <el-switch v-model="localForm.enable_recording" size="small" />
+    </el-form-item>
+    
+    <div v-if="localForm.enable_recording" style="background: #f5f7fa; padding: 16px; border-radius: 4px; margin-bottom: 16px">
+      <el-row :gutter="12">
+        <el-col :span="8">
+          <el-form-item label="录像格式">
+            <el-select v-model="localForm.recording.format" placeholder="选择格式" style="width: 100%">
+              <el-option label="MP4" value="Mp4" />
+              <el-option label="HLS" value="Hls" />
+              <el-option label="FLV" value="Flv" />
+              <el-option label="TS" value="Ts" />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :span="8">
+          <el-form-item label="最大时长(秒)">
+            <el-input-number v-model="localForm.recording.max_duration_secs" :min="0" :max="86400" style="width: 100%" placeholder="0表示不限制" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="8">
+          <el-form-item label="最大文件大小(MB)">
+            <el-input-number v-model="localForm.recording.max_file_size_mb" :min="0" :max="4096" style="width: 100%" placeholder="0表示不限制" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+    </div>
 
     <el-divider>播放认证</el-divider>
     <el-row :gutter="12">
@@ -116,6 +142,12 @@ const localForm = reactive({
   app: 'live',
   rtmp_mode: 'push',
   stream_key: '',
+  enable_recording: false,
+  recording: {
+    format: 'Mp4',
+    max_duration_secs: 0,
+    max_file_size_mb: 0,
+  },
   playback_username: '',
   playback_password: '',
   is_public: false,
@@ -127,23 +159,32 @@ watch(() => props.deviceTag, (tag) => {
   if (tag) loadData(tag)
 }, { immediate: true })
 
+function generateStreamKey(name) {
+  if (!name?.trim()) return ''
+  return name.trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || Math.random().toString(36).slice(2, 10)
+}
+
+const autoStreamKey = computed(() => generateStreamKey(localForm.name))
+
 const pushAddressPreview = computed(() => {
   if (!props.pushAddress) return ''
-  return `${props.pushAddress.replace(/\/$/, '')}:${props.pushPort}/${localForm.app}/`
+  const key = autoStreamKey.value || '{stream_key}'
+  return `${props.pushAddress.replace(/\/$/, '')}:${props.pushPort}/${localForm.app}/${key}`
 })
 
 function validate() {
   if (!localForm.name?.trim()) {
     return { valid: false, message: '请填写设备名称' }
   }
-  if (!localForm.stream_key?.trim()) {
-    return { valid: false, message: '请填写流名称' }
-  }
   return { valid: true }
 }
 
 function getData() {
-  return { ...localForm, protocol: 'Rtmp' }
+  return { ...localForm, stream_key: autoStreamKey.value, protocol: 'Rtmp' }
 }
 
 async function loadData(deviceTag) {
@@ -163,6 +204,13 @@ async function loadData(deviceTag) {
     localForm.app = fullDevice.app || 'live'
     localForm.rtmp_mode = ext.rtmp_mode || 'push'
     localForm.stream_key = ext.stream_key || ''
+    const devRecording = ext.recording || {}
+    localForm.enable_recording = !!devRecording && devRecording.enabled === true
+    localForm.recording = {
+      format: devRecording.format || 'Mp4',
+      max_duration_secs: devRecording.max_duration_secs || 0,
+      max_file_size_mb: devRecording.max_file_size_mb || 0,
+    }
   } catch (e) {
     ElMessage.error('加载设备数据失败: ' + (e?.message || e))
   }

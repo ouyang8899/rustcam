@@ -1309,12 +1309,12 @@ impl DeviceService {
             .collect()
     }
 
-    pub async fn list_devices_paginated(&self, limit: usize, offset: usize, search: Option<&str>) -> Vec<Device> {
-        self.infra.db.list_devices_paginated(limit, offset, search).await
+    pub async fn list_devices_paginated(&self, limit: usize, offset: usize, search: Option<&str>, region_code: Option<&str>, protocol: Option<&str>, status: Option<&str>, device_type: Option<&str>, group_id: Option<i64>) -> anyhow::Result<Vec<Device>> {
+        self.infra.db.list_devices_paginated(limit, offset, search, region_code, protocol, status, device_type, group_id).await
     }
 
-    pub async fn count_devices_filtered(&self, search: Option<&str>) -> usize {
-        self.infra.db.count_devices_filtered(search).await
+    pub async fn count_devices_filtered(&self, search: Option<&str>, region_code: Option<&str>, protocol: Option<&str>, status: Option<&str>, device_type: Option<&str>, group_id: Option<i64>) -> anyhow::Result<usize> {
+        self.infra.db.count_devices_filtered(search, region_code, protocol, status, device_type, group_id).await
     }
 
     pub async fn count_devices(&self) -> usize {

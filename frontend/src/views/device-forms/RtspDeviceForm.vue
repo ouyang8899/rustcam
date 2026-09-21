@@ -135,6 +135,36 @@
       </el-row>
     </div>
 
+    <el-divider>录像配置</el-divider>
+    <el-form-item label="启用自动录像">
+      <el-switch v-model="localForm.enable_recording" size="small" />
+    </el-form-item>
+    
+    <div v-if="localForm.enable_recording" style="background: #f5f7fa; padding: 16px; border-radius: 4px; margin-bottom: 16px">
+      <el-row :gutter="12">
+        <el-col :span="8">
+          <el-form-item label="录像格式">
+            <el-select v-model="localForm.recording.format" placeholder="选择格式" style="width: 100%">
+              <el-option label="MP4" value="Mp4" />
+              <el-option label="HLS" value="Hls" />
+              <el-option label="FLV" value="Flv" />
+              <el-option label="TS" value="Ts" />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :span="8">
+          <el-form-item label="最大时长(秒)">
+            <el-input-number v-model="localForm.recording.max_duration_secs" :min="0" :max="86400" style="width: 100%" placeholder="0表示不限制" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="8">
+          <el-form-item label="最大文件大小(MB)">
+            <el-input-number v-model="localForm.recording.max_file_size_mb" :min="0" :max="4096" style="width: 100%" placeholder="0表示不限制" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+    </div>
+
     <el-divider>播放认证</el-divider>
     <el-row :gutter="12">
       <el-col :span="12">
@@ -184,6 +214,12 @@ const localForm = reactive({
     video_codec: '',
     audio_codec: '',
     stream_mode: '',
+  },
+  enable_recording: false,
+  recording: {
+    format: 'Mp4',
+    max_duration_secs: 0,
+    max_file_size_mb: 0,
   },
   playback_username: '',
   playback_password: '',
@@ -240,6 +276,13 @@ async function loadData(deviceTag) {
       video_codec: devStreamConfig.video_codec || '',
       audio_codec: devStreamConfig.audio_codec || '',
       stream_mode: devStreamConfig.stream_mode || '',
+    }
+    const devRecording = ext.recording || {}
+    localForm.enable_recording = !!devRecording && devRecording.enabled === true
+    localForm.recording = {
+      format: devRecording.format || 'Mp4',
+      max_duration_secs: devRecording.max_duration_secs || 0,
+      max_file_size_mb: devRecording.max_file_size_mb || 0,
     }
   } catch (e) {
     ElMessage.error('加载设备数据失败: ' + (e?.message || e))

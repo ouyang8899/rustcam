@@ -98,16 +98,16 @@ pub async fn get_channel_play_links_handler(
 ) -> Result<Json<ApiResponse<crate::domain::device::PlayLinks>>, AppError> {
     let channel = state.app.registry.channel_service
         .get_channel(&device_tag, &channel_tag)
-        .await?
-        .ok_or_else(|| AppError::NotFound(format!("Channel {}/{} not found", device_tag, channel_tag)))?;
-
-    let cache = state.app.registry.infra.db.streams_cache();
-    let stream_key = query.stream_key.unwrap_or_else(|| channel.channel_tag.clone());
-    
-    let stream_id = crate::domain::stream::make_stream_key(&device_tag, stream_key.as_str());
+        .await?;
 
     let device = state.app.registry.device_service.get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
+
+    let stream_key = query.stream_key.unwrap_or_else(|| {
+        channel.as_ref().map(|c| c.channel_tag.clone()).unwrap_or_else(|| channel_tag.clone())
+    });
+
+    let stream_id = crate::domain::stream::make_stream_key(&device_tag, stream_key.as_str());
     let token = state.app.registry.play_service.generate_token(&device.id.to_string()).await?;
     let play_links = state.app.registry.play_service.build_play_links(&device, &token, &stream_id).await;
 

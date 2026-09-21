@@ -6,9 +6,11 @@ use crate::context::{InfraContext, MediaContext};
 use crate::infrastructure::DbRepository;
 use crate::infrastructure::RedisStore;
 use crate::infrastructure::cluster::ClusterManager;
+use crate::infrastructure::EventBus;
 use crate::error::{AppError, Result};
 use crate::application::RecordingService;
 use crate::application::StreamService;
+use crate::protocol::event::SignalEvent;
 
 /// Hook 处理结果
 #[derive(Debug, Clone)]
@@ -345,6 +347,8 @@ pub struct HookService {
     redis: Arc<RedisStore>,
     /// 集群管理器
     cluster: Arc<ClusterManager>,
+    /// 事件总线
+    event_bus: Arc<EventBus>,
     /// 会话过期时间（秒）
     session_expiry_secs: i64,
     /// 录制服务
@@ -360,11 +364,13 @@ impl HookService {
     /// * `repo` - 数据库仓库
     /// * `redis` - Redis 存储
     /// * `cluster` - 集群管理器
+    /// * `event_bus` - 事件总线
     /// * `session_expiry_secs` - 会话过期时间
     pub fn new(
         repo: Arc<DbRepository>,
         redis: Arc<RedisStore>,
         cluster: Arc<ClusterManager>,
+        event_bus: Arc<EventBus>,
         session_expiry_secs: i64,
         recording_service: Arc<RecordingService>,
         stream_service: Arc<StreamService>,
@@ -373,6 +379,7 @@ impl HookService {
             repo,
             redis,
             cluster,
+            event_bus,
             session_expiry_secs,
             recording_service,
             stream_service,
@@ -397,6 +404,7 @@ impl HookService {
             repo: infra.db.clone(),
             redis: infra.redis.clone(),
             cluster: media.cluster.clone(),
+            event_bus: infra.event_bus.clone(),
             session_expiry_secs: infra.config().session.expiration_secs,
             recording_service,
             stream_service,
@@ -657,7 +665,7 @@ impl HookService {
 
     /// 处理播放事件
     ///
-    /// 验证 Token，创建会话记录，并更新流观看人数。
+    /// 验证 Token，发送 HookPlay 事件，由其他服务处理会话创建和流观看人数更新。
     async fn on_play(
         &self,
         media_server_id: &str,
@@ -691,7 +699,7 @@ impl HookService {
         // 提取 Token
         let token = params_map.get("token").map(|s| s.as_str());
 
-        let token = match token {
+        let _token = match token {
             Some(t) => t,
             None => {
                 tracing::warn!("[Hook] on_play: no token provided for stream={}", stream_id);
@@ -700,7 +708,7 @@ impl HookService {
         };
 
         // 验证 Token
-        let stream = match self.get_stream_by_token(token).await {
+        let _stream = match self.get_stream_by_token(_token).await {
             Ok(Some(s)) => s,
             Ok(None) => {
                 tracing::warn!("[Hook] on_play: invalid token for stream={}", stream_id);
@@ -712,34 +720,17 @@ impl HookService {
             }
         };
 
-        // 更新流观看人数
-        let stream_key = crate::domain::stream::make_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
-        if let Err(e) = self.increment_stream_viewers(&stream_key).await {
-            tracing::warn!("[Hook] on_play: failed to increment viewers: {}", e);
+        // 发送 HookPlay 事件，由其他服务处理会话创建和流观看人数更新
+        let event = SignalEvent::HookPlay {
+            media_server_tag: media_server_id.to_string(),
+            stream_id: stream_id.to_string(),
+            client_ip: client_ip.map(String::from),
+        };
+        if let Err(e) = self.event_bus.publish(event).await {
+            tracing::warn!("[Hook] on_play: failed to publish event: {}", e);
         }
 
-        // 创建会话
-        let mut session = crate::domain::Session::new(
-            crate::domain::SessionType::Play,
-            0,
-        );
-        session.state = crate::domain::SessionState::Active;
-        session.client_ip = client_ip.map(String::from);
-        session.media_server_tag = Some(media_server_id.to_string());
-        session.device_tag = stream.device_tag.clone();
-        session.channel_tag = stream.channel_tag.clone();
-        session.refresh_expiry(self.session_expiry_secs);
-
-        if let Err(e) = self.repo.create_session(&session).await {
-            tracing::error!("[Hook] on_play: failed to create session: {}", e);
-            return HookAction::Deny("Failed to create session".to_string());
-        }
-
-        self.repo.sessions_cache().insert(session.id, session);
-        tracing::info!("[Hook] on_play: session created, stream={}, viewers now={}",
-            stream_id,
-            stream.viewer_count + 1
-        );
+        tracing::info!("[Hook] on_play: event published, stream={}", stream_id);
 
         HookAction::Allow
     }
@@ -872,10 +863,16 @@ impl HookService {
             channel_tag
         );
 
-        if is_rtmp {
-            if let Err(e) = self.register_push_stream(media_server_id, stream_id, device_tag.as_deref(), channel_tag.as_deref()).await {
-                tracing::warn!("[Hook] on_publish: failed to register push stream: {}", e);
-            }
+        // 发送 HookPublish 事件，由其他服务处理推流注册
+        let event = SignalEvent::HookPublish {
+            media_server_tag: media_server_id.to_string(),
+            stream_id: stream_id.to_string(),
+            client_ip: client_ip.map(String::from),
+            device_tag,
+            channel_tag,
+        };
+        if let Err(e) = self.event_bus.publish(event).await {
+            tracing::warn!("[Hook] on_publish: failed to publish event: {}", e);
         }
     }
 
@@ -1156,11 +1153,11 @@ impl HookService {
         passwd: Option<&str>,
         user_name: Option<&str>,
     ) -> HookAction {
-        tracing::info!(
-            "[Hook] on_shell_login: server={}, ip={:?}, user={:?}",
+        tracing::warn!(
+            "[Hook] on_shell_login: server={}, ip={:?}, user={:?} - denying shell login",
             media_server_id, ip, user_name
         );
-        HookAction::Allow
+        HookAction::Deny("Shell login not allowed".to_string())
     }
 
     async fn on_stream_changed(
@@ -1182,36 +1179,26 @@ impl HookService {
             media_server_id, app, stream, regist, origin_type_str, reader_count, total_reader_count
         );
 
+        // 发送事件，由其他服务处理状态更新
         if !regist {
-            if let Some(s) = self.find_stream_by_stream_key(stream) {
-                let mut s = s;
-                s.stopped();
-                if let Err(e) = self.repo.update_stream(&s).await {
-                    tracing::warn!("[Hook] on_stream_changed: failed to stop stream: {}", e);
-                }
-                tracing::info!("[Hook] on_stream_changed: stream {} stopped", stream);
+            let event = SignalEvent::HookUnpublish {
+                media_server_tag: media_server_id.to_string(),
+                stream_id: stream.to_string(),
+            };
+            if let Err(e) = self.event_bus.publish(event).await {
+                tracing::warn!("[Hook] on_stream_changed: failed to publish unpublish event: {}", e);
             }
-            return;
-        }
-
-        if let Some(s) = self.find_stream_by_stream_key(stream) {
-            let mut s = s;
-            s.update_keepalive();
-            if s.state != crate::domain::StreamState::Active {
-                s.start();
-            }
-            if let Err(e) = self.repo.update_stream(&s).await {
-                tracing::warn!("[Hook] on_stream_changed: failed to update stream: {}", e);
-            }
-        }
-
-        if let Some(device_id) = self.find_device_by_push_stream(stream) {
-            if let Some(device) = self.repo.devices_cache().get(&device_id) {
-                let mut device = (*device).clone();
-                device.set_online();
-                if let Err(e) = self.repo.update_device(&device).await {
-                    tracing::warn!("[Hook] on_stream_changed: failed to update device online status: {}", e);
-                }
+        } else {
+            let event = SignalEvent::HookStreamUpdate {
+                media_server_tag: media_server_id.to_string(),
+                stream_id: stream.to_string(),
+                regist: true,
+                reader_count,
+                total_reader_count,
+                bytes_speed,
+            };
+            if let Err(e) = self.event_bus.publish(event).await {
+                tracing::warn!("[Hook] on_stream_changed: failed to publish stream update event: {}", e);
             }
         }
     }

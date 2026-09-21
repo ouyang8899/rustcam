@@ -13,9 +13,6 @@ use rustcam_media::transport::{
 };
 use rustcam_media::api::{AppState, create_router, FullState};
 
-use rustls::ServerConfig;
-use rustls_pemfile::{certs, pkcs8_private_keys};
-use tokio_rustls::TlsAcceptor;
 use futures::FutureExt;
 
 /// 优雅关闭信号处理
@@ -138,64 +135,14 @@ async fn main() -> anyhow::Result<()> {
     );
     let server_config = &registry.infra.config().server;
 
-    let http_server = if server_config.tls_enabled {
-        let cert_file = server_config.tls_cert.as_ref()
-            .expect("TLS certificate path not configured");
-        let key_file = server_config.tls_key.as_ref()
-            .expect("TLS key path not configured");
-
-        let cert_chain = std::fs::read(cert_file)
-            .expect("Failed to read TLS certificate");
-        let key = std::fs::read(key_file)
-            .expect("Failed to read TLS key");
-
-        let certs = certs(&mut std::io::Cursor::new(cert_chain))
-            .expect("Failed to parse TLS certificate")
-            .into_iter()
-            .map(rustls::Certificate)
-            .collect::<Vec<_>>();
-
-        let keys = pkcs8_private_keys(&mut std::io::Cursor::new(key))
-            .expect("Failed to parse TLS private key");
-
-        if certs.is_empty() {
-            panic!("No certificates found in certificate file");
+    let listener = TcpListener::bind(&http_addr).await?;
+    info!("HTTP API server listening on {}", http_addr);
+    let http_server = async move {
+        let server = axum::serve(listener, app);
+        if let Err(e) = server.await {
+            error!("HTTP server error: {}", e);
         }
-        if keys.is_empty() {
-            panic!("No private key found in key file");
-        }
-
-        let mut tls_config = ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certs, rustls::pki_types::PrivateKey::Pkcs8(keys[0].clone()))
-            .expect("Failed to build TLS config");
-
-        tls_config.alpn_protocols = vec![b"http/1.1".to_vec()];
-
-        let listener = TcpListener::bind(&http_addr).await?;
-        let local_addr = listener.local_addr()?;
-        info!("HTTPS API server listening on {} (TLS enabled)", local_addr);
-
-        let tls_acceptor = TlsAcceptor::from(Arc::new(tls_config));
-        let app = app.into_make_service();
-
-        async move {
-            let server = hyper::Server::builder(tokio_rustls::TlsAcceptorStream::new(tls_acceptor, listener))
-                .serve(app);
-            if let Err(e) = server.await {
-                error!("HTTPS server error: {}", e);
-            }
-        }.boxed()
-    } else {
-        let listener = TcpListener::bind(&http_addr).await?;
-        info!("HTTP API server listening on {}", http_addr);
-        async move {
-            let server = axum::serve(listener, app);
-            if let Err(e) = server.await {
-                error!("HTTP server error: {}", e);
-            }
-        }.boxed()
-    };
+    }.boxed();
 
     // 7. SIP TCP 信令服务器
     let sig_cfg = &registry.infra.config().signaling_server;
@@ -327,6 +274,16 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     });
+
+    // 14.6 启动 Hook 事件处理器
+    let hook_handler = rustcam_media::application::hook_event_handler::HookEventHandler::new(
+        registry.infra.db.clone(),
+        registry.infra.redis.clone(),
+        registry.infra.event_bus.clone(),
+        registry.infra.config().session.expiration_secs,
+        registry.recording_service.clone(),
+    );
+    hook_handler.start().await;
 
     // 15. 并发运行所有服务
     tokio::select! {
