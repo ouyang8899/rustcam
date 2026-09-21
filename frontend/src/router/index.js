@@ -18,6 +18,11 @@ const routes = [
         component: () => import('../views/Devices.vue'),
       },
       {
+        path: 'device-map',
+        name: 'DeviceMap',
+        component: () => import('../views/DeviceMap.vue'),
+      },
+      {
         path: 'devices/:deviceTag',
         name: 'DeviceDetail',
         component: () => import('../views/DeviceDetail.vue'),

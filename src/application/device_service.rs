@@ -1006,6 +1006,8 @@ impl DeviceService {
         device.app = req.app.clone();
         device.device_tag = Some(device_tag);
         device.region_code = req.region_code.clone();
+        device.latitude = req.latitude;
+        device.longitude = req.longitude;
         device.is_public = req.is_public.unwrap_or(false);
 
         // 处理 extended 字段
@@ -1136,6 +1138,8 @@ impl DeviceService {
         }
         if let Some(v) = req.parent_device_tag { device.parent_device_tag = Some(v); }
         if let Some(v) = req.region_code { device.region_code = Some(v); }
+        if let Some(v) = req.latitude { device.latitude = Some(v); }
+        if let Some(v) = req.longitude { device.longitude = Some(v); }
         if let Some(v) = req.group_id { device.group_id = Some(v); }
         if let Some(v) = req.is_public { device.is_public = v; }
         

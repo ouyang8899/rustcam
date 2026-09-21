@@ -285,6 +285,8 @@ pub struct Device {
     pub parent_device_tag: Option<String>,
 
     pub region_code: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 
     pub group_id: Option<i64>,
 
@@ -332,6 +334,8 @@ impl Device {
             device_tag: None,
             parent_device_tag: None,
             region_code: None,
+            latitude: None,
+            longitude: None,
             group_id: None,
             extended: None,
             is_online: false,
@@ -424,6 +428,8 @@ pub struct CreateDeviceRequest {
     pub device_tag: Option<String>,
     pub parent_device_tag: Option<String>,
     pub region_code: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
     pub is_public: Option<bool>,
     pub extended: Option<serde_json::Value>,
     #[serde(default)]
@@ -451,6 +457,8 @@ impl Default for CreateDeviceRequest {
             device_tag: None,
             parent_device_tag: None,
             region_code: None,
+            latitude: None,
+            longitude: None,
             is_public: Some(false),
             extended: None,
             device_type: None,
@@ -478,6 +486,8 @@ pub struct UpdateDeviceRequest {
     pub device_tag: Option<String>,
     pub parent_device_tag: Option<String>,
     pub region_code: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
     pub group_id: Option<i64>,
     pub is_public: Option<bool>,
     pub extended: Option<serde_json::Value>,

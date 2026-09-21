@@ -72,6 +72,23 @@
               </template>
             </el-skeleton>
           </DataCard>
+
+          <DataCard>
+            <template #header><span>电子地图配置</span></template>
+            <el-form-item label="TMS 瓦片地址">
+              <el-input v-model="mapTmsUrl" placeholder="http://localhost:8080/geoserver/gwc/service/tms/1.0.0" />
+            </el-form-item>
+            <el-form-item label="WFS 服务地址">
+              <el-input v-model="mapWfsUrl" placeholder="http://localhost:8080/geoserver/ows?service=WFS&version=2.0.0&request=GetFeature" />
+            </el-form-item>
+            <el-form-item label="自动定位事件">
+              <el-switch v-model="mapAutoLocate" />
+            </el-form-item>
+            <el-text type="info" size="small">
+              TMS: 地图底图瓦片服务，GeoServer 发布<br/>
+              WFS: 设备点位服务，需包含 device_tag、status、latitude、longitude 字段
+            </el-text>
+          </DataCard>
         </el-col>
       </el-row>
 
@@ -86,7 +103,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { Plus, Delete } from '@element-plus/icons-vue'
 import { useSettingsStore } from '../stores/settingsStore'
 import { authFetch } from '../utils/authFetch'
@@ -94,8 +111,14 @@ import DataCard from '../components/common/DataCard.vue'
 
 const settingsStore = useSettingsStore()
 const playerType = ref(settingsStore.playerType)
+const mapWfsUrl = ref(settingsStore.mapWfsUrl)
+const mapTmsUrl = ref(settingsStore.mapTmsUrl)
+const mapAutoLocate = ref(settingsStore.mapAutoLocate)
 
 function savePlayerType() { settingsStore.setPlayerType(playerType.value) }
+function saveMapWfsUrl() { settingsStore.setMapWfsUrl(mapWfsUrl.value) }
+function saveMapTmsUrl() { settingsStore.setMapTmsUrl(mapTmsUrl.value) }
+function saveMapAutoLocate() { settingsStore.setMapAutoLocate(mapAutoLocate.value) }
 
 const config = ref({
   server: { host: '0.0.0.0', port: 8080 },
@@ -110,6 +133,10 @@ const successMsg = ref('')
 const errorMsg = ref('')
 
 onMounted(async () => { await fetchServers() })
+
+watch(mapWfsUrl, () => saveMapWfsUrl())
+watch(mapTmsUrl, () => saveMapTmsUrl())
+watch(mapAutoLocate, () => saveMapAutoLocate())
 
 async function fetchServers() {
   loading.value = true
