@@ -11,7 +11,7 @@ default_username = "admin"
 default_password = "admin"
 
 [database]
-url = "postgres://postgres:123456@127.0.0.1:5435/rustcam?options=-c%20client_encoding=UTF8"
+url = "postgres://postgres:123456@192.168.1.7:5435/rustcam?options=-c%20client_encoding=UTF8"
 max_connections = 10
 debug_sql = true
 

@@ -53,11 +53,11 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
-import 'leaflet.markercluster'
-import 'leaflet.markercluster/dist/MarkerCluster.css'
-import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
+import maplibregl from 'maplibre-gl'
+import 'maplibre-gl/dist/maplibre-gl.css'
+import { TerraDraw, TerraDrawPolygonMode, TerraDrawLineStringMode, TerraDrawPointMode, TerraDrawSelectMode } from 'terra-draw'
+import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter'
+import Supercluster from 'supercluster'
 import { ElMessage } from 'element-plus'
 import { Close } from '@element-plus/icons-vue'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -67,8 +67,9 @@ import VideoPlayer from '../components/VideoPlayer.vue'
 const settingsStore = useSettingsStore()
 const mapContainer = ref(null)
 let map = null
-let markersLayer = null
-const markersMap = ref(new Map())
+let draw = null
+let cluster = null
+const featuresGeoJSON = ref({ type: 'FeatureCollection', features: [] })
 
 const searchText = ref('')
 const filterStatus = ref('')
@@ -76,7 +77,7 @@ const selectedDevice = ref(null)
 const showPlayer = ref(false)
 const playUrl = ref('')
 
-const hasDevices = computed(() => markersMap.value.size > 0)
+const hasDevices = computed(() => featuresGeoJSON.value.features.length > 0)
 
 const statusColors = {
   online: '#22c55e',
@@ -98,15 +99,25 @@ function getStatusLabel(status) {
   return statusLabels[status] || status || '未知'
 }
 
-function getFeatureStyle(feature) {
-  const status = feature.properties.status || 'offline'
-  const color = statusColors[status] || statusColors.offline
+function getClusterStyle() {
   return {
-    color: color,
-    fillColor: color,
-    fillOpacity: 0.6,
-    weight: 2,
-    radius: 8,
+    'circle-color': [
+      'step',
+      ['get', 'point_count'],
+      '#3b82f6',
+      10, '#f97316',
+      50, '#ef4444',
+    ],
+    'circle-radius': [
+      'step',
+      ['get', 'point_count'],
+      20,
+      10, 25,
+      50, 30,
+    ],
+    'circle-stroke-width': 2,
+    'circle-stroke-color': '#ffffff',
+    'circle-stroke-opacity': 0.8,
   }
 }
 
@@ -117,7 +128,10 @@ async function fetchWfsFeatures(bounds) {
     return []
   }
 
-  const bbox = bounds ? `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}` : null
+  let bbox = null
+  if (bounds) {
+    bbox = `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`
+  }
 
   let targetUrl = wfsUrl
   if (bbox) {
@@ -235,9 +249,45 @@ function filterFeatures(features) {
   })
 }
 
-async function loadDevices(bounds) {
+function initCluster(features) {
+  cluster = new Supercluster({
+    radius: 50,
+    maxZoom: 18,
+    map: (props) => ({
+      status: props.status || 'offline',
+    }),
+    reduce: (accumulated, props) => {
+    },
+  })
+  cluster.load(features)
+}
+
+function updateMapView() {
+  if (!map || !cluster) return
+
+  const bounds = map.getBounds()
+  const zoom = Math.floor(map.getZoom())
+
+  const clusters = cluster.getClusters(
+    [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()],
+    zoom
+  )
+
+  featuresGeoJSON.value = {
+    type: 'FeatureCollection',
+    features: clusters,
+  }
+
+  const source = map.getSource('devices')
+  if (source) {
+    source.setData(featuresGeoJSON.value)
+  }
+}
+
+async function loadDevices() {
   if (!map) return
 
+  const bounds = map.getBounds()
   const features = await fetchWfsFeatures(bounds)
   const filtered = filterFeatures(features)
 
@@ -247,42 +297,8 @@ async function loadDevices(bounds) {
     ElMessage.warning('未获取到设备数据，请检查WFS服务配置')
   }
 
-  markersMap.value.clear()
-  if (markersLayer) {
-    map.removeLayer(markersLayer)
-  }
-
-  markersLayer = L.markerClusterGroup({
-    maxClusterRadius: 50,
-    spiderfyOnMaxZoom: true,
-    showCoverageOnHover: false,
-    zoomToBoundsOnClick: true,
-  })
-
-  for (const feature of filtered) {
-    const [lng, lat] = feature.geometry.coordinates
-    const props = feature.properties
-    const status = props.status || 'offline'
-
-    const marker = L.circleMarker([lat, lng], {
-      ...getFeatureStyle({ properties: { status } }),
-      radius: status === 'intrusion' ? 12 : 8,
-    })
-
-    marker.bindTooltip(props.name || props.device_tag || '未知设备', {
-      direction: 'top',
-      offset: [0, -10],
-    })
-
-    marker.on('click', () => {
-      selectedDevice.value = props
-    })
-
-    markersLayer.addLayer(marker)
-    markersMap.value.set(props.device_tag, { marker, feature })
-  }
-
-  markersLayer.addTo(map)
+  initCluster(filtered)
+  updateMapView()
 }
 
 async function playDevice() {
@@ -306,81 +322,215 @@ async function playDevice() {
 }
 
 function fitToDevices() {
-  if (!map || markersMap.value.size === 0) return
+  if (!map || !cluster) return
 
-  const group = L.featureGroup(Array.from(markersMap.value.values()).map(v => v.marker))
-  map.fitBounds(group.getBounds(), { padding: [50, 50] })
+  const features = cluster.getClusters([-180, -85, 180, 85], 0)
+  if (features.length === 0) return
+
+  let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity
+
+  for (const f of features) {
+    if (f.geometry.type === 'Point') {
+      const [lng, lat] = f.geometry.coordinates
+      minLng = Math.min(minLng, lng)
+      minLat = Math.min(minLat, lat)
+      maxLng = Math.max(maxLng, lng)
+      maxLat = Math.max(maxLat, lat)
+    } else if (f.properties.cluster) {
+      const clusterId = f.properties.cluster_id
+      const leaves = cluster.getLeaves(clusterId, Infinity)
+      for (const leaf of leaves) {
+        const [lng, lat] = leaf.geometry.coordinates
+        minLng = Math.min(minLng, lng)
+        minLat = Math.min(minLat, lat)
+        maxLng = Math.max(maxLng, lng)
+        maxLat = Math.max(maxLat, lat)
+      }
+    }
+  }
+
+  if (minLng !== Infinity) {
+    map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: [50, 50] })
+  }
 }
 
 let loadTimer = null
-function debouncedLoad(bounds) {
+function debouncedLoad() {
   if (loadTimer) clearTimeout(loadTimer)
-  loadTimer = setTimeout(() => loadDevices(bounds), 300)
+  loadTimer = setTimeout(() => loadDevices(), 300)
 }
 
 watch([searchText, filterStatus], () => {
-  if (map) {
-    loadDevices(map.getBounds())
+  if (map && cluster) {
+    updateMapView()
   }
 })
 
 onMounted(() => {
   if (!mapContainer.value) return
 
-  map = L.map('device-map', {
-    center: [31.23, 121.47],
+  map = new maplibregl.Map({
+    container: 'device-map',
+    center: [121.47, 31.23],
     zoom: 10,
     zoomControl: true,
+  })
+
+  map.on('load', () => {
+    const adapter = new TerraDrawMapLibreGLAdapter({
+      map,
+    })
+
+    draw = new TerraDraw({
+      adapter,
+      modes: [
+        new TerraDrawPointMode(),
+        new TerraDrawLineStringMode(),
+        new TerraDrawPolygonMode(),
+        new TerraDrawSelectMode(),
+      ],
+    })
+
+    draw.start()
+
+    map.addSource('devices', {
+      type: 'geojson',
+      data: featuresGeoJSON.value,
+    })
+
+    map.addLayer({
+      id: 'device-clusters',
+      type: 'circle',
+      source: 'devices',
+      filter: ['has', 'point_count'],
+      paint: getClusterStyle(),
+    })
+
+    map.addLayer({
+      id: 'device-points',
+      type: 'circle',
+      source: 'devices',
+      filter: ['!', ['has', 'point_count']],
+      paint: {
+        'circle-color': [
+          'match',
+          ['get', 'status'],
+          'online', '#22c55e',
+          'error', '#f97316',
+          'maintaining', '#3b82f6',
+          'intrusion', '#ef4444',
+          '#9ca3af',
+        ],
+        'circle-radius': [
+          'match',
+          ['get', 'status'],
+          'intrusion', 12,
+          8,
+        ],
+        'circle-opacity': 0.8,
+        'circle-stroke-width': 2,
+        'circle-stroke-color': [
+          'match',
+          ['get', 'status'],
+          'online', '#22c55e',
+          'error', '#f97316',
+          'maintaining', '#3b82f6',
+          'intrusion', '#ef4444',
+          '#9ca3af',
+        ],
+        'circle-stroke-opacity': 1,
+      },
+    })
+
+    loadDevices()
+  })
+
+  map.on('moveend', () => {
+    debouncedLoad()
+  })
+
+  map.on('zoomend', () => {
+    debouncedLoad()
+  })
+
+  map.on('click', 'device-clusters', (e) => {
+    const feature = e.features[0]
+    const clusterId = feature.properties.cluster_id
+    const zoom = cluster.getClusterExpansionZoom(clusterId)
+    map.easeTo({
+      center: feature.geometry.coordinates,
+      zoom: zoom,
+    })
+  })
+
+  map.on('click', 'device-points', (e) => {
+    const feature = e.features[0]
+    const props = feature.properties || {}
+    selectedDevice.value = props
+  })
+
+  map.on('mouseenter', 'device-clusters', () => {
+    map.getCanvas().style.cursor = 'pointer'
+  })
+
+  map.on('mouseleave', 'device-clusters', () => {
+    map.getCanvas().style.cursor = ''
+  })
+
+  map.on('mouseenter', 'device-points', () => {
+    map.getCanvas().style.cursor = 'pointer'
+  })
+
+  map.on('mouseleave', 'device-points', () => {
+    map.getCanvas().style.cursor = ''
   })
 
   const tmsUrl = settingsStore.mapTmsUrl
 
   if (tmsUrl && tmsUrl.includes('{x}') && tmsUrl.includes('{y}') && tmsUrl.includes('{z}')) {
-    const subdomainMatch = tmsUrl.match(/\{([^}]+)\}/)
-    const hasNumericSubdomain = subdomainMatch && /^\d+(,\d+)*$/.test(subdomainMatch[1])
-
-    if (hasNumericSubdomain) {
-      const subdomains = subdomainMatch[1].split(',')
-      const baseUrl = tmsUrl.replace(subdomainMatch[0], '{s}')
-      L.tileLayer(baseUrl, {
-        maxZoom: 18,
-        attribution: 'GeoServer',
-        subdomains: subdomains,
-        errorTileUrl: '',
-      }).on('tileerror', function(e) {
-        console.warn('[DeviceMap] Tile load error:', e)
-      }).addTo(map)
-    } else {
-      L.tileLayer(tmsUrl, {
-        maxZoom: 18,
-        attribution: 'GeoServer',
-        errorTileUrl: '',
-      }).on('tileerror', function(e) {
-        console.warn('[DeviceMap] Tile load error:', e)
-      }).addTo(map)
-    }
+    const tileUrls = tmsUrl.split('\n').map(u => u.trim()).filter(u => u && u.length > 0)
+    map.addSource('raster-tiles', {
+      type: 'raster',
+      tiles: tileUrls,
+      tileSize: 256,
+    })
+    map.addLayer({
+      id: 'raster-tiles-layer',
+      type: 'raster',
+      source: 'raster-tiles',
+      minzoom: 0,
+      maxzoom: 18,
+    })
   } else if (tmsUrl) {
     console.warn('[DeviceMap] Invalid TMS URL (missing {x} {y} {z}), using OpenStreetMap instead')
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 18,
+    map.addSource('osm-tiles', {
+      type: 'raster',
+      tiles: ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tileSize: 256,
       attribution: 'OpenStreetMap',
-    }).addTo(map)
+    })
+    map.addLayer({
+      id: 'osm-tiles-layer',
+      type: 'raster',
+      source: 'osm-tiles',
+      minzoom: 0,
+      maxzoom: 18,
+    })
   } else {
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 18,
+    map.addSource('osm-tiles', {
+      type: 'raster',
+      tiles: ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tileSize: 256,
       attribution: 'OpenStreetMap',
-    }).addTo(map)
+    })
+    map.addLayer({
+      id: 'osm-tiles-layer',
+      type: 'raster',
+      source: 'osm-tiles',
+      minzoom: 0,
+      maxzoom: 18,
+    })
   }
-
-  loadDevices()
-
-  map.on('moveend', () => {
-    debouncedLoad(map.getBounds())
-  })
-
-  map.on('zoomend', () => {
-    debouncedLoad(map.getBounds())
-  })
 })
 
 onUnmounted(() => {
@@ -506,17 +656,13 @@ onUnmounted(() => {
   color: #999;
 }
 
-:deep(.custom-marker) {
-  background: transparent;
-  border: none;
+:deep(.maplibregl-ctrl-group) {
+  background: var(--bg-color);
+  border-radius: 4px;
 }
 
-:deep(.alarm-marker) {
-  animation: alarm-pulse 1s infinite;
-}
-
-@keyframes alarm-pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.2); }
+:deep(.maplibregl-ctrl-group button) {
+  width: 32px;
+  height: 32px;
 }
 </style>

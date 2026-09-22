@@ -10,7 +10,7 @@
 | 设备管理 | 设备发现、注册、状态监控、分组管理 |
 | 云台控制 | PTZ 协议支持、预置位管理 |
 | 流媒体 | 集群部署、多服务器适配 (ZLMediKit/SRS/Xiu) |
-| 电子地图 | Leaflet 地图、设备标记聚合、状态筛选、设备加载 |
+| 电子地图 | MapLibre GL JS 地图、设备标记聚合、状态筛选、设备加载 |
 | 用户权限 | JWT 认证、RBAC 权限控制 |
 
 ## 技术栈
@@ -28,7 +28,7 @@
 | 类别 | 技术 |
 |------|------|
 | 框架 | Vue 3 + Element Plus |
-| 状态 | Vuex |
+| 状态 | Pina |
 | 图表 | ECharts + Vue-ECharts |
 | 视频 | flv.js、hls.js、video.js |
 | 构建 | Vite |
@@ -60,7 +60,7 @@
 | **前端** | PTZ 控制 | ✅ 完成 | D-pad + 摇杆 + 预置位独立卡片 |
 | **前端** | 摄像头墙 | ✅ 完成 | 网格布局、拖拽排序 |
 | **前端** | 录像回放 | ✅ 完成 | 时间轴检索、回放控制 |
-| **前端** | 电子地图 | ✅ 完成 | Leaflet + GeoServer|
+| **前端** | 电子地图 | ✅ 完成 | MapLibre GL JS + GeoServer |
 | **认证** | JWT + RBAC | ✅ 完成 | 角色权限动态分配 |
 | **传输** | TCP Server | ✅ 完成 | TCP传输模式 |
 | **传输** | UDP Server | ✅ 完成 | UDP传输模式 |
@@ -200,7 +200,7 @@ docker run -d --name rustcam \
 - [x] 云台 PTZ 控制 (GB28181 + ONVIF)
 - [x] 前端 PTZ UI 重构 (控制面板 + 预置位分离)
 - [x] 统一 API 响应格式 (中文错误消息)
-- [x] 电子地图 (Leaflet + GeoServer)
+- [x] 电子地图 (MapLibre GL JS + GeoServer)
 - [ ] SRS 流媒体支持
 - [ ] XIU 流媒体支持
 - [x] HTTPS/WSS 加密传输
