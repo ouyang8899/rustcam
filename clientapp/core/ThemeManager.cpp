@@ -92,17 +92,19 @@ void ThemeManager::loadTheme(const QString& qssFilePath)
 
 void ThemeManager::applyStylesheet(const QString& qss)
 {
-    qApp->setStyleSheet(qss);
-
     QRegularExpression varRe(R"(@(\w+)\s*:\s*([^;]+);)");
     QRegularExpressionMatchIterator it = varRe.globalMatch(qss);
 
+    QString processedQss = qss;
     while (it.hasNext()) {
         QRegularExpressionMatch match = it.next();
         QString key = match.captured(1);
         QString value = match.captured(2).trimmed();
         m_styleValues[key] = value;
+        processedQss.replace("@" + key, value);
     }
+
+    qApp->setStyleSheet(processedQss);
 }
 
 QString ThemeManager::getStyleValue(const QString& key, const QString& defaultValue) const

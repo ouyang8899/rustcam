@@ -2,10 +2,14 @@
 
 #include <QObject>
 #include <QString>
+#include <QJsonObject>
 
 class QApplication;
 
 namespace rustcam {
+
+class LoginWindow;
+class MainWindow;
 
 class App : public QObject {
     Q_OBJECT
@@ -28,6 +32,9 @@ signals:
     void initialized();
     void aboutToQuit();
 
+private slots:
+    void onLoginSuccess(const QJsonObject& userInfo);
+
 private:
     explicit App(QObject* parent = nullptr);
     ~App();
@@ -37,9 +44,12 @@ private:
     void setupEnvironment();
     void setupLogging();
     void loadPlugins();
+    void showMainWindow();
 
     QApplication* m_app = nullptr;
     bool m_initialized = false;
+    LoginWindow* m_loginWindow = nullptr;
+    MainWindow* m_mainWindow = nullptr;
 };
 
 }

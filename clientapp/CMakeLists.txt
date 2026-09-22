@@ -6,6 +6,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
+
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
@@ -60,6 +64,7 @@ add_subdirectory(common)
 add_subdirectory(core)
 add_subdirectory(interfaces)
 add_subdirectory(resources)
+# add_subdirectory(rustcam_plugins)  # Plugins built separately
 
 set(CONFIG_TEMPLATE "resources/config/default.json.in")
 configure_file(${CONFIG_TEMPLATE} ${CMAKE_BINARY_DIR}/bin/config/default.json @ESCAPE)
@@ -67,7 +72,7 @@ configure_file(${CONFIG_TEMPLATE} ${CMAKE_BINARY_DIR}/bin/config/default.json @E
 file(COPY ${CMAKE_SOURCE_DIR}/resources/qss DESTINATION ${CMAKE_BINARY_DIR}/bin/resources/)
 file(COPY ${CMAKE_SOURCE_DIR}/resources/icons DESTINATION ${CMAKE_BINARY_DIR}/bin/resources/)
 file(COPY ${CMAKE_SOURCE_DIR}/resources/fonts DESTINATION ${CMAKE_BINARY_DIR}/bin/resources/)
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/bin/plugins)
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/bin/rustcam_plugins)
 
 message(STATUS "=================================================")
 message(STATUS "rustcam-client v${PROJECT_VERSION}")

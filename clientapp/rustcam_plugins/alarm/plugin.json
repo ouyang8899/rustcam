@@ -1,0 +1,13 @@
+{
+  "id": "alarm",
+  "name": "告警中心",
+  "version": "1.0.0",
+  "author": "rustcam",
+  "description": "告警列表、详情、确认、处理",
+  "apiVersion": "1.0",
+  "dependencies": [],
+  "workspace": true,
+  "sidePanel": true,
+  "shortcut": "Ctrl+3",
+  "icon": ":/icons/alarm.svg"
+}

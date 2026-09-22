@@ -1,4 +1,4 @@
-#include "PluginManager.h"
+﻿#include "PluginManager.h"
 #include "Logger.h"
 #include "interfaces/IPlugin.h"
 #include "EventBus.h"

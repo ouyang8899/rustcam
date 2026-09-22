@@ -4,6 +4,8 @@
 #include "ThemeManager.h"
 #include "PluginManager.h"
 #include "MainWindow.h"
+#include "LoginWindow.h"
+#include "SessionManager.h"
 #include "Utils.h"
 #include <QApplication>
 #include <QCommandLineParser>
@@ -50,7 +52,7 @@ bool App::initialize()
     ConfigManager::instance();
     ThemeManager::instance();
 
-    QString pluginDir = QCoreApplication::applicationDirPath() + "/plugins";
+    QString pluginDir = QCoreApplication::applicationDirPath() + "/rustcam_plugins";
     PluginManager::instance()->loadPlugins(pluginDir);
 
     LOG_INFO("App", "Application initialized successfully");
@@ -63,6 +65,25 @@ bool App::initialize()
 
 void App::run()
 {
+    m_loginWindow = new LoginWindow();
+    m_loginWindow->setAttribute(Qt::WA_DeleteOnClose);
+    connect(m_loginWindow, &LoginWindow::loginSuccess, this, &App::onLoginSuccess);
+    m_loginWindow->show();
+}
+
+void App::onLoginSuccess(const QJsonObject& userInfo)
+{
+    Q_UNUSED(userInfo)
+    LOG_INFO("App", "User logged in successfully, showing main window");
+    m_loginWindow->hide();
+    m_loginWindow->deleteLater();
+    m_loginWindow = nullptr;
+    showMainWindow();
+}
+
+void App::showMainWindow()
+{
+    MainWindow::instance()->registerPlugins();
     MainWindow::instance()->show();
 }
 

@@ -1,4 +1,4 @@
-#include "ConfigManager.h"
+﻿#include "ConfigManager.h"
 #include "Logger.h"
 #include <QFileInfo>
 #include <QDir>

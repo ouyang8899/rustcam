@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <QObject>
 #include <QString>
@@ -23,7 +23,7 @@ public:
     virtual QString version() const = 0;
     virtual QIcon icon() const = 0;
 
-    virtual bool initialize(EventBus* bus, ConfigManager* cfg) = 0;
+    virtual bool initialize(EventBus* bus, QObject* cfg) = 0;
     virtual void shutdown() = 0;
 
     virtual QWidget* createWorkspace(QWidget* parent) = 0;

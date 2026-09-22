@@ -1,5 +1,6 @@
-#include <QApplication>
+ï»¿#include <QApplication>
 #include <QDir>
+#include <QTextCodec>
 #include <csignal>
 
 #include "App.h"
@@ -31,13 +32,15 @@ void setupSignalHandlers()
 int main(int argc, char* argv[])
 {
 
+    QTextCodec::setCodecForLocale(QTextCodec::codecForName("UTF-8"));
+
     QApplication app(argc, argv);
     app.setApplicationName("rustcam-client");
     app.setOrganizationName("rustcam");
     app.setApplicationVersion("1.0.0");
     QString appDir = QCoreApplication::applicationDirPath();
     if (!QDir::setCurrent(appDir)) {
-        qWarning() << "ÉèÖÃ¹¤×÷Ä¿Â¼Ê§°Ü:" << appDir;
+        qWarning() << "Failed to set working directory:" << appDir;
     }
 
     app.setAttribute(Qt::AA_UseHighDpiPixmaps);

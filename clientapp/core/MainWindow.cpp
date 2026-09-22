@@ -5,18 +5,15 @@
 #include "PluginManager.h"
 #include "ThemeManager.h"
 #include "Logger.h"
+#include "interfaces/IPlugin.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QToolBar>
-#include <QMenuBar>
 #include <QStatusBar>
 #include <QLabel>
 #include <QComboBox>
-#include <QActionGroup>
-#include <QKeySequence>
 #include <QDateTime>
 #include <QTimer>
-#include <QMenu>
 #include <QToolButton>
 #include <QLineEdit>
 #include <QCloseEvent>
@@ -48,7 +45,6 @@ MainWindow* MainWindow::instance()
 
 void MainWindow::setupUi()
 {
-    createMenuBar();
     createToolBar();
     createWorkspace();
     createStatusBar();
@@ -56,46 +52,33 @@ void MainWindow::setupUi()
     restoreLayout();
 }
 
-void MainWindow::createMenuBar()
+void MainWindow::registerPlugins()
 {
-    QMenuBar* menuBar = new QMenuBar(this);
-    setMenuBar(menuBar);
+    PluginManager* pm = PluginManager::instance();
+    for (IPlugin* plugin : pm->allPlugins()) {
+        QString id = plugin->id();
+        QIcon icon = plugin->icon();
+        QString tooltip = plugin->displayName();
 
-    QMenu* fileMenu = menuBar->addMenu(tr("File(&F)"));
-    fileMenu->addAction(tr("Import Config..."), this, [](){}, QKeySequence("Ctrl+I"));
-    fileMenu->addAction(tr("Export Config..."), this, [](){}, QKeySequence("Ctrl+E"));
-    fileMenu->addSeparator();
-    fileMenu->addAction(tr("Exit(&X)"), this, &QWidget::close, QKeySequence("Alt+F4"));
+        QWidget* sidePanel = plugin->createSidePanel(m_navBar);
+        bool isWorkspace = plugin->isWorkspace();
 
-    QMenu* viewMenu = menuBar->addMenu(tr("View(&V)"));
-    m_layoutMenu = viewMenu->addMenu(tr("Layout(&L)"));
-    m_layoutMenu->addAction("1", this, [this](){ switchToWorkspace("live_video"); });
-    m_layoutMenu->addAction("4", this, [this](){ switchToWorkspace("live_video"); });
-    m_layoutMenu->addAction("9", this, [this](){ switchToWorkspace("live_video"); });
-    m_layoutMenu->addAction("16", this, [this](){ switchToWorkspace("live_video"); });
+        m_navBar->addNavigationItem(id, icon, tooltip, sidePanel, isWorkspace);
 
-    viewMenu->addSeparator();
-    QAction* fullscreenAction = viewMenu->addAction(tr("Fullscreen(&F)"), this, &MainWindow::onFullscreenAction, QKeySequence("F11"));
-    fullscreenAction->setCheckable(true);
-
-    m_themeMenu = viewMenu->addMenu(tr("Theme(&T)"));
-    QActionGroup* themeGroup = new QActionGroup(this);
-    themeGroup->setExclusive(true);
-
-    QStringList themes = ThemeManager::instance()->availableThemes();
-    for (int i = 0; i < themes.size(); ++i) {
-        QAction* action = m_themeMenu->addAction(themes[i], this, &MainWindow::onThemeActionTriggered);
-        action->setCheckable(true);
-        action->setData(i);
-        themeGroup->addAction(action);
-        if (i == 0) {
-            action->setChecked(true);
+        if (isWorkspace) {
+            QWidget* workspace = plugin->createWorkspace(m_workspace);
+            if (workspace) {
+                int index = m_workspaceStack->addWidget(workspace);
+                m_workspaceIndices[id] = index;
+            }
         }
+
+        LOG_INFO("MainWindow", QString("Registered plugin: %1 (workspace: %2)")
+                                    .arg(id).arg(isWorkspace));
     }
 
-    QMenu* helpMenu = menuBar->addMenu(tr("Help(&H)"));
-    helpMenu->addAction(tr("About..."), this, [](){});
-    helpMenu->addAction(tr("Check Updates..."), this, [](){});
+    connect(m_navBar, &LeftNavigationBar::navigationChanged,
+            this, &MainWindow::onNavigationChanged);
 }
 
 void MainWindow::createToolBar()
@@ -129,12 +112,6 @@ void MainWindow::createToolBar()
     alarmBtn->setText(tr("Alarm"));
     alarmBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     toolbar->addWidget(alarmBtn);
-
-    QToolButton* themeBtn = new QToolButton;
-    themeBtn->setPopupMode(QToolButton::InstantPopup);
-    themeBtn->setText(tr("Theme"));
-    themeBtn->setMenu(m_themeMenu);
-    toolbar->addWidget(themeBtn);
 
     QToolButton* userBtn = new QToolButton;
     userBtn->setText(tr("User"));
@@ -260,6 +237,9 @@ void MainWindow::switchToWorkspace(const QString& workspaceId)
 
 void MainWindow::onNavigationChanged(const QString& id)
 {
+    if (m_workspaceIndices.contains(id)) {
+        m_workspaceStack->setCurrentIndex(m_workspaceIndices[id]);
+    }
     emit layoutChanged();
 }
 
@@ -267,25 +247,6 @@ void MainWindow::onPanelVisibilityChanged(bool visible)
 {
     Q_UNUSED(visible)
     saveLayout();
-}
-
-void MainWindow::onThemeActionTriggered(bool checked)
-{
-    Q_UNUSED(checked)
-    auto* action = qobject_cast<QAction*>(sender());
-    if (action) {
-        int themeIndex = action->data().toInt();
-        ThemeManager::instance()->setTheme(static_cast<ThemeManager::Theme>(themeIndex));
-    }
-}
-
-void MainWindow::onFullscreenAction()
-{
-    if (m_fullscreen) {
-        exitFullscreenVideo();
-    } else {
-        showFullscreenVideo();
-    }
 }
 
 void MainWindow::showFullscreenVideo()
@@ -298,11 +259,6 @@ void MainWindow::exitFullscreenVideo()
 {
     showNormal();
     m_fullscreen = false;
-}
-
-void MainWindow::onExitFullscreenAction()
-{
-    exitFullscreenVideo();
 }
 
 void MainWindow::closeEvent(QCloseEvent* event)

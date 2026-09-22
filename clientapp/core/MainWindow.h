@@ -6,11 +6,9 @@
 #include <QStackedWidget>
 
 class QToolBar;
-class QMenuBar;
 class QStatusBar;
 class QLabel;
 class QComboBox;
-class QAction;
 
 namespace rustcam {
 
@@ -25,6 +23,7 @@ public:
     static MainWindow* instance();
 
     void setupUi();
+    void registerPlugins();
     void restoreLayout();
     void saveLayout();
 
@@ -40,7 +39,6 @@ public:
 
 signals:
     void layoutChanged();
-    void themeChangeRequested(int themeIndex);
 
 public slots:
     void onNavigationChanged(const QString& id);
@@ -51,26 +49,19 @@ protected:
     void closeEvent(QCloseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
 
-private slots:
-    void onThemeActionTriggered(bool checked);
-    void onFullscreenAction();
-    void onExitFullscreenAction();
-
 private:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
     Q_DISABLE_COPY(MainWindow)
 
-    void createMenuBar();
     void createToolBar();
     void createStatusBar();
     void createWorkspace();
 
-    void loadStylesheet(const QString& themeName);
-
     LeftNavigationBar* m_navBar = nullptr;
     QWidget* m_workspace = nullptr;
     QStackedWidget* m_workspaceStack = nullptr;
+    QMap<QString, int> m_workspaceIndices;
 
     QLabel* m_connectionStatusLabel = nullptr;
     QLabel* m_fpsLabel = nullptr;
@@ -78,9 +69,6 @@ private:
     QLabel* m_gpuLabel = nullptr;
     QLabel* m_cpuLabel = nullptr;
     QLabel* m_timeLabel = nullptr;
-
-    QMenu* m_themeMenu = nullptr;
-    QMenu* m_layoutMenu = nullptr;
 
     bool m_fullscreen = false;
 };

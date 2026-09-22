@@ -1,0 +1,61 @@
+{
+    "version": 3,
+    "configurePresets": [
+        {
+            "name": "vs2019-qt5152",
+            "displayName": "Visual Studio 2019 with Qt 5.15.2",
+            "description": "Generate VS2019 project using Qt 5.15.2 from E:\\qt\\5.15.2",
+            "generator": "Visual Studio 16 2019",
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            },
+            "toolchainFile": null,
+            "binaryDir": "${sourceDir}/build-vs2019",
+            "installDir": "${sourceDir}/install",
+            "cacheVariables": {
+                "CMAKE_PREFIX_PATH": "E:/qt/5.15.2/msvc2019_64",
+                "Qt5_DIR": "E:/qt/5.15.2/msvc2019_64/lib/cmake/Qt5",
+                "QT_VERSION_STRING": "5.15.2",
+                "BUILD_TESTS": "ON",
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "vs2019-qt5152-debug",
+            "displayName": "Visual Studio 2019 with Qt 5.15.2 (Debug)",
+            "inherits": "vs2019-qt5152",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "ninja-qt5152",
+            "displayName": "Ninja with Qt 5.15.2",
+            "description": "Use Ninja generator with Qt 5.15.2",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build-ninja",
+            "cacheVariables": {
+                "CMAKE_PREFIX_PATH": "E:/qt/5.15.2/msvc2019_64",
+                "Qt5_DIR": "E:/qt/5.15.2/msvc2019_64/lib/cmake/Qt5",
+                "QT_VERSION_STRING": "5.15.2",
+                "BUILD_TESTS": "ON",
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "vs2019-release",
+            "configurePreset": "vs2019-qt5152"
+        },
+        {
+            "name": "vs2019-debug",
+            "configurePreset": "vs2019-qt5152-debug"
+        },
+        {
+            "name": "ninja-release",
+            "configurePreset": "ninja-qt5152"
+        }
+    ]
+}

@@ -1,9 +1,10 @@
-#include "EventBus.h"
-#include <QDebug>
+﻿#include "EventBus.h"
+#include "Logger.h"
+#include <QCoreApplication>
+#include <QMetaMethod>
 
 namespace rustcam {
 
-namespace {
 const char* TOPIC_device_online = "device/online";
 const char* TOPIC_device_offline = "device/offline";
 const char* TOPIC_alarm_triggered = "alarm/triggered";
@@ -19,7 +20,6 @@ const char* TOPIC_map_focus = "map/focus";
 const char* TOPIC_map_marker_add = "map/marker/add";
 const char* TOPIC_layout_change = "layout/change";
 const char* TOPIC_permission_changed = "permission/changed";
-}
 
 EventBus::EventBus(QObject* parent)
     : QObject(parent)
@@ -29,6 +29,7 @@ EventBus::EventBus(QObject* parent)
 EventBus::~EventBus()
 {
     m_subscriptions.clear();
+    m_handlerSubscriptions.clear();
 }
 
 EventBus* EventBus::instance()
@@ -67,7 +68,75 @@ void EventBus::subscribe(const QString& topic, QObject* receiver, const char* sl
 
     m_subscriptions.append(sub);
 
-    qDebug() << "EventBus: Subscribed" << topic << "->" << receiver->metaObject()->className() << "::" << slot;
+    LOG_DEBUG("EventBus", QString("Subscribed: %1 -> %2::%3")
+               .arg(topic)
+               .arg(receiver->metaObject()->className())
+               .arg(slot));
+}
+
+void EventBus::subscribeHandler(const QString& topic, QObject* receiver, const char* slot)
+{
+    HandlerSubscription sub;
+    sub.topic = topic;
+    sub.receiver = receiver;
+    sub.slot = slot;
+
+    m_handlerSubscriptions.append(sub);
+
+    LOG_DEBUG("EventBus", QString("Handler subscribed: %1 -> %2::%3")
+               .arg(topic)
+               .arg(receiver->metaObject()->className())
+               .arg(slot));
+}
+
+void EventBus::dispatch(const QString& topic, const QVariantMap& payload, Callback callback)
+{
+    QList<HandlerSubscription> handlers;
+    for (const auto& h : m_handlerSubscriptions) {
+        if (h.topic == topic) {
+            handlers.append(h);
+        }
+    }
+
+    if (handlers.isEmpty()) {
+        LOG_WARNING("EventBus", QString("No handler for dispatch: %1").arg(topic));
+        if (callback) {
+            QVariantMap result;
+            result["_success"] = false;
+            result["_error"] = "No handler registered";
+            callback(result);
+        }
+        return;
+    }
+
+    const auto& handler = handlers.first();
+    if (!handler.receiver) {
+        if (callback) {
+            QVariantMap result;
+            result["_success"] = false;
+            result["_error"] = "Handler receiver is null";
+            callback(result);
+        }
+        return;
+    }
+
+    QVariantMap result;
+    bool invokeResult = QMetaObject::invokeMethod(
+        handler.receiver,
+        handler.slot,
+        Qt::DirectConnection,
+        Q_ARG(QString, topic),
+        Q_ARG(QVariantMap, payload));
+
+    result["_success"] = invokeResult;
+    if (callback) {
+        callback(result);
+    }
+
+    LOG_DEBUG("EventBus", QString("Dispatched: %1 -> %2::%3")
+              .arg(topic)
+              .arg(handler.receiver->metaObject()->className())
+              .arg(handler.slot));
 }
 
 void EventBus::unsubscribe(const QString& topic, QObject* receiver)
@@ -79,6 +148,14 @@ void EventBus::unsubscribe(const QString& topic, QObject* receiver)
         }
     }
     m_subscriptions = filtered;
+
+    QList<HandlerSubscription> handlerFiltered;
+    for (const auto& h : m_handlerSubscriptions) {
+        if (!(h.topic == topic && h.receiver == receiver)) {
+            handlerFiltered.append(h);
+        }
+    }
+    m_handlerSubscriptions = handlerFiltered;
 }
 
 void EventBus::unsubscribeAll(QObject* receiver)
@@ -90,6 +167,14 @@ void EventBus::unsubscribeAll(QObject* receiver)
         }
     }
     m_subscriptions = filtered;
+
+    QList<HandlerSubscription> handlerFiltered;
+    for (const auto& h : m_handlerSubscriptions) {
+        if (h.receiver != receiver) {
+            handlerFiltered.append(h);
+        }
+    }
+    m_handlerSubscriptions = handlerFiltered;
 }
 
 bool EventBus::isSubscribed(const QString& topic, QObject* receiver) const
