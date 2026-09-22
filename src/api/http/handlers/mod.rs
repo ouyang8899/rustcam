@@ -12,3 +12,4 @@ pub mod group_handler;
 pub mod onvif_handler;
 pub mod gb28181_ref_handler;
 pub mod channel_handler;
+pub mod proxy_handler;

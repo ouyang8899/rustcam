@@ -76,7 +76,7 @@
           <DataCard>
             <template #header><span>电子地图配置</span></template>
             <el-form-item label="TMS 瓦片地址">
-              <el-input v-model="mapTmsUrl" placeholder="http://localhost:8080/geoserver/gwc/service/tms/1.0.0" />
+              <el-input v-model="mapTmsUrl" placeholder="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             </el-form-item>
             <el-form-item label="WFS 服务地址">
               <el-input v-model="mapWfsUrl" placeholder="http://localhost:8080/geoserver/ows?service=WFS&version=2.0.0&request=GetFeature" />
@@ -85,7 +85,8 @@
               <el-switch v-model="mapAutoLocate" />
             </el-form-item>
             <el-text type="info" size="small">
-              TMS: 地图底图瓦片服务，GeoServer 发布<br/>
+              TMS: 地图底图，{s} 为子域名占位符<br/>
+              多子域名示例: https://webrd{1,2,3,4}.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scale=1&style=8<br/>
               WFS: 设备点位服务，需包含 device_tag、status、latitude、longitude 字段
             </el-text>
           </DataCard>

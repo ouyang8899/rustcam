@@ -119,59 +119,105 @@ async function fetchWfsFeatures(bounds) {
 
   const bbox = bounds ? `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}` : null
 
-  let url = wfsUrl
+  let targetUrl = wfsUrl
   if (bbox) {
-    url += (wfsUrl.includes('?') ? '&' : '?') + `bbox=${bbox}`
+    targetUrl += (wfsUrl.includes('?') ? '&' : '?') + `bbox=${bbox}`
   }
 
+  const useProxy = import.meta.env.DEV
+  const fetchUrl = useProxy ? `/api/v1/proxy/wfs?url=${encodeURIComponent(targetUrl)}` : targetUrl
+
   try {
-    const res = await fetch(url)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000)
+    const res = await fetch(fetchUrl, { signal: controller.signal })
+    clearTimeout(timeoutId)
+
+    if (!res.ok) {
+      console.warn('[DeviceMap] WFS response not ok:', res.status)
+      return []
+    }
+
     const text = await res.text()
-    const parser = new DOMParser()
-    const xml = parser.parseFromString(text, 'text/xml')
 
-    const features = []
-    const featureCollections = xml.getElementsByTagName('FeatureCollection')
-    if (featureCollections.length > 0) {
-      const memberElements = featureCollections[0].getElementsByTagName('member')
-      for (const member of memberElements) {
-        const featureMember = member.firstElementChild
-        if (!featureMember) continue
+    if (!text || text.trim() === '') {
+      return []
+    }
 
-        const properties = {}
-        const children = featureMember.children
-        for (const child of children) {
-          properties[child.tagName.split(':').pop()] = child.textContent
-        }
+    const trimmed = text.trim()
+    let features = []
 
-        let lat = parseFloat(properties.latitude || properties.lat || properties.y)
-        let lng = parseFloat(properties.longitude || properties.lng || properties.lon || properties.x)
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      const geojson = JSON.parse(text)
+      if (geojson.features) {
+        for (const f of geojson.features) {
+          const props = f.properties || {}
+          let lat = parseFloat(props.latitude || props.lat || props.y)
+          let lng = parseFloat(props.longitude || props.lng || props.lon || props.x)
 
-        if (!lat || !lng) {
-          const pointElement = featureMember.querySelector('Point') || featureMember.querySelector('[gml\\:Point]')
-          if (pointElement) {
-            const coords = pointElement.textContent.trim().split(/[\s,]+/)
-            if (coords.length >= 2) {
-              lng = parseFloat(coords[0])
-              lat = parseFloat(coords[1])
-            }
+          if (f.geometry && f.geometry.coordinates) {
+            lng = f.geometry.coordinates[0]
+            lat = f.geometry.coordinates[1]
+          }
+
+          if (lat && lng) {
+            features.push({
+              type: 'Feature',
+              geometry: { type: 'Point', coordinates: [lng, lat] },
+              properties: props,
+            })
           }
         }
+      }
+    } else {
+      const parser = new DOMParser()
+      const xml = parser.parseFromString(text, 'text/xml')
 
-        if (lat && lng) {
-          features.push({
-            type: 'Feature',
-            geometry: { type: 'Point', coordinates: [lng, lat] },
-            properties: properties,
-          })
+      const featureCollections = xml.getElementsByTagName('FeatureCollection')
+      if (featureCollections.length > 0) {
+        const memberElements = featureCollections[0].getElementsByTagName('member')
+        for (const member of memberElements) {
+          const featureMember = member.firstElementChild
+          if (!featureMember) continue
+
+          const properties = {}
+          const children = featureMember.children
+          for (const child of children) {
+            properties[child.tagName.split(':').pop()] = child.textContent
+          }
+
+          let lat = parseFloat(properties.latitude || properties.lat || properties.y)
+          let lng = parseFloat(properties.longitude || properties.lng || properties.lon || properties.x)
+
+          if (!lat || !lng) {
+            const pointElement = featureMember.querySelector('Point') || featureMember.querySelector('[gml\\:Point]')
+            if (pointElement) {
+              const coords = pointElement.textContent.trim().split(/[\s,]+/)
+              if (coords.length >= 2) {
+                lng = parseFloat(coords[0])
+                lat = parseFloat(coords[1])
+              }
+            }
+          }
+
+          if (lat && lng) {
+            features.push({
+              type: 'Feature',
+              geometry: { type: 'Point', coordinates: [lng, lat] },
+              properties: properties,
+            })
+          }
         }
       }
     }
 
     return features
   } catch (e) {
-    console.error('[DeviceMap] Failed to fetch WFS:', e)
-    ElMessage.error('获取设备数据失败: ' + e.message)
+    if (e.name === 'AbortError') {
+      console.warn('[DeviceMap] WFS request timeout')
+    } else {
+      console.error('[DeviceMap] Failed to fetch WFS:', e)
+    }
     return []
   }
 }
@@ -194,6 +240,12 @@ async function loadDevices(bounds) {
 
   const features = await fetchWfsFeatures(bounds)
   const filtered = filterFeatures(features)
+
+  if (filtered.length === 0 && features.length > 0) {
+    ElMessage.warning('当前范围内没有带坐标的设备，请在设备管理中添加经纬度')
+  } else if (features.length === 0) {
+    ElMessage.warning('未获取到设备数据，请检查WFS服务配置')
+  }
 
   markersMap.value.clear()
   if (markersLayer) {
@@ -276,16 +328,42 @@ onMounted(() => {
   if (!mapContainer.value) return
 
   map = L.map('device-map', {
-    center: [35, 105],
-    zoom: 5,
+    center: [31.23, 121.47],
+    zoom: 10,
     zoomControl: true,
   })
 
   const tmsUrl = settingsStore.mapTmsUrl
-  if (tmsUrl) {
-    L.tileLayer(tmsUrl, {
+
+  if (tmsUrl && tmsUrl.includes('{x}') && tmsUrl.includes('{y}') && tmsUrl.includes('{z}')) {
+    const subdomainMatch = tmsUrl.match(/\{([^}]+)\}/)
+    const hasNumericSubdomain = subdomainMatch && /^\d+(,\d+)*$/.test(subdomainMatch[1])
+
+    if (hasNumericSubdomain) {
+      const subdomains = subdomainMatch[1].split(',')
+      const baseUrl = tmsUrl.replace(subdomainMatch[0], '{s}')
+      L.tileLayer(baseUrl, {
+        maxZoom: 18,
+        attribution: 'GeoServer',
+        subdomains: subdomains,
+        errorTileUrl: '',
+      }).on('tileerror', function(e) {
+        console.warn('[DeviceMap] Tile load error:', e)
+      }).addTo(map)
+    } else {
+      L.tileLayer(tmsUrl, {
+        maxZoom: 18,
+        attribution: 'GeoServer',
+        errorTileUrl: '',
+      }).on('tileerror', function(e) {
+        console.warn('[DeviceMap] Tile load error:', e)
+      }).addTo(map)
+    }
+  } else if (tmsUrl) {
+    console.warn('[DeviceMap] Invalid TMS URL (missing {x} {y} {z}), using OpenStreetMap instead')
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 18,
-      attribution: 'GeoServer',
+      attribution: 'OpenStreetMap',
     }).addTo(map)
   } else {
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {

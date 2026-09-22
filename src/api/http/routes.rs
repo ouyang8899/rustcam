@@ -23,6 +23,7 @@ use crate::api::http::handlers::{
     onvif_handler,
     gb28181_ref_handler,
     channel_handler,
+    proxy_handler,
 };
 
 async fn trace_layer(request: Request, next: Next) -> axum::response::Response {
@@ -204,6 +205,8 @@ fn public_routes(state: Arc<FullState>) -> Router {
         .route("/api/v1/auth/refresh", post(crate::auth::handlers::refresh))
         .route("/api/v1/public/streams", get(device_handler::list_public_streams_handler))
         .route("/api/v1/stats", get(stats_handler))
+        // WFS 代理（解决跨域问题）
+        .route("/api/v1/proxy/wfs", get(proxy_handler::wfs_proxy_handler))
         .route("/ws", get(crate::api::websocket::ws_handler))
         .route("/ws/audio-talk/{device_id}/{channel_id}", get(crate::api::websocket::audio_talk_handler))
         // HTTP trace layer (logs incoming requests at TRACE level)
