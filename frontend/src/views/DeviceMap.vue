@@ -487,12 +487,23 @@ onMounted(() => {
 
   const tmsUrl = settingsStore.mapTmsUrl
 
-  if (tmsUrl && tmsUrl.includes('{x}') && tmsUrl.includes('{y}') && tmsUrl.includes('{z}')) {
+  if (tmsUrl && tmsUrl.includes('{x}') && tmsUrl.includes('{z}')) {
+    const hasNegY = tmsUrl.includes('{-y}')
     const tileUrls = tmsUrl.split('\n').map(u => u.trim()).filter(u => u && u.length > 0)
     map.addSource('raster-tiles', {
       type: 'raster',
       tiles: tileUrls,
       tileSize: 256,
+      transformUrl: (url) => {
+        if (!hasNegY) return url
+        const zMatch = url.match(/[?&]z=(\d+)/)
+        const yMatch = url.match(/[?&]y=(\d+)/)
+        if (!zMatch || !yMatch) return url
+        const z = parseInt(zMatch[1])
+        const y = parseInt(yMatch[1])
+        const flippedY = (1 << z) - 1 - y
+        return url.replace('{-y}', flippedY)
+      },
     })
     map.addLayer({
       id: 'raster-tiles-layer',
