@@ -1,7 +1,8 @@
-﻿#include "DeviceTreePlugin.h"
+﻿#include "DeviceTree.h"
 #include "core/EventBus.h"
 #include "core/ServerApi.h"
 #include "core/SessionManager.h"
+#include "common/Logger.h"
 #include <QTreeView>
 #include <QVBoxLayout>
 #include <QLineEdit>
@@ -35,8 +36,9 @@ private slots:
 
     void onCustomContextMenu(const QPoint& pos) {
         QMenu menu(this);
-        menu.addAction("打开视频", this, [this]() {
-            QModelIndex index = m_treeView->indexAt(pos);
+        QPoint globalPos = m_treeView->mapToGlobal(pos);
+        menu.addAction("打开视频", this, [this, globalPos]() {
+            QModelIndex index = m_treeView->indexAt(globalPos);
             if (index.isValid()) {
                 QString deviceId = index.data(Qt::UserRole).toString();
                 if (!deviceId.isEmpty()) {
@@ -44,8 +46,8 @@ private slots:
                 }
             }
         });
-        menu.addAction("查看录像", this, [this]() {
-            QModelIndex index = m_treeView->indexAt(pos);
+        menu.addAction("查看录像", this, [this, globalPos]() {
+            QModelIndex index = m_treeView->indexAt(globalPos);
             if (index.isValid()) {
                 QString deviceId = index.data(Qt::UserRole).toString();
                 if (!deviceId.isEmpty()) {
@@ -55,7 +57,7 @@ private slots:
                 }
             }
         });
-        menu.exec(m_treeView->mapToGlobal(pos));
+        menu.exec(globalPos);
     }
 
 private:
@@ -259,5 +261,3 @@ void DeviceTreePlugin::onSearchTextChanged(const QString& text)
 }
 
 }
-
-#include "DeviceTreePlugin.moc"

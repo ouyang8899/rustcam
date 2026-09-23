@@ -1,0 +1,7 @@
+#pragma once
+
+#ifdef INTERFACES_EXPORTS
+#define INTERFACES_API Q_DECL_EXPORT
+#else
+#define INTERFACES_API Q_DECL_IMPORT
+#endif

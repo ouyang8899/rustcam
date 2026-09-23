@@ -1,7 +1,7 @@
 ﻿#include "PlaybackPlugin.h"
 #include "core/EventBus.h"
 #include "core/ServerApi.h"
-#include "core/Logger.h"
+#include "common/Logger.h"
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -276,5 +276,3 @@ void PlaybackPlugin::loadRecordings(const QString& deviceId, const QDateTime& st
 }
 
 }
-
-#include "PlaybackPlugin.moc"

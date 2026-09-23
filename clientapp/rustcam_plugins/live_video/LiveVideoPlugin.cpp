@@ -1,135 +1,91 @@
 ﻿#include "LiveVideoPlugin.h"
 #include "core/EventBus.h"
-#include "core/Logger.h"
-#include <QWidget>
+#include "core/ServerApi.h"
+#include "core/DeviceTreeNode.h"
+#include "common/Logger.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
 #include <QStackedWidget>
 #include <QToolBar>
 #include <QAction>
-#include <QLabel>
 #include <QComboBox>
+#include <QJsonArray>
 
 namespace rustcam {
 
-class VideoCell : public QWidget {
-    Q_OBJECT
-public:
-    VideoCell(const QString& cellId, QWidget* parent = nullptr)
-        : QWidget(parent)
-        , m_cellId(cellId)
-        , m_playing(false)
-    {
-        setupUi();
+VideoCell::VideoCell(const QString& cellId, QWidget* parent)
+    : QWidget(parent)
+    , m_cellId(cellId)
+    , m_playing(false)
+{
+    setupUi();
+}
+
+void VideoCell::setTitle(const QString& title)
+{
+    m_titleLabel->setText(title);
+}
+
+void VideoCell::setPlaying(bool playing)
+{
+    m_playing = playing;
+    if (playing) {
+        m_overlayWidget->hide();
+    } else {
+        m_overlayWidget->show();
     }
+}
 
-    QString cellId() const { return m_cellId; }
-    bool isPlaying() const { return m_playing; }
+void VideoCell::updateOsd(const QString& info)
+{
+    m_osdLabel->setText(info);
+}
 
-    void setTitle(const QString& title) {
-        m_titleLabel->setText(title);
-    }
+void VideoCell::onCellClicked()
+{
+    emit cellSelected(m_cellId);
+}
 
-    void setPlaying(bool playing) {
-        m_playing = playing;
-        if (playing) {
-            m_overlayWidget->hide();
-        } else {
-            m_overlayWidget->show();
-        }
-    }
+void VideoCell::setupUi()
+{
+    setObjectName("VideoCell");
+    setAttribute(Qt::WA_StyledBackground);
 
-    void updateOsd(const QString& info) {
-        m_osdLabel->setText(info);
-    }
+    QVBoxLayout* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(0, 0, 0, 0);
 
-private slots:
-    void onCellClicked() {
-        emit cellSelected(m_cellId);
-    }
+    m_videoLabel = new QLabel(this);
+    m_videoLabel->setObjectName("VideoLabel");
+    m_videoLabel->setAlignment(Qt::AlignCenter);
+    m_videoLabel->setText(tr("NO SIGNAL"));
+    layout->addWidget(m_videoLabel);
 
-signals:
-    void cellSelected(const QString& cellId);
+    m_overlayWidget = new QWidget(this);
+    m_overlayWidget->setObjectName("VideoOverlay");
+    QVBoxLayout* overlayLayout = new QVBoxLayout(m_overlayWidget);
+    overlayLayout->setAlignment(Qt::AlignCenter);
+    overlayLayout->setContentsMargins(0, 0, 0, 0);
+    QLabel* iconLabel = new QLabel("📹", m_overlayWidget);
+    iconLabel->setAlignment(Qt::AlignCenter);
+    overlayLayout->addWidget(iconLabel);
+    QLabel* textLabel = new QLabel(tr("Offline"), m_overlayWidget);
+    textLabel->setObjectName("OverlayText");
+    textLabel->setAlignment(Qt::AlignCenter);
+    overlayLayout->addWidget(textLabel);
 
-private:
-    void setupUi() {
-        setStyleSheet(R"(
-            VideoCell {
-                background-color: #000000;
-                border: 1px solid rgba(255, 255, 255, 0.08);
-                border-radius: 4px;
-            }
-            VideoCell:hover {
-                border: 1px solid #0078D4;
-            }
-        )");
+    m_osdLabel = new QLabel(this);
+    m_osdLabel->setObjectName("OsdLabel");
+    m_osdLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    m_osdLabel->hide();
 
-        QVBoxLayout* layout = new QVBoxLayout(this);
-        layout->setContentsMargins(0, 0, 0, 0);
+    m_titleLabel = new QLabel(this);
+    m_titleLabel->setObjectName("TitleLabel");
+    m_titleLabel->setAlignment(Qt::AlignLeft | Qt::AlignBottom);
+    m_titleLabel->hide();
 
-        m_videoLabel = new QLabel(this);
-        m_videoLabel->setAlignment(Qt::AlignCenter);
-        m_videoLabel->setText("NO SIGNAL");
-        m_videoLabel->setStyleSheet(R"(
-            QLabel {
-                color: #666;
-                font-size: 14px;
-                background-color: #000;
-            }
-        )");
-        layout->addWidget(m_videoLabel);
-
-        m_overlayWidget = new QWidget(this);
-        m_overlayWidget->setStyleSheet("background-color: rgba(0, 0, 0, 0.7);");
-        QVBoxLayout* overlayLayout = new QVBoxLayout(m_overlayWidget);
-        overlayLayout->setAlignment(Qt::AlignCenter);
-        QLabel* iconLabel = new QLabel("📹", m_overlayWidget);
-        iconLabel->setAlignment(Qt::AlignCenter);
-        iconLabel->setStyleSheet("font-size: 32px;");
-        overlayLayout->addWidget(iconLabel);
-        QLabel* textLabel = new QLabel("离线", m_overlayWidget);
-        textLabel->setAlignment(Qt::AlignCenter);
-        textLabel->setStyleSheet("color: #666; font-size: 12px;");
-        overlayLayout->addWidget(textLabel);
-
-        m_osdLabel = new QLabel(this);
-        m_osdLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-        m_osdLabel->setStyleSheet(R"(
-            QLabel {
-                color: white;
-                background-color: rgba(0, 0, 0, 0.6);
-                padding: 4px 8px;
-                border-radius: 2px;
-                font-size: 11px;
-            }
-        )");
-        m_osdLabel->hide();
-
-        m_titleLabel = new QLabel(this);
-        m_titleLabel->setAlignment(Qt::AlignLeft | Qt::AlignBottom);
-        m_titleLabel->setStyleSheet(R"(
-            QLabel {
-                color: white;
-                background-color: rgba(0, 0, 0, 0.6);
-                padding: 4px 8px;
-                border-radius: 2px;
-                font-size: 12px;
-                font-weight: bold;
-            }
-        )");
-        m_titleLabel->hide();
-
-        setMinimumSize(320, 180);
-    }
-
-    QString m_cellId;
-    bool m_playing;
-    QLabel* m_videoLabel;
-    QWidget* m_overlayWidget;
-    QLabel* m_osdLabel;
-    QLabel* m_titleLabel;
-};
+    setMinimumSize(320, 180);
+}
 
 bool LiveVideoPlugin::initialize(EventBus* bus, QObject* cfg)
 {
@@ -164,41 +120,27 @@ QWidget* LiveVideoPlugin::createWorkspace(QWidget* parent)
     layout->setSpacing(8);
 
     QToolBar* toolbar = new QToolBar(m_workspace);
-    toolbar->setStyleSheet(R"(
-        QToolBar {
-            background-color: #1e1e1e;
-            border: none;
-            spacing: 8px;
-            padding: 4px;
-        }
-    )");
+    toolbar->setObjectName("VideoToolbar");
+    toolbar->setMovable(false);
 
-    QLabel* layoutLabel = new QLabel("布局:");
-    layoutLabel->setStyleSheet("color: #e0e0e0;");
+    QLabel* layoutLabel = new QLabel(tr("Layout:"));
+    layoutLabel->setObjectName("ToolbarLabel");
     toolbar->addWidget(layoutLabel);
 
     QComboBox* layoutCombo = new QComboBox();
+    layoutCombo->setObjectName("LayoutCombo");
     layoutCombo->addItems({"1", "4", "6", "8", "9", "13", "16"});
     layoutCombo->setCurrentText("4");
-    layoutCombo->setStyleSheet(R"(
-        QComboBox {
-            background-color: #2b2b2b;
-            border: 1px solid #3e3e3e;
-            border-radius: 4px;
-            padding: 4px 8px;
-            color: #e0e0e0;
-        }
-    )");
-    connect(layoutCombo, &QComboBox::currentTextChanged, this, [this](const QString& text) {
+    QObject::connect(layoutCombo, &QComboBox::currentTextChanged, this, [this](const QString& text) {
         setLayout(text.toInt());
     });
     toolbar->addWidget(layoutCombo);
 
     toolbar->addSeparator();
 
-    QAction* stopAllAction = new QAction("停止全部", this);
-    stopAllAction->setIconText("⏹");
-    connect(stopAllAction, &QAction::triggered, this, [this]() {
+    QAction* stopAllAction = new QAction(tr("Stop All"), this);
+    stopAllAction->setObjectName("StopAllAction");
+    QObject::connect(stopAllAction, &QAction::triggered, this, [this]() {
         for (auto cell : m_cells.values()) {
             stopStream(cell->cellId());
         }
@@ -325,6 +267,152 @@ void LiveVideoPlugin::onStreamStop(const QString& topic, const QVariantMap& payl
     }
 }
 
+QWidget* LiveVideoPlugin::createSidePanel(QWidget* parent)
+{
+    m_sidePanel = new QWidget(parent);
+    m_sidePanel->setObjectName("VideoSidePanel");
+
+    QVBoxLayout* layout = new QVBoxLayout(m_sidePanel);
+    layout->setContentsMargins(0, 0, 0, 0);
+
+    m_tabWidget = new QTabWidget(m_sidePanel);
+
+    m_regionTree = new DeviceTree(m_tabWidget);
+    QObject::connect(m_regionTree, QOverload<QVariantMap>::of(&DeviceTree::itemDoubleClicked),
+                     this, &LiveVideoPlugin::onDeviceTreeItemClicked);
+    QObject::connect(m_regionTree, QOverload<const QString&>::of(&DeviceTree::nodeNotFound), [](const QString& key) {
+        LOG_WARNING("LiveVideoPlugin", QString("Region node not found: %1").arg(key));
+    });
+    m_tabWidget->addTab(m_regionTree, tr("地区"));
+
+    m_groupTree = new DeviceTree(m_tabWidget);
+    QObject::connect(m_groupTree, QOverload<QVariantMap>::of(&DeviceTree::itemDoubleClicked),
+                     this, &LiveVideoPlugin::onDeviceTreeItemClicked);
+    QObject::connect(m_groupTree, QOverload<const QString&>::of(&DeviceTree::nodeNotFound), [](const QString& key) {
+        LOG_WARNING("LiveVideoPlugin", QString("Group node not found: %1").arg(key));
+    });
+    m_tabWidget->addTab(m_groupTree, tr("自定义分组"));
+
+    loadRegionTree();
+    loadGroupTree();
+
+    layout->addWidget(m_tabWidget);
+
+    return m_sidePanel;
 }
 
-#include "LiveVideoPlugin.moc"
+void LiveVideoPlugin::onChannelClicked(int deviceId, int channelId, const QString& channelName)
+{
+    Q_UNUSED(channelId)
+    QString url = QString("rtsp://localhost/live/%1").arg(deviceId);
+    QString cellId;
+
+    for (auto cell : m_cells.values()) {
+        if (!cell->isPlaying()) {
+            cellId = cell->cellId();
+            break;
+        }
+    }
+
+    if (cellId.isEmpty()) {
+        cellId = "cell-0";
+    }
+
+    playStream(cellId, url, channelName);
+}
+
+void LiveVideoPlugin::loadRegionTree()
+{
+    QFuture<QPair<bool, QJsonObject>> future = QtConcurrent::run([]() {
+        QJsonObject response;
+        QString error;
+        bool success = ServerApi::instance()->getSync("/api/v1/regions", response, error);
+        Q_UNUSED(error)
+        return QPair<bool, QJsonObject>(success, response);
+    });
+
+    m_regionTreeWatcher = new QFutureWatcher<QPair<bool, QJsonObject>>(this);
+    QObject::connect(m_regionTreeWatcher, &QFutureWatcher<QPair<bool, QJsonObject>>::finished,
+            this, &LiveVideoPlugin::onRegionTreeFinished);
+    m_regionTreeWatcher->setFuture(future);
+}
+
+void LiveVideoPlugin::loadGroupTree()
+{
+    QFuture<QPair<bool, QJsonObject>> future = QtConcurrent::run([]() {
+        QJsonObject response;
+        QString error;
+        bool success = ServerApi::instance()->getSync("/api/v1/groups", response, error);
+        Q_UNUSED(error)
+        return QPair<bool, QJsonObject>(success, response);
+    });
+
+    m_groupTreeWatcher = new QFutureWatcher<QPair<bool, QJsonObject>>(this);
+    QObject::connect(m_groupTreeWatcher, &QFutureWatcher<QPair<bool, QJsonObject>>::finished,
+            this, &LiveVideoPlugin::onGroupTreeFinished);
+    m_groupTreeWatcher->setFuture(future);
+}
+
+void LiveVideoPlugin::onRegionTreeFinished()
+{
+    QPair<bool, QJsonObject> result = m_regionTreeWatcher->future().result();
+    bool success = result.first;
+    const QJsonObject& response = result.second;
+
+    if (!success) {
+        LOG_ERROR("LiveVideoPlugin", "Failed to load region tree");
+        return;
+    }
+
+    QList<DeviceTreeNode> nodes;
+    QJsonArray data = response.value("data").toArray();
+
+    for (const QJsonValue& value : data) {
+        DeviceTreeNode node;
+        node.key = value.toObject()["id"].toString();
+        node.name = value.toObject()["name"].toString();
+        node.type = "region";
+        nodes.append(node);
+    }
+
+    m_regionTree->setNodes(nodes);
+}
+
+void LiveVideoPlugin::onGroupTreeFinished()
+{
+    QPair<bool, QJsonObject> result = m_groupTreeWatcher->future().result();
+    bool success = result.first;
+    const QJsonObject& response = result.second;
+
+    if (!success) {
+        LOG_ERROR("LiveVideoPlugin", "Failed to load group tree");
+        return;
+    }
+
+    QList<DeviceTreeNode> nodes;
+    QJsonArray data = response.value("data").toArray();
+
+    for (const QJsonValue& value : data) {
+        DeviceTreeNode node;
+        node.key = value.toObject()["id"].toString();
+        node.name = value.toObject()["name"].toString();
+        node.type = "group";
+        nodes.append(node);
+    }
+
+    m_groupTree->setNodes(nodes);
+}
+
+void LiveVideoPlugin::onDeviceTreeItemClicked(const QVariantMap& meta)
+{
+    QString type = meta["type"].toString();
+    if (type == "region" || type == "group" || type == "device") {
+        QString key = meta["key"].toString();
+        int deviceId = key.toInt();
+        if (deviceId > 0) {
+            onChannelClicked(deviceId, 0, meta["name"].toString());
+        }
+    }
+}
+
+}

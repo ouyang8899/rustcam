@@ -24,12 +24,25 @@ target_include_directories(${PLUGIN_ID} PRIVATE
 target_link_libraries(${PLUGIN_ID} PRIVATE
     interfaces
     common
+    rustcam-core
     Qt5::Core
     Qt5::Widgets
+    Qt5::Concurrent
 )
 
 set_target_properties(${PLUGIN_ID} PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/rustcam_plugins
     OUTPUT_NAME "rustcam_${PLUGIN_ID}"
     AUTOMOC ON
+)
+
+add_custom_command(TARGET ${PLUGIN_ID} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy
+        $<TARGET_FILE:${PLUGIN_ID}>
+        ${CMAKE_BINARY_DIR}/bin/rustcam_plugins/
+)
+add_custom_command(TARGET ${PLUGIN_ID} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy
+        $<TARGET_FILE:${PLUGIN_ID}>
+        ${CMAKE_BINARY_DIR}/bin/Debug/rustcam_plugins/
 )

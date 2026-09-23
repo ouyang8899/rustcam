@@ -5,10 +5,11 @@
 #include <QString>
 #include <QList>
 #include <functional>
+#include "CoreExport.h"
 
 namespace rustcam {
 
-class EventBus : public QObject {
+class RUSTCAM_CORE_API EventBus : public QObject {
     Q_OBJECT
 public:
     using Callback = std::function<void(const QVariantMap& result)>;

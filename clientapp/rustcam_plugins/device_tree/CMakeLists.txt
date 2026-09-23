@@ -1,11 +1,11 @@
 set(PLUGIN_ID "device_tree")
 
 set(PLUGIN_SOURCES
-    DeviceTreePlugin.cpp
+    DeviceTree.cpp
 )
 
 set(PLUGIN_HEADERS
-    DeviceTreePlugin.h
+    DeviceTree.h
 )
 
 add_library(${PLUGIN_ID} SHARED

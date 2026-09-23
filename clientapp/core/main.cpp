@@ -12,7 +12,7 @@
     #include <windows.h>
 #endif
 
-using namespace rustcam;
+using rustcam::App;
 
 void setupSignalHandlers()
 {

@@ -4,6 +4,7 @@
 #include <QString>
 #include <QIcon>
 #include <QWidget>
+#include "InterfacesExport.h"
 
 namespace rustcam {
 
@@ -13,7 +14,7 @@ class ConfigManager;
 #define RUSTCAM_PLUGIN_IID "com.rustcam.IPlugin/1.0"
 #define RUSTCAM_PLUGIN_METADATA_IID "com.rustcam.ClientPlugin"
 
-class IPlugin : public QObject {
+class INTERFACES_API IPlugin : public QObject {
     Q_OBJECT
 public:
     virtual ~IPlugin() = default;

@@ -512,3 +512,65 @@ rustcam--LoginWindow#copyrightLabel {
     font-size: 12px;
     font-family: 'Segoe UI', sans-serif;
 }
+
+/* LiveVideo Styles */
+VideoCell {
+    background-color: #000000;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+}
+
+VideoCell:hover {
+    border: 1px solid @accent;
+}
+
+VideoLabel {
+    color: #666;
+    font-size: 14px;
+    background-color: #000;
+}
+
+VideoOverlay {
+    background-color: rgba(0, 0, 0, 0.7);
+}
+
+VideoOverlay #OverlayText {
+    color: #666;
+    font-size: 12px;
+}
+
+OsdLabel {
+    color: white;
+    background-color: rgba(0, 0, 0, 0.6);
+    padding: 4px 8px;
+    border-radius: 2px;
+    font-size: 11px;
+}
+
+TitleLabel {
+    color: white;
+    background-color: rgba(0, 0, 0, 0.6);
+    padding: 4px 8px;
+    border-radius: 2px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+QToolBar#VideoToolbar {
+    background-color: @primary_bg;
+    border: none;
+    spacing: 8px;
+    padding: 4px;
+}
+
+QToolBar#VideoToolbar QLabel {
+    color: @text_primary;
+}
+
+QToolBar#VideoToolbar QComboBox {
+    background-color: @secondary_bg;
+    border: 1px solid @border;
+    border-radius: 4px;
+    padding: 4px 8px;
+    color: @text_primary;
+}

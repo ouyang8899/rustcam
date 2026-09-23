@@ -6,6 +6,7 @@
 #include <QMap>
 #include <QVariantMap>
 #include <functional>
+#include "CoreExport.h"
 
 namespace rustcam {
 
@@ -16,7 +17,7 @@ enum class HttpMethod {
     Delete
 };
 
-class ServerApi : public QObject {
+class RUSTCAM_CORE_API ServerApi : public QObject {
     Q_OBJECT
 public:
     using Callback = std::function<void(bool success, const QJsonObject& response, const QString& error)>;
@@ -27,6 +28,7 @@ public:
     void clearAuthToken();
 
     void get(const QString& endpoint, Callback callback);
+    bool getSync(const QString& endpoint, QJsonObject& response, QString& error);
     void post(const QString& endpoint, const QJsonObject& body, Callback callback);
     void put(const QString& endpoint, const QJsonObject& body, Callback callback);
     void deleteResource(const QString& endpoint, Callback callback);

@@ -49,6 +49,13 @@ void ServerApi::get(const QString& endpoint, Callback callback)
     request(HttpMethod::Get, endpoint, QJsonObject(), callback);
 }
 
+bool ServerApi::getSync(const QString& endpoint, QJsonObject& response, QString& error)
+{
+    QString url = buildUrl(endpoint);
+    bool success = performRequest(HttpMethod::Get, url, QJsonObject(), response, error);
+    return success;
+}
+
 void ServerApi::post(const QString& endpoint, const QJsonObject& body, Callback callback)
 {
     request(HttpMethod::Post, endpoint, body, callback);

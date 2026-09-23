@@ -1,7 +1,7 @@
 ﻿#include "AlarmPlugin.h"
 #include "core/EventBus.h"
 #include "core/ServerApi.h"
-#include "core/Logger.h"
+#include "common/Logger.h"
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -252,5 +252,3 @@ void AlarmPlugin::onAcknowledgeAlarm(const QString& alarmId)
 }
 
 }
-
-#include "AlarmPlugin.moc"

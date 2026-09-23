@@ -90,11 +90,6 @@ void MainWindow::createToolBar()
 
     toolbar->addWidget(new QLabel(" rustcam "));
 
-    QLineEdit* searchBox = new QLineEdit;
-    searchBox->setPlaceholderText(tr("Search device..."));
-    searchBox->setMaximumWidth(200);
-    toolbar->addWidget(searchBox);
-
     toolbar->addSeparator();
 
     QLabel* layoutLabel = new QLabel(tr("Layout:"));

@@ -1,7 +1,7 @@
 ﻿#include "MapPlugin.h"
 #include "core/EventBus.h"
 #include "core/ServerApi.h"
-#include "core/Logger.h"
+#include "common/Logger.h"
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -353,5 +353,3 @@ void MapPlugin::onMarkerAdd(const QString& topic, const QVariantMap& payload)
 }
 
 }
-
-#include "MapPlugin.moc"

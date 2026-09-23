@@ -224,8 +224,9 @@ async fn root_handler() -> &'static str {
     "RustCam-Media API v2.0"
 }
 
-async fn health_handler() -> axum::http::StatusCode {
-    axum::http::StatusCode::OK
+async fn health_handler() -> impl IntoResponse {
+    use crate::api::response::ApiResponse;
+    Json(ApiResponse::success(serde_json::json!({ "status": "ok" })))
 }
 
 use axum::{extract::State, Json, response::IntoResponse};

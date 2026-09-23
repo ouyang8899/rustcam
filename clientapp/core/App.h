@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QString>
 #include <QJsonObject>
+#include "CoreExport.h"
 
 class QApplication;
 class ThemeStyle;
@@ -12,7 +13,7 @@ namespace rustcam {
 class LoginWindow;
 class MainWindow;
 
-class App : public QObject {
+class RUSTCAM_CORE_API App : public QObject {
     Q_OBJECT
 public:
     static App* instance();

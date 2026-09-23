@@ -5,6 +5,7 @@
 #include <QMap>
 #include <QStringList>
 #include <QPluginLoader>
+#include "CoreExport.h"
 
 namespace rustcam {
 
@@ -12,7 +13,7 @@ class IPlugin;
 class EventBus;
 class ConfigManager;
 
-class PluginManager : public QObject {
+class RUSTCAM_CORE_API PluginManager : public QObject {
     Q_OBJECT
 public:
     static PluginManager* instance();

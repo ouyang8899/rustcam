@@ -1,5 +1,4 @@
-set(CORE_SOURCES
-    main.cpp
+set(CORE_LIB_SOURCES
     App.cpp
     MainWindow.cpp
     EventBus.cpp
@@ -12,9 +11,11 @@ set(CORE_SOURCES
     ServerApi.cpp
     LoginWindow.cpp
     ServerConfigDialog.cpp
+    AnimatedBackground.cpp
+    DeviceTree.cpp
 )
 
-set(CORE_HEADERS
+set(CORE_LIB_HEADERS
     App.h
     MainWindow.h
     EventBus.h
@@ -27,33 +28,38 @@ set(CORE_HEADERS
     ServerApi.h
     LoginWindow.h
     ServerConfigDialog.h
+    AnimatedBackground.h
+    DeviceTree.h
+    DeviceTreeNode.h
 )
 
-add_executable(rustcam-client
-    ${CORE_SOURCES}
-    ${CORE_HEADERS}
+add_library(rustcam-core SHARED
+    ${CORE_LIB_SOURCES}
+    ${CORE_LIB_HEADERS}
 )
 
-target_include_directories(rustcam-client PRIVATE
+target_compile_definitions(rustcam-core PRIVATE RUSTCAM_CORE_EXPORTS)
+
+target_include_directories(rustcam-core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/common
     ${CMAKE_SOURCE_DIR}/interfaces
     ${CMAKE_SOURCE_DIR}
 )
 
-target_link_libraries(rustcam-client PRIVATE
+target_link_libraries(rustcam-core PUBLIC
     common
     interfaces
 )
 
 if(Qt5_FOUND)
-    target_link_libraries(rustcam-client PRIVATE
+    target_link_libraries(rustcam-core PUBLIC
         Qt5::Core
         Qt5::Widgets
         Qt5::Network
     )
 else()
-    target_link_libraries(rustcam-client PRIVATE
+    target_link_libraries(rustcam-core PUBLIC
         Qt6::Core
         Qt6::Widgets
         Qt6::Network
@@ -80,17 +86,29 @@ set(SQLITE3_ROOT "${CMAKE_SOURCE_DIR}/3rd_party/SQLITE3")
 set(SQLITE3_INCLUDE_DIR "${SQLITE3_ROOT}/include")
 set(SQLITE3_LIBRARY "${SQLITE3_ROOT}/lib/sqlite3.lib")
 
-target_include_directories(rustcam-client PRIVATE
+target_include_directories(rustcam-core PRIVATE
     ${CURL_INCLUDE_DIR}
     ${OPENSSL_INCLUDE_DIR}
     ${SQLITE3_INCLUDE_DIR}
 )
 
-target_link_libraries(rustcam-client PRIVATE
+target_link_libraries(rustcam-core PRIVATE
     ${CURL_LIBRARY}
     ${OPENSSL_SSL_LIBRARY}
     ${OPENSSL_CRYPTO_LIBRARY}
     ${SQLITE3_LIBRARY}
+)
+
+set_target_properties(rustcam-core PROPERTIES
+    OUTPUT_NAME "rustcam-core"
+)
+
+add_executable(rustcam-client
+    main.cpp
+)
+
+target_link_libraries(rustcam-client PRIVATE
+    rustcam-core
 )
 
 set_target_properties(rustcam-client PROPERTIES
