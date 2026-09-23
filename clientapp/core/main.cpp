@@ -1,10 +1,12 @@
 ﻿#include <QApplication>
 #include <QDir>
 #include <QTextCodec>
+#include <QStyleFactory>
 #include <csignal>
 
 #include "App.h"
 #include "Logger.h"
+#include "ThemeStyle.h"
 
 #if defined(Q_OS_WIN)
     #include <windows.h>
@@ -38,6 +40,7 @@ int main(int argc, char* argv[])
     app.setApplicationName("rustcam-client");
     app.setOrganizationName("rustcam");
     app.setApplicationVersion("1.0.0");
+    app.setStyle(new rustcam::ThemeStyle());
     QString appDir = QCoreApplication::applicationDirPath();
     if (!QDir::setCurrent(appDir)) {
         qWarning() << "Failed to set working directory:" << appDir;

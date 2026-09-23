@@ -4,6 +4,9 @@
 #include <QTextStream>
 #include <QDebug>
 #include <QDateTime>
+#ifdef Q_OS_WIN
+#include <Windows.h>
+#endif
 
 namespace rustcam {
 
@@ -64,13 +67,16 @@ void Logger::log(Level level, const QString& category, const QString& message)
         writeToFile(line);
     }
 
-    if (level >= Error) {
-        qCritical() << qPrintable(line);
-    } else if (level == Warning) {
-        qWarning() << qPrintable(line);
-    } else {
-        qDebug() << qPrintable(line);
+#ifdef Q_OS_WIN
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (h) {
+        QMutexLocker locker(&m_mutex);
+        WriteConsoleA(h, line.toUtf8().constData(), line.length(), nullptr, nullptr);
+        WriteConsoleA(h, "\n", 1, nullptr, nullptr);
     }
+#else
+    fprintf(stderr, "%s\n", qPrintable(line));
+#endif
 
     emit logMessage(level, timestamp, category, message);
 }

@@ -7,6 +7,10 @@
 #include <QPalette>
 #include <QColor>
 #include <QFont>
+#include <QDir>
+#include <QPixmapCache>
+#include <QWidget>
+#include <QtWidgets>
 
 namespace rustcam {
 
@@ -28,12 +32,28 @@ ThemeManager* ThemeManager::instance()
 
 void ThemeManager::initThemePaths()
 {
-    m_themeDir = qApp->applicationDirPath() + "/resources/qss";
+#ifdef _DEBUG
+    m_themeDir = "D:/RustCam-Media/clientapp/resources/qss";
+#else
+    QString basePath = qApp->applicationDirPath();
+    m_themeDir = basePath + "/resources/qss";
+#endif
+
+    LOG_INFO("ThemeManager", QString("Theme dir: %1").arg(m_themeDir));
+
+    QDir themeDir(m_themeDir);
+    if (!themeDir.exists()) {
+        LOG_ERROR("ThemeManager", QString("Theme directory does not exist: %1").arg(m_themeDir));
+    } else {
+        QStringList files = themeDir.entryList(QStringList() << "*.qss");
+        LOG_INFO("ThemeManager", QString("Found QSS files: %1").arg(files.join(", ")));
+    }
 }
 
 QString ThemeManager::themeName(Theme theme) const
 {
     switch (theme) {
+        case Theme::None:         return "None";
         case Theme::MidnightPro:   return "Midnight Pro";
         case Theme::ArcticClean:   return "Arctic Clean";
         case Theme::ObsidianNeon: return "Obsidian Neon";
@@ -44,6 +64,7 @@ QString ThemeManager::themeName(Theme theme) const
 QString ThemeManager::themeFilePath(Theme theme) const
 {
     switch (theme) {
+        case Theme::None:         return QString();
         case Theme::MidnightPro:   return m_themeDir + "/midnight_pro.qss";
         case Theme::ArcticClean:   return m_themeDir + "/arctic_clean.qss";
         case Theme::ObsidianNeon: return m_themeDir + "/obsidian_neon.qss";
@@ -58,9 +79,7 @@ QStringList ThemeManager::availableThemes() const
 
 void ThemeManager::setTheme(Theme theme)
 {
-    if (m_currentTheme == theme) {
-        return;
-    }
+    LOG_INFO("ThemeManager", QString("setTheme called: %1, current: %2").arg(themeName(theme)).arg(themeName(m_currentTheme)));
 
     QString filePath = themeFilePath(theme);
     if (filePath.isEmpty() || !QFile::exists(filePath)) {
@@ -68,8 +87,32 @@ void ThemeManager::setTheme(Theme theme)
         return;
     }
 
-    loadTheme(filePath);
+    QFile file(filePath);
+    if (!file.open(QFile::ReadOnly | QFile::Text)) {
+        LOG_ERROR("ThemeManager", QString("Failed to open theme file: %1").arg(filePath));
+        return;
+    }
+
+    QTextStream stream(&file);
+    QString qss = stream.readAll();
+    file.close();
+
+    LOG_INFO("ThemeManager", QString("QSS loaded, size: %1 bytes, preview: %2")
+        .arg(qss.size()).arg(qss.left(100)));
+
+    QPixmapCache::clear();
+
+    applyStylesheet(qss);
+    LOG_INFO("ThemeManager", QString("Stylesheet applied to qApp, isEmpty: %1")
+        .arg(qApp->styleSheet().isEmpty()));
     m_currentTheme = theme;
+
+    for (QWidget* w : QApplication::topLevelWidgets()) {
+        w->setAttribute(Qt::WA_StyledBackground, true);
+        w->style()->unpolish(w);
+        w->style()->polish(w);
+        w->update();
+    }
 
     LOG_INFO("ThemeManager", QString("Theme changed to: %1").arg(themeName(theme)));
     emit themeChanged(theme);
@@ -92,16 +135,20 @@ void ThemeManager::loadTheme(const QString& qssFilePath)
 
 void ThemeManager::applyStylesheet(const QString& qss)
 {
-    QRegularExpression varRe(R"(@(\w+)\s*:\s*([^;]+);)");
-    QRegularExpressionMatchIterator it = varRe.globalMatch(qss);
+    QRegularExpression defRe(R"(@(\w+)\s*:\s*([^;]+);)");
+
+    QMap<QString, QString> vars;
+    QRegularExpressionMatchIterator defIt = defRe.globalMatch(qss);
+    while (defIt.hasNext()) {
+        QRegularExpressionMatch match = defIt.next();
+        vars[match.captured(1)] = match.captured(2).trimmed();
+    }
 
     QString processedQss = qss;
-    while (it.hasNext()) {
-        QRegularExpressionMatch match = it.next();
-        QString key = match.captured(1);
-        QString value = match.captured(2).trimmed();
-        m_styleValues[key] = value;
-        processedQss.replace("@" + key, value);
+    processedQss.remove(defRe);
+
+    for (auto it = vars.constBegin(); it != vars.constEnd(); ++it) {
+        processedQss.replace("@" + it.key(), it.value());
     }
 
     qApp->setStyleSheet(processedQss);

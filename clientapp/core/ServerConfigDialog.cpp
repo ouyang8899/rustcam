@@ -344,7 +344,7 @@ void ServerConfigDialog::onTestClicked()
     config->setServerPort(m_serverPortSpin->value());
     config->setUseHttps(m_httpsCheck->isChecked());
 
-    ServerApi::instance()->get("/api/v1/auth/login", [this](bool success, const QJsonObject&, const QString& error) {
+    ServerApi::instance()->get("/api/v1/health", [this](bool success, const QJsonObject&, const QString& error) {
         m_testButton->setEnabled(true);
         m_testButton->setText("测试连接");
 

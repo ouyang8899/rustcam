@@ -1,8 +1,8 @@
 #pragma once
 
-#include <QWidget>
 #include <QJsonObject>
 #include <QString>
+#include <StyledWidget.h>
 
 class QLineEdit;
 class QPushButton;
@@ -12,7 +12,9 @@ class QSpinBox;
 
 namespace rustcam {
 
-class LoginWindow : public QWidget {
+class AnimatedBackground;
+
+class LoginWindow : public StyledWidget {
     Q_OBJECT
 public:
     explicit LoginWindow(QWidget* parent = nullptr);
@@ -48,6 +50,7 @@ private:
     QLabel* m_errorLabel;
     QCheckBox* m_rememberCheck;
     QLabel* m_serverConfigLink;
+    AnimatedBackground* m_animationBg;
 
     bool m_loading;
 };

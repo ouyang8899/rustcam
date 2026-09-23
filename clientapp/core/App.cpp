@@ -11,6 +11,14 @@
 #include <QCommandLineParser>
 #include <QDir>
 #include <QDateTime>
+#include <QStyleFactory>
+#include <QTranslator>
+#include <QLocale>
+#include <StyledWidget.h>
+#include <ThemeStyle.h>
+#ifdef Q_OS_WIN
+#include <Windows.h>
+#endif
 
 namespace rustcam {
 
@@ -37,6 +45,12 @@ bool App::initialize()
         return true;
     }
 
+#ifdef Q_OS_WIN
+    AllocConsole();
+    FILE* fp;
+    freopen_s(&fp, "CONOUT$", "w", stdout);
+#endif
+
     setupEnvironment();
     setupLogging();
 
@@ -50,7 +64,16 @@ bool App::initialize()
     }
 
     ConfigManager::instance();
-    ThemeManager::instance();
+
+    QTranslator* translator = new QTranslator(this);
+    if (translator->load("D:/RustCam-Media/clientapp/translations/zh_CN.qm")) {
+        QCoreApplication::installTranslator(translator);
+        LOG_INFO("App", QString("Translation loaded successfully"));
+    } else {
+        LOG_ERROR("App", "Failed to load translation");
+    }
+
+    ThemeManager::instance()->setTheme(ThemeManager::Theme::MidnightPro);
 
     QString pluginDir = QCoreApplication::applicationDirPath() + "/rustcam_plugins";
     PluginManager::instance()->loadPlugins(pluginDir);
@@ -83,6 +106,8 @@ void App::onLoginSuccess(const QJsonObject& userInfo)
 
 void App::showMainWindow()
 {
+    ThemeManager::instance()->setTheme(ThemeManager::instance()->currentTheme() == ThemeManager::Theme::None
+        ? ThemeManager::Theme::MidnightPro : ThemeManager::instance()->currentTheme());
     MainWindow::instance()->registerPlugins();
     MainWindow::instance()->show();
 }

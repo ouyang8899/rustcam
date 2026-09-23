@@ -5,6 +5,7 @@
 #include <QJsonObject>
 
 class QApplication;
+class ThemeStyle;
 
 namespace rustcam {
 

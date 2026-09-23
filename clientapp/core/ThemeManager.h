@@ -15,6 +15,7 @@ public:
     static ThemeManager* instance();
 
     enum class Theme {
+        None,
         MidnightPro,
         ArcticClean,
         ObsidianNeon
@@ -49,7 +50,7 @@ private:
 
     void initThemePaths();
 
-    Theme m_currentTheme = Theme::MidnightPro;
+    Theme m_currentTheme = Theme::None;
     QString m_themeDir;
     QMap<QString, QString> m_styleValues;
 };

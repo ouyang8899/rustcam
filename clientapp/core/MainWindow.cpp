@@ -34,7 +34,6 @@ MainWindow::MainWindow(QWidget* parent)
 
 MainWindow::~MainWindow()
 {
-    saveLayout();
 }
 
 MainWindow* MainWindow::instance()
@@ -199,9 +198,11 @@ void MainWindow::saveLayout()
 {
     ConfigManager* cfg = ConfigManager::instance();
 
-    cfg->setValue("ui/nav", "currentItem", m_navBar->currentItem());
-    cfg->setValue("ui/nav", "panelWidth", m_navBar->panelWidth());
-    cfg->setValue("ui/nav", "panelVisible", m_navBar->isPanelVisible());
+    if (m_navBar) {
+        cfg->setValue("ui/nav", "currentItem", m_navBar->currentItem());
+        cfg->setValue("ui/nav", "panelWidth", m_navBar->panelWidth());
+        cfg->setValue("ui/nav", "panelVisible", m_navBar->isPanelVisible());
+    }
 
     cfg->setValue("ui", "geometry", saveGeometry());
     cfg->setValue("ui", "windowState", saveState());

@@ -3,6 +3,8 @@ add_library(common STATIC
     Utils.cpp
     QtVersionCompat.h
     Types.h
+    StyledWidget.h
+    ThemeStyle.h
 )
 
 target_include_directories(common PUBLIC

@@ -4,6 +4,7 @@
 #include "ServerConfigDialog.h"
 #include "SessionManager.h"
 #include "Logger.h"
+#include "ThemeManager.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -13,10 +14,11 @@
 #include <QPushButton>
 #include <QCheckBox>
 #include <QSpacerItem>
-#include <QPropertyAnimation>
+#include <QTimer>
 #include <QPainter>
 #include <QPainterPath>
 #include <QtMath>
+#include <QCoreApplication>
 #include <QSpinBox>
 #include <cmath>
 
@@ -26,20 +28,25 @@ class AnimatedBackground : public QWidget {
     Q_OBJECT
 public:
     AnimatedBackground(QWidget* parent = nullptr) : QWidget(parent) {
-        setAttribute(Qt::WA_StaticContents);
-        m_animation = new QPropertyAnimation(this, "phase", this);
-        m_animation->setStartValue(0.0);
-        m_animation->setEndValue(1.0);
-        m_animation->setDuration(8000);
-        m_animation->setLoopCount(-1);
-        m_animation->start();
+        m_timer = new QTimer(this);
+        m_timer->setInterval(16);
+        connect(m_timer, &QTimer::timeout, this, &AnimatedBackground::onTick);
+        m_timer->start();
     }
 
-    qreal phase() const { return m_phase; }
-    void setPhase(qreal phase) {
-        m_phase = phase;
-        update();
+    ~AnimatedBackground() { m_timer->stop(); }
+
+    void stopAnimation() { m_timer->stop(); }
+
+private slots:
+    void onTick() {
+        m_phase += 0.003;
+        repaint();
     }
+
+private:
+    QTimer* m_timer;
+    qreal m_phase = 0.0;
 
 protected:
     void paintEvent(QPaintEvent* event) override {
@@ -47,75 +54,104 @@ protected:
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing);
 
-        QLinearGradient gradient(0, 0, width(), height());
-        gradient.setColorAt(0, QColor(30, 30, 30));
-        gradient.setColorAt(0.5, QColor(26, 26, 46));
-        gradient.setColorAt(1, QColor(22, 33, 62));
-        painter.fillRect(rect(), gradient);
+        ThemeManager* tm = ThemeManager::instance();
+        QColor primaryBg = tm->getColor("primary_bg");
+        QColor secondaryBg = tm->getColor("secondary_bg");
+        QColor accent = tm->getColor("accent");
+        QColor accentHover = tm->getColor("accent_hover");
+        QColor textPrimary = tm->getColor("text_primary");
+        QColor textSecondary = tm->getColor("text_secondary");
 
-        painter.setPen(QPen(QColor(0, 120, 212, 15), 1));
-        int gridSize = 60;
-        for (int x = 0; x < width(); x += gridSize) {
+        if (!primaryBg.isValid()) primaryBg = QColor(22, 33, 62);
+        if (!secondaryBg.isValid()) secondaryBg = QColor(30, 30, 46);
+        if (!accent.isValid()) accent = QColor(0, 120, 212);
+        if (!accentHover.isValid()) accentHover = QColor(0, 150, 255);
+
+        QLinearGradient bgGrad(0, 0, 0, height());
+        bgGrad.setColorAt(0, primaryBg.darker(180));
+        bgGrad.setColorAt(1, secondaryBg.darker(150));
+        painter.fillRect(rect(), bgGrad);
+
+        QColor gridColor = accent;
+        gridColor.setAlpha(15);
+        painter.setPen(QPen(gridColor, 1));
+        int gridStep = 40;
+        qreal offset = std::fmod(m_phase * gridStep, gridStep);
+        for (int x = -gridStep + static_cast<int>(offset); x < width() + gridStep; x += gridStep) {
             painter.drawLine(x, 0, x, height());
         }
-        for (int y = 0; y < height(); y += gridSize) {
+        for (int y = -gridStep + static_cast<int>(offset * 0.5); y < height() + gridStep; y += gridStep) {
             painter.drawLine(0, y, width(), y);
         }
 
-        QPainterPath path;
-        int waveHeight = 30;
-        int baseY = height() * 0.6;
-        path.moveTo(0, baseY);
+        QColor accentLight = accent;
+        accentLight.setAlpha(80);
 
-        for (int x = 0; x <= width(); x += 5) {
-            qreal y1 = baseY + qSin((x + m_phase * 200) * 0.02) * waveHeight;
-            qreal y2 = baseY + qSin((x + 50 + m_phase * 200) * 0.025) * waveHeight * 0.6;
-            path.quadTo(x, y1, x + 2, y2);
+        QPainterPath wave1;
+        wave1.moveTo(0, height());
+        for (int x = 0; x <= width(); x += 3) {
+            qreal y = height() * 0.7 + qSin((x * 0.01) + m_phase * 6.28318) * 15;
+            wave1.lineTo(x, y);
+        }
+        wave1.lineTo(width(), height());
+        wave1.closeSubpath();
+
+        QLinearGradient waveGrad1(0, height() * 0.65, 0, height());
+        waveGrad1.setColorAt(0, QColor(accent.red(), accent.green(), accent.blue(), 40));
+        waveGrad1.setColorAt(1, accent.darker(180));
+        painter.fillPath(wave1, waveGrad1);
+
+        QPainterPath wave2;
+        wave2.moveTo(0, height());
+        for (int x = 0; x <= width(); x += 3) {
+            qreal y = height() * 0.75 + qSin((x * 0.008) + m_phase * 4.0 + 1.5) * 20;
+            wave2.lineTo(x, y);
+        }
+        wave2.lineTo(width(), height());
+        wave2.closeSubpath();
+
+        QLinearGradient waveGrad2(0, height() * 0.7, 0, height());
+        waveGrad2.setColorAt(0, accent.darker(250));
+        waveGrad2.setColorAt(1, accent.darker(180));
+        painter.fillPath(wave2, waveGrad2);
+
+        for (int i = 0; i < 12; ++i) {
+            qreal baseX = width() * (0.08 + i * 0.08);
+            qreal baseY = height() * 0.3 + qSin(i * 0.8) * 50;
+            qreal orbitR = 20 + qSin(m_phase * 3.0 + i) * 8;
+            qreal cx = baseX + qCos(m_phase * 2.0 + i * 0.5) * orbitR;
+            qreal cy = baseY + qSin(m_phase * 2.5 + i * 0.7) * orbitR * 0.4;
+
+            QRadialGradient glow(cx, cy, 15);
+            glow.setColorAt(0, QColor(accent.red(), accent.green(), accent.blue(), 50));
+            glow.setColorAt(1, QColor(accent.red(), accent.green(), accent.blue(), 0));
+            painter.fillRect(cx - 15, cy - 15, 30, 30, glow);
+
+            painter.setPen(QPen(accentLight, 1.5));
+            painter.drawEllipse(QPointF(cx, cy), 3, 3);
         }
 
-        path.lineTo(width(), height());
-        path.lineTo(0, height());
-        path.closeSubpath();
+        for (int i = 0; i < 25; ++i) {
+            qreal sx = width() * 0.05 + std::fmod(i * 137.0, width() * 0.9);
+            qreal sy = std::fmod(i * 89.0 + std::fmod(m_phase, 1.0) * 30, height() * 0.65);
+            qreal ex = sx + 30 + std::fmod(i * 17.0, 50.0);
+            qreal ey = sy + std::fmod(i * 23.0, 30.0);
 
-        QLinearGradient waveGradient(0, baseY - waveHeight, 0, baseY + waveHeight);
-        waveGradient.setColorAt(0, QColor(0, 120, 212, 40));
-        waveGradient.setColorAt(1, QColor(0, 120, 212, 5));
-        painter.fillPath(path, waveGradient);
-
-        for (int i = 0; i < 8; ++i) {
-            qreal x = width() * (0.1 + i * 0.12);
-            qreal y = height() * 0.35 + qSin(m_phase * 3.14159 * 2 + i) * 20;
-            painter.setPen(QPen(QColor(0, 120, 212, 60), 2));
-            painter.drawEllipse(QPointF(x, y), 4, 4);
-
-            QPainterPath linePath;
-            linePath.moveTo(x, y + 4);
-            qreal lineLen = 30 + qSin(m_phase * 3.14159 * 2 + i * 0.5) * 10;
-            linePath.lineTo(x, y + lineLen);
-            painter.setPen(QPen(QColor(0, 120, 212, 30), 1));
-            painter.drawPath(linePath);
-        }
-
-        painter.setPen(QPen(QColor(0, 120, 212, 10), 1));
-        for (int i = 0; i < 20; ++i) {
-            qreal x1 = std::fmod((i * 73 + m_phase * 100), (qreal)width());
-            qreal y1 = std::fmod((i * 97 + m_phase * 50), (qreal)height());
-            qreal angle = qDegreesToRadians((qreal)((i * 37) % 360));
-            qreal len = 20 + (i * 7) % 30;
-            painter.drawLine(QPointF(x1, y1),
-                           QPointF(x1 + qCos(angle) * len, y1 + qSin(angle) * len));
+            QLinearGradient lineGrad(sx, sy, ex, ey);
+            lineGrad.setColorAt(0, QColor(accent.red(), accent.green(), accent.blue(), 30));
+            lineGrad.setColorAt(1, QColor(accent.red(), accent.green(), accent.blue(), 0));
+            painter.setPen(QPen(lineGrad, 1));
+            painter.drawLine(QPointF(sx, sy), QPointF(ex, ey));
         }
     }
-
-private:
-    qreal m_phase;
-    QPropertyAnimation* m_animation;
 };
 
 LoginWindow::LoginWindow(QWidget* parent)
-    : QWidget(parent)
+    : StyledWidget(parent)
     , m_loading(false)
+    , m_animationBg(nullptr)
 {
+    setObjectName("LoginWindow");
     setWindowTitle("rustcam - Login");
     setMinimumSize(900, 600);
     resize(1000, 650);
@@ -153,52 +189,34 @@ void LoginWindow::setupUi()
     QWidget* leftPanel = new QWidget(this);
     leftPanel->setMinimumWidth(400);
     leftPanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    leftPanel->setAutoFillBackground(false);
 
     QStackedLayout* leftStack = new QStackedLayout(leftPanel);
     leftStack->setContentsMargins(0, 0, 0, 0);
     leftStack->setStackingMode(QStackedLayout::StackAll);
 
-    AnimatedBackground* bg = new AnimatedBackground(leftPanel);
-    bg->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    leftStack->addWidget(bg);
+    m_animationBg = new AnimatedBackground(leftPanel);
+    m_animationBg->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    leftStack->addWidget(m_animationBg);
+    m_animationBg->lower();
 
     QWidget* textOverlay = new QWidget(leftPanel);
     textOverlay->setAttribute(Qt::WA_TransparentForMouseEvents);
+    textOverlay->setStyleSheet("background: transparent;");
     QVBoxLayout* textLayout = new QVBoxLayout(textOverlay);
     textLayout->setContentsMargins(50, 50, 50, 50);
 
     QLabel* titleLabel = new QLabel(textOverlay);
-    titleLabel->setText("rustcam");
-    titleLabel->setStyleSheet(R"(
-        QLabel {
-            color: #0078D4;
-            font-size: 42px;
-            font-weight: bold;
-            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-            letter-spacing: 4px;
-        }
-    )");
+    titleLabel->setObjectName("loginTitle");
+    titleLabel->setText(tr("rustcam"));
 
     QLabel* subtitleLabel = new QLabel(textOverlay);
-    subtitleLabel->setText("Intelligent Video Surveillance System");
-    subtitleLabel->setStyleSheet(R"(
-        QLabel {
-            color: rgba(255, 255, 255, 0.7);
-            font-size: 14px;
-            font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-            letter-spacing: 1px;
-        }
-    )");
+    subtitleLabel->setObjectName("loginSubtitle");
+    subtitleLabel->setText(tr("Intelligent Video Surveillance System"));
 
     QLabel* versionLabel = new QLabel(textOverlay);
-    versionLabel->setText("v1.0.0");
-    versionLabel->setStyleSheet(R"(
-        QLabel {
-            color: rgba(255, 255, 255, 0.3);
-            font-size: 12px;
-            font-family: 'Segoe UI', sans-serif;
-        }
-    )");
+    versionLabel->setObjectName("loginVersion");
+    versionLabel->setText(tr("v1.0.0"));
 
     textLayout->addWidget(titleLabel);
     textLayout->addWidget(subtitleLabel);
@@ -211,11 +229,7 @@ void LoginWindow::setupUi()
     mainLayout->addWidget(leftPanel, 1);
 
     QWidget* rightPanel = new QWidget(this);
-    rightPanel->setStyleSheet(R"(
-        QWidget {
-            background-color: #1e1e1e;
-        }
-    )");
+    rightPanel->setObjectName("rightPanel");
     QVBoxLayout* rightLayout = new QVBoxLayout(rightPanel);
     rightLayout->setContentsMargins(60, 40, 60, 40);
 
@@ -223,200 +237,65 @@ void LoginWindow::setupUi()
     rightLayout->addSpacerItem(topSpacer);
 
     QLabel* welcomeLabel = new QLabel(rightPanel);
-    welcomeLabel->setText("Welcome");
-    welcomeLabel->setStyleSheet(R"(
-        QLabel {
-            color: #e0e0e0;
-            font-size: 28px;
-            font-weight: bold;
-            font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
-        }
-    )");
+    welcomeLabel->setObjectName("welcomeLabel");
+    welcomeLabel->setText(tr("Welcome"));
     rightLayout->addWidget(welcomeLabel);
 
     QLabel* descLabel = new QLabel(rightPanel);
-    descLabel->setText("Please enter your credentials to login");
-    descLabel->setStyleSheet(R"(
-        QLabel {
-            color: #9e9e9e;
-            font-size: 14px;
-            font-family: 'Microsoft YaHei', sans-serif;
-            margin-bottom: 20px;
-        }
-    )");
+    descLabel->setObjectName("descLabel");
+    descLabel->setText(tr("Please enter your credentials to login"));
     rightLayout->addWidget(descLabel);
 
     QGridLayout* formLayout = new QGridLayout();
     formLayout->setSpacing(12);
 
     QLabel* serverLabel = new QLabel(rightPanel);
-    serverLabel->setText("服务器地址");
-    serverLabel->setStyleSheet(R"(
-        QLabel {
-            color: #9e9e9e;
-            font-size: 12px;
-            font-family: 'Microsoft YaHei', sans-serif;
-        }
-    )");
+    serverLabel->setObjectName("formLabel");
+    serverLabel->setText(tr("Server Address"));
     formLayout->addWidget(serverLabel, 0, 0, 1, 2);
 
     m_serverHostEdit = new QLineEdit(rightPanel);
-    m_serverHostEdit->setPlaceholderText("服务器 IP 或域名");
+    m_serverHostEdit->setObjectName("serverHostEdit");
+    m_serverHostEdit->setPlaceholderText(tr("Server IP or Domain"));
     m_serverHostEdit->setMinimumHeight(40);
     m_serverHostEdit->setText(ServerConfig::instance()->serverHost());
-    m_serverHostEdit->setStyleSheet(R"(
-        QLineEdit {
-            background-color: #2b2b2b;
-            border: 1px solid #3e3e3e;
-            border-radius: 6px;
-            padding: 0 12px;
-            color: #e0e0e0;
-            font-size: 14px;
-            font-family: 'Microsoft YaHei', sans-serif;
-        }
-        QLineEdit:focus {
-            border-color: #0078D4;
-            background-color: #252525;
-        }
-        QLineEdit:disabled {
-            background-color: #1a1a1a;
-            color: #6e6e6e;
-        }
-    )");
     formLayout->addWidget(m_serverHostEdit, 1, 0, 1, 1);
 
     m_serverPortSpin = new QSpinBox(rightPanel);
+    m_serverPortSpin->setObjectName("serverPortSpin");
     m_serverPortSpin->setMinimum(1);
     m_serverPortSpin->setMaximum(65535);
     m_serverPortSpin->setValue(ServerConfig::instance()->serverPort());
     m_serverPortSpin->setMinimumHeight(40);
-    m_serverPortSpin->setStyleSheet(R"(
-        QSpinBox {
-            background-color: #2b2b2b;
-            border: 1px solid #3e3e3e;
-            border-radius: 6px;
-            padding: 0 12px;
-            color: #e0e0e0;
-            font-size: 14px;
-            font-family: 'Microsoft YaHei', sans-serif;
-        }
-        QSpinBox:focus {
-            border-color: #0078D4;
-            background-color: #252525;
-        }
-        QSpinBox::up-button, QSpinBox::down-button {
-            background-color: transparent;
-            border: none;
-            width: 20px;
-        }
-        QSpinBox::up-arrow {
-            image: none;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-bottom: 6px solid #9e9e9e;
-        }
-        QSpinBox::down-arrow {
-            image: none;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-top: 6px solid #9e9e9e;
-        }
-    )");
     formLayout->addWidget(m_serverPortSpin, 1, 1, 1, 1);
 
     m_httpsCheck = new QCheckBox(rightPanel);
-    m_httpsCheck->setText("使用 HTTPS");
+    m_httpsCheck->setObjectName("httpsCheck");
+    m_httpsCheck->setText(tr("Use HTTPS"));
     m_httpsCheck->setChecked(ServerConfig::instance()->useHttps());
-    m_httpsCheck->setStyleSheet(R"(
-        QCheckBox {
-            color: #9e9e9e;
-            font-size: 13px;
-            font-family: 'Microsoft YaHei', sans-serif;
-        }
-        QCheckBox::indicator {
-            width: 18px;
-            height: 18px;
-            border-radius: 4px;
-            border: 1px solid #3e3e3e;
-            background-color: #2b2b2b;
-        }
-        QCheckBox::indicator:checked {
-            background-color: #0078D4;
-            border-color: #0078D4;
-        }
-        QCheckBox:hover {
-            color: #e0e0e0;
-        }
-    )");
     formLayout->addWidget(m_httpsCheck, 2, 0, 1, 2);
 
     QLabel* userLabel = new QLabel(rightPanel);
-    userLabel->setText("用户名");
-    userLabel->setStyleSheet(R"(
-        QLabel {
-            color: #9e9e9e;
-            font-size: 12px;
-            font-family: 'Microsoft YaHei', sans-serif;
-        }
-    )");
+    userLabel->setObjectName("formLabel");
+    userLabel->setText(tr("Username"));
     formLayout->addWidget(userLabel, 3, 0, 1, 2);
 
     m_usernameEdit = new QLineEdit(rightPanel);
-    m_usernameEdit->setPlaceholderText("请输入用户名");
+    m_usernameEdit->setObjectName("usernameEdit");
+    m_usernameEdit->setPlaceholderText(tr("Enter username"));
     m_usernameEdit->setMinimumHeight(40);
-    m_usernameEdit->setStyleSheet(R"(
-        QLineEdit {
-            background-color: #2b2b2b;
-            border: 1px solid #3e3e3e;
-            border-radius: 6px;
-            padding: 0 12px;
-            color: #e0e0e0;
-            font-size: 14px;
-            font-family: 'Microsoft YaHei', sans-serif;
-        }
-        QLineEdit:focus {
-            border-color: #0078D4;
-            background-color: #252525;
-        }
-        QLineEdit::placeholder {
-            color: #6e6e6e;
-        }
-    )");
     formLayout->addWidget(m_usernameEdit, 4, 0, 1, 2);
 
     QLabel* pwdLabel = new QLabel(rightPanel);
-    pwdLabel->setText("密码");
-    pwdLabel->setStyleSheet(R"(
-        QLabel {
-            color: #9e9e9e;
-            font-size: 12px;
-            font-family: 'Microsoft YaHei', sans-serif;
-        }
-    )");
+    pwdLabel->setObjectName("formLabel");
+    pwdLabel->setText(tr("Password"));
     formLayout->addWidget(pwdLabel, 5, 0, 1, 2);
 
     m_passwordEdit = new QLineEdit(rightPanel);
-    m_passwordEdit->setPlaceholderText("请输入密码");
+    m_passwordEdit->setObjectName("passwordEdit");
+    m_passwordEdit->setPlaceholderText(tr("Enter password"));
     m_passwordEdit->setEchoMode(QLineEdit::Password);
     m_passwordEdit->setMinimumHeight(40);
-    m_passwordEdit->setStyleSheet(R"(
-        QLineEdit {
-            background-color: #2b2b2b;
-            border: 1px solid #3e3e3e;
-            border-radius: 6px;
-            padding: 0 12px;
-            color: #e0e0e0;
-            font-size: 14px;
-            font-family: 'Microsoft YaHei', sans-serif;
-        }
-        QLineEdit:focus {
-            border-color: #0078D4;
-            background-color: #252525;
-        }
-        QLineEdit::placeholder {
-            color: #6e6e6e;
-        }
-    )");
     formLayout->addWidget(m_passwordEdit, 6, 0, 1, 2);
 
     rightLayout->addLayout(formLayout);
@@ -425,33 +304,17 @@ void LoginWindow::setupUi()
     optionsLayout->setSpacing(16);
 
     m_rememberCheck = new QCheckBox(rightPanel);
-    m_rememberCheck->setText("记住密码");
+    m_rememberCheck->setObjectName("rememberCheck");
+    m_rememberCheck->setText(tr("Remember Password"));
     m_rememberCheck->setChecked(true);
-    m_rememberCheck->setStyleSheet(R"(
-        QCheckBox {
-            color: #9e9e9e;
-            font-size: 13px;
-            font-family: 'Microsoft YaHei', sans-serif;
-        }
-        QCheckBox::indicator {
-            width: 18px;
-            height: 18px;
-            border-radius: 4px;
-            border: 1px solid #3e3e3e;
-            background-color: #2b2b2b;
-        }
-        QCheckBox::indicator:checked {
-            background-color: #0078D4;
-            border-color: #0078D4;
-        }
-        QCheckBox:hover {
-            color: #e0e0e0;
-        }
-    )");
     optionsLayout->addWidget(m_rememberCheck);
 
     QLabel* forgotLabel = new QLabel(rightPanel);
-    forgotLabel->setText("<a href='#' style='color: #0078D4; text-decoration: none; font-size: 13px; font-family: \"Microsoft YaHei\", sans-serif;'>忘记密码？</a>");
+    forgotLabel->setObjectName("forgotLabel");
+    QColor textSecondary = ThemeManager::instance()->getColor("text_secondary");
+    if (!textSecondary.isValid()) textSecondary = QColor(158, 158, 158);
+    forgotLabel->setText(QString("<a href='#' style='color: %1;'>%2</a>")
+        .arg(textSecondary.name()).arg(tr("Forgot Password?")));
     forgotLabel->setAlignment(Qt::AlignRight);
     forgotLabel->setOpenExternalLinks(false);
     optionsLayout->addWidget(forgotLabel, 1);
@@ -459,46 +322,15 @@ void LoginWindow::setupUi()
     rightLayout->addLayout(optionsLayout);
 
     m_errorLabel = new QLabel(rightPanel);
-    m_errorLabel->setStyleSheet(R"(
-        QLabel {
-            color: #f44336;
-            font-size: 13px;
-            font-family: 'Microsoft YaHei', sans-serif;
-            background-color: rgba(244, 67, 54, 0.1);
-            border: 1px solid rgba(244, 67, 54, 0.3);
-            border-radius: 4px;
-            padding: 8px 12px;
-        }
-    )");
+    m_errorLabel->setObjectName("errorLabel");
     m_errorLabel->setVisible(false);
     rightLayout->addWidget(m_errorLabel);
 
     m_loginButton = new QPushButton(rightPanel);
-    m_loginButton->setText("登 录");
+    m_loginButton->setObjectName("loginButton");
+    m_loginButton->setText(tr("Login"));
     m_loginButton->setMinimumHeight(50);
     m_loginButton->setCursor(Qt::PointingHandCursor);
-    m_loginButton->setStyleSheet(R"(
-        QPushButton {
-            background-color: #0078D4;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            font-size: 16px;
-            font-weight: bold;
-            font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
-            letter-spacing: 8px;
-        }
-        QPushButton:hover {
-            background-color: #1084d8;
-        }
-        QPushButton:pressed {
-            background-color: #005a9e;
-        }
-        QPushButton:disabled {
-            background-color: #3e3e3e;
-            color: #6e6e6e;
-        }
-    )");
     rightLayout->addWidget(m_loginButton);
 
     QSpacerItem* bottomSpacer = new QSpacerItem(20, 12, QSizePolicy::Minimum, QSizePolicy::Fixed);
@@ -508,21 +340,19 @@ void LoginWindow::setupUi()
     footerLayout->setSpacing(8);
 
     m_serverConfigLink = new QLabel(rightPanel);
-    m_serverConfigLink->setText("<a href='#' style='color: #0078D4; text-decoration: none; font-size: 12px; font-family: \"Microsoft YaHei\", sans-serif;'>服务器设置</a>");
+    m_serverConfigLink->setObjectName("serverConfigLink");
+    QColor linkColor = ThemeManager::instance()->getColor("text_secondary");
+    if (!linkColor.isValid()) linkColor = QColor(158, 158, 158);
+    m_serverConfigLink->setText(QString("<a href='#' style='color: %1;'>%2</a>")
+        .arg(linkColor.name()).arg(tr("Server Settings")));
     m_serverConfigLink->setCursor(Qt::PointingHandCursor);
     footerLayout->addWidget(m_serverConfigLink);
 
     footerLayout->addStretch();
 
     QLabel* copyrightLabel = new QLabel(rightPanel);
-    copyrightLabel->setText("(c) 2024 rustcam. All rights reserved.");
-    copyrightLabel->setStyleSheet(R"(
-        QLabel {
-            color: #6e6e6e;
-            font-size: 12px;
-            font-family: 'Segoe UI', sans-serif;
-        }
-    )");
+    copyrightLabel->setObjectName("copyrightLabel");
+    copyrightLabel->setText(tr("(c) 2026 rustcam. All rights reserved."));
     footerLayout->addWidget(copyrightLabel);
 
     rightLayout->addLayout(footerLayout);
@@ -574,15 +404,15 @@ void LoginWindow::onLoginClicked()
 bool LoginWindow::validateInput()
 {
     if (m_serverHostEdit->text().trimmed().isEmpty()) {
-        showError("请输入服务器地址");
+        showError(tr("Please enter server address"));
         return false;
     }
     if (m_usernameEdit->text().trimmed().isEmpty()) {
-        showError("请输入用户名");
+        showError(tr("Please enter username"));
         return false;
     }
     if (m_passwordEdit->text().isEmpty()) {
-        showError("请输入密码");
+        showError(tr("Please enter password"));
         return false;
     }
     return true;
@@ -610,9 +440,9 @@ void LoginWindow::setLoading(bool loading)
     m_httpsCheck->setEnabled(!loading);
 
     if (loading) {
-        m_loginButton->setText("登录中...");
+        m_loginButton->setText(tr("Logging in..."));
     } else {
-        m_loginButton->setText("登 录");
+        m_loginButton->setText(tr("Login"));
     }
 }
 
@@ -639,6 +469,10 @@ void LoginWindow::onAuthSuccess(const QJsonObject& data)
     SessionManager::instance()->setTokens(accessToken, refreshToken);
     SessionManager::instance()->setUserInfo(userInfo);
 
+    if (m_animationBg) {
+        m_animationBg->stopAnimation();
+    }
+
     LOG_INFO("LoginWindow", QString("Login successful for user: %1")
               .arg(userInfo["username"].toString()));
 
@@ -660,7 +494,8 @@ void LoginWindow::onOpenServerConfig()
         m_serverPortSpin->setValue(ServerConfig::instance()->serverPort());
         m_httpsCheck->setChecked(ServerConfig::instance()->useHttps());
     }
-    }
+}
+
 }
 
 #include "LoginWindow.moc"

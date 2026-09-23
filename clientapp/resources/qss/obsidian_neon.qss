@@ -85,13 +85,6 @@ QComboBox::drop-down {
     width: 20px;
 }
 
-QComboBox::down-arrow {
-    image: none;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 6px solid @text_secondary;
-}
-
 QMenuBar {
     background-color: @primary_bg;
     border-bottom: 1px solid @border;
@@ -318,4 +311,199 @@ QToolTip {
     border: 1px solid @accent;
     padding: 4px;
     border-radius: 4px;
+}
+
+/* LoginWindow Styles */
+
+rustcam--LoginWindow#loginTitle {
+    color: @accent;
+    font-size: 42px;
+    font-weight: bold;
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    letter-spacing: 4px;
+}
+
+rustcam--LoginWindow#loginSubtitle {
+    color: rgba(226, 232, 240, 0.7);
+    font-size: 14px;
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    letter-spacing: 1px;
+}
+
+rustcam--LoginWindow#loginVersion {
+    color: rgba(226, 232, 240, 0.3);
+    font-size: 12px;
+    font-family: 'Segoe UI', sans-serif;
+}
+
+rustcam--LoginWindow#rightPanel {
+    background-color: @secondary_bg;
+}
+
+rustcam--LoginWindow#welcomeLabel {
+    color: @text_primary;
+    font-size: 28px;
+    font-weight: bold;
+    font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+}
+
+rustcam--LoginWindow#descLabel {
+    color: @text_secondary;
+    font-size: 14px;
+    font-family: 'Microsoft YaHei', sans-serif;
+    margin-bottom: 20px;
+}
+
+rustcam--LoginWindow#formLabel {
+    color: @text_secondary;
+    font-size: 12px;
+    font-family: 'Microsoft YaHei', sans-serif;
+}
+
+rustcam--LoginWindow#serverHostEdit,
+rustcam--LoginWindow#usernameEdit,
+rustcam--LoginWindow#passwordEdit {
+    background-color: @primary_bg;
+    border: 1px solid @border;
+    border-radius: 6px;
+    padding: 0 12px;
+    color: @text_primary;
+    font-size: 14px;
+    font-family: 'Microsoft YaHei', sans-serif;
+    min-height: 40px;
+}
+
+rustcam--LoginWindow#serverHostEdit:focus,
+rustcam--LoginWindow#usernameEdit:focus,
+rustcam--LoginWindow#passwordEdit:focus {
+    border-color: @accent;
+}
+
+rustcam--LoginWindow#serverHostEdit:disabled,
+rustcam--LoginWindow#usernameEdit:disabled,
+rustcam--LoginWindow#passwordEdit:disabled {
+    background-color: @primary_bg;
+    color: @text_secondary;
+}
+
+rustcam--LoginWindow#serverPortSpin {
+    background-color: @primary_bg;
+    border: 1px solid @border;
+    border-radius: 6px;
+    padding: 0 12px;
+    color: @text_primary;
+    font-size: 14px;
+    font-family: 'Microsoft YaHei', sans-serif;
+    min-height: 40px;
+}
+
+rustcam--LoginWindow#serverPortSpin:focus {
+    border-color: @accent;
+}
+
+rustcam--LoginWindow#serverPortSpin::up-button,
+rustcam--LoginWindow#serverPortSpin::down-button {
+    background-color: transparent;
+    border: none;
+    width: 20px;
+}
+
+rustcam--LoginWindow#serverPortSpin::up-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-bottom: 6px solid @text_secondary;
+}
+
+rustcam--LoginWindow#serverPortSpin::down-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 6px solid @text_secondary;
+}
+
+rustcam--LoginWindow#httpsCheck,
+rustcam--LoginWindow#rememberCheck {
+    color: @text_secondary;
+    font-size: 13px;
+    font-family: 'Microsoft YaHei', sans-serif;
+}
+
+rustcam--LoginWindow#httpsCheck::indicator,
+rustcam--LoginWindow#rememberCheck::indicator {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border: 1px solid @border;
+    background-color: @primary_bg;
+}
+
+rustcam--LoginWindow#httpsCheck::indicator:checked,
+rustcam--LoginWindow#rememberCheck::indicator:checked {
+    background-color: @accent;
+    border-color: @accent;
+}
+
+rustcam--LoginWindow#httpsCheck:hover,
+rustcam--LoginWindow#rememberCheck:hover {
+    color: @text_primary;
+}
+
+rustcam--LoginWindow#errorLabel {
+    color: @error;
+    font-size: 13px;
+    font-family: 'Microsoft YaHei', sans-serif;
+    background-color: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 4px;
+    padding: 8px 12px;
+}
+
+rustcam--LoginWindow#loginButton {
+    background-color: @accent;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 16px;
+    font-weight: bold;
+    font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+    letter-spacing: 8px;
+    min-height: 50px;
+}
+
+rustcam--LoginWindow#loginButton:hover {
+    background-color: @accent_hover;
+}
+
+rustcam--LoginWindow#loginButton:pressed {
+    background-color: @accent_pressed;
+}
+
+rustcam--LoginWindow#loginButton:disabled {
+    background-color: @border;
+    color: @text_secondary;
+}
+
+rustcam--LoginWindow#forgotLabel,
+rustcam--LoginWindow#serverConfigLink {
+    color: @text_secondary;
+    font-size: 13px;
+    font-family: 'Microsoft YaHei', sans-serif;
+}
+
+rustcam--LoginWindow#forgotLabel a,
+rustcam--LoginWindow#serverConfigLink a {
+    color: @text_secondary;
+    text-decoration: none;
+}
+
+rustcam--LoginWindow#forgotLabel a:hover,
+rustcam--LoginWindow#serverConfigLink a:hover {
+    color: @accent;
+}
+
+rustcam--LoginWindow#copyrightLabel {
+    color: @text_secondary;
+    font-size: 12px;
+    font-family: 'Segoe UI', sans-serif;
 }
