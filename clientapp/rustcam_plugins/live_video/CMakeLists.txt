@@ -2,10 +2,14 @@ set(PLUGIN_ID "live_video")
 
 set(PLUGIN_SOURCES
     LiveVideoPlugin.cpp
+    NavigationBar.cpp
+    VideoPlayerContainer.cpp
 )
 
 set(PLUGIN_HEADERS
     LiveVideoPlugin.h
+    NavigationBar.h
+    VideoPlayerContainer.h
 )
 
 add_library(${PLUGIN_ID} SHARED
@@ -19,6 +23,10 @@ target_include_directories(${PLUGIN_ID} PRIVATE
     ${CMAKE_SOURCE_DIR}/core
     ${CMAKE_SOURCE_DIR}/interfaces
     ${CMAKE_SOURCE_DIR}/common
+    ${CMAKE_SOURCE_DIR}/3rd_party/bridge_player/include
+    ${CMAKE_SOURCE_DIR}/3rd_party/boost/include/boost-1_91
+    ${CMAKE_SOURCE_DIR}/3rd_party/ffmpeg-n8.1.3-win64-lgpl-shared-8.1/include
+    ${CMAKE_SOURCE_DIR}/3rd_party/jsoncpp/include
 )
 
 target_link_libraries(${PLUGIN_ID} PRIVATE

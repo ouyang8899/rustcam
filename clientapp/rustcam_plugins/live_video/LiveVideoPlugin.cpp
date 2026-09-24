@@ -92,6 +92,7 @@ bool LiveVideoPlugin::initialize(EventBus* bus, QObject* cfg)
     Q_UNUSED(cfg)
     m_currentLayout = 4;
     m_maxCells = 16;
+    m_tvWall = nullptr;
 
     EventBus::instance()->subscribe("video/stream/request", this, SLOT(onStreamRequested(QString,QVariantMap)));
     EventBus::instance()->subscribe("video/stream/stop", this, SLOT(onStreamStop(QString,QVariantMap)));
@@ -107,64 +108,8 @@ void LiveVideoPlugin::shutdown()
 
 QWidget* LiveVideoPlugin::createWorkspace(QWidget* parent)
 {
-    m_workspace = new QWidget(parent);
-    m_workspace->setObjectName("workspaceArea");
-    m_workspace->setStyleSheet(R"(
-        QWidget#workspaceArea {
-            background-color: #2b2b2b;
-        }
-    )");
-
-    QVBoxLayout* layout = new QVBoxLayout(m_workspace);
-    layout->setContentsMargins(8, 8, 8, 8);
-    layout->setSpacing(8);
-
-    QToolBar* toolbar = new QToolBar(m_workspace);
-    toolbar->setObjectName("VideoToolbar");
-    toolbar->setMovable(false);
-
-    QLabel* layoutLabel = new QLabel(tr("Layout:"));
-    layoutLabel->setObjectName("ToolbarLabel");
-    toolbar->addWidget(layoutLabel);
-
-    QComboBox* layoutCombo = new QComboBox();
-    layoutCombo->setObjectName("LayoutCombo");
-    layoutCombo->addItems({"1", "4", "6", "8", "9", "13", "16"});
-    layoutCombo->setCurrentText("4");
-    QObject::connect(layoutCombo, &QComboBox::currentTextChanged, this, [this](const QString& text) {
-        setLayout(text.toInt());
-    });
-    toolbar->addWidget(layoutCombo);
-
-    toolbar->addSeparator();
-
-    QAction* stopAllAction = new QAction(tr("Stop All"), this);
-    stopAllAction->setObjectName("StopAllAction");
-    QObject::connect(stopAllAction, &QAction::triggered, this, [this]() {
-        for (auto cell : m_cells.values()) {
-            stopStream(cell->cellId());
-        }
-    });
-    toolbar->addAction(stopAllAction);
-
-    layout->addWidget(toolbar);
-
-    QWidget* gridContainer = new QWidget(m_workspace);
-    QGridLayout* gridLayout = new QGridLayout(gridContainer);
-    gridLayout->setContentsMargins(0, 0, 0, 0);
-    gridLayout->setSpacing(8);
-
-    for (int i = 0; i < 16; ++i) {
-        QString cellId = QString("cell-%1").arg(i);
-        VideoCell* cell = new VideoCell(cellId, gridContainer);
-        m_cells[cellId] = cell;
-        cell->hide();
-    }
-
-    updateLayout();
-    layout->addWidget(gridContainer, 1);
-
-    return m_workspace;
+    m_tvWall = new VideoPlayerContainer(parent);
+    return m_tvWall;
 }
 
 void LiveVideoPlugin::updateLayout()

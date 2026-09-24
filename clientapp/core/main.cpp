@@ -4,9 +4,13 @@
 #include <QStyleFactory>
 #include <csignal>
 
+#include <curl/curl.h>
+
 #include "App.h"
 #include "Logger.h"
 #include "ThemeStyle.h"
+#include "bridge_player/include/core/app_logger.h"
+#include "bridge_player/include/core/global_context.h"
 
 #if defined(Q_OS_WIN)
     #include <windows.h>
@@ -53,6 +57,13 @@ int main(int argc, char* argv[])
     app.setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
 #endif
 
+    BridgePlayer::Logger::instance().init("./logs", BridgePlayer::LogLevel::TRACE,
+                                        BridgePlayer::Logger::Mode::ASYNC, true);
+
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+
+    BridgePlayer::GlobalContext::instance().install();
+
     app.installEventFilter(App::instance());
 
     setupSignalHandlers();
@@ -67,6 +78,10 @@ int main(int argc, char* argv[])
     int ret = app.exec();
 
     App::instance()->quit();
+
+    BridgePlayer::GlobalContext::instance().uninstall();
+    curl_global_cleanup();
+    BridgePlayer::Logger::instance().shutdown();
 
     return ret;
 }

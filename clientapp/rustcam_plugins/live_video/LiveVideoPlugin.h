@@ -11,6 +11,7 @@
 #include <QFutureWatcher>
 #include <QTabWidget>
 #include <DeviceTree.h>
+#include "VideoPlayerContainer.h"
 
 namespace rustcam {
 
@@ -90,6 +91,7 @@ private:
     QFutureWatcher<QPair<bool, QJsonObject>>* m_groupTreeWatcher;
     int m_currentLayout;
     int m_maxCells;
+    VideoPlayerContainer* m_tvWall;
 };
 
 }
