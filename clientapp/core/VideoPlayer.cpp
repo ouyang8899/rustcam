@@ -1,6 +1,8 @@
 #include "VideoPlayer.h"
 #include <QDebug>
 #include <QApplication>
+#include <QPainter>
+#include <QSvgRenderer>
 
 namespace rustcam {
 
@@ -13,15 +15,20 @@ VideoPlayer::VideoPlayer(QWidget* parent)
     , m_selected(false)
 {
     setAttribute(Qt::WA_PaintOnScreen, true);
-    setStyleSheet("QWidget { border: none; background-color: #1a1a1a; }");
+    setObjectName("VideoPlayer");
     setAttribute(Qt::WA_StyledBackground);
 
     m_placeholderLabel = new QLabel(this);
     m_placeholderLabel->setAlignment(Qt::AlignCenter);
-    m_placeholderLabel->setText("No Signal");
-    m_placeholderLabel->setStyleSheet(
-        "QLabel { color: #666; font-size: 14px; background-color: #1a1a1a; }"
-    );
+    QSvgRenderer renderer(QString(":/icons/no_signal.svg"));
+    if (renderer.isValid()) {
+        QPixmap pixmap(96, 96);
+        pixmap.fill(Qt::transparent);
+        QPainter painter(&pixmap);
+        renderer.render(&painter);
+        m_placeholderLabel->setPixmap(pixmap);
+    }
+    m_placeholderLabel->setStyleSheet("QLabel { background-color: transparent; }");
     m_placeholderLabel->setGeometry(rect());
 }
 

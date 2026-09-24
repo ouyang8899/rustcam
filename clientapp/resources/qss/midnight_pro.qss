@@ -584,3 +584,16 @@ QToolBar#VideoToolbar QComboBox {
     padding: 4px 8px;
     color: @text_primary;
 }
+
+#VideoPlayer {
+    border: 1px solid @border;
+    background-color: @primary_bg;
+}
+
+#videoArea {
+    background-color: @primary_bg;
+}
+
+#navBar {
+    background-color: @secondary_bg;
+}

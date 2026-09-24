@@ -2,7 +2,6 @@
 
 #include <QObject>
 #include <QMap>
-#include <QMutex>
 #include <atomic>
 #include "CoreExport.h"
 #include "PlayerLayout.h"
@@ -41,6 +40,7 @@ public:
     QWidget* getTarget(quint64 targetId);
     QList<VideoPlayer*> allPlayers() const;
     QString getItemId(VideoPlayer* player) const;
+    QStringList getPlayerIds() const;
 
 signals:
     void layoutChanged(const PlayerLayout& layout);
@@ -57,7 +57,6 @@ private:
     QMap<quint64, QWidget*> m_renderTargets;
     QMap<QString, quint64> m_itemTargetMap;
     QMap<VideoPlayer*, QString> m_playerItemMap;
-    mutable QMutex m_mutex;
     std::atomic<quint64> m_nextTargetId{1};
     PlayerLayout m_currentLayout;
 };

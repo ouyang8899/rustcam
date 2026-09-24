@@ -19,7 +19,7 @@ if(POLICY CMP0143)
     cmake_policy(SET CMP0143 NEW)
 endif()
 
-find_package(Qt5 COMPONENTS Core Widgets Network Concurrent QUIET)
+find_package(Qt5 COMPONENTS Core Widgets Network Concurrent Svg QUIET)
 if(Qt5_FOUND)
     set(QT_VERSION_MAJOR 5)
     set(QT_VERSION_STRING ${Qt5_VERSION})

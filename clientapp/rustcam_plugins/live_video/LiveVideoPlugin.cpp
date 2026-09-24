@@ -115,6 +115,9 @@ void LiveVideoPlugin::onLoggedIn(const QString& topic, EventDataPtr)
 {
     Q_UNUSED(topic)
     LOG_INFO("LiveVideoPlugin", "onLoggedIn, loading all device data");
+    if (m_videoContainer) {
+        m_videoContainer->initialize();
+    }
     loadAllDeviceData();
 }
 

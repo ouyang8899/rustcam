@@ -13,6 +13,7 @@ set(CORE_LIB_SOURCES
     ServerConfigDialog.cpp
     AnimatedBackground.cpp
     DeviceTree.cpp
+    DeviceTreeModel.cpp
     VideoPlayer.cpp
     VideoWidgetManager.cpp
     PlayerLayout.cpp
@@ -33,6 +34,7 @@ set(CORE_LIB_HEADERS
     ServerConfigDialog.h
     AnimatedBackground.h
     DeviceTree.h
+    DeviceTreeModel.h
     DeviceTreeNode.h
     VideoPlayer.h
     VideoWidgetManager.h
@@ -42,6 +44,7 @@ set(CORE_LIB_HEADERS
 add_library(rustcam-core SHARED
     ${CORE_LIB_SOURCES}
     ${CORE_LIB_HEADERS}
+    icons/icons.qrc
 )
 
 target_compile_definitions(rustcam-core PRIVATE RUSTCAM_CORE_EXPORTS)
@@ -63,12 +66,14 @@ if(Qt5_FOUND)
         Qt5::Core
         Qt5::Widgets
         Qt5::Network
+        Qt5::Svg
     )
 else()
     target_link_libraries(rustcam-core PUBLIC
         Qt6::Core
         Qt6::Widgets
         Qt6::Network
+        Qt6::Svg
     )
 endif()
 

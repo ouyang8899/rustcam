@@ -1,13 +1,12 @@
 #pragma once
 
 #include <QWidget>
-#include <QMap>
-#include <QStandardItemModel>
 #include <QTreeView>
 #include <QLineEdit>
-#include <QComboBox>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QHeaderView>
+#include "DeviceTreeModel.h"
 #include "DeviceTreeNode.h"
 #include "CoreExport.h"
 #include "FullRowSelectDelegate.h"
@@ -23,25 +22,24 @@ public:
     void setNodes(const QList<DeviceTreeNode::Ptr>& nodes);
     bool updateNodeState(const QString& nodeKey, const QVariantMap& state);
 
+    DeviceTreeModel* model() const { return m_model; }
+
 signals:
     void itemDoubleClicked(QVariantMap meta);
-    void itemDragged(QVariantMap meta);
+    void itemClicked(QVariantMap meta);
     void nodeStateChanged(const QString& nodeKey, const QVariantMap& state);
     void nodeNotFound(const QString& nodeKey);
 
 private slots:
     void onSearchTextChanged(const QString& text);
+    void onItemDoubleClicked(const QModelIndex& index);
+    void onItemClicked(const QModelIndex& index);
 
 private:
     void setupUi();
-    void buildTree(const QList<DeviceTreeNode::Ptr>& nodes, QStandardItem* parent);
-    QStandardItem* findItemByKey(QStandardItem* parent, const QString& key);
-    void applyNodeState(QStandardItem* item, const QVariantMap& state);
-    bool filterTreeItems(QStandardItem* item, const QString& text, bool& hasMatch);
-    void expandParents(QStandardItem* item);
+    QList<DeviceTreeNodeData*> buildTreeList(const QList<DeviceTreeNode::Ptr>& nodes, DeviceTreeNodeData* parent);
 
-    QMap<QString, QStandardItem*> m_keyToItem;
-    QStandardItemModel* m_model;
+    DeviceTreeModel* m_model;
     QTreeView* m_tree;
     QLineEdit* m_searchEdit;
 };

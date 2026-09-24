@@ -3,6 +3,8 @@
 #include "core/VideoPlayer.h"
 #include <QVBoxLayout>
 #include <QDebug>
+#include <QtConcurrent>
+#include <QFutureWatcher>
 
 namespace rustcam {
 
@@ -17,12 +19,10 @@ VideoPlayerContainer::VideoPlayerContainer(QWidget* parent)
 
     m_videoArea = new QWidget(this);
     m_videoArea->setObjectName("videoArea");
-    m_videoArea->setStyleSheet("background-color: #1a1a1a;");
     m_videoArea->setAcceptDrops(true);
 
     m_navBar = new NavigationBar(this);
     m_navBar->setObjectName("navBar");
-    m_navBar->setStyleSheet("background-color: #2a2a2a;");
 
     layout->addWidget(m_videoArea, 1);
     layout->addWidget(m_navBar, 0);
@@ -43,11 +43,21 @@ void VideoPlayerContainer::initialize()
 
 void VideoPlayerContainer::loadLayouts() {
     qDebug() << "loadLayouts called at" << QDateTime::currentDateTime().toString("hh:mm:ss.zzz");
-    ServerApi::instance()->get("/api/v1/layouts", [this](bool success, const QJsonObject& response, const QString& error) {
-        QMetaObject::invokeMethod(this, [this, success, response, error]() {
-            onLayoutsReceived(success, response, error);
-        }, Qt::QueuedConnection);
+    QFuture<QPair<bool, QJsonObject>> future = QtConcurrent::run([]() {
+        QJsonObject response;
+        QString error;
+        bool success = ServerApi::instance()->getSync("/api/v1/layouts", response, error);
+        Q_UNUSED(error)
+        return QPair<bool, QJsonObject>(success, response);
     });
+
+    QFutureWatcher<QPair<bool, QJsonObject>>* watcher = new QFutureWatcher<QPair<bool, QJsonObject>>(this);
+    connect(watcher, &QFutureWatcher<QPair<bool, QJsonObject>>::finished, [this, watcher]() {
+        QPair<bool, QJsonObject> result = watcher->result();
+        onLayoutsReceived(result.first, result.second, QString());
+        watcher->deleteLater();
+    });
+    watcher->setFuture(future);
 }
 
 void VideoPlayerContainer::onLayoutsReceived(bool success, const QJsonObject& response, const QString& error) {
@@ -86,27 +96,23 @@ void VideoPlayerContainer::onLayoutSelected(int index) {
 }
 
 void VideoPlayerContainer::calculateVideoLayout(const PlayerLayout& layout) {
-    VideoWidgetManager::instance().clearLayout();
-
-    const int margin = 2;
-    const int spacing = 2;
+    const int margin = 4;
+    const int spacing = 4;
 
     int availableW = m_videoArea->width();
     int availableH = m_videoArea->height();
 
-    qDebug() << "calculateVideoLayout: availableW=" << availableW << "availableH=" << availableH
-             << "cols=" << layout.cols << "rows=" << layout.rows
-             << "layoutItems=" << layout.layoutJson.size();
-
     if (availableW <= 0 || availableH <= 0 || layout.cols <= 0 || layout.rows <= 0) {
-        qDebug() << "calculateVideoLayout: early return due to zero size or invalid layout";
         return;
     }
 
     int cw = (availableW - margin * 2 - spacing * (layout.cols - 1)) / layout.cols;
     int ch = (availableH - margin * 2 - spacing * (layout.rows - 1)) / layout.rows;
 
+    QSet<QString> currentItemIds;
     for (const auto& item : layout.layoutJson) {
+        currentItemIds.insert(item.id);
+
         int x = margin + item.col * (cw + spacing);
         int y = margin + item.row * (ch + spacing);
         int w = item.colSpan * cw + (item.colSpan - 1) * spacing;
@@ -124,6 +130,12 @@ void VideoPlayerContainer::calculateVideoLayout(const PlayerLayout& layout) {
         player->setGeometry(x, y, w, h);
         player->setSelected(item.id == m_selectedItemId);
         player->show();
+    }
+
+    for (const QString& itemId : VideoWidgetManager::instance().getPlayerIds()) {
+        if (!currentItemIds.contains(itemId)) {
+            VideoWidgetManager::instance().unregisterPlayer(itemId);
+        }
     }
 }
 
@@ -212,6 +224,13 @@ void VideoPlayerContainer::handleDrop(const QVariantMap& meta) {
             QString targetId = selectTargetItem();
             playStream(targetId, url, meta["name"].toString());
         }
+    }
+}
+
+void VideoPlayerContainer::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    if (!m_currentLayout.layoutJson.isEmpty() && m_videoArea && m_videoArea->width() > 0 && m_videoArea->height() > 0) {
+        calculateVideoLayout(m_currentLayout);
     }
 }
 

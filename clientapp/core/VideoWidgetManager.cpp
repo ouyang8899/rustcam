@@ -19,25 +19,21 @@ VideoWidgetManager& VideoWidgetManager::instance() {
 }
 
 quint64 VideoWidgetManager::allocateTarget(QWidget* widget) {
-    QMutexLocker locker(&m_mutex);
     quint64 id = m_nextTargetId.fetch_add(1);
     m_renderTargets[id] = widget;
     return id;
 }
 
 void VideoWidgetManager::releaseTarget(quint64 targetId) {
-    QMutexLocker locker(&m_mutex);
     m_renderTargets.remove(targetId);
 }
 
 void VideoWidgetManager::registerPlayer(const QString& itemId, VideoPlayer* player) {
-    QMutexLocker locker(&m_mutex);
     m_players[itemId] = player;
     m_playerItemMap[player] = itemId;
 }
 
 void VideoWidgetManager::unregisterPlayer(const QString& itemId) {
-    QMutexLocker locker(&m_mutex);
     if (m_players.contains(itemId)) {
         VideoPlayer* player = m_players.take(itemId);
         m_playerItemMap.remove(player);
@@ -46,8 +42,6 @@ void VideoWidgetManager::unregisterPlayer(const QString& itemId) {
 }
 
 void VideoWidgetManager::play(const QString& itemId, const QString& url) {
-    QMutexLocker locker(&m_mutex);
-
     VideoPlayer* player = m_players.value(itemId);
     if (!player) {
         qWarning() << "VideoWidgetManager::play - no player for itemId:" << itemId;
@@ -58,8 +52,6 @@ void VideoWidgetManager::play(const QString& itemId, const QString& url) {
 }
 
 void VideoWidgetManager::stop(const QString& itemId) {
-    QMutexLocker locker(&m_mutex);
-
     VideoPlayer* player = m_players.value(itemId);
     if (player) {
         player->stop();
@@ -67,8 +59,6 @@ void VideoWidgetManager::stop(const QString& itemId) {
 }
 
 void VideoWidgetManager::stopAll() {
-    QMutexLocker locker(&m_mutex);
-
     for (auto* player : m_players.values()) {
         if (player) {
             player->stop();
@@ -77,8 +67,6 @@ void VideoWidgetManager::stopAll() {
 }
 
 void VideoWidgetManager::switchTarget(const QString& itemId, quint64 targetId) {
-    QMutexLocker locker(&m_mutex);
-
     VideoPlayer* player = m_players.value(itemId);
     if (player) {
         player->switchTarget(targetId);
@@ -86,7 +74,6 @@ void VideoWidgetManager::switchTarget(const QString& itemId, quint64 targetId) {
 }
 
 void VideoWidgetManager::applyLayout(const PlayerLayout& layout, QWidget* parent) {
-    QMutexLocker locker(&m_mutex);
     Q_UNUSED(parent);
     m_currentLayout = layout;
 
@@ -102,10 +89,10 @@ void VideoWidgetManager::applyLayout(const PlayerLayout& layout, QWidget* parent
 }
 
 void VideoWidgetManager::clearLayout() {
-    QMutexLocker locker(&m_mutex);
-
     for (const QString& itemId : m_players.keys()) {
-        unregisterPlayer(itemId);
+        VideoPlayer* player = m_players.take(itemId);
+        m_playerItemMap.remove(player);
+        m_itemTargetMap.remove(itemId);
     }
     m_players.clear();
     m_renderTargets.clear();
@@ -114,23 +101,23 @@ void VideoWidgetManager::clearLayout() {
 }
 
 VideoPlayer* VideoWidgetManager::getPlayer(const QString& itemId) {
-    QMutexLocker locker(&m_mutex);
     return m_players.value(itemId, nullptr);
 }
 
 QWidget* VideoWidgetManager::getTarget(quint64 targetId) {
-    QMutexLocker locker(&m_mutex);
     return m_renderTargets.value(targetId, nullptr);
 }
 
 QList<VideoPlayer*> VideoWidgetManager::allPlayers() const {
-    QMutexLocker locker(&m_mutex);
     return m_players.values();
 }
 
 QString VideoWidgetManager::getItemId(VideoPlayer* player) const {
-    QMutexLocker locker(&m_mutex);
     return m_playerItemMap.value(player, QString());
+}
+
+QStringList VideoWidgetManager::getPlayerIds() const {
+    return m_players.keys();
 }
 
 }
