@@ -10,6 +10,7 @@
 #include <QHBoxLayout>
 #include "DeviceTreeNode.h"
 #include "CoreExport.h"
+#include "FullRowSelectDelegate.h"
 
 namespace rustcam {
 
@@ -19,7 +20,7 @@ public:
     explicit DeviceTree(QWidget* parent = nullptr);
     ~DeviceTree();
 
-    void setNodes(const QList<DeviceTreeNode>& nodes);
+    void setNodes(const QList<DeviceTreeNode::Ptr>& nodes);
     bool updateNodeState(const QString& nodeKey, const QVariantMap& state);
 
 signals:
@@ -33,7 +34,7 @@ private slots:
 
 private:
     void setupUi();
-    void buildTree(const QList<DeviceTreeNode>& nodes, QStandardItem* parent);
+    void buildTree(const QList<DeviceTreeNode::Ptr>& nodes, QStandardItem* parent);
     QStandardItem* findItemByKey(QStandardItem* parent, const QString& key);
     void applyNodeState(QStandardItem* item, const QVariantMap& state);
     bool filterTreeItems(QStandardItem* item, const QString& text, bool& hasMatch);

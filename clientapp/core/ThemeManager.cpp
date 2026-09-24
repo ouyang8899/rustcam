@@ -11,7 +11,7 @@
 #include <QPixmapCache>
 #include <QWidget>
 #include <QtWidgets>
-
+#define TEST_PATH 1
 namespace rustcam {
 
 ThemeManager::ThemeManager(QObject* parent)
@@ -32,7 +32,7 @@ ThemeManager* ThemeManager::instance()
 
 void ThemeManager::initThemePaths()
 {
-#ifdef _DEBUG
+#ifdef TEST_PATH
     m_themeDir = "D:/RustCam-Media/clientapp/resources/qss";
 #else
     QString basePath = qApp->applicationDirPath();
@@ -149,6 +149,14 @@ void ThemeManager::applyStylesheet(const QString& qss)
 
     for (auto it = vars.constBegin(); it != vars.constEnd(); ++it) {
         processedQss.replace("@" + it.key(), it.value());
+    }
+
+    LOG_INFO("ThemeManager", QString("QSS processed length: %1, remaining @ count: %2")
+        .arg(processedQss.length()).arg(processedQss.count('@')));
+    int itemIdx = processedQss.indexOf("QTreeView::item");
+    if (itemIdx >= 0) {
+        LOG_INFO("ThemeManager", QString("QTreeView::item context: %1")
+            .arg(processedQss.mid(itemIdx, 120)));
     }
 
     qApp->setStyleSheet(processedQss);

@@ -6,6 +6,7 @@
 #include "SessionManager.h"
 #include "Logger.h"
 #include "ThemeManager.h"
+#include <QJsonDocument>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -273,7 +274,13 @@ void LoginWindow::onLoginClicked()
 
     ServerApi::instance()->post("/api/v1/auth/login", body, [this](bool success, const QJsonObject& response, const QString& error) {
         if (success) {
-            onAuthSuccess(response);
+            int code = response["code"].toInt();
+            if (code == 200) {
+                onAuthSuccess(response);
+            } else {
+                QString msg = response["message"].toString();
+                onAuthFailed(msg.isEmpty() ? QString("Login failed with code: %1").arg(code) : msg);
+            }
         } else {
             onAuthFailed(error);
         }
@@ -341,9 +348,10 @@ void LoginWindow::onAuthSuccess(const QJsonObject& data)
 {
     setLoading(false);
 
-    QString accessToken = data["access_token"].toString();
-    QString refreshToken = data["refresh_token"].toString();
-    QJsonObject userInfo = data["user"].toObject();
+    QJsonObject innerData = data["data"].toObject();
+    QString accessToken = innerData["access_token"].toString();
+    QString refreshToken = innerData["refresh_token"].toString();
+    QJsonObject userInfo = innerData["user"].toObject();
 
     SessionManager::instance()->setTokens(accessToken, refreshToken);
     SessionManager::instance()->setUserInfo(userInfo);

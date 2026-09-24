@@ -32,7 +32,7 @@ ServerApi* ServerApi::instance()
 void ServerApi::setAuthToken(const QString& token)
 {
     m_authToken = token;
-    LOG_DEBUG("ServerApi", QString("setAuthToken called, token length: %1").arg(token.length()));
+    LOG_INFO("ServerApi", QString("setAuthToken called, token length: %1").arg(token.length()));
 }
 
 void ServerApi::clearAuthToken()
@@ -191,10 +191,11 @@ bool ServerApi::performRequest(HttpMethod method, const QString& url,
         LOG_WARNING("ServerApi", error);
     }
 
-    LOG_INFO("ServerApi", QString("Request completed: %1 %2 -> HTTP %3")
+    LOG_INFO("ServerApi", QString("Request completed: %1 %2 -> HTTP %3, body: %4")
               .arg(static_cast<int>(method))
               .arg(url)
-              .arg(httpCode));
+              .arg(httpCode)
+              .arg(QString::fromUtf8(respData.body).left(500)));
 
     return success;
 }

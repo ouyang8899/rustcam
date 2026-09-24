@@ -33,6 +33,7 @@ void DeviceTree::setupUi()
     mainLayout->addLayout(toolbarLayout);
 
     m_tree = new QTreeView();
+    m_tree->setObjectName("deviceTreeView");
     m_model = new QStandardItemModel(this);
     m_tree->setModel(m_model);
     m_tree->setHeaderHidden(true);
@@ -40,6 +41,7 @@ void DeviceTree::setupUi()
     m_tree->setDragEnabled(true);
     m_tree->setAcceptDrops(false);
     m_tree->setSelectionBehavior(QTreeView::SelectRows);
+    m_tree->setItemDelegate(new FullRowSelectDelegate(m_tree));
 
     connect(m_tree, &QTreeView::doubleClicked, [this](const QModelIndex& index) {
         if (!index.isValid()) return;
@@ -71,10 +73,13 @@ void DeviceTree::setupUi()
     mainLayout->addWidget(m_tree);
 }
 
-void DeviceTree::setNodes(const QList<DeviceTreeNode>& nodes)
+void DeviceTree::setNodes(const QList<DeviceTreeNode::Ptr> & nodes)
 {
     m_keyToItem.clear();
     m_model->clear();
+
+    m_tree->style()->unpolish(m_tree);
+    m_tree->style()->polish(m_tree);
 
     QStandardItem* rootItem = m_model->invisibleRootItem();
     buildTree(nodes, rootItem);
@@ -82,32 +87,32 @@ void DeviceTree::setNodes(const QList<DeviceTreeNode>& nodes)
     m_tree->expandAll();
 }
 
-void DeviceTree::buildTree(const QList<DeviceTreeNode>& nodes, QStandardItem* parent)
+void DeviceTree::buildTree(const QList<DeviceTreeNode::Ptr>& nodes, QStandardItem* parent)
 {
-    for (const DeviceTreeNode& node : nodes) {
-        QStandardItem* item = new QStandardItem(node.name);
+    for (const DeviceTreeNode::Ptr& node : nodes) {
+        QStandardItem* item = new QStandardItem(node->name);
         item->setEditable(false);
 
         QVariantMap meta;
-        meta["key"] = node.key;
-        meta["name"] = node.name;
-        meta["type"] = node.type;
-        meta["parentKey"] = node.parentKey;
-        meta.unite(node.metadata);
+        meta["key"] = node->key;
+        meta["name"] = node->name;
+        meta["type"] = node->type;
+        meta["parentKey"] = node->parentKey;
+        meta.unite(node->metadata);
         item->setData(meta, Qt::UserRole);
 
-        m_keyToItem[node.key] = item;
+        m_keyToItem[node->key] = item;
 
-        if (node.type == "device" || node.type == "channel") {
-            if (node.metadata.contains("icon")) {
-                item->setIcon(QIcon(node.metadata["icon"].toString()));
+        if (node->type == "device" || node->type == "channel") {
+            if (node->metadata.contains("icon")) {
+                item->setIcon(QIcon(node->metadata["icon"].toString()));
             }
         }
 
         parent->appendRow(item);
 
-        if (!node.children.isEmpty()) {
-            buildTree(node.children, item);
+        if (!node->children.isEmpty()) {
+            buildTree(node->children, item);
         }
     }
 }

@@ -1,14 +1,19 @@
 @primary_bg: #f5f5f5;
 @secondary_bg: #ffffff;
+@tertiary_bg: #fafafa;
 @accent: #0078D4;
 @accent_hover: #1084d8;
 @accent_pressed: #005a9e;
 @text_primary: #1e1e1e;
 @text_secondary: #6e6e6e;
+@text_disabled: #999999;
 @border: #e0e0e0;
 @success: #4caf50;
 @warning: #ff9800;
 @error: #f44336;
+@hover_bg: rgba(0, 0, 0, 0.04);
+@selected_bg: rgba(0, 120, 212, 0.15);
+@selected_bg_active: rgba(0, 120, 212, 0.25);
 
 QMainWindow, QDialog {
     background-color: @primary_bg;
@@ -284,20 +289,65 @@ QDockWidget::title {
     border-bottom: 1px solid @border;
 }
 
-QTreeWidget, QListWidget, QTableWidget {
-    background-color: white;
+QTreeView {
+    background-color: @secondary_bg;
     alternate-background-color: rgba(0, 0, 0, 0.02);
     border: 1px solid @border;
     color: @text_primary;
     gridline-color: @border;
+    outline: 0;
+    show-decoration-selected: 1;
 }
 
-QTreeWidget::item:selected, QListWidget::item:selected, QTableWidget::item:selected {
-    background-color: rgba(0, 120, 212, 0.15);
+QTreeView::item {
+    color: @text_primary;
+    padding: 6px 4px;
+    border: 0px solid transparent;
+    background-color: transparent;
 }
 
-QTreeWidget::item:hover, QListWidget::item:hover, QTableWidget::item:hover {
-    background-color: rgba(0, 0, 0, 0.04);
+QTreeView::item:hover {
+    color: @text_primary;
+    background-color: @hover_bg;
+}
+
+QTreeView::item:selected {
+    color: #ffffff;
+    background-color: @selected_bg;
+}
+
+QTreeView::item:selected:active {
+    color: #ffffff;
+    background-color: @selected_bg_active;
+}
+
+QTreeView::item:selected:!active {
+    color: #ffffff;
+    background-color: @selected_bg;
+}
+
+QTreeView::item:disabled {
+    color: @text_disabled;
+}
+
+QTreeView::branch:has-children:!has-siblings:closed,
+QTreeView::branch:closed:has-children:has-siblings {
+    image: none;
+    border-image: none;
+}
+
+QTreeView::branch:open:has-children:!has-siblings,
+QTreeView::branch:open:has-children:has-siblings {
+    image: none;
+    border-image: none;
+}
+
+QTreeView::branch {
+    background-color: transparent;
+}
+
+QTreeView::branch:selected {
+    background-color: @selected_bg;
 }
 
 QHeaderView::section {

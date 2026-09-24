@@ -19,15 +19,23 @@
 
 namespace rustcam {
 
+class RUSTCAM_CORE_API EventResponse {
+public:
+    virtual ~EventResponse() = default;
+};
+
 class RUSTCAM_CORE_API EventData {
 public:
     virtual ~EventData() = default;
     QString topic() const { return m_topic; }
+    void setCallback(std::function<void(EventResponse*)> cb) { m_callback = cb; }
+    void invokeCallback(EventResponse* resp) { if (m_callback) m_callback(resp); }
 
-protected:
-    EventData() = default;
-    explicit EventData(const QString& topic) : m_topic(topic) {}
+    protected:
+    EventData() : m_callback(nullptr) {}
+    explicit EventData(const QString& topic) : m_topic(topic), m_callback(nullptr) {}
     QString m_topic;
+    std::function<void(EventResponse*)> m_callback;
 };
 
 using EventDataPtr = QSharedPointer<EventData>;

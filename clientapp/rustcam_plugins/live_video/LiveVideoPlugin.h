@@ -4,15 +4,17 @@
 #include <QObject>
 #include <QString>
 #include <QMap>
-#include <QVector>
 #include <QWidget>
 #include <QLabel>
 #include <QtConcurrent>
 #include <QFutureWatcher>
 #include <QTabWidget>
+#include <QJsonObject>
+#include <QJsonArray>
 #include <DeviceTree.h>
 #include "VideoPlayerContainer.h"
 #include "core/EventBus.h"
+#include "core/DeviceTreeNode.h"
 
 namespace rustcam {
 
@@ -71,15 +73,19 @@ signals:
 private slots:
     void onStreamRequested(const QString& topic, EventDataPtr);
     void onStreamStop(const QString& topic, EventDataPtr);
-    void onRegionTreeFinished();
-    void onGroupTreeFinished();
+    void onAllDataLoaded();
     void onLoggedIn(const QString& topic, EventDataPtr);
 
 private:
     void updateLayout();
     VideoCell* getCell(const QString& cellId);
-    void loadRegionTree();
-    void loadGroupTree();
+    void loadAllDeviceData();
+    void buildDeviceTrees(const QJsonArray& regionsData, const QJsonArray& groupsData,
+                         const QJsonArray& devicesData, const QJsonArray& channelsData);
+    DeviceTreeNode::Ptr parseRegionNode(const QJsonObject& obj, const QMap<QString, QList<DeviceTreeNode::Ptr>>& regionDeviceMap);
+    DeviceTreeNode::Ptr parseGroupNode(const QJsonObject& obj, const QMap<QString, QList<DeviceTreeNode::Ptr>>& groupDeviceMap);
+    //void addDevicesToTree(QList<DeviceTreeNode>& nodes, const QMap<QString, QList<DeviceTreeNode>>& deviceMap,const std::unordered_map<QString, DeviceTreeNode::Ptr>& allDevcieMap);
+   // void addChannelsToTree(QList<DeviceTreeNode>& nodes, const QMap<QString, QList<DeviceTreeNode>>& channelMap, const std::unordered_map<QString, DeviceTreeNode::Ptr>& allDevcieMap);
     void onDeviceTreeItemClicked(const QVariantMap& meta);
 
     QWidget* m_workspace;
@@ -88,12 +94,16 @@ private:
     DeviceTree* m_regionTree;
     DeviceTree* m_groupTree;
     QMap<QString, VideoCell*> m_cells;
-    QFutureWatcher<QPair<bool, QJsonObject>>* m_regionTreeWatcher;
-    QFutureWatcher<QPair<bool, QJsonObject>>* m_groupTreeWatcher;
     int m_currentLayout;
     int m_maxCells;
     VideoPlayerContainer* m_videoContainer;
     QString m_sessionLoggedInToken;
+
+    QFutureWatcher<QPair<bool, QJsonObject>>* m_allDataWatcher;
+    QFuture<QPair<bool, QJsonObject>> m_regionsFuture;
+    QFuture<QPair<bool, QJsonObject>> m_groupsFuture;
+    QFuture<QPair<bool, QJsonObject>> m_devicesFuture;
+    QFuture<QPair<bool, QJsonObject>> m_channelsFuture;
 };
 
 }

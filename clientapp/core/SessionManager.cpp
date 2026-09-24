@@ -49,7 +49,7 @@ void SessionManager::setTokens(const QString& accessToken, const QString& refres
 {
     m_accessToken = accessToken;
     m_refreshToken = refreshToken;
-    LOG_DEBUG("SessionManager", QString("setTokens called, token length: %1").arg(accessToken.length()));
+    LOG_INFO("SessionManager", QString("setTokens called, token length: %1").arg(accessToken.length()));
     ServerApi::instance()->setAuthToken(accessToken);
     saveToDisk();
     emit sessionChanged(true);
