@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <defs>
+    <linearGradient id="bellGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFD93D"/>
+      <stop offset="100%" stop-color="#FF9F1C"/>
+    </linearGradient>
+    <linearGradient id="alertGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FF6B6B"/>
+      <stop offset="100%" stop-color="#EE5A5A"/>
+    </linearGradient>
+  </defs>
+  <path d="M24 4v4" stroke="url(#bellGrad)" stroke-width="3" stroke-linecap="round"/>
+  <path d="M20 6h8" stroke="url(#bellGrad)" stroke-width="3" stroke-linecap="round"/>
+  <path d="M12 20c0-7 5-10 12-10s12 3 12 10c0 2-1 4-2 6 0 0-1 2-2 3H16c-1-1-2-3-2-3-1-2-2-4-2-6z" fill="url(#bellGrad)"/>
+  <path d="M19 32c0 3 2.5 5 5 5s5-2 5-5" stroke="url(#bellGrad)" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="36" cy="10" r="6" fill="url(#alertGrad)"/>
+  <path d="M36 7v4M36 13v1" stroke="white" stroke-width="2" stroke-linecap="round"/>
+  <path d="M34 26l-2 2M38 26l2 2" stroke="#FFD93D" stroke-width="2" stroke-linecap="round"/>
+</svg>

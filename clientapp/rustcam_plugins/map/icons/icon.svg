@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <defs>
+    <linearGradient id="mapGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4A9EFF"/>
+      <stop offset="100%" stop-color="#2D7DD2"/>
+    </linearGradient>
+    <linearGradient id="pinGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FF6B6B"/>
+      <stop offset="100%" stop-color="#EE5A5A"/>
+    </linearGradient>
+  </defs>
+  <path d="M6 12l10-4 8 4 8-4 10 4v28l-10 4-8-4-8 4-10-4V12z" fill="#1e3a5f" opacity="0.3"/>
+  <path d="M6 12l10-4 8 4 8-4 10 4" stroke="url(#mapGrad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M6 12v28l10 4M16 40V16M24 12v28M32 16v24M34 12l10 4v28" stroke="url(#mapGrad)" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+  <path d="M24 8c-4 0-7 3-7 7 0 5 7 15 7 15s7-10 7-15c0-4-3-7-7-7z" fill="url(#pinGrad)"/>
+  <circle cx="24" cy="15" r="3" fill="white"/>
+</svg>
