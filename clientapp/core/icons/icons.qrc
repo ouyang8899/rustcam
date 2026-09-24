@@ -1,0 +1,9 @@
+<RCC>
+  <qresource prefix="/icons">
+    <file>region.svg</file>
+    <file>group.svg</file>
+    <file>device.svg</file>
+    <file>channel.svg</file>
+    <file>no_signal.svg</file>
+  </qresource>
+</RCC>
