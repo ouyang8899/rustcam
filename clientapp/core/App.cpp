@@ -7,8 +7,11 @@
 #include "LoginWindow.h"
 #include "SessionManager.h"
 #include "Utils.h"
+#include "EventBus.h"
+#include "interfaces/IPlugin.h"
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QTimer>
 #include <QDir>
 #include <QDateTime>
 #include <QStyleFactory>
@@ -102,6 +105,9 @@ void App::onLoginSuccess(const QJsonObject& userInfo)
     m_loginWindow->deleteLater();
     m_loginWindow = nullptr;
     showMainWindow();
+
+    EventBus::instance()->publish(TOPIC_SESSION_LOGGED_IN);
+    LOG_INFO("App", "Published session/loggedIn event");
 }
 
 void App::showMainWindow()

@@ -3,10 +3,11 @@
 #include <QWidget>
 #include <QStyleOption>
 #include <QPainter>
+#include "CommonExport.h"
 
 namespace rustcam {
 
-class StyledWidget : public QWidget {
+class COMMON_API StyledWidget : public QWidget {
     Q_OBJECT
 public:
     explicit StyledWidget(QWidget* parent = nullptr) : QWidget(parent) {

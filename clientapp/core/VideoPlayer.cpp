@@ -10,8 +10,11 @@ VideoPlayer::VideoPlayer(QWidget* parent)
     , m_targetId(0)
     , m_state(State::Idle)
     , m_placeholderLabel(nullptr)
+    , m_selected(false)
 {
     setAttribute(Qt::WA_PaintOnScreen, true);
+    setStyleSheet("QWidget { border: none; background-color: #1a1a1a; }");
+    setAttribute(Qt::WA_StyledBackground);
 
     m_placeholderLabel = new QLabel(this);
     m_placeholderLabel->setAlignment(Qt::AlignCenter);
@@ -104,6 +107,20 @@ void VideoPlayer::updatePlaceholder() {
     if (m_placeholderLabel) {
         bool show = (m_state != State::Playing && m_state != State::Connecting && m_state != State::Connected);
         m_placeholderLabel->setVisible(show);
+    }
+}
+
+void VideoPlayer::mousePressEvent(QMouseEvent* event) {
+    Q_UNUSED(event)
+    emit clicked();
+}
+
+void VideoPlayer::setSelected(bool selected) {
+    if (m_selected != selected) {
+        m_selected = selected;
+        setStyleSheet(selected ?
+            "QWidget { border: 2px solid #4a9eff; background-color: #1a1a1a; }" :
+            "QWidget { border: none; background-color: #1a1a1a; }");
     }
 }
 

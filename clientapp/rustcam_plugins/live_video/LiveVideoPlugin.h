@@ -12,6 +12,7 @@
 #include <QTabWidget>
 #include <DeviceTree.h>
 #include "VideoPlayerContainer.h"
+#include "core/EventBus.h"
 
 namespace rustcam {
 
@@ -41,7 +42,7 @@ private:
     QLabel* m_titleLabel;
 };
 
-class LiveVideoPlugin : public QObject, public IPlugin {
+class LiveVideoPlugin :  public IPlugin {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "com.rustcam.IPlugin/1.0" FILE "plugin.json")
     Q_INTERFACES(rustcam::IPlugin)
@@ -49,7 +50,6 @@ public:
     QString id() const override { return "live_video"; }
     QString displayName() const override { return tr("实时视频"); }
     QString version() const override { return "1.0.0"; }
-    QIcon icon() const override { return QIcon(":/icons/live_video.svg"); }
 
     bool initialize(EventBus* bus, QObject* cfg) override;
     void shutdown() override;
@@ -69,10 +69,11 @@ signals:
     void streamStopped(const QString& cellId);
 
 private slots:
-    void onStreamRequested(const QString& topic, const QVariantMap& payload);
-    void onStreamStop(const QString& topic, const QVariantMap& payload);
+    void onStreamRequested(const QString& topic, EventDataPtr);
+    void onStreamStop(const QString& topic, EventDataPtr);
     void onRegionTreeFinished();
     void onGroupTreeFinished();
+    void onLoggedIn(const QString& topic, EventDataPtr);
 
 private:
     void updateLayout();
@@ -91,7 +92,8 @@ private:
     QFutureWatcher<QPair<bool, QJsonObject>>* m_groupTreeWatcher;
     int m_currentLayout;
     int m_maxCells;
-    VideoPlayerContainer* m_tvWall;
+    VideoPlayerContainer* m_videoContainer;
+    QString m_sessionLoggedInToken;
 };
 
 }

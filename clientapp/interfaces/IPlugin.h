@@ -4,6 +4,7 @@
 #include <QString>
 #include <QIcon>
 #include <QWidget>
+#include <QFileInfo>
 #include "InterfacesExport.h"
 
 namespace rustcam {
@@ -22,7 +23,9 @@ public:
     virtual QString id() const = 0;
     virtual QString displayName() const = 0;
     virtual QString version() const = 0;
-    virtual QIcon icon() const = 0;
+    QIcon icon() const { return m_icon; }
+
+    void setPluginPath(const QString& path);
 
     virtual bool initialize(EventBus* bus, QObject* cfg) = 0;
     virtual void shutdown() = 0;
@@ -31,13 +34,17 @@ public:
     virtual QWidget* createSidePanel(QWidget* parent) = 0;
 
     virtual bool isWorkspace() const { return false; }
-    virtual QString shortcut() const { return {}; }
+    QString shortcut() const { return m_shortcut; }
 
     virtual QStringList dependencies() const { return {}; }
     virtual QString apiVersion() const { return "1.0"; }
 
 protected:
     IPlugin(QObject* parent = nullptr) : QObject(parent) {}
+
+    QString m_pluginPath;
+    mutable QIcon m_icon;
+    QString m_shortcut;
 };
 
 }

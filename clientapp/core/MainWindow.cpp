@@ -59,12 +59,9 @@ void MainWindow::registerPlugins()
         QIcon icon = plugin->icon();
         QString tooltip = plugin->displayName();
 
-        QWidget* sidePanel = plugin->createSidePanel(m_navBar);
-        bool isWorkspace = plugin->isWorkspace();
+        m_navBar->addNavigationItem(id, icon, tooltip);
 
-        m_navBar->addNavigationItem(id, icon, tooltip, sidePanel, isWorkspace);
-
-        if (isWorkspace) {
+        if (plugin->isWorkspace()) {
             QWidget* workspace = plugin->createWorkspace(m_workspace);
             if (workspace) {
                 int index = m_workspaceStack->addWidget(workspace);
@@ -72,8 +69,12 @@ void MainWindow::registerPlugins()
             }
         }
 
-        LOG_INFO("MainWindow", QString("Registered plugin: %1 (workspace: %2)")
-                                    .arg(id).arg(isWorkspace));
+        QString shortcut = plugin->shortcut();
+        if (!shortcut.isEmpty()) {
+            m_pluginShortcuts[shortcut] = id;
+        }
+
+        LOG_INFO("MainWindow", QString("Registered plugin: %1 (shortcut: %2)").arg(id).arg(shortcut));
     }
 
     connect(m_navBar, &LeftNavigationBar::navigationChanged,
@@ -89,27 +90,6 @@ void MainWindow::createToolBar()
     addToolBar(Qt::TopToolBarArea, toolbar);
 
     toolbar->addWidget(new QLabel(" rustcam "));
-
-    toolbar->addSeparator();
-
-    QLabel* layoutLabel = new QLabel(tr("Layout:"));
-    toolbar->addWidget(layoutLabel);
-
-    QComboBox* layoutCombo = new QComboBox;
-    layoutCombo->addItems({"1", "4", "6", "8", "9", "13", "16"});
-    layoutCombo->setCurrentText("4");
-    toolbar->addWidget(layoutCombo);
-
-    toolbar->addSeparator();
-
-    QToolButton* alarmBtn = new QToolButton;
-    alarmBtn->setText(tr("Alarm"));
-    alarmBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    toolbar->addWidget(alarmBtn);
-
-    QToolButton* userBtn = new QToolButton;
-    userBtn->setText(tr("User"));
-    toolbar->addWidget(userBtn);
 }
 
 void MainWindow::createWorkspace()
@@ -177,13 +157,8 @@ void MainWindow::restoreLayout()
 {
     ConfigManager* cfg = ConfigManager::instance();
 
-    QString currentNav = cfg->getValue("ui/nav", "currentItem", "device_tree").toString();
-    int panelWidth = cfg->getValue("ui/nav", "panelWidth", 280).toInt();
-    bool panelVisible = cfg->getValue("ui/nav", "panelVisible", true).toBool();
-
+    QString currentNav = cfg->getValue("ui/nav", "currentItem", "live_video").toString();
     m_navBar->setCurrentItem(currentNav);
-    m_navBar->setPanelWidth(panelWidth);
-    m_navBar->setPanelVisible(panelVisible);
 
     restoreGeometry(cfg->getValue("ui", "geometry").toByteArray());
     restoreState(cfg->getValue("ui", "windowState").toByteArray());
@@ -195,8 +170,6 @@ void MainWindow::saveLayout()
 
     if (m_navBar) {
         cfg->setValue("ui/nav", "currentItem", m_navBar->currentItem());
-        cfg->setValue("ui/nav", "panelWidth", m_navBar->panelWidth());
-        cfg->setValue("ui/nav", "panelVisible", m_navBar->isPanelVisible());
     }
 
     cfg->setValue("ui", "geometry", saveGeometry());
@@ -264,6 +237,22 @@ void MainWindow::closeEvent(QCloseEvent* event)
     event->accept();
 }
 
+QString MainWindow::formatShortcut(Qt::KeyboardModifiers modifiers, int key)
+{
+    QStringList parts;
+    if (modifiers & Qt::ControlModifier) parts << "Ctrl";
+    if (modifiers & Qt::ShiftModifier) parts << "Shift";
+    if (modifiers & Qt::AltModifier) parts << "Alt";
+    if (modifiers & Qt::MetaModifier) parts << "Meta";
+
+    QString keyText = QKeySequence(key).toString();
+    if (!keyText.isEmpty()) {
+        parts << keyText;
+    }
+
+    return parts.join("+");
+}
+
 void MainWindow::keyPressEvent(QKeyEvent* event)
 {
     if (event->key() == Qt::Key_Escape && m_fullscreen) {
@@ -272,34 +261,12 @@ void MainWindow::keyPressEvent(QKeyEvent* event)
         return;
     }
 
-    if (event->modifiers() & Qt::ControlModifier) {
-        switch (event->key()) {
-            case Qt::Key_1:
-            switchToWorkspace("device_tree");
-            break;
-            case Qt::Key_2:
-            switchToWorkspace("map");
-            break;
-            case Qt::Key_3:
-            switchToWorkspace("alarm");
-            break;
-            case Qt::Key_4:
-            switchToWorkspace("drone");
-            break;
-            case Qt::Key_5:
-            switchToWorkspace("playback");
-            break;
-            case Qt::Key_6:
-            switchToWorkspace("dashboard");
-            break;
-            case Qt::Key_B:
-            if (event->modifiers() & Qt::ShiftModifier) {
-                m_workspace->hide();
-            } else {
-                m_navBar->togglePanel();
-            }
-            break;
-        }
+    QString pressedShortcut = formatShortcut(event->modifiers(), event->key());
+    if (m_pluginShortcuts.contains(pressedShortcut)) {
+        QString pluginId = m_pluginShortcuts[pressedShortcut];
+        switchToWorkspace(pluginId);
+        event->accept();
+        return;
     }
 
     QMainWindow::keyPressEvent(event);

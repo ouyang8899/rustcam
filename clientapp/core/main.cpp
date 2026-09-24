@@ -56,8 +56,8 @@ int main(int argc, char* argv[])
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     app.setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
 #endif
-
-    BridgePlayer::Logger::instance().init("./logs", BridgePlayer::LogLevel::TRACE,
+    std::string log_path = "./logs";
+    BridgePlayer::Logger::instance().init(log_path, BridgePlayer::LogLevel::TRACE,
                                         BridgePlayer::Logger::Mode::ASYNC, true);
 
     curl_global_init(CURL_GLOBAL_DEFAULT);

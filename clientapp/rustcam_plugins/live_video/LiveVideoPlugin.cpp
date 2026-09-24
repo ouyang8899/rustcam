@@ -92,10 +92,18 @@ bool LiveVideoPlugin::initialize(EventBus* bus, QObject* cfg)
     Q_UNUSED(cfg)
     m_currentLayout = 4;
     m_maxCells = 16;
-    m_tvWall = nullptr;
+    m_videoContainer = nullptr;
 
-    EventBus::instance()->subscribe("video/stream/request", this, SLOT(onStreamRequested(QString,QVariantMap)));
-    EventBus::instance()->subscribe("video/stream/stop", this, SLOT(onStreamStop(QString,QVariantMap)));
+    EventBus::instance()->subscribe(TOPIC_VIDEO_STREAM_REQUEST, [this](const QString& topic, EventDataPtr data) {
+        onStreamRequested(topic, data);
+    });
+    EventBus::instance()->subscribe(TOPIC_VIDEO_STREAM_STOP, [this](const QString& topic, EventDataPtr data) {
+        onStreamStop(topic, data);
+    });
+    m_sessionLoggedInToken = EventBus::instance()->subscribe(TOPIC_SESSION_LOGGED_IN, [this](const QString& topic, EventDataPtr data) {
+        onLoggedIn(topic, data);
+    });
+    LOG_INFO("LiveVideoPlugin", QString("Subscribed to session/loggedIn"));
 
     LOG_INFO("LiveVideoPlugin", "Initialized");
     return true;
@@ -103,13 +111,63 @@ bool LiveVideoPlugin::initialize(EventBus* bus, QObject* cfg)
 
 void LiveVideoPlugin::shutdown()
 {
-    EventBus::instance()->unsubscribeAll(this);
+    EventBus::instance()->unsubscribeAll();
+}
+
+void LiveVideoPlugin::onLoggedIn(const QString& topic, EventDataPtr)
+{
+    Q_UNUSED(topic)
+    qDebug() << "onLoggedIn invoked!";
+    qDebug() << "m_regionTree:" << m_regionTree << "m_groupTree:" << m_groupTree << "m_videoContainer:" << m_videoContainer;
+
+    if (m_regionTree) {
+        loadRegionTree();
+    }
+    if (m_groupTree) {
+        loadGroupTree();
+    }
+    if (m_videoContainer) {
+        m_videoContainer->initialize();
+    }
 }
 
 QWidget* LiveVideoPlugin::createWorkspace(QWidget* parent)
 {
-    m_tvWall = new VideoPlayerContainer(parent);
-    return m_tvWall;
+    QWidget* mainWidget = new QWidget(parent);
+    mainWidget->setObjectName("LiveVideoWorkspace");
+
+    QHBoxLayout* mainLayout = new QHBoxLayout(mainWidget);
+    mainLayout->setContentsMargins(0, 0, 0, 0);
+    mainLayout->setSpacing(4);
+
+    m_sidePanel = new QWidget(mainWidget);
+    m_sidePanel->setObjectName("sidePanel");
+    m_sidePanel->setMinimumWidth(280);
+    m_sidePanel->setMaximumWidth(400);
+    QVBoxLayout* sideLayout = new QVBoxLayout(m_sidePanel);
+    sideLayout->setContentsMargins(8, 8, 8, 8);
+    sideLayout->setSpacing(4);
+
+    m_tabWidget = new QTabWidget(m_sidePanel);
+
+    m_regionTree = new DeviceTree(m_tabWidget);
+    QObject::connect(m_regionTree, QOverload<QVariantMap>::of(&DeviceTree::itemDoubleClicked),
+                     this, &LiveVideoPlugin::onDeviceTreeItemClicked);
+    m_tabWidget->addTab(m_regionTree, tr("地区"));
+
+    m_groupTree = new DeviceTree(m_tabWidget);
+    QObject::connect(m_groupTree, QOverload<QVariantMap>::of(&DeviceTree::itemDoubleClicked),
+                     this, &LiveVideoPlugin::onDeviceTreeItemClicked);
+    m_tabWidget->addTab(m_groupTree, tr("自定义分组"));
+
+    sideLayout->addWidget(m_tabWidget);
+
+    m_videoContainer = new VideoPlayerContainer(mainWidget);
+
+    mainLayout->addWidget(m_sidePanel, 0);
+    mainLayout->addWidget(m_videoContainer, 1);
+
+    return mainWidget;
 }
 
 void LiveVideoPlugin::updateLayout()
@@ -184,32 +242,14 @@ void LiveVideoPlugin::stopStream(const QString& cellId)
     }
 }
 
-void LiveVideoPlugin::onStreamRequested(const QString& topic, const QVariantMap& payload)
+void LiveVideoPlugin::onStreamRequested(const QString& topic, EventDataPtr)
 {
     Q_UNUSED(topic)
-    QString cellId = payload["cellId"].toString();
-    QString url = payload["url"].toString();
-    QString title = payload["title"].toString();
-
-    if (cellId.isEmpty()) {
-        for (auto cell : m_cells.values()) {
-            if (!cell->isPlaying()) {
-                cellId = cell->cellId();
-                break;
-            }
-        }
-    }
-
-    playStream(cellId, url, title);
 }
 
-void LiveVideoPlugin::onStreamStop(const QString& topic, const QVariantMap& payload)
+void LiveVideoPlugin::onStreamStop(const QString& topic, EventDataPtr)
 {
     Q_UNUSED(topic)
-    QString cellId = payload["cellId"].toString();
-    if (!cellId.isEmpty()) {
-        stopStream(cellId);
-    }
 }
 
 QWidget* LiveVideoPlugin::createSidePanel(QWidget* parent)
@@ -355,7 +395,12 @@ void LiveVideoPlugin::onDeviceTreeItemClicked(const QVariantMap& meta)
         QString key = meta["key"].toString();
         int deviceId = key.toInt();
         if (deviceId > 0) {
-            onChannelClicked(deviceId, 0, meta["name"].toString());
+            if (m_videoContainer) {
+                QString url = QString("rtsp://localhost/live/%1").arg(deviceId);
+                m_videoContainer->playStream(QString(), url, meta["name"].toString());
+            } else {
+                onChannelClicked(deviceId, 0, meta["name"].toString());
+            }
         }
     }
 }

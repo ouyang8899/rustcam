@@ -40,12 +40,28 @@ bool PluginManager::loadPlugins(const QString& pluginDir)
     filters << "*.so";
 #endif
 
-    QStringList pluginFiles = dir.entryList(filters, QDir::Files);
-    LOG_INFO("PluginManager", QString("Found %1 plugin files").arg(pluginFiles.size()));
+    QStringList pluginFiles = dir.entryList(filters, QDir::Files | QDir::AllDirs | QDir::NoDotAndDotDot);
+
+    QStringList allPluginFiles;
+    for (const QString& entry : pluginFiles) {
+        QString fullPath = dir.absoluteFilePath(entry);
+        QFileInfo fi(fullPath);
+        if (fi.isDir()) {
+            QDir subDir(fullPath);
+            QStringList subFiles = subDir.entryList(filters, QDir::Files);
+            for (const QString& subFile : subFiles) {
+                allPluginFiles.append(subDir.absoluteFilePath(subFile));
+            }
+        } else {
+            allPluginFiles.append(fullPath);
+        }
+    }
+
+    LOG_INFO("PluginManager", QString("Found %1 plugin files").arg(allPluginFiles.size()));
 
     int loadedCount = 0;
-    for (const QString& file : pluginFiles) {
-        if (loadPlugin(dir.absoluteFilePath(file))) {
+    for (const QString& file : allPluginFiles) {
+        if (loadPlugin(file)) {
             loadedCount++;
         }
     }
@@ -93,6 +109,8 @@ bool PluginManager::loadPlugin(const QString& filePath)
     m_loaders[id] = new QPluginLoader(filePath, this);
     m_plugins[id] = plugin;
     m_enabledPlugins[id] = true;
+
+    plugin->setPluginPath(filePath);
 
     LOG_INFO("PluginManager", QString("Plugin loaded: %1 v%2").arg(id, plugin->version()));
     emit pluginLoaded(id, plugin->version());

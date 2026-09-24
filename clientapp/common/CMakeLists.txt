@@ -1,11 +1,14 @@
-add_library(common STATIC
+add_library(common SHARED
     Logger.cpp
     Utils.cpp
     QtVersionCompat.h
     Types.h
     StyledWidget.h
     ThemeStyle.h
+    CommonExport.h
 )
+
+target_compile_definitions(common PRIVATE COMMON_EXPORTS)
 
 target_include_directories(common PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -18,6 +21,10 @@ else()
 endif()
 
 set_target_properties(common PROPERTIES
+    OUTPUT_NAME "rustcam-common"
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
     POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden
 )

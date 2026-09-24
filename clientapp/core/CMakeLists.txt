@@ -149,5 +149,11 @@ add_custom_command(TARGET rustcam-client POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy
         ${BRIDGE_PLAYER_BIN_DIR}/bridge_player.dll
         $<TARGET_FILE_DIR:rustcam-client>
+    COMMAND ${CMAKE_COMMAND} -E copy
+        ${CMAKE_SOURCE_DIR}/3rd_party/jsoncpp/bin/jsoncpp.dll
+        $<TARGET_FILE_DIR:rustcam-client>
+    COMMAND ${CMAKE_COMMAND} -E copy
+        ${BRIDGE_PLAYER_BIN_DIR}/SDL3.dll
+        $<TARGET_FILE_DIR:rustcam-client>
     COMMENT "Copying ffmpeg and bridge_player DLLs to output directory"
 )

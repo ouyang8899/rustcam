@@ -26,7 +26,6 @@ public:
     QString id() const override { return "map"; }
     QString displayName() const override { return tr("电子地图"); }
     QString version() const override { return "1.0.0"; }
-    QIcon icon() const override { return QIcon(":/icons/map.svg"); }
 
     bool initialize(EventBus* bus, QObject* cfg) override;
     void shutdown() override;

@@ -15,7 +15,6 @@ public:
     QString id() const override { return "playback"; }
     QString displayName() const override { return tr("录像回放"); }
     QString version() const override { return "1.0.0"; }
-    QIcon icon() const override { return QIcon(":/icons/playback.svg"); }
 
     bool initialize(EventBus* bus, QObject* cfg) override;
     void shutdown() override;

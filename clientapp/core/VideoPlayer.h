@@ -37,7 +37,9 @@ public:
     quint64 playerId() const { return m_playerId; }
     quint64 targetId() const { return m_targetId; }
 
-signals:
+    void setSelected(bool selected);
+
+    signals:
     void started();
     void stopped();
     void error(const QString& msg);
@@ -46,8 +48,10 @@ signals:
     void connected();
     void playing();
     void disconnected();
+    void clicked();
 
 protected:
+    void mousePressEvent(QMouseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
 
 private:
@@ -62,6 +66,7 @@ private:
     BridgePlayer::PlayerBase::Ptr m_player;
     QMutex m_mutex;
     QLabel* m_placeholderLabel;
+    bool m_selected = false;
 };
 
 }

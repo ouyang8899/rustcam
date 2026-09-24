@@ -8,6 +8,6 @@
   "dependencies": [],
   "workspace": true,
   "sidePanel": true,
-  "shortcut": "Ctrl+4",
+  "shortcut": "Ctrl+2",
   "icon": ":/icons/map.svg"
 }

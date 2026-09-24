@@ -16,7 +16,6 @@ public:
     QString id() const override { return "alarm"; }
     QString displayName() const override { return tr("告警中心"); }
     QString version() const override { return "1.0.0"; }
-    QIcon icon() const override { return QIcon(":/icons/alarm.svg"); }
 
     bool initialize(EventBus* bus, QObject* cfg) override;
     void shutdown() override;

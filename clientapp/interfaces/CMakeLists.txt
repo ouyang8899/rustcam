@@ -1,5 +1,6 @@
 add_library(interfaces SHARED
     IPlugin.h
+    IPlugin.cpp
     InterfacesExport.h
 )
 
@@ -16,5 +17,8 @@ else()
 endif()
 
 set_target_properties(interfaces PROPERTIES
+    OUTPUT_NAME "rustcam-interfaces"
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
     POSITION_INDEPENDENT_CODE ON
 )

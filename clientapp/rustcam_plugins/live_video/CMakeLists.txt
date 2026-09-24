@@ -18,6 +18,8 @@ add_library(${PLUGIN_ID} SHARED
     plugin.json
 )
 
+add_dependencies(${PLUGIN_ID} interfaces rustcam-core)
+
 target_include_directories(${PLUGIN_ID} PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/core
@@ -29,7 +31,7 @@ target_include_directories(${PLUGIN_ID} PRIVATE
     ${CMAKE_SOURCE_DIR}/3rd_party/jsoncpp/include
 )
 
-target_link_libraries(${PLUGIN_ID} PRIVATE
+target_link_libraries(${PLUGIN_ID} PUBLIC
     interfaces
     common
     rustcam-core
@@ -39,18 +41,20 @@ target_link_libraries(${PLUGIN_ID} PRIVATE
 )
 
 set_target_properties(${PLUGIN_ID} PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/rustcam_plugins
-    OUTPUT_NAME "rustcam_${PLUGIN_ID}"
+    OUTPUT_NAME "rustcam-${PLUGIN_ID}"
     AUTOMOC ON
 )
 
 add_custom_command(TARGET ${PLUGIN_ID} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        $<TARGET_FILE_DIR:${PLUGIN_ID}>/rustcam_plugins/${PLUGIN_ID}/icons/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
         $<TARGET_FILE:${PLUGIN_ID}>
-        ${CMAKE_BINARY_DIR}/bin/rustcam_plugins/
-)
-add_custom_command(TARGET ${PLUGIN_ID} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy
-        $<TARGET_FILE:${PLUGIN_ID}>
-        ${CMAKE_BINARY_DIR}/bin/Debug/rustcam_plugins/
+        $<TARGET_FILE_DIR:${PLUGIN_ID}>/rustcam_plugins/${PLUGIN_ID}/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/plugin.json
+        $<TARGET_FILE_DIR:${PLUGIN_ID}>/rustcam_plugins/${PLUGIN_ID}/
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/icons/icon.svg
+        $<TARGET_FILE_DIR:${PLUGIN_ID}>/rustcam_plugins/${PLUGIN_ID}/icons/
 )

@@ -1,5 +1,6 @@
 #include "SessionManager.h"
 #include "Logger.h"
+#include "ServerApi.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -48,6 +49,8 @@ void SessionManager::setTokens(const QString& accessToken, const QString& refres
 {
     m_accessToken = accessToken;
     m_refreshToken = refreshToken;
+    LOG_DEBUG("SessionManager", QString("setTokens called, token length: %1").arg(accessToken.length()));
+    ServerApi::instance()->setAuthToken(accessToken);
     saveToDisk();
     emit sessionChanged(true);
     LOG_INFO("SessionManager", "Session tokens updated");
@@ -64,6 +67,7 @@ void SessionManager::clearSession()
     m_accessToken.clear();
     m_refreshToken.clear();
     m_userInfo = QJsonObject();
+    ServerApi::instance()->clearAuthToken();
     saveToDisk();
     emit sessionChanged(false);
     LOG_INFO("SessionManager", "Session cleared");

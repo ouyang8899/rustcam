@@ -4,10 +4,11 @@
 #include <QVariant>
 #include <QRect>
 #include <QSize>
+#include "CommonExport.h"
 
 namespace rustcam {
 
-class Utils {
+class COMMON_API Utils {
 public:
     static QString formatBytes(qint64 bytes);
     static QString formatDuration(int seconds);

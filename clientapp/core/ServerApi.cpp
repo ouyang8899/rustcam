@@ -32,6 +32,7 @@ ServerApi* ServerApi::instance()
 void ServerApi::setAuthToken(const QString& token)
 {
     m_authToken = token;
+    LOG_DEBUG("ServerApi", QString("setAuthToken called, token length: %1").arg(token.length()));
 }
 
 void ServerApi::clearAuthToken()
@@ -110,6 +111,9 @@ bool ServerApi::performRequest(HttpMethod method, const QString& url,
     if (!m_authToken.isEmpty()) {
         std::string authHeader = "Authorization: Bearer " + m_authToken.toStdString();
         headers = curl_slist_append(headers, authHeader.c_str());
+        LOG_DEBUG("ServerApi", QString("Using auth token, length: %1").arg(m_authToken.length()));
+    } else {
+        LOG_DEBUG("ServerApi", "No auth token available");
     }
 
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);

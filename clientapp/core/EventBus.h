@@ -1,35 +1,55 @@
 ﻿#pragma once
 
 #include <QObject>
-#include <QVariantMap>
 #include <QString>
 #include <QList>
+#include <QSharedPointer>
 #include <functional>
 #include "CoreExport.h"
 
+#define TOPIC_SESSION_LOGGED_IN "session/loggedIn"
+#define TOPIC_VIDEO_STREAM_REQUEST "video/stream/request"
+#define TOPIC_VIDEO_STREAM_STOP "video/stream/stop"
+#define TOPIC_DEVICE_ONLINE "device/online"
+#define TOPIC_DEVICE_OFFLINE "device/offline"
+#define TOPIC_ALARM_TRIGGERED "alarm/triggered"
+#define TOPIC_ALARM_ACKNOWLEDGED "alarm/acknowledged"
+#define TOPIC_MAP_FOCUS "map/focus"
+#define TOPIC_MAP_MARKER_ADD "map/marker/add"
+
 namespace rustcam {
+
+class RUSTCAM_CORE_API EventData {
+public:
+    virtual ~EventData() = default;
+    QString topic() const { return m_topic; }
+
+protected:
+    EventData() = default;
+    explicit EventData(const QString& topic) : m_topic(topic) {}
+    QString m_topic;
+};
+
+using EventDataPtr = QSharedPointer<EventData>;
 
 class RUSTCAM_CORE_API EventBus : public QObject {
     Q_OBJECT
 public:
-    using Callback = std::function<void(const QVariantMap& result)>;
+    using Handler = std::function<void(const QString& topic, EventDataPtr data)>;
 
     static EventBus* instance();
 
-    void publish(const QString& topic, const QVariantMap& payload = {});
+    void publish(const QString& topic, EventDataPtr data = nullptr);
 
-    void subscribe(const QString& topic, QObject* receiver, const char* slot);
-    void unsubscribe(const QString& topic, QObject* receiver);
-    void unsubscribeAll(QObject* receiver);
+    QString subscribe(const QString& topic, Handler handler);
+    void unsubscribe(const QString& token);
+    void unsubscribeAll();
 
-    void subscribeHandler(const QString& topic, QObject* receiver, const char* slot);
-    void dispatch(const QString& topic, const QVariantMap& payload, Callback callback);
-
-    bool isSubscribed(const QString& topic, QObject* receiver) const;
-    QStringList subscribedTopics(QObject* receiver) const;
+    bool isSubscribed(const QString& topic) const;
+    QStringList subscribedTopics() const;
 
 signals:
-    void eventPublished(const QString& topic, const QVariantMap& payload);
+    void eventPublished(const QString& topic, EventDataPtr data);
 
 private:
     explicit EventBus(QObject* parent = nullptr);
@@ -37,19 +57,13 @@ private:
     Q_DISABLE_COPY(EventBus)
 
     struct Subscription {
+        QString token;
         QString topic;
-        QObject* receiver;
-        const char* slot;
-    };
-
-    struct HandlerSubscription {
-        QString topic;
-        QObject* receiver;
-        const char* slot;
+        Handler handler;
     };
 
     QList<Subscription> m_subscriptions;
-    QList<HandlerSubscription> m_handlerSubscriptions;
+    int m_tokenCounter = 0;
 };
 
 }

@@ -7,10 +7,11 @@
 #include <QMutex>
 #include <QTextStream>
 #include <QString>
+#include "CommonExport.h"
 
 namespace rustcam {
 
-class Logger : public QObject {
+class COMMON_API Logger : public QObject {
     Q_OBJECT
 public:
     enum Level {

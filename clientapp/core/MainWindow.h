@@ -57,11 +57,13 @@ private:
     void createToolBar();
     void createStatusBar();
     void createWorkspace();
+    QString formatShortcut(Qt::KeyboardModifiers modifiers, int key);
 
     LeftNavigationBar* m_navBar = nullptr;
     QWidget* m_workspace = nullptr;
     QStackedWidget* m_workspaceStack = nullptr;
     QMap<QString, int> m_workspaceIndices;
+    QMap<QString, QString> m_pluginShortcuts;
 
     QLabel* m_connectionStatusLabel = nullptr;
     QLabel* m_fpsLabel = nullptr;
