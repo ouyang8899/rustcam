@@ -50,6 +50,7 @@ namespace BridgePlayer {
            const std::string& type, const std::string& requestId, const std::string& cRequestId,const
            Json::Value& data);
         void set_command_handler(const std::shared_ptr<CommandHandler>& handler);
+        bool build_render_target(const RenderTargetData& rtd);
     private:
         std::unordered_map<uint64_t, PlayerBase::Ptr> players_;
         mutable std::shared_mutex mutex_;

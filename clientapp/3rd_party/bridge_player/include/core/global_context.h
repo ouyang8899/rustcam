@@ -10,8 +10,8 @@ namespace BridgePlayer{
     public:
         static GlobalContext& instance();
     public:
-        void install(const std::vector<RenderTargetData>& render_target_vec);
-        void add_render_target(const std::vector<RenderTargetData>& render_target_vec, int max_queue_size);
+        void install();
+        void build_render_target(const std::vector<RenderTargetData>& render_target_vec, int max_queue_size);
         void uninstall();
         void set_rtsp_transport_type(const std::string& transport);
         PlayerConfig::Ptr get_player_config();

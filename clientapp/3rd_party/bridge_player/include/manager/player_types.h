@@ -68,7 +68,6 @@ typedef struct PlayerData
 } PlayerData;
 typedef   struct RenderTargetData {
         NativeWindowHandle handle{ nullptr };
-        RendererType renderer_type{ RendererType::D3D12};
         uint64_t target_id;
         int width{ 800 };
         int height{ 600 };

@@ -85,7 +85,12 @@ namespace BridgePlayer{
         void set_gamma( float value);
         void restore_gamma();
         void restore_image_params();
-
+        uint64_t get_self_render_target() {
+            return this->self_render_target_id_;
+        }
+        uint64_t get_current_render_target() {
+            return this->render_target_id_;
+        }
     public:
         virtual bool start(const std::string& url);
         virtual void in_context(std::function<void()> task) = 0;
@@ -105,7 +110,7 @@ namespace BridgePlayer{
         virtual int get_output_height() const { return target_height_; }
         virtual void update_player_data(const PlayerData& data);
         //for real render to native window
-        virtual void render_to_window(NativeWindowHandle host);
+        virtual void render_to_target(uint64_t target_id);
         // 设置回调
         void set_resize_callback(ResizeCallback cb) { resize_callback_ = std::move(cb); }
         //for offscreen render
@@ -157,6 +162,7 @@ namespace BridgePlayer{
         RenderParamValue video_contrast_;
         RenderParamValue video_saturation_;
         uint64_t render_target_id_{ 0 };
+        uint64_t self_render_target_id_{ 0 };
         uint64_t render_serial_{ 0 };
     };
 }

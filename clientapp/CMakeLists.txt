@@ -61,6 +61,23 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
+set(THIRD_PARTY_DIR ${CMAKE_SOURCE_DIR}/3rd_party)
+
+set(FFMPEG_DIR ${THIRD_PARTY_DIR}/ffmpeg-n8.1.3-win64-lgpl-shared-8.1)
+set(BRIDGE_PLAYER_DIR ${THIRD_PARTY_DIR}/bridge_player)
+
+set(FFMPEG_INCLUDE_DIR ${FFMPEG_DIR}/include)
+set(FFMPEG_LIB_DIR ${FFMPEG_DIR}/lib)
+set(BRIDGE_PLAYER_INCLUDE_DIR ${BRIDGE_PLAYER_DIR}/include)
+set(BRIDGE_PLAYER_LIB_DIR ${BRIDGE_PLAYER_DIR}/lib)
+set(BRIDGE_PLAYER_BIN_DIR ${BRIDGE_PLAYER_DIR}/bin)
+
+add_library(bridge_player SHARED IMPORTED)
+set_target_properties(bridge_player PROPERTIES
+    IMPORTED_LOCATION ${BRIDGE_PLAYER_BIN_DIR}/bridge_player.dll
+    IMPORTED_IMPLIB ${BRIDGE_PLAYER_LIB_DIR}/bridge_player.lib
+)
+
 add_subdirectory(common)
 add_subdirectory(core)
 add_subdirectory(interfaces)
@@ -80,4 +97,6 @@ message(STATUS "rustcam-client v${PROJECT_VERSION}")
 message(STATUS "Qt Version: ${QT_VERSION_STRING} (Major: ${QT_VERSION_MAJOR})")
 message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Install Prefix: ${CMAKE_INSTALL_PREFIX}")
+message(STATUS "FFmpeg: ${FFMPEG_DIR}")
+message(STATUS "BridgePlayer: ${BRIDGE_PLAYER_DIR}")
 message(STATUS "=================================================")
