@@ -1,4 +1,5 @@
 #include "LeftNavigationBar.h"
+#include "common/Logger.h"
 #include <QVBoxLayout>
 #include <QToolButton>
 #include <QLabel>
@@ -89,25 +90,21 @@ void LeftNavigationBar::removeNavigationItem(const QString& id)
 
 void LeftNavigationBar::setCurrentItem(const QString& id)
 {
-    if (m_currentId == id) {
+    LOG_INFO("LeftNavigationBar", QString("setCurrentItem called: id=%1, m_currentId=%2").arg(id).arg(m_currentId));
+    if (!id.isEmpty() && m_currentId == id) {
+        LOG_INFO("LeftNavigationBar", "setCurrentItem early return - same id");
         return;
     }
 
-    if (m_currentId.isEmpty() || !m_iconButtons.contains(m_currentId)) {
-        if (!m_iconButtons.isEmpty()) {
-            QString firstId = m_iconButtons.firstKey();
-            m_iconButtons[firstId]->setChecked(true);
-        }
-    } else {
-        if (m_iconButtons.contains(id)) {
-            for (auto it = m_iconButtons.begin(); it != m_iconButtons.end(); ++it) {
-                it.value()->setChecked(it.key() == id);
-            }
-        }
+    for (auto it = m_iconButtons.begin(); it != m_iconButtons.end(); ++it) {
+        it.value()->setChecked(it.key() == id);
     }
 
     m_currentId = id;
-    emit navigationChanged(id);
+    if (!id.isEmpty()) {
+        LOG_INFO("LeftNavigationBar", QString("setCurrentItem emitting: %1").arg(id));
+        emit navigationChanged(id);
+    }
 }
 
 void LeftNavigationBar::onIconClicked()
@@ -145,7 +142,7 @@ void LeftNavigationBar::setBadge(const QString& id, int count)
     } else {
         badge->setVisible(true);
         if (count > 99) {
-            badge->setText("99+");
+            badge->setText(tr("99+"));
         } else {
             badge->setText(QString::number(count));
         }

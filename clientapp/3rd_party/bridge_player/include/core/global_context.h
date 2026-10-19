@@ -5,7 +5,10 @@
 #include<vector>
 #include"config/bridge_config.h"
 namespace BridgePlayer{
-    BRIDGE_EXPORT  void  test_render();
+    //BRIDGE_EXPORT  void  test_render();
+    BRIDGE_EXPORT const char* oem_name();
+    BRIDGE_EXPORT const char* lib_version();
+    BRIDGE_EXPORT const char* lib_uuid();
     class BRIDGE_EXPORT GlobalContext {
     public:
         static GlobalContext& instance();

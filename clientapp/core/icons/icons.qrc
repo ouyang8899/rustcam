@@ -1,9 +1,41 @@
 <RCC>
   <qresource prefix="/icons">
+    <file>check.svg</file>
     <file>region.svg</file>
     <file>group.svg</file>
     <file>device.svg</file>
+    <file>device_online.svg</file>
+    <file>device_offline.svg</file>
     <file>channel.svg</file>
+    <file>channel_online.svg</file>
+    <file>channel_offline.svg</file>
     <file>no_signal.svg</file>
+    <file>video_placeholder.svg</file>
+    <file>ic_toolbar_stop.svg</file>
+    <file>ic_toolbar_rotate.svg</file>
+    <file>ic_toolbar_mirror_h.svg</file>
+    <file>ic_toolbar_mirror_v.svg</file>
+    <file>ic_toolbar_screenshot.svg</file>
+    <file>ic_toolbar_zoom.svg</file>
+    <file>ic_toolbar_fullscreen.svg</file>
+    <file>ic_toolbar_audio_on.svg</file>
+    <file>ic_toolbar_audio_off.svg</file>
+    <file>ic_toolbar_mediainfo.svg</file>
+    <file>ic_toolbar_more.svg</file>
+    <file>ic_ptz_up.svg</file>
+    <file>ic_ptz_down.svg</file>
+    <file>ic_ptz_left.svg</file>
+    <file>ic_ptz_right.svg</file>
+    <file>ic_ptz_up_left.svg</file>
+    <file>ic_ptz_up_right.svg</file>
+    <file>ic_ptz_down_left.svg</file>
+    <file>ic_ptz_down_right.svg</file>
+    <file>ic_ptz_center.svg</file>
+    <file>ic_ptz_zoom_in.svg</file>
+    <file>ic_ptz_zoom_out.svg</file>
+    <file>ic_ptz_focus_near.svg</file>
+    <file>ic_ptz_focus_far.svg</file>
+    <file>ic_ptz_iris_open.svg</file>
+    <file>ic_ptz_iris_close.svg</file>
   </qresource>
 </RCC>

@@ -8,6 +8,7 @@ set(CORE_LIB_SOURCES
     LeftNavigationBar.cpp
     SessionManager.cpp
     ServerConfig.cpp
+    SystemConfig.cpp
     ServerApi.cpp
     LoginWindow.cpp
     ServerConfigDialog.cpp
@@ -15,8 +16,25 @@ set(CORE_LIB_SOURCES
     DeviceTree.cpp
     DeviceTreeModel.cpp
     VideoPlayer.cpp
+    VideoPlayerToolbar.cpp
     VideoWidgetManager.cpp
     PlayerLayout.cpp
+    NotificationWidget.cpp
+    DataManager.cpp
+    ReplayPlayer.cpp
+    StreamSource.cpp
+    PlaybackController.cpp
+    PlaybackCell.cpp
+    ReplayPlayerContainer.cpp
+    ReplayNavBar.cpp
+    TimelineWidget.cpp
+    RecordingFileListWidget.cpp
+    PlaybackSidePanel.cpp
+    MapView.cpp
+    MapSidePanel.cpp
+    AlarmSidePanel.cpp
+    PTZControlPanel.cpp
+    PTZControlPanel.ui
 )
 
 set(CORE_LIB_HEADERS
@@ -24,11 +42,13 @@ set(CORE_LIB_HEADERS
     MainWindow.h
     EventBus.h
     ConfigManager.h
+    ConfigKeys.h
     ThemeManager.h
     PluginManager.h
     LeftNavigationBar.h
     SessionManager.h
     ServerConfig.h
+    SystemConfig.h
     ServerApi.h
     LoginWindow.h
     ServerConfigDialog.h
@@ -37,8 +57,24 @@ set(CORE_LIB_HEADERS
     DeviceTreeModel.h
     DeviceTreeNode.h
     VideoPlayer.h
+    VideoPlayerToolbar.h
     VideoWidgetManager.h
     PlayerLayout.h
+    NotificationWidget.h
+    DataManager.h
+    ReplayPlayer.h
+    StreamSource.h
+    PlaybackController.h
+    PlaybackCell.h
+    ReplayPlayerContainer.h
+    ReplayNavBar.h
+    TimelineWidget.h
+    RecordingFileListWidget.h
+    PlaybackSidePanel.h
+    MapView.h
+    MapSidePanel.h
+    AlarmSidePanel.h
+    PTZControlPanel.h
 )
 
 add_library(rustcam-core SHARED
@@ -67,14 +103,22 @@ if(Qt5_FOUND)
         Qt5::Widgets
         Qt5::Network
         Qt5::Svg
+        Qt5::Concurrent
     )
+    if(Qt5_WebEngineWidgets_FOUND)
+        target_link_libraries(rustcam-core PUBLIC Qt5::WebEngineWidgets)
+    endif()
 else()
     target_link_libraries(rustcam-core PUBLIC
         Qt6::Core
         Qt6::Widgets
         Qt6::Network
         Qt6::Svg
+        Qt6::Concurrent
     )
+    if(Qt6_WebEngineWidgets_FOUND)
+        target_link_libraries(rustcam-core PUBLIC Qt6::WebEngineWidgets)
+    endif()
 endif()
 
 set(BOOST_ROOT "${CMAKE_SOURCE_DIR}/3rd_party/boost")

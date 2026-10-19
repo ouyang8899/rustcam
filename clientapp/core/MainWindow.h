@@ -71,6 +71,9 @@ private:
     QLabel* m_gpuLabel = nullptr;
     QLabel* m_cpuLabel = nullptr;
     QLabel* m_timeLabel = nullptr;
+    QWidget* m_topRightWidget = nullptr;
+    QLabel* m_userLabel = nullptr;
+    QComboBox* m_themeCombo = nullptr;
 
     bool m_fullscreen = false;
 };

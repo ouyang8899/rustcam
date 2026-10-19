@@ -11,21 +11,19 @@
 #include <QFrame>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QListWidgetItem>
 #include <QToolButton>
+
+#ifdef RUSTCAM_WITH_WEBENGINE
+#include "core/MapView.h"
+#endif
 
 namespace rustcam {
 
 bool MapPlugin::initialize(EventBus* bus, QObject* cfg)
 {
+    Q_UNUSED(bus)
     Q_UNUSED(cfg)
-
-    EventBus::instance()->subscribe("device/online", this, SLOT(onDeviceOnline(QString,QVariantMap)));
-    EventBus::instance()->subscribe("device/offline", this, SLOT(onDeviceOffline(QString,QVariantMap)));
-    EventBus::instance()->subscribe("alarm/triggered", this, SLOT(onAlarmTriggered(QString,QVariantMap)));
-    EventBus::instance()->subscribe("map/focus", this, SLOT(onMapFocus(QString,QVariantMap)));
-    EventBus::instance()->subscribe("map/marker/add", this, SLOT(onMarkerAdd(QString,QVariantMap)));
-
-    loadDeviceMarkers();
 
     LOG_INFO("MapPlugin", "Initialized");
     return true;
@@ -33,7 +31,6 @@ bool MapPlugin::initialize(EventBus* bus, QObject* cfg)
 
 void MapPlugin::shutdown()
 {
-    EventBus::instance()->unsubscribeAll(this);
 }
 
 QWidget* MapPlugin::createWorkspace(QWidget* parent)
@@ -60,7 +57,7 @@ QWidget* MapPlugin::createWorkspace(QWidget* parent)
         }
     )");
 
-    QLabel* titleLabel = new QLabel("电子地图", toolbar);
+    QLabel* titleLabel = new QLabel(tr("Electronic Map"), toolbar);
     titleLabel->setStyleSheet(R"(
         QLabel {
             color: #e0e0e0;
@@ -73,6 +70,7 @@ QWidget* MapPlugin::createWorkspace(QWidget* parent)
 
     toolbar->addSeparator();
 
+#ifdef RUSTCAM_WITH_WEBENGINE
     QToolButton* zoomInBtn = new QToolButton(toolbar);
     zoomInBtn->setText("+");
     zoomInBtn->setCursor(Qt::PointingHandCursor);
@@ -108,9 +106,10 @@ QWidget* MapPlugin::createWorkspace(QWidget* parent)
     toolbar->addWidget(zoomOutBtn);
 
     toolbar->addSeparator();
+#endif
 
     QToolButton* locateBtn = new QToolButton(toolbar);
-    locateBtn->setText("定位");
+    locateBtn->setText(tr("Locate"));
     locateBtn->setCursor(Qt::PointingHandCursor);
     locateBtn->setStyleSheet(R"(
         QToolButton {
@@ -129,7 +128,7 @@ QWidget* MapPlugin::createWorkspace(QWidget* parent)
     toolbar->addSeparator();
 
     QToolButton* fullscreenBtn = new QToolButton(toolbar);
-    fullscreenBtn->setText("全屏");
+    fullscreenBtn->setText(tr("Fullscreen"));
     fullscreenBtn->setCursor(Qt::PointingHandCursor);
     fullscreenBtn->setStyleSheet(R"(
         QToolButton {
@@ -147,52 +146,41 @@ QWidget* MapPlugin::createWorkspace(QWidget* parent)
 
     layout->addWidget(toolbar);
 
-    QFrame* mapFrame = new QFrame(m_workspace);
-    mapFrame->setStyleSheet(R"(
-        QFrame {
-            background-color: #1a2a3a;
-            border: 1px solid #3e3e3e;
-        }
-    )");
-    QVBoxLayout* mapLayout = new QVBoxLayout(mapFrame);
-    mapLayout->setAlignment(Qt::AlignCenter);
+    m_mapSidePanel = new MapSidePanel(m_workspace);
+    connect(m_mapSidePanel, &MapSidePanel::deviceSelected, this, &MapPlugin::onDeviceSelected);
 
-    QLabel* mapPlaceholder = new QLabel("地图区域\n\n支持百度/高德/离线地图", mapFrame);
-    mapPlaceholder->setAlignment(Qt::AlignCenter);
-    mapPlaceholder->setStyleSheet(R"(
-        QLabel {
-            color: #5a7a9a;
-            font-size: 18px;
-            background-color: transparent;
-        }
-    )");
-    mapLayout->addWidget(mapPlaceholder);
+#ifdef RUSTCAM_WITH_WEBENGINE
+    QVBoxLayout* mapLayout = qobject_cast<QVBoxLayout*>(m_mapSidePanel->mapContainer()->layout());
+    if (mapLayout) {
+        MapView* mapView = new MapView(m_mapSidePanel->mapContainer());
+        mapView->initialize(116.4, 39.9, 10);
+        mapLayout->addWidget(mapView);
+    }
+#endif
 
-    for (auto it = m_markers.begin(); it != m_markers.end(); ++it) {
-        const MapMarker& marker = it.value();
-        QLabel* markerLabel = new QLabel(mapFrame);
-        markerLabel->setText(QString("<div style='background:%1;width:12px;height:12px;border-radius:50%;display:inline-block;'></div> %2")
-                            .arg(marker.online ? "#4caf50" : "#f44336")
-                            .arg(marker.name));
-        markerLabel->setStyleSheet("color: #e0e0e0; font-size: 12px; background: rgba(0,0,0,0.5); padding: 4px 8px; border-radius: 4px;");
-        mapLayout->addWidget(markerLabel);
+    layout->addWidget(m_mapSidePanel, 1);
+
+    if (DataManager::instance()->isLoaded()) {
+        onDataManagerLoaded();
+    } else {
+        connect(DataManager::instance(), &DataManager::loadFinished, this, &MapPlugin::onDataManagerLoaded, Qt::UniqueConnection);
     }
 
-    layout->addWidget(mapFrame, 1);
+    loadDeviceMarkers();
 
     return m_workspace;
 }
 
 QWidget* MapPlugin::createSidePanel(QWidget* parent)
 {
-    m_sidePanel = new QWidget(parent);
-    m_sidePanel->setStyleSheet("background-color: #2b2b2b;");
+    QWidget* sidePanel = new QWidget(parent);
+    sidePanel->setStyleSheet("background-color: #2b2b2b;");
 
-    QVBoxLayout* layout = new QVBoxLayout(m_sidePanel);
+    QVBoxLayout* layout = new QVBoxLayout(sidePanel);
     layout->setContentsMargins(8, 8, 8, 8);
     layout->setSpacing(8);
 
-    QLabel* titleLabel = new QLabel("设备列表", m_sidePanel);
+    QLabel* titleLabel = new QLabel(tr("Device List"), sidePanel);
     titleLabel->setStyleSheet(R"(
         QLabel {
             color: #e0e0e0;
@@ -202,8 +190,8 @@ QWidget* MapPlugin::createSidePanel(QWidget* parent)
     )");
     layout->addWidget(titleLabel);
 
-    QLineEdit* searchEdit = new QLineEdit(m_sidePanel);
-    searchEdit->setPlaceholderText("搜索设备...");
+    QLineEdit* searchEdit = new QLineEdit(sidePanel);
+    searchEdit->setPlaceholderText(tr("Search device..."));
     searchEdit->setStyleSheet(R"(
         QLineEdit {
             background-color: #1a1a1a;
@@ -218,7 +206,7 @@ QWidget* MapPlugin::createSidePanel(QWidget* parent)
     )");
     layout->addWidget(searchEdit);
 
-    QListWidget* deviceList = new QListWidget(m_sidePanel);
+    QListWidget* deviceList = new QListWidget(sidePanel);
     deviceList->setStyleSheet(R"(
         QListWidget {
             background-color: #1a1a1a;
@@ -235,21 +223,52 @@ QWidget* MapPlugin::createSidePanel(QWidget* parent)
         }
     )");
 
-    for (auto it = m_markers.begin(); it != m_markers.end(); ++it) {
-        const MapMarker& marker = it.value();
-        QListWidgetItem* item = new QListWidgetItem(marker.name, deviceList);
-        item->setData(Qt::UserRole, marker.id);
-    }
-
     layout->addWidget(deviceList, 1);
 
-    return m_sidePanel;
+    return sidePanel;
 }
 
-void MapPlugin::addMarker(const MapMarker& marker)
+void MapPlugin::onDataManagerLoaded() {
+    disconnect(DataManager::instance(), &DataManager::loadFinished, this, &MapPlugin::onDataManagerLoaded);
+
+    if (m_mapSidePanel) {
+        m_mapSidePanel->setRegionTreeNodes(DataManager::instance()->regionTree());
+        m_mapSidePanel->setGroupTreeNodes(DataManager::instance()->groupTree());
+        m_mapSidePanel->setDeviceTreeNodes(DataManager::instance()->deviceList());
+    }
+
+    LOG_INFO("MapPlugin", QString("Using DataManager: regionNodes=%1, groupNodes=%2, deviceNodes=%3")
+        .arg(DataManager::instance()->regionTree().size())
+        .arg(DataManager::instance()->groupTree().size())
+        .arg(DataManager::instance()->deviceList().size()));
+}
+
+void MapPlugin::loadDeviceMarkers()
+{
+    ServerApi::instance()->get("/api/v1/devices", [this](bool success, const QJsonObject& resp, const QString&) {
+        if (success) {
+            QJsonArray devices = resp["data"].toArray();
+            for (const QJsonValue& dev : devices) {
+                QJsonObject obj = dev.toObject();
+                if (obj.contains("lat") && obj.contains("lon")) {
+                    MapMarkerData marker;
+                    marker.id = obj["id"].toString();
+                    marker.name = obj["name"].toString();
+                    marker.lat = obj["lat"].toDouble();
+                    marker.lon = obj["lon"].toDouble();
+                    marker.type = obj["type"].toString();
+                    marker.online = obj["online"].toBool();
+                    addMarker(marker);
+                }
+            }
+        }
+    });
+}
+
+void MapPlugin::addMarker(const MapMarkerData& marker)
 {
     m_markers[marker.id] = marker;
-    LOG_INFO("MapPlugin", QString("Marker added: %1").arg(marker.name));
+    LOG_INFO("MapPlugin", QString("Marker added: %1 at %2,%3").arg(marker.name).arg(marker.lat).arg(marker.lon));
 }
 
 void MapPlugin::removeMarker(const QString& markerId)
@@ -270,86 +289,25 @@ void MapPlugin::updateMarkerPosition(const QString& markerId, double lat, double
 
 void MapPlugin::focusOn(double lat, double lon, int zoom)
 {
-    Q_UNUSED(lat)
-    Q_UNUSED(lon)
-    Q_UNUSED(zoom)
+#ifdef RUSTCAM_WITH_WEBENGINE
+    QVBoxLayout* mapLayout = qobject_cast<QVBoxLayout*>(m_mapSidePanel->mapContainer()->layout());
+    if (mapLayout) {
+        QLayoutItem* item = mapLayout->itemAt(0);
+        if (item && item->widget()) {
+            MapView* mapView = qobject_cast<MapView*>(item->widget());
+            if (mapView) {
+                mapView->setCenter(lon, lat, zoom);
+            }
+        }
+    }
+#endif
     LOG_INFO("MapPlugin", QString("Focus on: %1, %2 zoom %3").arg(lat).arg(lon).arg(zoom));
 }
 
-void MapPlugin::loadDeviceMarkers()
+void MapPlugin::onDeviceSelected(const QString& deviceId, const QString& deviceName)
 {
-    ServerApi::instance()->get("/api/v1/devices", [this](bool success, const QJsonObject& resp, const QString&) {
-        if (success) {
-            QJsonArray devices = resp["data"].toArray();
-            for (const auto& dev : devices) {
-                QJsonObject obj = dev.toObject();
-                if (obj.contains("lat") && obj.contains("lon")) {
-                    MapMarker marker;
-                    marker.id = obj["id"].toString();
-                    marker.name = obj["name"].toString();
-                    marker.lat = obj["lat"].toDouble();
-                    marker.lon = obj["lon"].toDouble();
-                    marker.type = obj["type"].toString();
-                    marker.online = obj["online"].toBool();
-                    addMarker(marker);
-                }
-            }
-        }
-    });
-}
-
-void MapPlugin::onDeviceOnline(const QString& topic, const QVariantMap& payload)
-{
-    Q_UNUSED(topic)
-    QString deviceId = payload["deviceId"].toString();
-    if (m_markers.contains(deviceId)) {
-        m_markers[deviceId].online = true;
-        LOG_INFO("MapPlugin", QString("Device online: %1").arg(deviceId));
-    }
-}
-
-void MapPlugin::onDeviceOffline(const QString& topic, const QVariantMap& payload)
-{
-    Q_UNUSED(topic)
-    QString deviceId = payload["deviceId"].toString();
-    if (m_markers.contains(deviceId)) {
-        m_markers[deviceId].online = false;
-        LOG_INFO("MapPlugin", QString("Device offline: %1").arg(deviceId));
-    }
-}
-
-void MapPlugin::onAlarmTriggered(const QString& topic, const QVariantMap& payload)
-{
-    Q_UNUSED(topic)
-    QString deviceId = payload["deviceId"].toString();
-    double lat = payload["lat"].toDouble();
-    double lon = payload["lon"].toDouble();
-    if (!deviceId.isEmpty() && lat != 0 && lon != 0) {
-        focusOn(lat, lon, 18);
-        LOG_INFO("MapPlugin", QString("Alarm focus: %1 at %2, %3").arg(deviceId).arg(lat).arg(lon));
-    }
-}
-
-void MapPlugin::onMapFocus(const QString& topic, const QVariantMap& payload)
-{
-    Q_UNUSED(topic)
-    double lat = payload["lat"].toDouble();
-    double lon = payload["lon"].toDouble();
-    int zoom = payload["zoom"].toInt(15);
-    focusOn(lat, lon, zoom);
-}
-
-void MapPlugin::onMarkerAdd(const QString& topic, const QVariantMap& payload)
-{
-    Q_UNUSED(topic)
-    MapMarker marker;
-    marker.id = payload["id"].toString();
-    marker.name = payload["name"].toString();
-    marker.lat = payload["lat"].toDouble();
-    marker.lon = payload["lon"].toDouble();
-    marker.type = payload["type"].toString();
-    marker.online = payload["online"].toBool(true);
-    addMarker(marker);
+    Q_UNUSED(deviceId)
+    Q_UNUSED(deviceName)
 }
 
 }

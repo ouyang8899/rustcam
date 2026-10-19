@@ -40,7 +40,8 @@ impl HookEventHandler {
                         if matches!(event, SignalEvent::HookPlay { .. } |
                             SignalEvent::HookPublish { .. } |
                             SignalEvent::HookUnpublish { .. } |
-                            SignalEvent::HookStreamUpdate { .. }) {
+                            SignalEvent::HookStreamUpdate { .. } |
+                            SignalEvent::HookStreamChanged { .. }) {
                             self.handle_event(&event).await;
                         }
                     }
@@ -69,6 +70,9 @@ impl HookEventHandler {
             }
             SignalEvent::HookStreamUpdate { media_server_tag, stream_id, regist, reader_count, total_reader_count, bytes_speed } => {
                 self.handle_hook_stream_update(media_server_tag, stream_id, *regist, *reader_count, *total_reader_count, *bytes_speed).await;
+            }
+            SignalEvent::HookStreamChanged { media_server_tag, app: _, stream_id, regist } => {
+                self.handle_hook_stream_changed(media_server_tag, stream_id, *regist).await;
             }
             _ => {}
         }
@@ -252,6 +256,99 @@ impl HookEventHandler {
             Ok(None) => {}
             Err(e) => {
                 tracing::error!("[HookEventHandler] Failed to auto-start recording: {}", e);
+            }
+        }
+    }
+
+    async fn handle_hook_stream_changed(&self, media_server_tag: &str, stream_id: &str, regist: bool) {
+        tracing::info!("[HookEventHandler] HookStreamChanged: server={}, stream={}, regist={}",
+            media_server_tag, stream_id, regist);
+
+        if !regist {
+            if let Some(s) = self.find_stream_by_stream_key(stream_id).await {
+                let device_tag = s.device_tag.clone();
+                let channel_tag = s.channel_tag.clone();
+                let mut s = s;
+                if let Some(ref dt) = device_tag {
+                    if let Some(device) = self.db.devices_cache().get(dt) {
+                        if device.status == crate::domain::DeviceStatus::Maintaining {
+                            s.stopped();
+                        } else {
+                            s.error("stream closed by media server");
+                        }
+                    } else {
+                        s.error("stream closed by media server");
+                    }
+                } else {
+                    s.error("stream closed by media server");
+                }
+                if let Err(e) = self.db.update_stream(&s).await {
+                    tracing::warn!("[HookEventHandler] HookStreamChanged: failed to stop stream: {}", e);
+                }
+                if let Some(ref dt) = device_tag {
+                    if let Ok(Some(mut channel)) = self.db.get_channel(dt, channel_tag.as_deref().unwrap_or(dt)).await {
+                        channel.status = crate::domain::DeviceStatus::Offline;
+                        if let Err(e) = self.db.update_channel(&channel).await {
+                            tracing::warn!("[HookEventHandler] HookStreamChanged: failed to update channel status: {}", e);
+                        }
+                    }
+                    self.sync_device_status_by_channels(dt).await;
+                }
+            }
+            return;
+        }
+
+        if let Some(s) = self.find_stream_by_stream_key(stream_id).await {
+            let device_tag = s.device_tag.clone();
+            let channel_tag = s.channel_tag.clone();
+            let mut s = s;
+            s.update_keepalive();
+            if s.state != crate::domain::StreamState::Active {
+                s.start();
+            }
+            if let Err(e) = self.db.update_stream(&s).await {
+                tracing::warn!("[HookEventHandler] HookStreamChanged: failed to update stream: {}", e);
+            }
+            if let Some(ref dt) = device_tag {
+                tracing::debug!("[HookEventHandler] HookStreamChanged: looking for channel device_tag={}, channel_tag={}", dt, channel_tag.as_deref().unwrap_or(dt));
+                if let Ok(Some(mut channel)) = self.db.get_channel(dt, channel_tag.as_deref().unwrap_or(dt)).await {
+                    tracing::info!("[HookEventHandler] HookStreamChanged: found channel, updating status to Online");
+                    channel.status = crate::domain::DeviceStatus::Online;
+                    if let Err(e) = self.db.update_channel(&channel).await {
+                        tracing::warn!("[HookEventHandler] HookStreamChanged: failed to update channel status: {}", e);
+                    }
+                } else {
+                    tracing::warn!("[HookEventHandler] HookStreamChanged: channel not found device_tag={}, channel_tag={}", dt, channel_tag.as_deref().unwrap_or(dt));
+                }
+                self.sync_device_status_by_channels(dt).await;
+            }
+        }
+    }
+
+    async fn sync_device_status_by_channels(&self, device_tag: &str) {
+        let channels = self.db.channels_cache()
+            .iter()
+            .filter(|c| c.key().starts_with(&format!("{}/", device_tag)))
+            .map(|c| c.value().clone())
+            .collect::<Vec<_>>();
+
+        let all_offline = channels.iter().all(|c| c.status == crate::domain::DeviceStatus::Offline);
+        let has_online = channels.iter().any(|c| c.status == crate::domain::DeviceStatus::Online);
+
+        if let Some(device) = self.db.devices_cache().get(device_tag) {
+            let mut device = (*device).clone();
+            if all_offline && !has_online {
+                if device.status != crate::domain::DeviceStatus::Maintaining {
+                    device.set_offline();
+                    if let Err(e) = self.db.update_device(&device).await {
+                        tracing::warn!("[HookEventHandler] sync_device_status: failed to update device status: {}", e);
+                    }
+                }
+            } else if has_online {
+                device.set_online();
+                if let Err(e) = self.db.update_device(&device).await {
+                    tracing::warn!("[HookEventHandler] sync_device_status: failed to update device status: {}", e);
+                }
             }
         }
     }

@@ -7,9 +7,12 @@
 #include <QDragEnterEvent>
 #include <QMimeData>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include "core/PlayerLayout.h"
 #include "core/VideoWidgetManager.h"
 #include "core/ServerApi.h"
+#include "core/DataManager.h"
+#include "core/VideoPlayerToolbar.h"
 
 namespace rustcam {
 
@@ -29,12 +32,12 @@ public slots:
     void onStreamRequested(const QString& topic);
 
 private slots:
-    void onLayoutsReceived(bool success, const QJsonObject& response, const QString& error);
+    void onLayoutsReady();
     void onLayoutSelected(int index);
     void onVideoPlayerClicked(const QString& itemId);
+    void onChannelPlayLinksReceived(bool success, const QJsonObject& response, const QString& error, const QString& title, const QString& targetId);
 
 private:
-    void loadLayouts();
     void calculateVideoLayout(const PlayerLayout& layout);
     QString selectTargetItem();
     void handleDrop(const QVariantMap& meta);
@@ -51,6 +54,7 @@ protected:
     PlayerLayout m_currentLayout;
     QString m_selectedItemId;
     QMap<QString, QString> m_playingUrls;
+    QMap<QString, QWidget*> m_playerWrappers;
 };
 
 }

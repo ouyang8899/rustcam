@@ -3,12 +3,14 @@
 #include "interfaces/IPlugin.h"
 #include <QObject>
 #include <QString>
-#include <QStandardItemModel>
 #include <QJsonArray>
+#include "core/EventBus.h"
+#include "core/AlarmSidePanel.h"
+#include "core/DataManager.h"
 
 namespace rustcam {
 
-class AlarmPlugin : public QObject, public IPlugin {
+class AlarmPlugin : public IPlugin {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "com.rustcam.IPlugin/1.0" FILE "plugin.json")
     Q_INTERFACES(rustcam::IPlugin)
@@ -29,16 +31,19 @@ signals:
     void alarmCountChanged(int count);
 
 private slots:
-    void onAlarmTriggered(const QString& topic, const QVariantMap& payload);
-    void onRefreshAlarms();
-    void onAcknowledgeAlarm(const QString& alarmId);
+    void onAlarmTriggered(const QString& topic, EventDataPtr data);
+    void onDataManagerLoaded();
+    void onDeviceSelected(const QString& deviceId, const QString& deviceName);
+    void onAlarmSelected(const QString& alarmId);
 
 private:
     void loadAlarms();
     void addAlarmItem(const QJsonObject& alarm);
 
-    QStandardItemModel* m_alarmModel;
-    int m_unreadCount;
+    QWidget* m_workspace;
+    AlarmSidePanel* m_sidePanel;
+    int m_unreadCount = 0;
+    QString m_currentDeviceId;
 };
 
 }

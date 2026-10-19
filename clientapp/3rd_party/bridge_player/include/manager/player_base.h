@@ -100,6 +100,19 @@ namespace BridgePlayer{
         virtual void stop() = 0;
         virtual bool is_playing() const = 0;
         virtual bool is_live_stream() const = 0;
+        //virtual void capture_video_image(const std::string& fullPath) = 0;
+        virtual void set_mirror_mode(VideoMirrorMode mode);
+        virtual void set_roate_angle(int degree);
+        virtual void set_name(VideoNameData::Ptr name);
+        virtual void set_name_visible(bool visible);
+        virtual void set_watermark(VideoWatermarkData::Ptr mark);
+        virtual void set_watermark_visible(bool visible);
+        virtual void set_locale_time(VideoLocaleTimeData::Ptr time);
+        virtual void set_locale_time_visible(bool visible);
+        virtual void set_zoom(ZoomData::Ptr data);
+        virtual void set_media_rate(VideoMediaRateData::Ptr rate);
+        virtual void set_media_rate_visible(bool visible);
+
         // virtual const int64_t &id() const { return id_; }
         // virtual const std::string &url() const { return url_; }
 
@@ -123,9 +136,20 @@ namespace BridgePlayer{
         const std::string& url()  const { return url_; }
         void set_scale_quality(ScaleQuality quality);
         static uint64_t next_render_serial();
+
+        int get_roate_angle() {
+            return this->roate_angle_;
+        }
+
+        VideoMirrorMode get_mirror_mode() {
+            return this->video_mirror_mode_;
+        }
+        void  capture_video_image(const std::string& path);
     protected:
+        std::string get_screenshot_path();
         virtual void on_video_frame(AVFrame* frame,
-            bool first_frame);
+            bool first_frame,
+            double media_rate);
         virtual void on_audio_frame(AVFrame* frame);
         void on_error(const std::string& err);
         void notify_play_code(PlayCode code);
@@ -144,7 +168,8 @@ namespace BridgePlayer{
        std::shared_ptr<TaskRenderBase> task_render_{ nullptr };
         PlayStatusCallback play_status_callback_{ nullptr };
         Stats stats_;
-
+        int roate_angle_{ 0 };
+        VideoMirrorMode video_mirror_mode_{ VideoMirrorMode::None };
         //audio
         std::atomic<bool> audio_initialized_ = false; // 音频设备是否已初始化
         bool has_audio_ = false;
@@ -164,5 +189,12 @@ namespace BridgePlayer{
         uint64_t render_target_id_{ 0 };
         uint64_t self_render_target_id_{ 0 };
         uint64_t render_serial_{ 0 };
+        VideoNameDisplay::Ptr video_name_display_{ nullptr };
+        VideoWatermarkDisplay::Ptr video_watermark_display_{ nullptr };
+        VideoLocaleTimeDisplay::Ptr video_locale_time_display_ { nullptr };
+        VideoMediaRateDisplay::Ptr video_media_rate_display_{ nullptr };
+        ZoomData::Ptr zoom_data_{ nullptr };
+        std::vector<std::string> screenshot_paths_;
+        std::mutex screenshot_paths_mutex_;
     };
 }

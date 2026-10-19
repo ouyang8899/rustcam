@@ -39,6 +39,7 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
     fn name(&self) -> &str { &self.config.name }
     fn tag(&self) -> &str { &self.config.server_tag }
     fn server_type(&self) -> &str { "zlmediakit" }
+    fn secret(&self) -> &str { &self.config.api_key }
 
     async fn is_online(&self) -> bool {
         self.client.get::<serde_json::Value>("/index/api/getStatistic").await.is_ok()

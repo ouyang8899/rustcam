@@ -272,6 +272,12 @@ pub enum SignalEvent {
         total_reader_count: Option<u32>,
         bytes_speed: Option<u64>,
     },
+    HookStreamChanged {
+        media_server_tag: String,
+        app: String,
+        stream_id: String,
+        regist: bool,
+    },
 }
 impl SignalEvent {
     /// 获取事件类型字符串
@@ -323,6 +329,7 @@ impl SignalEvent {
             SignalEvent::HookPublish { .. } => "hook_publish".to_string(),
             SignalEvent::HookUnpublish { .. } => "hook_unpublish".to_string(),
             SignalEvent::HookStreamUpdate { .. } => "hook_stream_update".to_string(),
+            SignalEvent::HookStreamChanged { .. } => "hook_stream_changed".to_string(),
         }
     }
 

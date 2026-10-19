@@ -58,6 +58,168 @@ typedef struct PlayerLayout
     int top;
     int width;
     int height;
+} PlayerLayout;
+enum class VideoMirrorMode: uint8_t {
+    None,       // 不镜像
+    Horizontal=0x01, // 水平镜像（左右翻转）
+    Vertical=0x02,   // 垂直镜像（上下翻转）
+    Both=0x03        // 水平+垂直
+};
+enum class VideoDecodeType:uint16_t {
+    SOFTWARE = 1,
+    HARDWARE = 2,
+    AUTO = 3,
+};
+typedef struct Color {
+    int r=0;
+    int g=0;
+    int b=0;
+    int a=255;
+}Color;
+
+enum class Align: uint64_t {
+    none = 0,
+    top = 1 << 0,
+    left = 1 << 1,
+    right = 1 << 2,
+    bottom = 1 << 3,
+    centerH = 1 << 4,  // 显式水平居中
+    centerV = 1 << 5,  // 显式垂直居中
+};
+inline  Align operator|(Align a, Align b) {
+    return static_cast<Align>(static_cast<uint64_t>(a) | static_cast<uint64_t>(b));
+}
+inline  Align operator&(Align a, Align b) {
+    return static_cast<Align>(static_cast<uint64_t>(a) & static_cast<uint64_t>(b));
+}
+inline  bool has(Align a, Align b) {
+    return (static_cast<uint64_t>(a) & static_cast<uint64_t>(b)) != 0;
+}
+typedef struct Margin {
+    int left = 0;
+    int top = 0;
+    int right = 0;
+    int bottom = 0;
+} Margin;
+typedef struct Rect2D {
+    int left = 0;
+    int top = 0;
+    int width = 0;
+    int height = 0;
+
+    static Rect2D alignRect(const Rect2D& window,
+        Rect2D control,
+        Align align,
+        const Margin& margin = {})
+    {
+        const int winL = window.left;
+        const int winT = window.top;
+        const int winR = window.left + window.width;
+        const int winB = window.top + window.height;
+
+        const bool alignTop = has(align, Align::top);
+        const bool alignBottom = has(align, Align::bottom);
+        const bool alignLeft = has(align, Align::left);
+        const bool alignRight = has(align, Align::right);
+
+        // ---- 水平 ----
+        // 宽高固定，left|right 同时指定时按优先级选一个
+        // 这里优先级：left > right
+        if (alignLeft) {
+            control.left = winL + margin.left;
+        }
+        else if (alignRight) {
+            control.left = winR - margin.right - control.width;
+        }
+        else {
+            control.left = winL + (window.width - control.width) / 2;
+        }
+
+        // ---- 垂直 ----
+        // 优先级：top > bottom
+        if (alignTop) {
+            control.top = winT + margin.top;
+        }
+        else if (alignBottom) {
+            control.top = winB - margin.bottom - control.height;
+        }
+        else {
+            control.top = winT + (window.height - control.height) / 2;
+        }
+
+        return control;
+    }
+} Rect2D;
+
+typedef struct Point2D {
+    using Ptr = std::shared_ptr<Point2D>;
+    int x;
+    int y;
+}Point2D;
+
+typedef struct ZoomData {
+    using Ptr = std::shared_ptr<ZoomData>;
+    Point2D::Ptr center{nullptr};
+    float scale{ 1.0 };
+    bool enable{false};
+}ZoomData;
+typedef struct VideoNameData {
+    using Ptr = std::shared_ptr<VideoNameData>;
+    std::string name;
+    Color color;
+    Color background;
+    int font_size;
+    uint64_t align;
+    bool mirror_roate_with_video{ true };
+}VideoNameData;
+
+typedef struct VideoNameDisplay {
+    using Ptr = std::shared_ptr<VideoNameDisplay>;
+    VideoNameData::Ptr data{nullptr};
+    bool visible{ false };
+}VideoNameDisplay;
+typedef struct VideoWatermarkData {
+    using Ptr = std::shared_ptr<VideoWatermarkData>;
+    std::string title;
+    Color color;
+    int font_size;
+    int degree{ 30 };
+    bool mirror_roate_with_video{ true };
+}VideoWaterMarkData;
+typedef struct VideoWatermarkDisplay {
+    using Ptr = std::shared_ptr<VideoWatermarkDisplay>;
+    VideoWatermarkData::Ptr data{nullptr};
+    bool visible{ false };
+} VideoWatermarkDisplay;
+
+typedef struct VideoLocaleTimeData {
+    using Ptr = std::shared_ptr<VideoLocaleTimeData>;
+    std::function <std::string(void)> get_time_fun{ nullptr };
+    Color color;
+    int font_size;
+    uint64_t align;
+    bool mirror_roate_with_video{ true };
+} VideoLocaleTimeData;
+
+typedef struct VideoLocaleTimeDisplay {
+    using Ptr = std::shared_ptr<VideoLocaleTimeDisplay>;
+    VideoLocaleTimeData::Ptr data{nullptr};
+    bool visible{ false };
+}VideoLocaleTimeDisplay;
+
+typedef struct VideoMediaRateData {
+    using Ptr = std::shared_ptr<VideoMediaRateData>;
+    Color color;
+    int font_size;
+    uint64_t align;
+    bool mirror_roate_with_video{ true };
+
+}VideoMediaRateData;
+
+typedef struct VideoMediaRateDisplay {
+    using Ptr = std::shared_ptr<VideoMediaRateDisplay>;
+    VideoMediaRateData::Ptr data{ nullptr };
+    bool visible{ false };
 };
 typedef struct PlayerData
 {

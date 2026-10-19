@@ -68,7 +68,7 @@ namespace BridgePlayer
         }
 
         //void render_to_window(NativeWindowHandle host) override;
-
+       // void capture_video_image(const std::string& fullPath) override;
 
 
     protected:
@@ -80,7 +80,7 @@ namespace BridgePlayer
         void post_task(const Task &task);
         void update_depacketizer(int track_id, bool use_tcp);
 
-        void create_codec_context(const std::vector<MediaTrack> &media_tracks);
+        void create_codec_context(const std::unordered_map<int,std::shared_ptr<MediaTrack>>& media_tracks);
     private:
         void on_rtp_packet(const uint8_t *data, size_t size, int64_t pts, bool is_key);
         void on_rtp_stream_data_packet(std::shared_ptr<StreamData> stream_data);
@@ -90,7 +90,7 @@ namespace BridgePlayer
 
         void on_audio_rtp_packet(const uint8_t *data, size_t size, int64_t pts);
 
-        void init_audio_decoder(AVCodecID codec_id);
+        void init_audio_decoder(AVCodecID codec_id, std::shared_ptr<MediaTrack> media_track);
         void init_ps_ts_decoder(const std::unique_ptr<PSStreamDemuxer> &stream_demuxer);
         // 重新创建转换器
         void recreate_converter();
@@ -114,6 +114,7 @@ namespace BridgePlayer
         std::map<int, std::unique_ptr<RTPDepacketizer>> depacketizers_;
         std::unordered_map<int, std::unique_ptr<AudioRTPDepacketizer>> audio_depacketizers_;
         std::mutex worker_thread_mutex_;
+        double media_rate_{ 0 };
         public:
         friend class PlayerManager;
         friend class RTSPSession;

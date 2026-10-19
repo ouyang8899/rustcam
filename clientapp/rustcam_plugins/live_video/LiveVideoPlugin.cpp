@@ -2,6 +2,7 @@
 #include "core/EventBus.h"
 #include "core/ServerApi.h"
 #include "core/DeviceTreeNode.h"
+#include "core/NotificationWidget.h"
 #include "common/Logger.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -114,11 +115,36 @@ void LiveVideoPlugin::shutdown()
 void LiveVideoPlugin::onLoggedIn(const QString& topic, EventDataPtr)
 {
     Q_UNUSED(topic)
-    LOG_INFO("LiveVideoPlugin", "onLoggedIn, loading all device data");
+    LOG_INFO("LiveVideoPlugin", "onLoggedIn, checking data...");
     if (m_videoContainer) {
         m_videoContainer->initialize();
     }
-    loadAllDeviceData();
+
+    if (DataManager::instance()->isLoaded()) {
+        LOG_INFO("LiveVideoPlugin", "Using DataManager data");
+        onDataManagerLoaded();
+    } else {
+        LOG_INFO("LiveVideoPlugin", "DataManager not loaded yet, loading...");
+        connect(DataManager::instance(), &DataManager::loadFinished, this, &LiveVideoPlugin::onDataManagerLoaded, Qt::UniqueConnection);
+        DataManager::instance()->loadAll();
+    }
+}
+
+void LiveVideoPlugin::onDataManagerLoaded()
+{
+    disconnect(DataManager::instance(), &DataManager::loadFinished, this, &LiveVideoPlugin::onDataManagerLoaded);
+
+    if (!DataManager::instance()->isLoaded()) {
+        LOG_ERROR("LiveVideoPlugin", "DataManager load failed");
+        return;
+    }
+
+    m_regionTree->setNodes(DataManager::instance()->regionTree());
+    m_groupTree->setNodes(DataManager::instance()->groupTree());
+
+    LOG_INFO("LiveVideoPlugin", QString("Using DataManager: regionNodes=%1, groupNodes=%2")
+        .arg(DataManager::instance()->regionTree().size())
+        .arg(DataManager::instance()->groupTree().size()));
 }
 
 void LiveVideoPlugin::loadAllDeviceData()
@@ -217,6 +243,7 @@ void LiveVideoPlugin::buildDeviceTrees(const QJsonArray& regionsData, const QJso
         meta["device_tag"] = obj["device_tag"].toVariant();
         meta["host"] = obj["host"].toVariant();
         meta["port"] = obj["port"].toVariant();
+        meta["status"] = obj["status"].toString();
         deviceNode->metadata = meta;
 
         QString regionCode = obj["region_code"].toString();
@@ -247,6 +274,7 @@ void LiveVideoPlugin::buildDeviceTrees(const QJsonArray& regionsData, const QJso
         meta["channel_tag"] = obj["channel_tag"].toVariant();
         meta["host"] = obj["ip_address"].toString();
         meta["port"] = obj["port"].toVariant();
+        meta["status"] = obj["status"].toString();
         channelNode->metadata = meta;
 
         QString deviceTag = obj["device_tag"].toString();
@@ -360,6 +388,7 @@ DeviceTreeNode::Ptr LiveVideoPlugin::parseGroupNode(const QJsonObject& obj, cons
 
 QWidget* LiveVideoPlugin::createWorkspace(QWidget* parent)
 {
+    LOG_INFO("LiveVideoPlugin", "createWorkspace called");
     QWidget* mainWidget = new QWidget(parent);
     mainWidget->setObjectName("LiveVideoWorkspace");
 
@@ -372,28 +401,42 @@ QWidget* LiveVideoPlugin::createWorkspace(QWidget* parent)
     m_sidePanel->setMinimumWidth(280);
     m_sidePanel->setMaximumWidth(400);
     QVBoxLayout* sideLayout = new QVBoxLayout(m_sidePanel);
-    sideLayout->setContentsMargins(8, 8, 8, 8);
+    sideLayout->setContentsMargins(4, 4, 4, 4);
     sideLayout->setSpacing(4);
 
     m_tabWidget = new QTabWidget(m_sidePanel);
+    m_tabWidget->setStyleSheet(R"(
+        QTabWidget::pane {
+            border: 1px solid #3e3e3e;
+            background-color: #2a2a2a;
+        }
+    )");
 
     m_regionTree = new DeviceTree(m_tabWidget);
     QObject::connect(m_regionTree, QOverload<QVariantMap>::of(&DeviceTree::itemDoubleClicked),
                      this, &LiveVideoPlugin::onDeviceTreeItemClicked);
-    m_tabWidget->addTab(m_regionTree, tr("地区"));
+    m_tabWidget->addTab(m_regionTree, tr("Region"));
 
     m_groupTree = new DeviceTree(m_tabWidget);
     QObject::connect(m_groupTree, QOverload<QVariantMap>::of(&DeviceTree::itemDoubleClicked),
                      this, &LiveVideoPlugin::onDeviceTreeItemClicked);
-    m_tabWidget->addTab(m_groupTree, tr("自定义分组"));
+    m_tabWidget->addTab(m_groupTree, tr("Group"));
 
-    sideLayout->addWidget(m_tabWidget);
+    sideLayout->addWidget(m_tabWidget, 1);
+
+    m_ptzPanel = new PTZControlPanel(m_sidePanel);
+    m_ptzPanel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    m_ptzPanel->setMinimumHeight(180);
+    m_ptzPanel->setMinimumWidth(200);
+    connect(m_ptzPanel, &PTZControlPanel::ptzCommand, this, &LiveVideoPlugin::onPtzCommand);
+    sideLayout->addWidget(m_ptzPanel);
 
     m_videoContainer = new VideoPlayerContainer(mainWidget);
 
     mainLayout->addWidget(m_sidePanel, 0);
     mainLayout->addWidget(m_videoContainer, 1);
 
+    LOG_INFO("LiveVideoPlugin", "createWorkspace done, returning mainWidget");
     return mainWidget;
 }
 
@@ -410,14 +453,18 @@ QWidget* LiveVideoPlugin::createSidePanel(QWidget* parent)
     m_regionTree = new DeviceTree(m_tabWidget);
     QObject::connect(m_regionTree, QOverload<QVariantMap>::of(&DeviceTree::itemDoubleClicked),
                      this, &LiveVideoPlugin::onDeviceTreeItemClicked);
-    m_tabWidget->addTab(m_regionTree, tr("地区"));
+    m_tabWidget->addTab(m_regionTree, tr("Region"));
 
     m_groupTree = new DeviceTree(m_tabWidget);
     QObject::connect(m_groupTree, QOverload<QVariantMap>::of(&DeviceTree::itemDoubleClicked),
                      this, &LiveVideoPlugin::onDeviceTreeItemClicked);
-    m_tabWidget->addTab(m_groupTree, tr("自定义分组"));
+    m_tabWidget->addTab(m_groupTree, tr("Group"));
 
     layout->addWidget(m_tabWidget);
+
+    m_ptzPanel = new PTZControlPanel(m_sidePanel);
+    connect(m_ptzPanel, &PTZControlPanel::ptzCommand, this, &LiveVideoPlugin::onPtzCommand);
+    layout->addWidget(m_ptzPanel);
 
     return m_sidePanel;
 }
@@ -504,6 +551,131 @@ void LiveVideoPlugin::onDeviceTreeItemClicked(const QVariantMap& meta)
             }
             m_videoContainer->playStream(QString(), url, meta["name"].toString());
         }
+    } else if (type == "channel") {
+        QString deviceTag = meta["device_tag"].toString();
+        QString channelTag = meta["channel_tag"].toString();
+        if (!deviceTag.isEmpty() && !channelTag.isEmpty() && m_videoContainer) {
+            QString title = meta["name"].toString();
+            QString itemId = QString("%1/%2").arg(deviceTag).arg(channelTag);
+            QtConcurrent::run([this, deviceTag, channelTag, title, itemId]() {
+                QJsonObject response;
+                QString error;
+                QString endpoint = QString("/api/v1/channels/%1/%2/play-links").arg(deviceTag).arg(channelTag);
+                bool success = ServerApi::instance()->getSync(endpoint, response, error);
+                QMetaObject::invokeMethod(this, [this, success, response, error, title, itemId]() {
+                    onChannelPlayLinksReceived(success, response, error, title, itemId);
+                }, Qt::QueuedConnection);
+            });
+        }
+    }
+}
+
+void LiveVideoPlugin::onChannelPlayLinksReceived(bool success, const QJsonObject& response, const QString& error, const QString& title, const QString& itemId)
+{
+    LOG_INFO("LiveVideoPlugin", QString("onChannelPlayLinksReceived: success=%1, title=%2").arg(success).arg(title));
+    if (!success) {
+        LOG_ERROR("LiveVideoPlugin", QString("Failed to get play links: %1").arg(error));
+        EventBus::instance()->publish(TOPIC_NOTIFICATION_SHOW,
+            QSharedPointer<NotificationEventData>(new NotificationEventData(tr("Playback failed: %1").arg(error), NotificationEventData::Error)));
+        return;
+    }
+    QJsonObject data = response["data"].toObject();
+    QString url = data["rtsp_media"].toString();
+    if (url.isEmpty()) {
+        url = data["hls"].toString();
+    }
+    if (url.isEmpty()) {
+        url = data["flv"].toString();
+    }
+    if (url.isEmpty()) {
+        LOG_ERROR("LiveVideoPlugin", "No playable URL found in play links response");
+        EventBus::instance()->publish(TOPIC_NOTIFICATION_SHOW,
+            QSharedPointer<NotificationEventData>(new NotificationEventData(tr("No playable URL available"), NotificationEventData::Warning)));
+        return;
+    }
+    LOG_INFO("LiveVideoPlugin", QString("Playing: %1 -> %2").arg(title).arg(url));
+    EventBus::instance()->publish(TOPIC_NOTIFICATION_SHOW,
+        QSharedPointer<NotificationEventData>(new NotificationEventData(tr("Playing: %1").arg(title), NotificationEventData::Success)));
+    if (m_videoContainer) {
+        m_videoContainer->playStream(QString(), url, title);
+        if (m_ptzPanel) {
+            m_ptzPanel->loadPresets(itemId);
+        }
+    } else {
+        LOG_ERROR("LiveVideoPlugin", "m_videoContainer is null!");
+    }
+}
+
+void LiveVideoPlugin::onPtzCommand(const QString& command, const QVariant& value) {
+    QString itemId = m_videoContainer->getSelectedItemId();
+    if (itemId.isEmpty()) {
+        LOG_WARNING("LiveVideoPlugin", "No item selected for PTZ command");
+        return;
+    }
+
+    QStringList parts = itemId.split("/");
+    if (parts.size() != 2) {
+        LOG_ERROR("LiveVideoPlugin", QString("Invalid itemId format: %1").arg(itemId));
+        return;
+    }
+    QString deviceTag = parts[0];
+    QString channelTag = parts[1];
+
+    LOG_INFO("LiveVideoPlugin", QString("PTZ command: %1, value: %2, device: %3, channel: %4").arg(command).arg(value.toString()).arg(deviceTag).arg(channelTag));
+
+    QString apiPath;
+    if (command == "direction") {
+        apiPath = QString("/api/v1/channels/%1/%2/ptz/direction?dir=%3").arg(deviceTag, channelTag, value.toString());
+        ServerApi::instance()->get(apiPath, [this](bool success, const QJsonObject& resp, const QString& error) {
+            if (!success) {
+                LOG_ERROR("LiveVideoPlugin", QString("PTZ command failed: %1").arg(error));
+            }
+        });
+    } else if (command == "center") {
+        apiPath = QString("/api/v1/channels/%1/%2/ptz/center").arg(deviceTag, channelTag);
+        ServerApi::instance()->get(apiPath, [this](bool success, const QJsonObject& resp, const QString& error) {
+            if (!success) {
+                LOG_ERROR("LiveVideoPlugin", QString("PTZ command failed: %1").arg(error));
+            }
+        });
+    } else if (command == "aux") {
+        apiPath = QString("/api/v1/channels/%1/%2/ptz/aux?func=%3").arg(deviceTag, channelTag, value.toString());
+        ServerApi::instance()->get(apiPath, [this](bool success, const QJsonObject& resp, const QString& error) {
+            if (!success) {
+                LOG_ERROR("LiveVideoPlugin", QString("PTZ command failed: %1").arg(error));
+            }
+        });
+    } else if (command == "add_preset") {
+        apiPath = QString("/api/v1/channels/%1/%2/ptz/presets").arg(deviceTag, channelTag);
+        QJsonObject body;
+        body["name"] = value.toString();
+        ServerApi::instance()->post(apiPath, body, [this](bool success, const QJsonObject& resp, const QString& error) {
+            if (!success) {
+                LOG_ERROR("LiveVideoPlugin", QString("Add preset failed: %1").arg(error));
+            } else {
+                LOG_INFO("LiveVideoPlugin", "Preset added successfully");
+                emit m_ptzPanel->loadPresets(m_videoContainer->getSelectedItemId());
+            }
+        });
+    } else if (command == "delete_preset") {
+        apiPath = QString("/api/v1/channels/%1/%2/ptz/presets/%3").arg(deviceTag, channelTag, value.toString());
+        ServerApi::instance()->deleteResource(apiPath, [this](bool success, const QJsonObject& resp, const QString& error) {
+            if (!success) {
+                LOG_ERROR("LiveVideoPlugin", QString("Delete preset failed: %1").arg(error));
+            } else {
+                LOG_INFO("LiveVideoPlugin", "Preset deleted successfully");
+                emit m_ptzPanel->loadPresets(m_videoContainer->getSelectedItemId());
+            }
+        });
+    } else if (command == "preset") {
+        apiPath = QString("/api/v1/channels/%1/%2/ptz/presets/%3/goto").arg(deviceTag, channelTag, value.toString());
+        ServerApi::instance()->get(apiPath, [this](bool success, const QJsonObject& resp, const QString& error) {
+            if (!success) {
+                LOG_ERROR("LiveVideoPlugin", QString("Goto preset failed: %1").arg(error));
+            }
+        });
+    } else {
+        LOG_WARNING("LiveVideoPlugin", QString("Unknown PTZ command: %1").arg(command));
     }
 }
 

@@ -2,6 +2,7 @@
 #include <QDir>
 #include <QTextCodec>
 #include <QStyleFactory>
+#include <QTranslator>
 #include <csignal>
 
 #include <curl/curl.h>
@@ -14,6 +15,8 @@
 
 #if defined(Q_OS_WIN)
     #include <windows.h>
+    #include <io.h>
+    #include <fcntl.h>
 #endif
 
 using rustcam::App;
@@ -34,10 +37,38 @@ void setupSignalHandlers()
     });
 #endif
 }
+#if defined(Q_OS_WIN)
+static void forceConsole() {
+    // 已经有控制台就别折腾
+    if (GetConsoleWindow() != nullptr) {
+        return;
+    }
 
+    if (AllocConsole()) {
+        // 用 freopen 统一重定向 C 流
+        FILE* f = nullptr;
+        freopen_s(&f, "CONOUT$", "w", stdout);
+        freopen_s(&f, "CONOUT$", "w", stderr);
+        freopen_s(&f, "CONIN$", "r", stdin);
+
+        // 让 C++ 流与 C 流同步（默认就是 true，这里显式一下更稳）
+        std::ios::sync_with_stdio(true);
+
+        // 关闭缓冲，调试时立刻可见
+        setvbuf(stdout, nullptr, _IONBF, 0);
+        setvbuf(stderr, nullptr, _IONBF, 0);
+        std::cout.setf(std::ios::unitbuf);
+        std::cerr.setf(std::ios::unitbuf);
+
+        std::cout << "Console allocated." << std::endl;
+    }
+}
+#endif
 int main(int argc, char* argv[])
 {
-
+#if defined(Q_OS_WIN)
+    forceConsole();
+#endif
     QTextCodec::setCodecForLocale(QTextCodec::codecForName("UTF-8"));
 
     QApplication app(argc, argv);
@@ -50,6 +81,20 @@ int main(int argc, char* argv[])
         qWarning() << "Failed to set working directory:" << appDir;
     }
 
+    QTranslator translator;
+    QStringList translationPaths = {
+        appDir + "/translations/zh_CN.qm",
+        appDir + "/../translations/zh_CN.qm",
+        ":/translations/zh_CN.qm"
+    };
+    for (const QString& path : translationPaths) {
+        if (translator.load(path)) {
+            app.installTranslator(&translator);
+            qDebug() << "Loaded translation from:" << path;
+            break;
+        }
+    }
+
     app.setAttribute(Qt::AA_UseHighDpiPixmaps);
     app.setAttribute(Qt::AA_EnableHighDpiScaling);
 
@@ -59,7 +104,7 @@ int main(int argc, char* argv[])
     std::string log_path = "./logs";
     BridgePlayer::Logger::instance().init(log_path, BridgePlayer::LogLevel::TRACE,
                                         BridgePlayer::Logger::Mode::ASYNC, true);
-
+    APP_LOG_STREAM(BridgePlayer::LogLevel::DEBUG) << "init bridge player logger!";
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
     BridgePlayer::GlobalContext::instance().install();

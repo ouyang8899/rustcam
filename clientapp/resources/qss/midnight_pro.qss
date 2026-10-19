@@ -85,6 +85,31 @@ QComboBox:hover {
     border-color: @accent;
 }
 
+QComboBox#themeCombo {
+    background-color: @secondary_bg;
+    border: 1px solid @border;
+    border-radius: 4px;
+    padding: 4px 24px 4px 8px;
+    color: @text_primary;
+    min-width: 120px;
+}
+
+QComboBox#themeCombo::drop-down {
+    border: none;
+    width: 20px;
+    subcontrol-origin: padding;
+    subcontrol-position: right center;
+}
+
+QComboBox#themeCombo QAbstractItemView {
+    background-color: @secondary_bg;
+    border: 1px solid @border;
+    color: @text_primary;
+    selection-background-color: @accent;
+    show-decoration-selected: true;
+    min-height: 80px;
+}
+
 QMenuBar {
     background-color: @primary_bg;
     border-bottom: 1px solid @border;
@@ -154,6 +179,23 @@ QToolButton#navIconButton:hover {
 
 QToolButton#navIconButton:checked {
     background-color: rgba(0, 120, 212, 0.20);
+}
+
+QWidget#PTZControlPanel QToolButton:hover {
+    background-color: rgba(0, 120, 212, 0.25);
+}
+
+QWidget#PTZControlPanel QToolButton:pressed {
+    background-color: rgba(0, 120, 212, 0.35);
+}
+
+QToolButton#btnCenter:hover {
+    background-color: rgba(0, 120, 212, 0.25);
+}
+
+QLabel#userLabel {
+    color: @text_primary;
+    padding: 0 8px;
 }
 
 QWidget#navIconBar {
@@ -586,14 +628,206 @@ QToolBar#VideoToolbar QComboBox {
 }
 
 #VideoPlayer {
-    border: 1px solid @border;
-    background-color: @primary_bg;
+    border: none;
+    background-color: #1a1a1a;
 }
 
+#VideoPlayer #NoSignalIcon{
+    background-color: transparent;
+}
+
+#VideoPlayerToolbar {
+    background-color: rgba(0, 0, 0, 180);
+}
+
+#VideoPlayerToolbar #ToolbarButton {
+    background-color: transparent;
+    border: none;
+    padding: 4px;
+    color: @text_primary;
+}
+
+#VideoPlayerToolbar #ToolbarButton:hover {
+    background-color: @hover_bg;
+    border-radius: 4px;
+}
+
+#VideoPlayerToolbar #ToolbarButton:pressed {
+    background-color: @accent_pressed;
+    border-radius: 4px;
+}
+
+#VideoPlayerToolbar #ToolbarButton:checked {
+    background-color: @accent;
+    border-radius: 4px;
+}
+
+#VideoPlayerToolbar #VideoPlayerToolbarWidget {
+    background-color: transparent;
+}
 #videoArea {
-    background-color: @primary_bg;
+    background-color: #2a2a2a;
+}
+
+LayoutNavButton {
+    border: 1px solid @border;
+    border-radius: 4px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #333, stop:1 #222);
+}
+
+LayoutNavButton:hover {
+    border: 1px solid #888;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #444, stop:1 #333);
+}
+
+LayoutNavButton:pressed {
+    border: 1px solid @accent;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @accent, stop:1 @accent_pressed);
 }
 
 #navBar {
     background-color: @secondary_bg;
+}
+
+/* Settings Widget Styles */
+QTabWidget#settingsTabs::pane {
+    background-color: @secondary_bg;
+    border: 1px solid @border;
+    border-radius: 4px;
+    padding: 16px;
+}
+
+QTabWidget#settingsTabs QTabBar::tab {
+    background-color: @primary_bg;
+    color: @text_secondary;
+    padding: 10px 20px;
+    border: 1px solid @border;
+    border-bottom: none;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+}
+
+QTabWidget#settingsTabs QTabBar::tab:selected {
+    background-color: @secondary_bg;
+    color: @text_primary;
+    border-color: @border;
+    border-bottom: 1px solid @secondary_bg;
+}
+
+QTabWidget#settingsTabs QTabBar::tab:hover {
+    background-color: @hover_bg;
+}
+
+QCheckBox {
+    color: @text_primary;
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    spacing: 8px;
+}
+
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border: 1px solid @border;
+    background-color: @primary_bg;
+}
+
+QCheckBox::indicator:checked {
+    background-color: @accent;
+    border-color: @accent;
+    image: url(:/icons/check.svg);
+}
+
+QCheckBox::indicator:unchecked:hover {
+    border-color: @accent;
+}
+
+QSpinBox {
+    background-color: @primary_bg;
+    border: 1px solid @border;
+    border-radius: 4px;
+    padding: 6px;
+    color: @text_primary;
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+}
+
+QSpinBox:focus {
+    border-color: @accent;
+}
+
+QSpinBox::up-button, QSpinBox::down-button {
+    background-color: @secondary_bg;
+    border: none;
+    width: 20px;
+    border-radius: 2px;
+}
+
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+    background-color: @accent;
+}
+
+QSpinBox::up-arrow {
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-bottom: 6px solid @text_primary;
+}
+
+QSpinBox::down-arrow {
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 6px solid @text_primary;
+}
+
+QListWidget {
+    background-color: @primary_bg;
+    border: 1px solid @border;
+    border-radius: 4px;
+    color: @text_primary;
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    padding: 4px;
+}
+
+QListWidget::item {
+    padding: 8px 12px;
+    border-radius: 4px;
+    background-color: transparent;
+}
+
+QListWidget::item:hover {
+    background-color: @hover_bg;
+}
+
+QListWidget::item:selected {
+    background-color: @selected_bg;
+    color: @text_primary;
+}
+
+QGroupBox {
+    border: 1px solid @border;
+    border-radius: 4px;
+    margin-top: 12px;
+    padding-top: 12px;
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    color: @text_primary;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 12px;
+    padding: 0 8px;
+    color: @text_primary;
+}
+
+#colorPreviewLabel {
+    border: 1px solid @border;
+    border-radius: 4px;
+    min-width: 60px;
+    min-height: 24px;
+    background-color: @primary_bg;
+}
+
+SettingsWidget QLabel {
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
 }

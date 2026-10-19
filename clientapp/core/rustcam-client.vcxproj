@@ -1,0 +1,545 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MinSizeRel|x64">
+      <Configuration>MinSizeRel</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="RelWithDebInfo|x64">
+      <Configuration>RelWithDebInfo</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{50DEBD7F-9399-363D-88A3-A062261565B8}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <Platform>x64</Platform>
+    <ProjectName>rustcam-client</ProjectName>
+    <VCProjectUpgraderObjectName>NoUpgrade</VCProjectUpgraderObjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v142</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v142</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v142</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v142</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\RustCam-Media\clientapp\bin\Debug\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">rustcam-client.dir\Debug\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">rustcam-client</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\RustCam-Media\clientapp\bin\Release\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">rustcam-client.dir\Release\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">rustcam-client</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|x64'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\RustCam-Media\clientapp\bin\MinSizeRel\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">rustcam-client.dir\MinSizeRel\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">rustcam-client</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\RustCam-Media\clientapp\bin\RelWithDebInfo\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">rustcam-client.dir\RelWithDebInfo\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">rustcam-client</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">true</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">true</GenerateManifest>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>D:\RustCam-Media\clientapp\core\rustcam-client_autogen\include_Debug;D:\RustCam-Media\clientapp\core;D:\RustCam-Media\clientapp\common;D:\RustCam-Media\clientapp\interfaces;D:\RustCam-Media\clientapp;D:\RustCam-Media\clientapp\3rd_party\CURL\include;D:\RustCam-Media\clientapp\3rd_party\openssl\include;D:\RustCam-Media\clientapp\3rd_party\SQLITE3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "E:/qt/5.15.2/msvc2019_64/include" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtCore" /external:I "E:/qt/5.15.2/msvc2019_64/./mkspecs/win32-msvc" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtWidgets" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtGui" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtANGLE" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtNetwork" /utf-8</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <FloatingPointModel></FloatingPointModel>
+      <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
+      <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>Disabled</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RemoveUnreferencedCodeData></RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;BOOST_ALL_NO_LIB;QT_CORE_LIB;QT_WIDGETS_LIB;QT_GUI_LIB;QT_NETWORK_LIB;CMAKE_INTDIR="Debug"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;BOOST_ALL_NO_LIB;QT_CORE_LIB;QT_WIDGETS_LIB;QT_GUI_LIB;QT_NETWORK_LIB;CMAKE_INTDIR=\"Debug\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>D:\RustCam-Media\clientapp\core\rustcam-client_autogen\include_Debug;D:\RustCam-Media\clientapp\core;D:\RustCam-Media\clientapp\common;D:\RustCam-Media\clientapp\interfaces;D:\RustCam-Media\clientapp;D:\RustCam-Media\clientapp\3rd_party\CURL\include;D:\RustCam-Media\clientapp\3rd_party\openssl\include;D:\RustCam-Media\clientapp\3rd_party\SQLITE3\include;E:\qt\5.15.2\msvc2019_64\include;E:\qt\5.15.2\msvc2019_64\include\QtCore;E:\qt\5.15.2\msvc2019_64\.\mkspecs\win32-msvc;E:\qt\5.15.2\msvc2019_64\include\QtWidgets;E:\qt\5.15.2\msvc2019_64\include\QtGui;E:\qt\5.15.2\msvc2019_64\include\QtANGLE;E:\qt\5.15.2\msvc2019_64\include\QtNetwork;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>D:\RustCam-Media\clientapp\core\rustcam-client_autogen\include_Debug;D:\RustCam-Media\clientapp\core;D:\RustCam-Media\clientapp\common;D:\RustCam-Media\clientapp\interfaces;D:\RustCam-Media\clientapp;D:\RustCam-Media\clientapp\3rd_party\CURL\include;D:\RustCam-Media\clientapp\3rd_party\openssl\include;D:\RustCam-Media\clientapp\3rd_party\SQLITE3\include;E:\qt\5.15.2\msvc2019_64\include;E:\qt\5.15.2\msvc2019_64\include\QtCore;E:\qt\5.15.2\msvc2019_64\.\mkspecs\win32-msvc;E:\qt\5.15.2\msvc2019_64\include\QtWidgets;E:\qt\5.15.2\msvc2019_64\include\QtGui;E:\qt\5.15.2\msvc2019_64\include\QtANGLE;E:\qt\5.15.2\msvc2019_64\include\QtNetwork;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>..\lib\Debug\common.lib;E:\qt\5.15.2\msvc2019_64\lib\Qt5Widgetsd.lib;E:\qt\5.15.2\msvc2019_64\lib\Qt5Networkd.lib;..\3rd_party\CURL\lib\libcurl_imp.lib;..\3rd_party\openssl\lib\libssl.lib;..\3rd_party\openssl\lib\libcrypto.lib;..\3rd_party\SQLITE3\lib\sqlite3.lib;E:\qt\5.15.2\msvc2019_64\lib\Qt5Guid.lib;E:\qt\5.15.2\msvc2019_64\lib\Qt5Cored.lib;E:\qt\5.15.2\msvc2019_64\lib\qtmaind.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <DataExecutionPrevention></DataExecutionPrevention>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
+      <ImportLibrary>D:/RustCam-Media/clientapp/lib/Debug/rustcam-client.lib</ImportLibrary>
+      <LinkErrorReporting></LinkErrorReporting>
+      <ProgramDataBaseFile>D:/RustCam-Media/clientapp/bin/Debug/rustcam-client.pdb</ProgramDataBaseFile>
+      <RandomizedBaseAddress></RandomizedBaseAddress>
+      <SubSystem>Windows</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>D:\RustCam-Media\clientapp\core\rustcam-client_autogen\include_Release;D:\RustCam-Media\clientapp\core;D:\RustCam-Media\clientapp\common;D:\RustCam-Media\clientapp\interfaces;D:\RustCam-Media\clientapp;D:\RustCam-Media\clientapp\3rd_party\CURL\include;D:\RustCam-Media\clientapp\3rd_party\openssl\include;D:\RustCam-Media\clientapp\3rd_party\SQLITE3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "E:/qt/5.15.2/msvc2019_64/include" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtCore" /external:I "E:/qt/5.15.2/msvc2019_64/./mkspecs/win32-msvc" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtWidgets" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtGui" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtANGLE" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtNetwork" /utf-8</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <FloatingPointModel></FloatingPointModel>
+      <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RemoveUnreferencedCodeData></RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;BOOST_ALL_NO_LIB;QT_CORE_LIB;QT_NO_DEBUG;QT_WIDGETS_LIB;QT_GUI_LIB;QT_NETWORK_LIB;CMAKE_INTDIR="Release"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;BOOST_ALL_NO_LIB;QT_CORE_LIB;QT_NO_DEBUG;QT_WIDGETS_LIB;QT_GUI_LIB;QT_NETWORK_LIB;CMAKE_INTDIR=\"Release\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>D:\RustCam-Media\clientapp\core\rustcam-client_autogen\include_Release;D:\RustCam-Media\clientapp\core;D:\RustCam-Media\clientapp\common;D:\RustCam-Media\clientapp\interfaces;D:\RustCam-Media\clientapp;D:\RustCam-Media\clientapp\3rd_party\CURL\include;D:\RustCam-Media\clientapp\3rd_party\openssl\include;D:\RustCam-Media\clientapp\3rd_party\SQLITE3\include;E:\qt\5.15.2\msvc2019_64\include;E:\qt\5.15.2\msvc2019_64\include\QtCore;E:\qt\5.15.2\msvc2019_64\.\mkspecs\win32-msvc;E:\qt\5.15.2\msvc2019_64\include\QtWidgets;E:\qt\5.15.2\msvc2019_64\include\QtGui;E:\qt\5.15.2\msvc2019_64\include\QtANGLE;E:\qt\5.15.2\msvc2019_64\include\QtNetwork;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>D:\RustCam-Media\clientapp\core\rustcam-client_autogen\include_Release;D:\RustCam-Media\clientapp\core;D:\RustCam-Media\clientapp\common;D:\RustCam-Media\clientapp\interfaces;D:\RustCam-Media\clientapp;D:\RustCam-Media\clientapp\3rd_party\CURL\include;D:\RustCam-Media\clientapp\3rd_party\openssl\include;D:\RustCam-Media\clientapp\3rd_party\SQLITE3\include;E:\qt\5.15.2\msvc2019_64\include;E:\qt\5.15.2\msvc2019_64\include\QtCore;E:\qt\5.15.2\msvc2019_64\.\mkspecs\win32-msvc;E:\qt\5.15.2\msvc2019_64\include\QtWidgets;E:\qt\5.15.2\msvc2019_64\include\QtGui;E:\qt\5.15.2\msvc2019_64\include\QtANGLE;E:\qt\5.15.2\msvc2019_64\include\QtNetwork;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>..\lib\Release\common.lib;E:\qt\5.15.2\msvc2019_64\lib\Qt5Widgets.lib;E:\qt\5.15.2\msvc2019_64\lib\Qt5Network.lib;..\3rd_party\CURL\lib\libcurl_imp.lib;..\3rd_party\openssl\lib\libssl.lib;..\3rd_party\openssl\lib\libcrypto.lib;..\3rd_party\SQLITE3\lib\sqlite3.lib;E:\qt\5.15.2\msvc2019_64\lib\Qt5Gui.lib;E:\qt\5.15.2\msvc2019_64\lib\Qt5Core.lib;E:\qt\5.15.2\msvc2019_64\lib\qtmain.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <DataExecutionPrevention></DataExecutionPrevention>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
+      <ImportLibrary>D:/RustCam-Media/clientapp/lib/Release/rustcam-client.lib</ImportLibrary>
+      <LinkErrorReporting></LinkErrorReporting>
+      <ProgramDataBaseFile>D:/RustCam-Media/clientapp/bin/Release/rustcam-client.pdb</ProgramDataBaseFile>
+      <RandomizedBaseAddress></RandomizedBaseAddress>
+      <SubSystem>Windows</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>D:\RustCam-Media\clientapp\core\rustcam-client_autogen\include_MinSizeRel;D:\RustCam-Media\clientapp\core;D:\RustCam-Media\clientapp\common;D:\RustCam-Media\clientapp\interfaces;D:\RustCam-Media\clientapp;D:\RustCam-Media\clientapp\3rd_party\CURL\include;D:\RustCam-Media\clientapp\3rd_party\openssl\include;D:\RustCam-Media\clientapp\3rd_party\SQLITE3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "E:/qt/5.15.2/msvc2019_64/include" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtCore" /external:I "E:/qt/5.15.2/msvc2019_64/./mkspecs/win32-msvc" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtWidgets" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtGui" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtANGLE" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtNetwork" /utf-8</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <FloatingPointModel></FloatingPointModel>
+      <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MinSpace</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RemoveUnreferencedCodeData></RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;BOOST_ALL_NO_LIB;QT_CORE_LIB;QT_NO_DEBUG;QT_WIDGETS_LIB;QT_GUI_LIB;QT_NETWORK_LIB;CMAKE_INTDIR="MinSizeRel"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;BOOST_ALL_NO_LIB;QT_CORE_LIB;QT_NO_DEBUG;QT_WIDGETS_LIB;QT_GUI_LIB;QT_NETWORK_LIB;CMAKE_INTDIR=\"MinSizeRel\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>D:\RustCam-Media\clientapp\core\rustcam-client_autogen\include_MinSizeRel;D:\RustCam-Media\clientapp\core;D:\RustCam-Media\clientapp\common;D:\RustCam-Media\clientapp\interfaces;D:\RustCam-Media\clientapp;D:\RustCam-Media\clientapp\3rd_party\CURL\include;D:\RustCam-Media\clientapp\3rd_party\openssl\include;D:\RustCam-Media\clientapp\3rd_party\SQLITE3\include;E:\qt\5.15.2\msvc2019_64\include;E:\qt\5.15.2\msvc2019_64\include\QtCore;E:\qt\5.15.2\msvc2019_64\.\mkspecs\win32-msvc;E:\qt\5.15.2\msvc2019_64\include\QtWidgets;E:\qt\5.15.2\msvc2019_64\include\QtGui;E:\qt\5.15.2\msvc2019_64\include\QtANGLE;E:\qt\5.15.2\msvc2019_64\include\QtNetwork;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>D:\RustCam-Media\clientapp\core\rustcam-client_autogen\include_MinSizeRel;D:\RustCam-Media\clientapp\core;D:\RustCam-Media\clientapp\common;D:\RustCam-Media\clientapp\interfaces;D:\RustCam-Media\clientapp;D:\RustCam-Media\clientapp\3rd_party\CURL\include;D:\RustCam-Media\clientapp\3rd_party\openssl\include;D:\RustCam-Media\clientapp\3rd_party\SQLITE3\include;E:\qt\5.15.2\msvc2019_64\include;E:\qt\5.15.2\msvc2019_64\include\QtCore;E:\qt\5.15.2\msvc2019_64\.\mkspecs\win32-msvc;E:\qt\5.15.2\msvc2019_64\include\QtWidgets;E:\qt\5.15.2\msvc2019_64\include\QtGui;E:\qt\5.15.2\msvc2019_64\include\QtANGLE;E:\qt\5.15.2\msvc2019_64\include\QtNetwork;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>..\lib\MinSizeRel\common.lib;E:\qt\5.15.2\msvc2019_64\lib\Qt5Widgets.lib;E:\qt\5.15.2\msvc2019_64\lib\Qt5Network.lib;..\3rd_party\CURL\lib\libcurl_imp.lib;..\3rd_party\openssl\lib\libssl.lib;..\3rd_party\openssl\lib\libcrypto.lib;..\3rd_party\SQLITE3\lib\sqlite3.lib;E:\qt\5.15.2\msvc2019_64\lib\Qt5Gui.lib;E:\qt\5.15.2\msvc2019_64\lib\Qt5Core.lib;E:\qt\5.15.2\msvc2019_64\lib\qtmain.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <DataExecutionPrevention></DataExecutionPrevention>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
+      <ImportLibrary>D:/RustCam-Media/clientapp/lib/MinSizeRel/rustcam-client.lib</ImportLibrary>
+      <LinkErrorReporting></LinkErrorReporting>
+      <ProgramDataBaseFile>D:/RustCam-Media/clientapp/bin/MinSizeRel/rustcam-client.pdb</ProgramDataBaseFile>
+      <RandomizedBaseAddress></RandomizedBaseAddress>
+      <SubSystem>Windows</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>D:\RustCam-Media\clientapp\core\rustcam-client_autogen\include_RelWithDebInfo;D:\RustCam-Media\clientapp\core;D:\RustCam-Media\clientapp\common;D:\RustCam-Media\clientapp\interfaces;D:\RustCam-Media\clientapp;D:\RustCam-Media\clientapp\3rd_party\CURL\include;D:\RustCam-Media\clientapp\3rd_party\openssl\include;D:\RustCam-Media\clientapp\3rd_party\SQLITE3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "E:/qt/5.15.2/msvc2019_64/include" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtCore" /external:I "E:/qt/5.15.2/msvc2019_64/./mkspecs/win32-msvc" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtWidgets" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtGui" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtANGLE" /external:I "E:/qt/5.15.2/msvc2019_64/include/QtNetwork" /utf-8</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <FloatingPointModel></FloatingPointModel>
+      <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MinimalRebuild></MinimalRebuild>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RemoveUnreferencedCodeData></RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <SupportJustMyCode></SupportJustMyCode>
+      <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;BOOST_ALL_NO_LIB;QT_CORE_LIB;QT_NO_DEBUG;QT_WIDGETS_LIB;QT_GUI_LIB;QT_NETWORK_LIB;CMAKE_INTDIR="RelWithDebInfo"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;BOOST_ALL_NO_LIB;QT_CORE_LIB;QT_NO_DEBUG;QT_WIDGETS_LIB;QT_GUI_LIB;QT_NETWORK_LIB;CMAKE_INTDIR=\"RelWithDebInfo\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>D:\RustCam-Media\clientapp\core\rustcam-client_autogen\include_RelWithDebInfo;D:\RustCam-Media\clientapp\core;D:\RustCam-Media\clientapp\common;D:\RustCam-Media\clientapp\interfaces;D:\RustCam-Media\clientapp;D:\RustCam-Media\clientapp\3rd_party\CURL\include;D:\RustCam-Media\clientapp\3rd_party\openssl\include;D:\RustCam-Media\clientapp\3rd_party\SQLITE3\include;E:\qt\5.15.2\msvc2019_64\include;E:\qt\5.15.2\msvc2019_64\include\QtCore;E:\qt\5.15.2\msvc2019_64\.\mkspecs\win32-msvc;E:\qt\5.15.2\msvc2019_64\include\QtWidgets;E:\qt\5.15.2\msvc2019_64\include\QtGui;E:\qt\5.15.2\msvc2019_64\include\QtANGLE;E:\qt\5.15.2\msvc2019_64\include\QtNetwork;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>D:\RustCam-Media\clientapp\core\rustcam-client_autogen\include_RelWithDebInfo;D:\RustCam-Media\clientapp\core;D:\RustCam-Media\clientapp\common;D:\RustCam-Media\clientapp\interfaces;D:\RustCam-Media\clientapp;D:\RustCam-Media\clientapp\3rd_party\CURL\include;D:\RustCam-Media\clientapp\3rd_party\openssl\include;D:\RustCam-Media\clientapp\3rd_party\SQLITE3\include;E:\qt\5.15.2\msvc2019_64\include;E:\qt\5.15.2\msvc2019_64\include\QtCore;E:\qt\5.15.2\msvc2019_64\.\mkspecs\win32-msvc;E:\qt\5.15.2\msvc2019_64\include\QtWidgets;E:\qt\5.15.2\msvc2019_64\include\QtGui;E:\qt\5.15.2\msvc2019_64\include\QtANGLE;E:\qt\5.15.2\msvc2019_64\include\QtNetwork;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Link>
+      <AdditionalDependencies>..\lib\RelWithDebInfo\common.lib;E:\qt\5.15.2\msvc2019_64\lib\Qt5Widgets.lib;E:\qt\5.15.2\msvc2019_64\lib\Qt5Network.lib;..\3rd_party\CURL\lib\libcurl_imp.lib;..\3rd_party\openssl\lib\libssl.lib;..\3rd_party\openssl\lib\libcrypto.lib;..\3rd_party\SQLITE3\lib\sqlite3.lib;E:\qt\5.15.2\msvc2019_64\lib\Qt5Gui.lib;E:\qt\5.15.2\msvc2019_64\lib\Qt5Core.lib;E:\qt\5.15.2\msvc2019_64\lib\qtmain.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <DataExecutionPrevention></DataExecutionPrevention>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
+      <ImportLibrary>D:/RustCam-Media/clientapp/lib/RelWithDebInfo/rustcam-client.lib</ImportLibrary>
+      <LinkErrorReporting></LinkErrorReporting>
+      <ProgramDataBaseFile>D:/RustCam-Media/clientapp/bin/RelWithDebInfo/rustcam-client.pdb</ProgramDataBaseFile>
+      <RandomizedBaseAddress></RandomizedBaseAddress>
+      <SubSystem>Windows</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\RustCam-Media\clientapp\CMakeFiles\cecbe4ad1670fd352eb7d334779baaf5\timestamp.rule">
+      <UseUtf8Encoding>Always</UseUtf8Encoding>
+      <BuildInParallel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</BuildInParallel>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Automatic MOC and UIC for target rustcam-client</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+cd D:\RustCam-Media\clientapp\core
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E cmake_autogen D:/RustCam-Media/clientapp/core/CMakeFiles/rustcam-client_autogen.dir/AutogenInfo.json Debug
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/RustCam-Media/clientapp/core/rustcam-client_autogen/timestamp
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E cmake_transform_depfile "Visual Studio 16 2019" MSBuildAdditionalInputs D:/RustCam-Media/clientapp D:/RustCam-Media/clientapp/core D:/RustCam-Media/clientapp D:/RustCam-Media/clientapp/core D:/RustCam-Media/clientapp/core/rustcam-client_autogen/deps D:/RustCam-Media/clientapp/CMakeFiles/d/4a7fa1ae6cbc7d2c1f6fa412b8034d380a132eeb9c71e1ac4e536e1ca2f7e12d.AdditionalInputs
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">E:\qt\5.15.2\msvc2019_64\bin\moc.exe;E:\qt\5.15.2\msvc2019_64\bin\uic.exe;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\RustCam-Media\clientapp\core\rustcam-client_autogen\timestamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <DepFileAdditionalInputsFile Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\RustCam-Media\clientapp\CMakeFiles\d\4a7fa1ae6cbc7d2c1f6fa412b8034d380a132eeb9c71e1ac4e536e1ca2f7e12d.AdditionalInputs</DepFileAdditionalInputsFile>
+      <BuildInParallel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</BuildInParallel>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Automatic MOC and UIC for target rustcam-client</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+cd D:\RustCam-Media\clientapp\core
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E cmake_autogen D:/RustCam-Media/clientapp/core/CMakeFiles/rustcam-client_autogen.dir/AutogenInfo.json Release
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/RustCam-Media/clientapp/core/rustcam-client_autogen/timestamp
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E cmake_transform_depfile "Visual Studio 16 2019" MSBuildAdditionalInputs D:/RustCam-Media/clientapp D:/RustCam-Media/clientapp/core D:/RustCam-Media/clientapp D:/RustCam-Media/clientapp/core D:/RustCam-Media/clientapp/core/rustcam-client_autogen/deps D:/RustCam-Media/clientapp/CMakeFiles/d/4a7fa1ae6cbc7d2c1f6fa412b8034d380a132eeb9c71e1ac4e536e1ca2f7e12d.AdditionalInputs
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">E:\qt\5.15.2\msvc2019_64\bin\moc.exe;E:\qt\5.15.2\msvc2019_64\bin\uic.exe;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\RustCam-Media\clientapp\core\rustcam-client_autogen\timestamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <DepFileAdditionalInputsFile Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\RustCam-Media\clientapp\CMakeFiles\d\4a7fa1ae6cbc7d2c1f6fa412b8034d380a132eeb9c71e1ac4e536e1ca2f7e12d.AdditionalInputs</DepFileAdditionalInputsFile>
+      <BuildInParallel Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">true</BuildInParallel>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Automatic MOC and UIC for target rustcam-client</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+cd D:\RustCam-Media\clientapp\core
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E cmake_autogen D:/RustCam-Media/clientapp/core/CMakeFiles/rustcam-client_autogen.dir/AutogenInfo.json MinSizeRel
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/RustCam-Media/clientapp/core/rustcam-client_autogen/timestamp
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E cmake_transform_depfile "Visual Studio 16 2019" MSBuildAdditionalInputs D:/RustCam-Media/clientapp D:/RustCam-Media/clientapp/core D:/RustCam-Media/clientapp D:/RustCam-Media/clientapp/core D:/RustCam-Media/clientapp/core/rustcam-client_autogen/deps D:/RustCam-Media/clientapp/CMakeFiles/d/4a7fa1ae6cbc7d2c1f6fa412b8034d380a132eeb9c71e1ac4e536e1ca2f7e12d.AdditionalInputs
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">E:\qt\5.15.2\msvc2019_64\bin\moc.exe;E:\qt\5.15.2\msvc2019_64\bin\uic.exe;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\RustCam-Media\clientapp\core\rustcam-client_autogen\timestamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <DepFileAdditionalInputsFile Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\RustCam-Media\clientapp\CMakeFiles\d\4a7fa1ae6cbc7d2c1f6fa412b8034d380a132eeb9c71e1ac4e536e1ca2f7e12d.AdditionalInputs</DepFileAdditionalInputsFile>
+      <BuildInParallel Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">true</BuildInParallel>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Automatic MOC and UIC for target rustcam-client</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+cd D:\RustCam-Media\clientapp\core
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E cmake_autogen D:/RustCam-Media/clientapp/core/CMakeFiles/rustcam-client_autogen.dir/AutogenInfo.json RelWithDebInfo
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/RustCam-Media/clientapp/core/rustcam-client_autogen/timestamp
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E cmake_transform_depfile "Visual Studio 16 2019" MSBuildAdditionalInputs D:/RustCam-Media/clientapp D:/RustCam-Media/clientapp/core D:/RustCam-Media/clientapp D:/RustCam-Media/clientapp/core D:/RustCam-Media/clientapp/core/rustcam-client_autogen/deps D:/RustCam-Media/clientapp/CMakeFiles/d/4a7fa1ae6cbc7d2c1f6fa412b8034d380a132eeb9c71e1ac4e536e1ca2f7e12d.AdditionalInputs
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">E:\qt\5.15.2\msvc2019_64\bin\moc.exe;E:\qt\5.15.2\msvc2019_64\bin\uic.exe;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\RustCam-Media\clientapp\core\rustcam-client_autogen\timestamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+      <DepFileAdditionalInputsFile Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\RustCam-Media\clientapp\CMakeFiles\d\4a7fa1ae6cbc7d2c1f6fa412b8034d380a132eeb9c71e1ac4e536e1ca2f7e12d.AdditionalInputs</DepFileAdditionalInputsFile>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\RustCam-Media\clientapp\core\CMakeLists.txt">
+      <UseUtf8Encoding>Always</UseUtf8Encoding>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule D:/RustCam-Media/clientapp/core/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/RustCam-Media/clientapp -BD:/RustCam-Media/clientapp --check-stamp-file D:/RustCam-Media/clientapp/core/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\RustCam-Media\clientapp\core\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Building Custom Rule D:/RustCam-Media/clientapp/core/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/RustCam-Media/clientapp -BD:/RustCam-Media/clientapp --check-stamp-file D:/RustCam-Media/clientapp/core/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\RustCam-Media\clientapp\core\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Building Custom Rule D:/RustCam-Media/clientapp/core/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/RustCam-Media/clientapp -BD:/RustCam-Media/clientapp --check-stamp-file D:/RustCam-Media/clientapp/core/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\RustCam-Media\clientapp\core\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Building Custom Rule D:/RustCam-Media/clientapp/core/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/RustCam-Media/clientapp -BD:/RustCam-Media/clientapp --check-stamp-file D:/RustCam-Media/clientapp/core/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\RustCam-Media\clientapp\core\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\rustcam-client_autogen\mocs_compilation_Debug.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\main.cpp" />
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\App.cpp" />
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\MainWindow.cpp" />
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\EventBus.cpp" />
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\ConfigManager.cpp" />
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\ThemeManager.cpp" />
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\PluginManager.cpp" />
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\LeftNavigationBar.cpp" />
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\SessionManager.cpp" />
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\ServerConfig.cpp" />
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\SystemConfig.cpp" />
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\ServerApi.cpp" />
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\LoginWindow.cpp" />
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\ServerConfigDialog.cpp" />
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\device_tree\DeviceTree.cpp" />
+    <ClInclude Include="D:\RustCam-Media\clientapp\core\App.h" />
+    <ClInclude Include="D:\RustCam-Media\clientapp\core\MainWindow.h" />
+    <ClInclude Include="D:\RustCam-Media\clientapp\core\EventBus.h" />
+    <ClInclude Include="D:\RustCam-Media\clientapp\core\ConfigManager.h" />
+    <ClInclude Include="D:\RustCam-Media\clientapp\core\ThemeManager.h" />
+    <ClInclude Include="D:\RustCam-Media\clientapp\core\PluginManager.h" />
+    <ClInclude Include="D:\RustCam-Media\clientapp\core\LeftNavigationBar.h" />
+    <ClInclude Include="D:\RustCam-Media\clientapp\core\SessionManager.h" />
+    <ClInclude Include="D:\RustCam-Media\clientapp\core\ServerConfig.h" />
+    <ClInclude Include="D:\RustCam-Media\clientapp\core\SystemConfig.h" />
+    <ClInclude Include="D:\RustCam-Media\clientapp\core\ServerApi.h" />
+    <ClInclude Include="D:\RustCam-Media\clientapp\core\LoginWindow.h" />
+    <ClInclude Include="D:\RustCam-Media\clientapp\core\ServerConfigDialog.h" />
+    <ClInclude Include="D:\RustCam-Media\clientapp\core\device_tree\DeviceTree.h" />
+    <None Include="D:\RustCam-Media\clientapp\core\rustcam-client_autogen\timestamp">
+    </None>
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\rustcam-client_autogen\mocs_compilation_Release.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\rustcam-client_autogen\mocs_compilation_MinSizeRel.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="D:\RustCam-Media\clientapp\core\rustcam-client_autogen\mocs_compilation_RelWithDebInfo.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">true</ExcludedFromBuild>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup />
+  <ItemGroup>
+    <ProjectReference Include="D:\RustCam-Media\clientapp\ZERO_CHECK.vcxproj">
+      <Project>{BF6F1EAE-9F0E-35B5-9CE0-01E9F5167E0E}</Project>
+      <Name>ZERO_CHECK</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+    <ProjectReference Include="D:\RustCam-Media\clientapp\common\common.vcxproj">
+      <Project>{00A3564F-9744-32C0-A547-5CC019DDEE14}</Project>
+      <Name>common</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+  <Import Project="C:\Program Files\CMake\share\cmake-4.4\Templates\MSBuild\CustomBuildDepFile.targets" />
+</Project>

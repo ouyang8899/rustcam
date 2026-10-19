@@ -25,6 +25,7 @@ impl MediaServerAdapter for SrsAdapter {
     fn name(&self) -> &str { &self.config.name }
     fn tag(&self) -> &str { &self.config.server_tag }
     fn server_type(&self) -> &str { "srs" }
+    fn secret(&self) -> &str { &self.config.api_key }
 
     async fn is_online(&self) -> bool {
         let url = format!("{}/api/v1/summaries?api={}", self.base_url, self.config.api_key);

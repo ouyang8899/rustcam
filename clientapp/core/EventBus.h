@@ -4,18 +4,21 @@
 #include <QString>
 #include <QList>
 #include <QSharedPointer>
+#include <QVariantMap>
 #include <functional>
 #include "CoreExport.h"
 
 #define TOPIC_SESSION_LOGGED_IN "session/loggedIn"
 #define TOPIC_VIDEO_STREAM_REQUEST "video/stream/request"
 #define TOPIC_VIDEO_STREAM_STOP "video/stream/stop"
+#define TOPIC_VIDEO_CELL_SELECTED "video/cell/selected"
 #define TOPIC_DEVICE_ONLINE "device/online"
 #define TOPIC_DEVICE_OFFLINE "device/offline"
 #define TOPIC_ALARM_TRIGGERED "alarm/triggered"
 #define TOPIC_ALARM_ACKNOWLEDGED "alarm/acknowledged"
 #define TOPIC_MAP_FOCUS "map/focus"
 #define TOPIC_MAP_MARKER_ADD "map/marker/add"
+#define TOPIC_NOTIFICATION_SHOW "notification/show"
 
 namespace rustcam {
 
@@ -24,6 +27,10 @@ public:
     virtual ~EventResponse() = default;
 };
 
+class RUSTCAM_CORE_API EventData;
+
+using EventDataPtr = QSharedPointer<EventData>;
+
 class RUSTCAM_CORE_API EventData {
 public:
     virtual ~EventData() = default;
@@ -31,14 +38,16 @@ public:
     void setCallback(std::function<void(EventResponse*)> cb) { m_callback = cb; }
     void invokeCallback(EventResponse* resp) { if (m_callback) m_callback(resp); }
 
-    protected:
+    static EventDataPtr create() { return EventDataPtr(new EventData()); }
+
+    QVariantMap m_payload;
+
+protected:
     EventData() : m_callback(nullptr) {}
     explicit EventData(const QString& topic) : m_topic(topic), m_callback(nullptr) {}
     QString m_topic;
     std::function<void(EventResponse*)> m_callback;
 };
-
-using EventDataPtr = QSharedPointer<EventData>;
 
 class RUSTCAM_CORE_API EventBus : public QObject {
     Q_OBJECT

@@ -4,7 +4,9 @@
 #include "ConfigManager.h"
 #include "PluginManager.h"
 #include "ThemeManager.h"
+#include "SessionManager.h"
 #include "Logger.h"
+#include "NotificationWidget.h"
 #include "interfaces/IPlugin.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -29,7 +31,20 @@ MainWindow::MainWindow(QWidget* parent)
     setMinimumSize(1280, 720);
     resize(1600, 900);
 
+    NotificationWidget* notifier = new NotificationWidget();
+    notifier->hide();
+    Q_UNUSED(notifier);
+
     setupUi();
+
+    EventBus::instance()->subscribe(TOPIC_SESSION_LOGGED_IN, [this](const QString& topic, EventDataPtr) {
+        QMetaObject::invokeMethod(this, [this]() {
+            QJsonObject userInfo = SessionManager::instance()->userInfo();
+            if (!userInfo.isEmpty() && userInfo.contains("username")) {
+                m_userLabel->setText(userInfo["username"].toString());
+            }
+        }, Qt::QueuedConnection);
+    });
 }
 
 MainWindow::~MainWindow()
@@ -47,8 +62,6 @@ void MainWindow::setupUi()
     createToolBar();
     createWorkspace();
     createStatusBar();
-
-    restoreLayout();
 }
 
 void MainWindow::registerPlugins()
@@ -79,6 +92,8 @@ void MainWindow::registerPlugins()
 
     connect(m_navBar, &LeftNavigationBar::navigationChanged,
             this, &MainWindow::onNavigationChanged);
+
+    restoreLayout();
 }
 
 void MainWindow::createToolBar()
@@ -90,6 +105,39 @@ void MainWindow::createToolBar()
     addToolBar(Qt::TopToolBarArea, toolbar);
 
     toolbar->addWidget(new QLabel(" rustcam "));
+
+    QWidget* spacer = new QWidget();
+    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    toolbar->addWidget(spacer);
+
+    m_topRightWidget = new QWidget(toolbar);
+    QHBoxLayout* topRightLayout = new QHBoxLayout(m_topRightWidget);
+    topRightLayout->setContentsMargins(8, 2, 8, 2);
+    topRightLayout->setSpacing(16);
+
+    m_userLabel = new QLabel("Guest");
+    m_userLabel->setObjectName("userLabel");
+    topRightLayout->addWidget(m_userLabel);
+
+    QLabel* themeLabel = new QLabel(tr("Theme:"));
+    topRightLayout->addWidget(themeLabel);
+
+    m_themeCombo = new QComboBox();
+    m_themeCombo->setObjectName("themeCombo");
+    m_themeCombo->addItem("Midnight Pro", QVariant((int)ThemeManager::Theme::MidnightPro));
+    m_themeCombo->addItem("Arctic Clean", QVariant((int)ThemeManager::Theme::ArcticClean));
+    m_themeCombo->addItem("Obsidian Neon", QVariant((int)ThemeManager::Theme::ObsidianNeon));
+    topRightLayout->addWidget(m_themeCombo);
+
+    connect(m_themeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int index) {
+        if (index >= 0) {
+            ThemeManager::Theme theme = (ThemeManager::Theme)m_themeCombo->itemData(index).toInt();
+            ThemeManager::instance()->setTheme(theme);
+        }
+    });
+
+    toolbar->addWidget(m_topRightWidget);
 }
 
 void MainWindow::createWorkspace()
@@ -158,6 +206,7 @@ void MainWindow::restoreLayout()
     ConfigManager* cfg = ConfigManager::instance();
 
     QString currentNav = cfg->getValue("ui/nav", "currentItem", "live_video").toString();
+    m_navBar->setCurrentItem("");
     m_navBar->setCurrentItem(currentNav);
 
     restoreGeometry(cfg->getValue("ui", "geometry").toByteArray());
@@ -206,7 +255,9 @@ void MainWindow::switchToWorkspace(const QString& workspaceId)
 
 void MainWindow::onNavigationChanged(const QString& id)
 {
+    LOG_INFO("MainWindow", QString("onNavigationChanged: id=%1, contains=%2").arg(id).arg(m_workspaceIndices.contains(id)));
     if (m_workspaceIndices.contains(id)) {
+        LOG_INFO("MainWindow", QString("Switching to index: %1").arg(m_workspaceIndices[id]));
         m_workspaceStack->setCurrentIndex(m_workspaceIndices[id]);
     }
     emit layoutChanged();

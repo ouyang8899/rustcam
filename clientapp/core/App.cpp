@@ -48,11 +48,11 @@ bool App::initialize()
         return true;
     }
 
-#ifdef Q_OS_WIN
-    AllocConsole();
-    FILE* fp;
-    freopen_s(&fp, "CONOUT$", "w", stdout);
-#endif
+//#ifdef Q_OS_WIN
+//    AllocConsole();
+//    FILE* fp;
+//    freopen_s(&fp, "CONOUT$", "w", stdout);
+//#endif
 
     setupEnvironment();
     setupLogging();

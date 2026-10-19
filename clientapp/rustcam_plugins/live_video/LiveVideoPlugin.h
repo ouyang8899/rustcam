@@ -15,6 +15,8 @@
 #include "VideoPlayerContainer.h"
 #include "core/EventBus.h"
 #include "core/DeviceTreeNode.h"
+#include "core/DataManager.h"
+#include "core/PTZControlPanel.h"
 
 namespace rustcam {
 
@@ -75,6 +77,8 @@ private slots:
     void onStreamStop(const QString& topic, EventDataPtr);
     void onAllDataLoaded();
     void onLoggedIn(const QString& topic, EventDataPtr);
+    void onDataManagerLoaded();
+    void onPtzCommand(const QString& command, const QVariant& value);
 
 private:
     void updateLayout();
@@ -87,12 +91,14 @@ private:
     //void addDevicesToTree(QList<DeviceTreeNode>& nodes, const QMap<QString, QList<DeviceTreeNode>>& deviceMap,const std::unordered_map<QString, DeviceTreeNode::Ptr>& allDevcieMap);
    // void addChannelsToTree(QList<DeviceTreeNode>& nodes, const QMap<QString, QList<DeviceTreeNode>>& channelMap, const std::unordered_map<QString, DeviceTreeNode::Ptr>& allDevcieMap);
     void onDeviceTreeItemClicked(const QVariantMap& meta);
+    void onChannelPlayLinksReceived(bool success, const QJsonObject& response, const QString& error, const QString& title, const QString& itemId);
 
     QWidget* m_workspace;
     QWidget* m_sidePanel;
     QTabWidget* m_tabWidget;
     DeviceTree* m_regionTree;
     DeviceTree* m_groupTree;
+    PTZControlPanel* m_ptzPanel;
     QMap<QString, VideoCell*> m_cells;
     int m_currentLayout;
     int m_maxCells;

@@ -14,6 +14,10 @@ struct RUSTCAM_CORE_API LayoutItem {
     int colSpan = 1;
     QString label;
 
+    LayoutItem() = default;
+    LayoutItem(const QString& i, int r, int c, int rs, int cs)
+        : id(i), row(r), col(c), rowSpan(rs), colSpan(cs) {}
+
     static LayoutItem fromJson(const QJsonObject& obj);
     QJsonObject toJson() const;
 };

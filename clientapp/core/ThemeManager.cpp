@@ -147,7 +147,8 @@ void ThemeManager::applyStylesheet(const QString& qss)
     QString processedQss = qss;
     processedQss.remove(defRe);
 
-    for (auto it = vars.constBegin(); it != vars.constEnd(); ++it) {
+    for (auto it = vars.constEnd(); it != vars.constBegin(); ) {
+        --it;
         processedQss.replace("@" + it.key(), it.value());
     }
 

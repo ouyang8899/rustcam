@@ -29,7 +29,8 @@ public:
         KeyRole = Qt::UserRole + 1,
         NameRole,
         TypeRole,
-        MetadataRole
+        MetadataRole,
+        StatusRole
     };
 
     explicit DeviceTreeModel(QObject* parent = nullptr);

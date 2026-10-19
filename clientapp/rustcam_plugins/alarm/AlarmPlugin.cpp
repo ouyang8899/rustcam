@@ -5,248 +5,236 @@
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QTableView>
-#include <QHeaderView>
 #include <QPushButton>
 #include <QLabel>
 #include <QComboBox>
 #include <QToolBar>
-#include <QStandardItemModel>
 #include <QDateTime>
 
 namespace rustcam {
 
-class AlarmWidget : public QWidget {
-    Q_OBJECT
-public:
-    explicit AlarmWidget(AlarmPlugin* plugin, QWidget* parent = nullptr)
-        : QWidget(parent)
-        , m_plugin(plugin)
-    {
-        setupUi();
-    }
-
-private slots:
-    void onRefresh() {
-        m_plugin->loadAlarms();
-    }
-
-    void onFilterChanged(const QString& text) {
-        Q_UNUSED(text)
-    }
-
-    void onAlarmClicked(const QModelIndex& index) {
-        if (!index.isValid()) return;
-        QString alarmId = index.data(Qt::UserRole).toString();
-        if (!alarmId.isEmpty()) {
-            m_plugin->onAcknowledgeAlarm(alarmId);
-        }
-    }
-
-private:
-    void setupUi() {
-        QVBoxLayout* layout = new QVBoxLayout(this);
-        layout->setContentsMargins(8, 8, 8, 8);
-        layout->setSpacing(8);
-
-        QToolBar* toolbar = new QToolBar(this);
-        toolbar->setStyleSheet(R"(
-            QToolBar {
-                background-color: #1e1e1e;
-                border: none;
-                spacing: 8px;
-                padding: 4px;
-            }
-        )");
-
-        QLabel* titleLabel = new QLabel("告警列表", this);
-        titleLabel->setStyleSheet(R"(
-            QLabel {
-                color: #e0e0e0;
-                font-size: 14px;
-                font-weight: bold;
-            }
-        )");
-        toolbar->addWidget(titleLabel);
-
-        toolbar->addSeparator();
-
-        QPushButton* refreshBtn = new QPushButton("刷新", this);
-        refreshBtn->setCursor(Qt::PointingHandCursor);
-        refreshBtn->setStyleSheet(R"(
-            QPushButton {
-                background-color: #0078D4;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 6px 16px;
-            }
-            QPushButton:hover {
-                background-color: #1084d8;
-            }
-        )");
-        connect(refreshBtn, &QPushButton::clicked, this, &AlarmWidget::onRefresh);
-        toolbar->addWidget(refreshBtn);
-
-        layout->addWidget(toolbar);
-
-        QComboBox* filterCombo = new QComboBox(this);
-        filterCombo->addItems({"全部", "未处理", "已处理", "告警", "故障"});
-        filterCombo->setStyleSheet(R"(
-            QComboBox {
-                background-color: #2b2b2b;
-                border: 1px solid #3e3e3e;
-                border-radius: 4px;
-                padding: 6px 12px;
-                color: #e0e0e0;
-            }
-        )");
-        connect(filterCombo, &QComboBox::currentTextChanged, this, &AlarmWidget::onFilterChanged);
-        layout->addWidget(filterCombo);
-
-        m_tableView = new QTableView(this);
-        m_tableView->setModel(m_plugin->alarmModel());
-        m_tableView->setStyleSheet(R"(
-            QTableView {
-                background-color: #1a1a1a;
-                border: 1px solid #3e3e3e;
-                border-radius: 4px;
-                color: #e0e0e0;
-                gridline-color: #3e3e3e;
-            }
-            QTableView::item {
-                padding: 8px;
-            }
-            QTableView::item:selected {
-                background-color: rgba(0, 120, 212, 0.3);
-            }
-        )");
-        m_tableView->setAlternatingRowColors(true);
-        m_tableView->setSelectionBehavior(QAbstractItemView::SelectRows);
-        m_tableView->horizontalHeader()->setStyleSheet(R"(
-            QHeaderView::section {
-                background-color: #1e1e1e;
-                color: #e0e0e0;
-                padding: 8px;
-                border: none;
-                border-bottom: 1px solid #3e3e3e;
-            }
-        )");
-        m_tableView->verticalHeader()->hide();
-        connect(m_tableView, &QTableView::clicked, this, &AlarmWidget::onAlarmClicked);
-        layout->addWidget(m_tableView, 1);
-    }
-
-    AlarmPlugin* m_plugin;
-    QTableView* m_tableView;
-};
-
 bool AlarmPlugin::initialize(EventBus* bus, QObject* cfg)
 {
+    Q_UNUSED(bus)
     Q_UNUSED(cfg)
+
     m_unreadCount = 0;
-    m_alarmModel = new QStandardItemModel(this);
-    m_alarmModel->setHorizontalHeaderLabels({"时间", "设备", "类型", "级别", "状态"});
 
-    EventBus::instance()->subscribe("alarm/triggered", this, SLOT(onAlarmTriggered(QString,QVariantMap)));
+    EventBus::instance()->subscribe("alarm/triggered", [this](const QString& topic, EventDataPtr data) {
+        Q_UNUSED(topic)
+        QVariantMap payload = data->m_payload;
+        QString alarmId = payload["alarmId"].toString();
+        QString deviceName = payload["deviceName"].toString();
+        QString type = payload["type"].toString();
+        QString level = payload["level"].toString();
 
-    loadAlarms();
+        LOG_INFO("AlarmPlugin", QString("Alarm triggered: %1 from %2").arg(alarmId).arg(deviceName));
+
+        m_unreadCount++;
+        emit alarmCountChanged(m_unreadCount);
+
+        if (m_sidePanel) {
+            m_sidePanel->loadAlarms();
+        }
+    });
+
+    if (DataManager::instance()->isLoaded()) {
+        onDataManagerLoaded();
+    } else {
+        connect(DataManager::instance(), &DataManager::loadFinished, this, &AlarmPlugin::onDataManagerLoaded, Qt::UniqueConnection);
+    }
 
     return true;
 }
 
 void AlarmPlugin::shutdown()
 {
-    EventBus::instance()->unsubscribeAll(this);
+    EventBus::instance()->unsubscribeAll();
 }
 
 QWidget* AlarmPlugin::createWorkspace(QWidget* parent)
 {
-    return new AlarmWidget(this, parent);
+    m_workspace = new QWidget(parent);
+    m_workspace->setObjectName("workspaceArea");
+    m_workspace->setStyleSheet(R"(
+        QWidget#workspaceArea {
+            background-color: #2b2b2b;
+        }
+    )");
+
+    QVBoxLayout* layout = new QVBoxLayout(m_workspace);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+
+    QToolBar* toolbar = new QToolBar(m_workspace);
+    toolbar->setStyleSheet(R"(
+        QToolBar {
+            background-color: #1e1e1e;
+            border: none;
+            spacing: 8px;
+            padding: 4px;
+        }
+    )");
+
+    QLabel* titleLabel = new QLabel(tr("Alarm Center"), toolbar);
+    titleLabel->setStyleSheet(R"(
+        QLabel {
+            color: #e0e0e0;
+            font-size: 14px;
+            font-weight: bold;
+            padding: 0 8px;
+        }
+    )");
+    toolbar->addWidget(titleLabel);
+
+    toolbar->addSeparator();
+
+    QPushButton* refreshBtn = new QPushButton(tr("Refresh"), toolbar);
+    refreshBtn->setCursor(Qt::PointingHandCursor);
+    refreshBtn->setStyleSheet(R"(
+        QPushButton {
+            background-color: #0078D4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 16px;
+        }
+        QPushButton:hover {
+            background-color: #1084d8;
+        }
+    )");
+    connect(refreshBtn, &QPushButton::clicked, this, [this]() {
+        if (m_sidePanel) {
+            m_sidePanel->loadAlarms();
+        }
+    });
+    toolbar->addWidget(refreshBtn);
+
+    QLabel* countLabel = new QLabel(m_workspace);
+    countLabel->setStyleSheet(R"(
+        QLabel {
+            color: #f44336;
+            font-size: 12px;
+            padding: 0 8px;
+        }
+    )");
+    connect(this, &AlarmPlugin::alarmCountChanged, this, [countLabel](int count) {
+        countLabel->setText(tr("Unprocessed: %1").arg(count));
+    });
+    toolbar->addWidget(countLabel);
+
+    toolbar->addSeparator();
+
+    QComboBox* filterCombo = new QComboBox(toolbar);
+    filterCombo->addItems({tr("All"), tr("Unprocessed"), tr("Processed"), tr("Alarm"), tr("Fault")});
+    filterCombo->setStyleSheet(R"(
+        QComboBox {
+            background-color: #2b2b2b;
+            color: #e0e0e0;
+            border: 1px solid #3e3e3e;
+            border-radius: 4px;
+            padding: 6px 12px;
+        }
+    )");
+    connect(filterCombo, &QComboBox::currentTextChanged, this, [this](const QString& text) {
+        if (m_sidePanel) {
+            QString filter;
+            if (text == tr("Unprocessed")) filter = "unhandled";
+            else if (text == tr("Processed")) filter = "handled";
+            else if (text == tr("Alarm")) filter = "alarm";
+            else if (text == tr("Fault")) filter = "fault";
+            m_sidePanel->setFilter(filter);
+            m_sidePanel->loadAlarms();
+        }
+    });
+    toolbar->addWidget(filterCombo);
+
+    layout->addWidget(toolbar);
+
+    m_sidePanel = new AlarmSidePanel(m_workspace);
+    connect(m_sidePanel, &AlarmSidePanel::deviceSelected, this, &AlarmPlugin::onDeviceSelected);
+    connect(m_sidePanel, &AlarmSidePanel::alarmSelected, this, &AlarmPlugin::onAlarmSelected);
+
+    layout->addWidget(m_sidePanel, 1);
+
+    return m_workspace;
 }
 
 QWidget* AlarmPlugin::createSidePanel(QWidget* parent)
 {
-    return new AlarmWidget(this, parent);
+    m_sidePanel = new AlarmSidePanel(parent);
+    connect(m_sidePanel, &AlarmSidePanel::deviceSelected, this, &AlarmPlugin::onDeviceSelected);
+    connect(m_sidePanel, &AlarmSidePanel::alarmSelected, this, &AlarmPlugin::onAlarmSelected);
+    return m_sidePanel;
+}
+
+void AlarmPlugin::onDataManagerLoaded() {
+    disconnect(DataManager::instance(), &DataManager::loadFinished, this, &AlarmPlugin::onDataManagerLoaded);
+
+    if (m_sidePanel) {
+        m_sidePanel->setRegionTreeNodes(DataManager::instance()->regionTree());
+        m_sidePanel->setGroupTreeNodes(DataManager::instance()->groupTree());
+        m_sidePanel->setDeviceTreeNodes(DataManager::instance()->deviceList());
+    }
+
+    LOG_INFO("AlarmPlugin", QString("Using DataManager: regionNodes=%1, groupNodes=%2, deviceNodes=%3")
+        .arg(DataManager::instance()->regionTree().size())
+        .arg(DataManager::instance()->groupTree().size())
+        .arg(DataManager::instance()->deviceList().size()));
 }
 
 void AlarmPlugin::loadAlarms()
 {
-    ServerApi::instance()->get("/api/v1/alarms", [this](bool success, const QJsonObject& resp, const QString&) {
-        if (success) {
-            QJsonArray alarms = resp["data"].toArray();
-            m_alarmModel->clear();
-            m_alarmModel->setHorizontalHeaderLabels({"时间", "设备", "类型", "级别", "状态"});
-            for (const auto& alarm : alarms) {
-                addAlarmItem(alarm.toObject());
-            }
-            LOG_INFO("AlarmPlugin", QString("Loaded %1 alarms").arg(alarms.size()));
-        }
-    });
+    if (m_sidePanel) {
+        m_sidePanel->loadAlarms();
+    }
 }
 
 void AlarmPlugin::addAlarmItem(const QJsonObject& alarm)
 {
-    QString time = alarm["time"].toString();
-    QString device = alarm["deviceName"].toString();
-    QString type = alarm["type"].toString();
-    QString level = alarm["level"].toString();
-    QString status = alarm["status"].toString();
-
-    QList<QStandardItem*> row;
-    row.append(new QStandardItem(time));
-    row.append(new QStandardItem(device));
-    row.append(new QStandardItem(type));
-    row.append(new QStandardItem(level));
-    row.append(new QStandardItem(status));
-
-    for (auto item : row) {
-        item->setData(alarm["id"].toString(), Qt::UserRole);
-        if (status == "未处理") {
-            if (level == "严重") {
-                item->setForeground(QColor("#f44336"));
-            } else if (level == "警告") {
-                item->setForeground(QColor("#ff9800"));
-            }
-        }
-    }
-
-    m_alarmModel->appendRow(row);
+    Q_UNUSED(alarm)
 }
 
-void AlarmPlugin::onAlarmTriggered(const QString& topic, const QVariantMap& payload)
+void AlarmPlugin::onAlarmTriggered(const QString& topic, EventDataPtr data)
 {
     Q_UNUSED(topic)
+
+    QVariantMap payload = data->m_payload;
     QString alarmId = payload["alarmId"].toString();
     QString deviceName = payload["deviceName"].toString();
     QString type = payload["type"].toString();
     QString level = payload["level"].toString();
 
-    QJsonObject alarm;
-    alarm["id"] = alarmId;
-    alarm["deviceName"] = deviceName;
-    alarm["type"] = type;
-    alarm["level"] = level;
-    alarm["status"] = "未处理";
-    alarm["time"] = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
-
-    addAlarmItem(alarm);
+    LOG_INFO("AlarmPlugin", QString("Alarm triggered: %1 from %2").arg(alarmId).arg(deviceName));
 
     m_unreadCount++;
     emit alarmCountChanged(m_unreadCount);
-    emit alarmCountChanged(m_unreadCount);
+
+    if (m_sidePanel) {
+        m_sidePanel->loadAlarms();
+    }
 }
 
-void AlarmPlugin::onAcknowledgeAlarm(const QString& alarmId)
+void AlarmPlugin::onDeviceSelected(const QString& deviceId, const QString& deviceName)
 {
-    QVariantMap payload;
+    Q_UNUSED(deviceId)
+    Q_UNUSED(deviceName)
+}
+
+void AlarmPlugin::onAlarmSelected(const QString& alarmId)
+{
+    QJsonObject payload;
     payload["alarmId"] = alarmId;
 
-    ServerApi::instance()->post("/api/v1/alarms/acknowledge", payload, [this](bool success, const QJsonObject&, const QString&) {
+    ServerApi::instance()->post("/api/v1/alarms/acknowledge", payload, [this](bool success, const QJsonObject&, const QString& error) {
         if (success) {
             m_unreadCount = qMax(0, m_unreadCount - 1);
             emit alarmCountChanged(m_unreadCount);
-            loadAlarms();
+            if (m_sidePanel) {
+                m_sidePanel->loadAlarms();
+            }
+        } else {
+            LOG_ERROR("AlarmPlugin", QString("Failed to acknowledge alarm: %1").arg(error));
         }
     });
 }

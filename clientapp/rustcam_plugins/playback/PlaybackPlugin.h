@@ -1,13 +1,23 @@
 ﻿#pragma once
 
 #include "interfaces/IPlugin.h"
-#include <QObject>
 #include <QString>
 #include <QDateTime>
+#include <QList>
+#include <QMap>
+#include <QtConcurrent>
+#include <QFutureWatcher>
+#include <QJsonObject>
+#include <QJsonArray>
+#include "core/DeviceTreeNode.h"
 
 namespace rustcam {
 
-class PlaybackPlugin : public QObject, public IPlugin {
+class PlaybackSidePanel;
+class ReplayPlayerContainer;
+class RecordingFile;
+
+class PlaybackPlugin : public IPlugin {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "com.rustcam.IPlugin/1.0" FILE "plugin.json")
     Q_INTERFACES(rustcam::IPlugin)
@@ -28,16 +38,24 @@ private slots:
     void onPause();
     void onStop();
     void onSpeedChanged(double speed);
-    void onSeek(const QDateTime& time);
+    void onSeek(int64_t timeMs);
+    void onCellClicked(int cellId, const QString& deviceId);
+    void onDeviceSelected(const QString& deviceId, const QString& deviceName);
+    void onTimeSelected(int64_t timeMs);
+    void onDateChanged(const QDate& date);
+    void onFileDoubleClicked(const RecordingFile& file);
+    void onLoadDeviceTree();
+    void onDataManagerLoaded();
 
 private:
     void loadRecordings(const QString& deviceId, const QDateTime& start, const QDateTime& end);
 
-    QWidget* m_workspace;
-    QString m_currentDeviceId;
+    PlaybackSidePanel* m_sidePanel;
+    ReplayPlayerContainer* m_container;
     QDateTime m_playbackTime;
-    bool m_isPlaying;
     double m_playbackSpeed;
+    QString m_currentDeviceId;
+    QString m_playbackRequestToken;
 };
 
 }

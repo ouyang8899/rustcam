@@ -21,15 +21,31 @@ target_include_directories(${PLUGIN_ID} PRIVATE
     ${CMAKE_SOURCE_DIR}/core
     ${CMAKE_SOURCE_DIR}/interfaces
     ${CMAKE_SOURCE_DIR}/common
+    ${CMAKE_SOURCE_DIR}/3rd_party/bridge_player/include
+    ${CMAKE_SOURCE_DIR}/3rd_party/boost/include/boost-1_91
+    ${CMAKE_SOURCE_DIR}/3rd_party/ffmpeg-n8.1.3-win64-lgpl-shared-8.1/include
+    ${CMAKE_SOURCE_DIR}/3rd_party/jsoncpp/include
 )
 
-target_link_libraries(${PLUGIN_ID} PUBLIC
-    interfaces
-    common
-    rustcam-core
-    Qt5::Core
-    Qt5::Widgets
-)
+if(Qt5_FOUND)
+    target_link_libraries(${PLUGIN_ID} PUBLIC
+        interfaces
+        common
+        rustcam-core
+        Qt5::Core
+        Qt5::Widgets
+        Qt5::Concurrent
+    )
+else()
+    target_link_libraries(${PLUGIN_ID} PUBLIC
+        interfaces
+        common
+        rustcam-core
+        Qt6::Core
+        Qt6::Widgets
+        Qt6::Concurrent
+    )
+endif()
 
 set_target_properties(${PLUGIN_ID} PROPERTIES
     OUTPUT_NAME "rustcam-${PLUGIN_ID}"

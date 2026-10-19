@@ -5,20 +5,23 @@
 #include <QString>
 #include <QMap>
 #include <QJsonObject>
+#include "core/MapSidePanel.h"
+#include "core/DataManager.h"
 
 namespace rustcam {
 
-struct MapMarker {
+struct MapMarkerData {
     QString id;
     QString name;
-    double lat;
-    double lon;
+    double lat = 0;
+    double lon = 0;
     QString type;
     QString icon;
-    bool online;
+    bool online = false;
+    QString status;
 };
 
-class MapPlugin : public QObject, public IPlugin {
+class MapPlugin : public IPlugin {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "com.rustcam.IPlugin/1.0" FILE "plugin.json")
     Q_INTERFACES(rustcam::IPlugin)
@@ -33,7 +36,7 @@ public:
     QWidget* createSidePanel(QWidget* parent) override;
     bool isWorkspace() const override { return true; }
 
-    void addMarker(const MapMarker& marker);
+    void addMarker(const MapMarkerData& marker);
     void removeMarker(const QString& markerId);
     void updateMarkerPosition(const QString& markerId, double lat, double lon);
     void focusOn(double lat, double lon, int zoom = 15);
@@ -42,18 +45,15 @@ signals:
     void markerClicked(const QString& markerId);
 
 private slots:
-    void onDeviceOnline(const QString& topic, const QVariantMap& payload);
-    void onDeviceOffline(const QString& topic, const QVariantMap& payload);
-    void onAlarmTriggered(const QString& topic, const QVariantMap& payload);
-    void onMapFocus(const QString& topic, const QVariantMap& payload);
-    void onMarkerAdd(const QString& topic, const QVariantMap& payload);
+    void onDataManagerLoaded();
+    void onDeviceSelected(const QString& deviceId, const QString& deviceName);
 
 private:
     void loadDeviceMarkers();
 
     QWidget* m_workspace;
-    QWidget* m_sidePanel;
-    QMap<QString, MapMarker> m_markers;
+    MapSidePanel* m_mapSidePanel;
+    QMap<QString, MapMarkerData> m_markers;
 };
 
 }

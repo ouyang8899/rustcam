@@ -1,6 +1,8 @@
 #include "VideoPlayerContainer.h"
 #include "NavigationBar.h"
 #include "core/VideoPlayer.h"
+#include "core/EventBus.h"
+#include "common/Logger.h"
 #include <QVBoxLayout>
 #include <QDebug>
 #include <QtConcurrent>
@@ -38,52 +40,24 @@ VideoPlayerContainer::~VideoPlayerContainer() {
 
 void VideoPlayerContainer::initialize()
 {
-    loadLayouts();
+    if (DataManager::instance()->isLayoutsLoaded()) {
+        onLayoutsReady();
+    } else {
+        connect(DataManager::instance(), &DataManager::layoutsLoaded, this, &VideoPlayerContainer::onLayoutsReady, Qt::UniqueConnection);
+        DataManager::instance()->loadLayouts();
+    }
 }
 
-void VideoPlayerContainer::loadLayouts() {
-    qDebug() << "loadLayouts called at" << QDateTime::currentDateTime().toString("hh:mm:ss.zzz");
-    QFuture<QPair<bool, QJsonObject>> future = QtConcurrent::run([]() {
-        QJsonObject response;
-        QString error;
-        bool success = ServerApi::instance()->getSync("/api/v1/layouts", response, error);
-        Q_UNUSED(error)
-        return QPair<bool, QJsonObject>(success, response);
-    });
-
-    QFutureWatcher<QPair<bool, QJsonObject>>* watcher = new QFutureWatcher<QPair<bool, QJsonObject>>(this);
-    connect(watcher, &QFutureWatcher<QPair<bool, QJsonObject>>::finished, [this, watcher]() {
-        QPair<bool, QJsonObject> result = watcher->result();
-        onLayoutsReceived(result.first, result.second, QString());
-        watcher->deleteLater();
-    });
-    watcher->setFuture(future);
-}
-
-void VideoPlayerContainer::onLayoutsReceived(bool success, const QJsonObject& response, const QString& error) {
-    qDebug() << "onLayoutsReceived: success=" << success << "error=" << error;
-    if (!success) {
-        qWarning() << "Failed to load layouts:" << error;
-        return;
-    }
-
-    QJsonArray data = response["data"].toArray();
-    m_layouts.clear();
-
-    for (const QJsonValue& v : data) {
-        m_layouts.append(PlayerLayout::fromJson(v.toObject()));
-    }
-
-    qDebug() << "onLayoutsReceived: loaded" << m_layouts.size() << "layouts";
+void VideoPlayerContainer::onLayoutsReady() {
+    disconnect(DataManager::instance(), &DataManager::layoutsLoaded, this, &VideoPlayerContainer::onLayoutsReady);
+    m_layouts = DataManager::instance()->layouts();
+    qDebug() << "Using layouts from DataManager:" << m_layouts.size();
 
     m_navBar->setLayouts(m_layouts);
 
     if (!m_layouts.isEmpty()) {
         m_currentLayout = m_layouts.first();
-        qDebug() << "onLayoutsReceived: calculating layout with first layout, cols=" << m_currentLayout.cols << "rows=" << m_currentLayout.rows;
         calculateVideoLayout(m_currentLayout);
-    } else {
-        qDebug() << "onLayoutsReceived: no layouts loaded, video area will be empty";
     }
 }
 
@@ -96,8 +70,8 @@ void VideoPlayerContainer::onLayoutSelected(int index) {
 }
 
 void VideoPlayerContainer::calculateVideoLayout(const PlayerLayout& layout) {
-    const int margin = 4;
-    const int spacing = 4;
+    const int margin = 2;
+    const int spacing = 2;
 
     int availableW = m_videoArea->width();
     int availableH = m_videoArea->height();
@@ -119,21 +93,41 @@ void VideoPlayerContainer::calculateVideoLayout(const PlayerLayout& layout) {
         int h = item.rowSpan * ch + (item.rowSpan - 1) * spacing;
 
         VideoPlayer* player = VideoWidgetManager::instance().getPlayer(item.id);
+        QWidget* wrapper = nullptr;
+
         if (!player) {
-            player = new VideoPlayer(m_videoArea);
+            wrapper = new QWidget(m_videoArea);
+            wrapper->setObjectName("VideoPlayerWrapper");
+            player = new VideoPlayer(wrapper);
+            player->setContentsMargins(1, 1, 1, 1);
             VideoWidgetManager::instance().registerPlayer(item.id, player);
+            m_playerWrappers[item.id] = wrapper;
             connect(player, &VideoPlayer::clicked, this, [this, itemId = item.id]() {
                 onVideoPlayerClicked(itemId);
             });
+        } else {
+            wrapper = m_playerWrappers.value(item.id);
         }
 
-        player->setGeometry(x, y, w, h);
+        const int borderWidth = 1;
+        wrapper->setGeometry(x, y, w, h);
+        player->setGeometry(borderWidth, borderWidth, w - borderWidth * 2, h - borderWidth * 2);
         player->setSelected(item.id == m_selectedItemId);
+
+        bool isSelected = (item.id == m_selectedItemId);
+        wrapper->setStyleSheet(isSelected
+            ? "QWidget#VideoPlayerWrapper { border: 2px solid #0078D4; background-color: #1a1a1a; }"
+            : "QWidget#VideoPlayerWrapper { border: 2px solid #1a1a1a; background-color: #1a1a1a; }");
+
+        wrapper->show();
         player->show();
     }
 
     for (const QString& itemId : VideoWidgetManager::instance().getPlayerIds()) {
         if (!currentItemIds.contains(itemId)) {
+            if (QWidget* wrapper = m_playerWrappers.take(itemId)) {
+                wrapper->deleteLater();
+            }
             VideoWidgetManager::instance().unregisterPlayer(itemId);
         }
     }
@@ -146,10 +140,20 @@ void VideoPlayerContainer::onVideoPlayerClicked(const QString& itemId) {
     if (!oldSelected.isEmpty()) {
         VideoPlayer* oldPlayer = VideoWidgetManager::instance().getPlayer(oldSelected);
         if (oldPlayer) oldPlayer->setSelected(false);
+        if (QWidget* oldWrapper = m_playerWrappers.value(oldSelected)) {
+            oldWrapper->setStyleSheet("#VideoPlayerWrapper { border: none; }");
+        }
     }
 
     VideoPlayer* newPlayer = VideoWidgetManager::instance().getPlayer(itemId);
     if (newPlayer) newPlayer->setSelected(true);
+    if (QWidget* newWrapper = m_playerWrappers.value(itemId)) {
+        newWrapper->setStyleSheet("#VideoPlayerWrapper { border: 2px solid #0078D4; }");
+    }
+
+    EventDataPtr eventData = EventData::create();
+    eventData->m_payload["itemId"] = itemId;
+    EventBus::instance()->publish(TOPIC_VIDEO_CELL_SELECTED, eventData);
 }
 
 void VideoPlayerContainer::onStreamRequested(const QString& topic) {
@@ -163,17 +167,31 @@ void VideoPlayerContainer::playStream(const QString& itemId, const QString& url,
         targetId = selectTargetItem();
     }
 
+    LOG_INFO("VideoPlayerContainer", QString("playStream: targetId=%1, url=%2, title=%3").arg(targetId).arg(url).arg(title));
+
+    if (targetId.isEmpty()) {
+        LOG_ERROR("VideoPlayerContainer", "playStream: targetId is empty!");
+        return;
+    }
+
     VideoPlayer* player = VideoWidgetManager::instance().getPlayer(targetId);
     if (player) {
         m_playingUrls[targetId] = url;
         player->play(url);
+    } else {
+        LOG_ERROR("VideoPlayerContainer", QString("playStream: player not found for targetId=%1, available players: %2")
+            .arg(targetId)
+            .arg(VideoWidgetManager::instance().getPlayerIds().join(", ")));
     }
 }
 
 QString VideoPlayerContainer::selectTargetItem() {
+    LOG_INFO("VideoPlayerContainer", QString("selectTargetItem: m_selectedItemId=%1, layoutJson.size=%2")
+        .arg(m_selectedItemId).arg(m_currentLayout.layoutJson.size()));
     if (!m_selectedItemId.isEmpty()) {
         VideoPlayer* selected = VideoWidgetManager::instance().getPlayer(m_selectedItemId);
         if (selected && !selected->isPlaying()) {
+            LOG_INFO("VideoPlayerContainer", QString("selectTargetItem: returning selected item %1").arg(m_selectedItemId));
             return m_selectedItemId;
         }
     }
@@ -181,14 +199,18 @@ QString VideoPlayerContainer::selectTargetItem() {
     for (const auto& item : m_currentLayout.layoutJson) {
         VideoPlayer* player = VideoWidgetManager::instance().getPlayer(item.id);
         if (player && !player->isPlaying()) {
+            LOG_INFO("VideoPlayerContainer", QString("selectTargetItem: returning idle item %1").arg(item.id));
             return item.id;
         }
     }
 
     if (!m_currentLayout.layoutJson.isEmpty()) {
-        return m_currentLayout.layoutJson.first().id;
+        QString firstId = m_currentLayout.layoutJson.first().id;
+        LOG_INFO("VideoPlayerContainer", QString("selectTargetItem: returning first item %1").arg(firstId));
+        return firstId;
     }
 
+    LOG_ERROR("VideoPlayerContainer", "selectTargetItem: layoutJson is empty, no players available!");
     return QString();
 }
 
@@ -216,7 +238,23 @@ void VideoPlayerContainer::dropEvent(QDropEvent* event) {
 
 void VideoPlayerContainer::handleDrop(const QVariantMap& meta) {
     QString type = meta["type"].toString();
-    if (type == "region" || type == "group" || type == "device") {
+    if (type == "channel") {
+        QString deviceTag = meta["device_tag"].toString();
+        QString channelTag = meta["channel_tag"].toString();
+        if (!deviceTag.isEmpty() && !channelTag.isEmpty()) {
+            QString title = meta["name"].toString();
+            QString targetId = selectTargetItem();
+            QtConcurrent::run([this, deviceTag, channelTag, title, targetId]() {
+                QJsonObject response;
+                QString error;
+                QString endpoint = QString("/api/v1/channels/%1/%2/play-links").arg(deviceTag, channelTag);
+                bool success = ServerApi::instance()->getSync(endpoint, response, error);
+                QMetaObject::invokeMethod(this, [this, success, response, error, title, targetId]() {
+                    onChannelPlayLinksReceived(success, response, error, title, targetId);
+                }, Qt::QueuedConnection);
+            });
+        }
+    } else if (type == "region" || type == "group" || type == "device") {
         QString key = meta["key"].toString();
         int deviceId = key.toInt();
         if (deviceId > 0) {
@@ -225,6 +263,27 @@ void VideoPlayerContainer::handleDrop(const QVariantMap& meta) {
             playStream(targetId, url, meta["name"].toString());
         }
     }
+}
+
+void VideoPlayerContainer::onChannelPlayLinksReceived(bool success, const QJsonObject& response, const QString& error, const QString& title, const QString& targetId)
+{
+    if (!success) {
+        qWarning() << "Failed to get play links:" << error;
+        return;
+    }
+    QJsonObject data = response["data"].toObject();
+    QString url = data["rtsp_media"].toString();
+    if (url.isEmpty()) {
+        url = data["hls"].toString();
+    }
+    if (url.isEmpty()) {
+        url = data["flv"].toString();
+    }
+    if (url.isEmpty()) {
+        qWarning() << "No playable URL found in play links response";
+        return;
+    }
+    playStream(targetId, url, title);
 }
 
 void VideoPlayerContainer::resizeEvent(QResizeEvent* event) {

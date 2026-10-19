@@ -179,15 +179,11 @@ impl ServiceRegistry {
         ));
 
         // ZLMediaKit Hook 处理器
-        let zlm_api_key = media_server_service.list().iter()
-            .find(|s| s.server_type == crate::domain::server::ServerType::Zlmediakit)
-            .map(|s| s.api_key.clone());
         let zlmediakit_hook_handler = Arc::new(
             ZlMediaKitHookHandler::from_context(
                 &infra,
                 &media,
                 recording_service.clone(),
-                zlm_api_key,
             ).with_stream_recovery_service(stream_recovery_service.clone())
         );
 

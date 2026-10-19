@@ -148,6 +148,7 @@ pub trait MediaServerAdapter: Send + Sync {
     fn name(&self) -> &str;
     fn tag(&self) -> &str;
     fn server_type(&self) -> &str;
+    fn secret(&self) -> &str;
     async fn is_online(&self) -> bool;
     async fn get_status(&self) -> anyhow::Result<ServerStatus>;
     async fn add_stream_proxy(&self, app: &str, stream_key: &str, rtsp_url: &str) -> anyhow::Result<StreamInfo>;

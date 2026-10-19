@@ -6,14 +6,18 @@
 #include <QStyleOption>
 #include <QGuiApplication>
 #include <QWindow>
+#include <QSvgRenderer>
+#include <QIcon>
+#include <QPixmap>
 
 namespace rustcam {
 
 NavigationBar::NavigationBar(QWidget* parent)
     : QWidget(parent)
 {
-    setFixedHeight(50);
-    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    //setFixedHeight(50);
+    //setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    this->setStyleSheet("{background-color:red;}");
 }
 
 NavigationBar::~NavigationBar() {
@@ -27,16 +31,28 @@ void NavigationBar::setLayouts(const QList<PlayerLayout>& layouts) {
     }
     m_buttons.clear();
 
+    const int thumbW = 50;
+    const int thumbH = 36;
+
     for (int i = 0; i < layouts.size(); ++i) {
         QPushButton* btn = new QPushButton(this);
-        btn->setFixedSize(60, 40);
+        btn->setFixedSize(60, 44);
         btn->setToolTip(layouts[i].name);
 
-        btn->setStyleSheet(QString(
-            "QPushButton { border: 1px solid #555; border-radius: 4px; background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #333, stop:1 #222); }"
-            "QPushButton:hover { border: 1px solid #888; background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #444, stop:1 #333); }"
-            "QPushButton:pressed { border: 1px solid #4a9eff; background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4a9eff, stop:1 #2d7ad4); }"
-        ));
+        QString svg = generateLayoutSvg(layouts[i], thumbW, thumbH);
+        QSvgRenderer renderer(svg.toUtf8());
+        if (renderer.isValid()) {
+            QPixmap pixmap(thumbW, thumbH);
+            pixmap.fill(Qt::transparent);
+            QPainter painter(&pixmap);
+            renderer.render(&painter);
+            QIcon icon(pixmap);
+            btn->setIcon(icon);
+            btn->setIconSize(QSize(thumbW, thumbH));
+        }
+
+        btn->setProperty("class", "LayoutNavButton");
+        btn->show();
 
         connect(btn, &QPushButton::clicked, this, &NavigationBar::onButtonClicked);
         btn->setProperty("index", i);

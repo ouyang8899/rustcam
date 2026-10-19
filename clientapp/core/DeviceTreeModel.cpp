@@ -20,11 +20,15 @@ DeviceTreeModel::~DeviceTreeModel()
 
 void DeviceTreeModel::setupIcons()
 {
-    m_icons.resize(4);
+    m_icons.resize(8);
     m_icons[0] = QIcon(":/icons/region.svg");
     m_icons[1] = QIcon(":/icons/group.svg");
     m_icons[2] = QIcon(":/icons/device.svg");
     m_icons[3] = QIcon(":/icons/channel.svg");
+    m_icons[4] = QIcon(":/icons/device_online.svg");
+    m_icons[5] = QIcon(":/icons/device_offline.svg");
+    m_icons[6] = QIcon(":/icons/channel_online.svg");
+    m_icons[7] = QIcon(":/icons/channel_offline.svg");
 }
 
 QModelIndex DeviceTreeModel::index(int row, int column, const QModelIndex& parent) const
@@ -97,10 +101,14 @@ QVariant DeviceTreeModel::data(const QModelIndex& index, int role) const
             iconIndex = 0;
         else if (node->type == "group")
             iconIndex = 1;
-        else if (node->type == "device")
-            iconIndex = 2;
-        else if (node->type == "channel")
-            iconIndex = 3;
+        else if (node->type == "device") {
+            QString status = node->metadata.value("status").toString();
+            iconIndex = (status == "Online") ? 4 : 5;
+        }
+        else if (node->type == "channel") {
+            QString status = node->metadata.value("status").toString();
+            iconIndex = (status == "Online") ? 6 : 7;
+        }
 
         if (iconIndex >= 0 && iconIndex < m_icons.size() && !m_icons[iconIndex].isNull())
             return m_icons[iconIndex];
@@ -118,6 +126,9 @@ QVariant DeviceTreeModel::data(const QModelIndex& index, int role) const
 
     case MetadataRole:
         return node->metadata;
+
+    case StatusRole:
+        return node->metadata.value("status");
 
     default:
         return QVariant();

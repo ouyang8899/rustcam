@@ -29,7 +29,7 @@ weight = 100
 enabled = true
 server_tag = "default"
 [media_servers.servers.protocol_ports]
-rtsp = 445
+rtsp = 554
 rtmp = 1935
 hls = 8083
 http = 8080
@@ -77,7 +77,7 @@ rtp_idle_timeout_secs = 30
 rtp_bind_addr = "192.168.1.7"
 
 [rtsp_server]
-bind_addr = "192.168.1.7:554"
+bind_addr = "192.168.1.7:5541"
 max_connections = 1000
 connection_timeout = 60
 keepalive_interval_secs = 30

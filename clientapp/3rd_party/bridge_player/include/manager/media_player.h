@@ -63,6 +63,7 @@ namespace BridgePlayer {
         virtual void stop() override;
         virtual bool is_playing() const;
         const Stats& get_stats()  override;
+     //   void capture_video_image(const std::string& fullPath) override;
     protected:
 
         Result<void> pause();

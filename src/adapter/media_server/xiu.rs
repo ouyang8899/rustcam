@@ -25,6 +25,7 @@ impl MediaServerAdapter for XiuAdapter {
     fn name(&self) -> &str { &self.config.name }
     fn tag(&self) -> &str { &self.config.server_tag }
     fn server_type(&self) -> &str { "xiu" }
+    fn secret(&self) -> &str { &self.config.api_key }
 
     async fn is_online(&self) -> bool {
         let url = format!("{}/api/status", self.base_url);

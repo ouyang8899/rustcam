@@ -76,6 +76,16 @@ impl HookResponse {
         }
     }
 
+    pub fn rtsp_auth_deny(msg: &str) -> Self {
+        Self {
+            code: 1,
+            msg: Some(msg.to_string()),
+            encrypted: Some(false),
+            passwd: Some(String::new()),
+            ..Default::default()
+        }
+    }
+
     pub fn http_access(path: &str, second: u32) -> Self {
         Self {
             code: 0,
@@ -496,7 +506,6 @@ pub struct ZlMediaKitHookHandler {
     event_bus: Arc<EventBus>,
     session_expiry_secs: i64,
     recording_service: Arc<RecordingService>,
-    secret: Option<String>,
     stream_recovery_service: Option<Arc<crate::application::StreamRecoveryService>>,
 }
 
@@ -508,9 +517,8 @@ impl ZlMediaKitHookHandler {
         event_bus: Arc<EventBus>,
         session_expiry_secs: i64,
         recording_service: Arc<RecordingService>,
-        secret: Option<String>,
     ) -> Self {
-        Self { repo, redis, cluster, event_bus, session_expiry_secs, recording_service, secret, stream_recovery_service: None }
+        Self { repo, redis, cluster, event_bus, session_expiry_secs, recording_service, stream_recovery_service: None }
     }
 
     pub fn with_stream_recovery_service(mut self, stream_recovery_service: Arc<crate::application::StreamRecoveryService>) -> Self {
@@ -522,7 +530,6 @@ impl ZlMediaKitHookHandler {
         infra: &InfraContext,
         media: &MediaContext,
         recording_service: Arc<RecordingService>,
-        secret: Option<String>,
     ) -> Self {
         Self::new(
             infra.db.clone(),
@@ -531,41 +538,12 @@ impl ZlMediaKitHookHandler {
             infra.event_bus.clone(),
             infra.config().session.expiration_secs,
             recording_service,
-            secret,
         )
     }
 
     /// 验证请求是否来自已配置的媒体服务器
     fn validate_media_server(&self, media_server_tag: &str) -> Option<Arc<dyn crate::adapter::media_server::MediaServerAdapter>> {
         self.cluster.get_server(media_server_tag)
-    }
-
-    /// 验证 secret（admin_params）
-    fn validate_secret(&self, params: Option<&str>) -> bool {
-        let Some(secret) = &self.secret else {
-            return true;
-        };
-        
-        let params = params.unwrap_or("");
-        let expected = format!("secret={}", secret);
-        params.contains(&expected)
-    }
-
-    /// 解析 query string 为 HashMap
-    fn parse_params(params: Option<&str>) -> HashMap<String, String> {
-        params
-            .map(|p| {
-                p.split('&')
-                    .filter_map(|pair| {
-                        let mut parts = pair.splitn(2, '=');
-                        match (parts.next(), parts.next()) {
-                            (Some(k), Some(v)) => Some((k.to_string(), v.to_string())),
-                            _ => None,
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
     }
 
     /// 处理 hook 事件
@@ -615,14 +593,30 @@ impl ZlMediaKitHookHandler {
     }
 
     async fn on_play(&self, media_server_tag: &str, stream: &str, ip: Option<&String>, params: Option<&String>, _app: Option<&String>) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_play: server={}, stream={}, ip={:?}, params={:?}", 
+        tracing::info!("[ZlMediaKit Hook] on_play: server={}, stream={}, ip={:?}, params={:?}",
             media_server_tag, stream, ip, params);
+
+        // 验证流是否存在
+        if self.find_stream_by_stream_key(stream).is_none() {
+            tracing::warn!("[ZlMediaKit Hook] on_play: stream not found, denying access: stream={}", stream);
+            return HookResponse::deny("Stream not found");
+        }
+
+        let event = SignalEvent::HookPlay {
+            media_server_tag: media_server_tag.to_string(),
+            stream_id: stream.to_string(),
+            client_ip: ip.cloned(),
+        };
+        if let Err(e) = self.event_bus.publish(event).await {
+            tracing::warn!("[ZlMediaKit Hook] on_play: failed to publish event: {}", e);
+        }
+
         HookResponse::allow()
     }
 
-    async fn on_publish(&self, media_server_tag: &str, stream: &str, ip: Option<&String>, _app: Option<&String>, params: Option<&String>) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_publish: server={}, stream={}, ip={:?}, params={:?}", 
-            media_server_tag, stream, ip, params);
+    async fn on_publish(&self, media_server_tag: &str, stream: &str, ip: Option<&String>, _app: Option<&String>, _params: Option<&String>) -> HookResponse {
+        tracing::info!("[ZlMediaKit Hook] on_publish: server={}, stream={}, ip={:?}",
+            media_server_tag, stream, ip);
 
         // 验证 media_server_tag
         if self.validate_media_server(media_server_tag).is_none() {
@@ -630,19 +624,39 @@ impl ZlMediaKitHookHandler {
             return HookResponse::deny("Unknown media server");
         }
 
-        // 验证 secret（如果配置了的话）
-        let is_admin = self.validate_secret(params.map(|s| s.as_str()));
-        if is_admin {
-            tracing::debug!("[ZlMediaKit Hook] on_publish: admin access");
+        // 验证流是否存在
+        if self.find_stream_by_stream_key(stream).is_none() {
+            tracing::warn!("[ZlMediaKit Hook] on_publish: stream not found, denying push: stream={}", stream);
+            return HookResponse::deny("Stream not found");
         }
 
-        // on_publish 只做认证，不操作 stream 状态
-        // stream 状态由 stream_service 管理，不应在 hook 中修改
+        let (device_tag, channel_tag) = crate::domain::parse_stream_key(stream)
+            .unwrap_or_else(|| (stream.to_string(), stream.to_string()));
+
+        let event = SignalEvent::HookPublish {
+            media_server_tag: media_server_tag.to_string(),
+            stream_id: stream.to_string(),
+            client_ip: ip.cloned(),
+            device_tag: Some(device_tag),
+            channel_tag: Some(channel_tag),
+        };
+        if let Err(e) = self.event_bus.publish(event).await {
+            tracing::warn!("[ZlMediaKit Hook] on_publish: failed to publish event: {}", e);
+        }
+
         HookResponse::allow()
     }
 
     async fn on_stop(&self, media_server_tag: &str, stream: &str, _ip: Option<&String>, _params: Option<&String>) -> HookResponse {
         tracing::info!("[ZlMediaKit Hook] on_stop: server={}, stream={}", media_server_tag, stream);
+
+        let event = SignalEvent::HookUnpublish {
+            media_server_tag: media_server_tag.to_string(),
+            stream_id: stream.to_string(),
+        };
+        if let Err(e) = self.event_bus.publish(event).await {
+            tracing::warn!("[ZlMediaKit Hook] on_stop: failed to publish event: {}", e);
+        }
 
         let sessions = self.find_sessions_by_stream(stream).await;
         for session in sessions {
@@ -742,13 +756,8 @@ impl ZlMediaKitHookHandler {
         HookResponse::http_access(allowed_path, 600)
     }
 
-    async fn on_rtsp_realm(&self, media_server_tag: &str, stream: &str, ip: Option<&String>, params: Option<&String>) -> HookResponse {
+    async fn on_rtsp_realm(&self, media_server_tag: &str, stream: &str, ip: Option<&String>, _params: Option<&String>) -> HookResponse {
         tracing::info!("[ZlMediaKit Hook] on_rtsp_realm: server={}, stream={}, ip={:?}", media_server_tag, stream, ip);
-
-        // 如果启用了 secret 验证且参数匹配，直接返回空 realm（不需要鉴权）
-        if self.validate_secret(params.map(|s| s.as_str())) {
-            return HookResponse::rtsp_realm("");
-        }
 
         // 查找设备进行 RTSP 认证
         if let Some(device) = self.find_device_by_stream_key(stream) {
@@ -765,24 +774,19 @@ impl ZlMediaKitHookHandler {
     async fn on_rtsp_auth(&self, media_server_tag: &str, stream: &str, ip: Option<&String>, user_name: Option<&str>, params: Option<&String>) -> HookResponse {
         tracing::info!("[ZlMediaKit Hook] on_rtsp_auth: server={}, stream={}, user={:?}", media_server_tag, stream, user_name);
 
-        // 验证 secret
-        if self.validate_secret(params.map(|s| s.as_str())) {
-            return HookResponse::rtsp_auth(false, "");
-        }
-
         // 查找设备进行密码验证
         let Some(device) = self.find_device_by_stream_key(stream) else {
             tracing::warn!("[ZlMediaKit Hook] on_rtsp_auth: device not found for stream={}", stream);
-            return HookResponse::rtsp_auth(false, "Device not found");
+            return HookResponse::rtsp_auth_deny("Device not found");
         };
 
         // 验证用户名匹配
         let expected_user = device.playback_username.as_deref().unwrap_or("");
         let provided_user = user_name.unwrap_or("");
         if !expected_user.is_empty() && provided_user != expected_user {
-            tracing::warn!("[ZlMediaKit Hook] on_rtsp_auth: username mismatch for stream={}, expected={}, got={}", 
+            tracing::warn!("[ZlMediaKit Hook] on_rtsp_auth: username mismatch for stream={}, expected={}, got={}",
                 stream, expected_user, provided_user);
-            return HookResponse::rtsp_auth(false, "Invalid username");
+            return HookResponse::rtsp_auth_deny("Invalid username");
         }
 
         // 验证密码
@@ -804,67 +808,17 @@ impl ZlMediaKitHookHandler {
     }
 
     async fn on_stream_changed(&self, media_server_tag: &str, app: &str, stream: &str, regist: bool) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_stream_changed: server={}, app={}, stream={}, regist={}", 
+        tracing::info!("[ZlMediaKit Hook] on_stream_changed: server={}, app={}, stream={}, regist={}",
             media_server_tag, app, stream, regist);
 
-        if !regist {
-            if let Some(s) = self.find_stream_by_stream_key(stream) {
-                let device_tag = s.device_tag.clone();
-                let channel_tag = s.channel_tag.clone();
-                let mut s = s;
-                if let Some(ref dt) = device_tag {
-                    if let Some(device) = self.repo.devices_cache().get(dt) {
-                        if device.status == crate::domain::DeviceStatus::Maintaining {
-                            s.stopped();
-                        } else {
-                            s.error("stream closed by media server");
-                        }
-                    } else {
-                        s.error("stream closed by media server");
-                    }
-                } else {
-                    s.error("stream closed by media server");
-                }
-                if let Err(e) = self.repo.update_stream(&s).await {
-                    tracing::warn!("[ZlMediaKit Hook] on_stream_changed: failed to stop stream: {}", e);
-                }
-                if let Some(ref dt) = device_tag {
-                    if let Ok(Some(mut channel)) = self.repo.get_channel(dt, channel_tag.as_deref().unwrap_or(dt)).await {
-                        channel.status = crate::domain::DeviceStatus::Offline;
-                        if let Err(e) = self.repo.update_channel(&channel).await {
-                            tracing::warn!("[ZlMediaKit Hook] on_stream_changed: failed to update channel status: {}", e);
-                        }
-                    }
-                    self.sync_device_status_by_channels(dt).await;
-                }
-            }
-            return HookResponse::allow();
-        }
-
-        if let Some(s) = self.find_stream_by_stream_key(stream) {
-            let device_tag = s.device_tag.clone();
-            let channel_tag = s.channel_tag.clone();
-            let mut s = s;
-            s.update_keepalive();
-            if s.state != crate::domain::StreamState::Active {
-                s.start();
-            }
-            if let Err(e) = self.repo.update_stream(&s).await {
-                tracing::warn!("[ZlMediaKit Hook] on_stream_changed: failed to update stream: {}", e);
-            }
-            if let Some(ref dt) = device_tag {
-                tracing::debug!("[ZlMediaKit Hook] on_stream_changed: looking for channel device_tag={}, channel_tag={}", dt, channel_tag.as_deref().unwrap_or(dt));
-                if let Ok(Some(mut channel)) = self.repo.get_channel(dt, channel_tag.as_deref().unwrap_or(dt)).await {
-                    tracing::info!("[ZlMediaKit Hook] on_stream_changed: found channel, updating status to Online");
-                    channel.status = crate::domain::DeviceStatus::Online;
-                    if let Err(e) = self.repo.update_channel(&channel).await {
-                        tracing::warn!("[ZlMediaKit Hook] on_stream_changed: failed to update channel status: {}", e);
-                    }
-                } else {
-                    tracing::warn!("[ZlMediaKit Hook] on_stream_changed: channel not found device_tag={}, channel_tag={}", dt, channel_tag.as_deref().unwrap_or(dt));
-                }
-                self.sync_device_status_by_channels(dt).await;
-            }
+        let event = SignalEvent::HookStreamChanged {
+            media_server_tag: media_server_tag.to_string(),
+            app: app.to_string(),
+            stream_id: stream.to_string(),
+            regist,
+        };
+        if let Err(e) = self.event_bus.publish(event).await {
+            tracing::warn!("[ZlMediaKit Hook] on_stream_changed: failed to publish event: {}", e);
         }
 
         HookResponse::allow()

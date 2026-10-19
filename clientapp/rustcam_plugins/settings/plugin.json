@@ -1,0 +1,12 @@
+{
+  "id": "settings",
+  "name": "系统设置",
+  "version": "1.0.0",
+  "author": "rustcam",
+  "description": "客户端系统设置，包括码流显示等",
+  "apiVersion": "1.0",
+  "dependencies": [],
+  "workspace": false,
+  "sidePanel": false,
+  "shortcut": "Ctrl+,"
+}

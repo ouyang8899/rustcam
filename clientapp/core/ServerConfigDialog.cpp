@@ -19,7 +19,7 @@ namespace rustcam {
 ServerConfigDialog::ServerConfigDialog(QWidget* parent)
     : QDialog(parent)
 {
-    setWindowTitle("服务器配置");
+    setWindowTitle(tr("Server Configuration"));
     setWindowFlags(Qt::Dialog | Qt::WindowTitleHint | Qt::WindowCloseButtonHint);
     setMinimumSize(450, 280);
     setStyleSheet(R"(
@@ -42,7 +42,7 @@ void ServerConfigDialog::setupUi()
     mainLayout->setContentsMargins(24, 20, 24, 20);
     mainLayout->setSpacing(16);
 
-    QLabel* titleLabel = new QLabel("服务器设置", this);
+    QLabel* titleLabel = new QLabel(tr("Server Settings"), this);
     titleLabel->setStyleSheet(R"(
         QLabel {
             color: #e0e0e0;
@@ -53,7 +53,7 @@ void ServerConfigDialog::setupUi()
     )");
     mainLayout->addWidget(titleLabel);
 
-    QLabel* descLabel = new QLabel("配置后端服务器的连接信息", this);
+    QLabel* descLabel = new QLabel(tr("Configure backend server connection information"), this);
     descLabel->setStyleSheet(R"(
         QLabel {
             color: #9e9e9e;
@@ -76,7 +76,7 @@ void ServerConfigDialog::setupUi()
     formLayout->setSpacing(12);
     formLayout->setLabelAlignment(Qt::AlignRight);
 
-    QLabel* hostLabel = new QLabel("服务器地址:", this);
+    QLabel* hostLabel = new QLabel(tr("Server Address:"), this);
     hostLabel->setStyleSheet(R"(
         QLabel {
             color: #e0e0e0;
@@ -85,7 +85,7 @@ void ServerConfigDialog::setupUi()
         }
     )");
     m_serverHostEdit = new QLineEdit(this);
-    m_serverHostEdit->setPlaceholderText("输入 IP 地址或域名");
+    m_serverHostEdit->setPlaceholderText(tr("Enter IP address or domain name"));
     m_serverHostEdit->setMinimumHeight(40);
     m_serverHostEdit->setStyleSheet(R"(
         QLineEdit {
@@ -107,7 +107,7 @@ void ServerConfigDialog::setupUi()
     )");
     formLayout->addRow(hostLabel, m_serverHostEdit);
 
-    QLabel* portLabel = new QLabel("端口:", this);
+    QLabel* portLabel = new QLabel(tr("Port:"), this);
     portLabel->setStyleSheet(R"(
         QLabel {
             color: #e0e0e0;
@@ -152,7 +152,7 @@ void ServerConfigDialog::setupUi()
     )");
     formLayout->addRow(portLabel, m_serverPortSpin);
 
-    QLabel* httpsLabel = new QLabel("加密连接:", this);
+    QLabel* httpsLabel = new QLabel(tr("Encrypted Connection:"), this);
     httpsLabel->setStyleSheet(R"(
         QLabel {
             color: #e0e0e0;
@@ -160,7 +160,7 @@ void ServerConfigDialog::setupUi()
             font-family: 'Microsoft YaHei', sans-serif;
         }
     )");
-    m_httpsCheck = new QCheckBox("使用 HTTPS (SSL)", this);
+    m_httpsCheck = new QCheckBox(tr("Use HTTPS"), this);
     m_httpsCheck->setStyleSheet(R"(
         QCheckBox {
             color: #e0e0e0;
@@ -198,7 +198,7 @@ void ServerConfigDialog::setupUi()
     QHBoxLayout* buttonLayout = new QHBoxLayout();
     buttonLayout->setSpacing(12);
 
-    m_testButton = new QPushButton("测试连接", this);
+    m_testButton = new QPushButton(tr("Test Connection"), this);
     m_testButton->setMinimumHeight(40);
     m_testButton->setCursor(Qt::PointingHandCursor);
     m_testButton->setStyleSheet(R"(
@@ -226,7 +226,7 @@ void ServerConfigDialog::setupUi()
 
     buttonLayout->addStretch();
 
-    m_cancelButton = new QPushButton("取消", this);
+    m_cancelButton = new QPushButton(tr("Cancel"), this);
     m_cancelButton->setMinimumHeight(40);
     m_cancelButton->setCursor(Qt::PointingHandCursor);
     m_cancelButton->setStyleSheet(R"(
@@ -248,7 +248,7 @@ void ServerConfigDialog::setupUi()
     )");
     buttonLayout->addWidget(m_cancelButton);
 
-    m_saveButton = new QPushButton("保存", this);
+    m_saveButton = new QPushButton(tr("Save"), this);
     m_saveButton->setMinimumHeight(40);
     m_saveButton->setCursor(Qt::PointingHandCursor);
     m_saveButton->setDefault(true);
@@ -288,14 +288,14 @@ void ServerConfigDialog::loadCurrentConfig()
     m_serverPortSpin->setValue(config->serverPort());
     m_httpsCheck->setChecked(config->useHttps());
 
-    m_statusLabel->setText(QString("当前服务器: %1").arg(config->serverUrl()));
+    m_statusLabel->setText(tr("Current Server: %1").arg(config->serverUrl()));
 }
 
 void ServerConfigDialog::onSaveClicked()
 {
     QString host = m_serverHostEdit->text().trimmed();
     if (host.isEmpty()) {
-        QMessageBox::warning(this, "警告", "请输入服务器地址");
+        QMessageBox::warning(this, tr("Warning"), tr("Please enter server address"));
         return;
     }
 
@@ -306,7 +306,7 @@ void ServerConfigDialog::onSaveClicked()
 
     LOG_INFO("ServerConfigDialog", QString("Server config saved: %1").arg(config->serverUrl()));
 
-    m_statusLabel->setText(QString("已保存: %1").arg(config->serverUrl()));
+    m_statusLabel->setText(tr("Saved: %1").arg(config->serverUrl()));
     m_statusLabel->setStyleSheet(R"(
         QLabel {
             color: #4caf50;
@@ -324,13 +324,13 @@ void ServerConfigDialog::onTestClicked()
 {
     QString host = m_serverHostEdit->text().trimmed();
     if (host.isEmpty()) {
-        QMessageBox::warning(this, "警告", "请输入服务器地址");
+        QMessageBox::warning(this, tr("Warning"), tr("Please enter server address"));
         return;
     }
 
     m_testButton->setEnabled(false);
-    m_testButton->setText("测试中...");
-    m_statusLabel->setText("正在连接...");
+    m_testButton->setText(tr("Testing..."));
+    m_statusLabel->setText(tr("Connecting..."));
     m_statusLabel->setStyleSheet(R"(
         QLabel {
             color: #9e9e9e;
@@ -346,10 +346,10 @@ void ServerConfigDialog::onTestClicked()
 
     ServerApi::instance()->get("/api/v1/health", [this](bool success, const QJsonObject&, const QString& error) {
         m_testButton->setEnabled(true);
-        m_testButton->setText("测试连接");
+        m_testButton->setText(tr("Test Connection"));
 
         if (success) {
-            m_statusLabel->setText("连接成功!");
+            m_statusLabel->setText(tr("Connection successful!"));
             m_statusLabel->setStyleSheet(R"(
                 QLabel {
                     color: #4caf50;
@@ -358,7 +358,7 @@ void ServerConfigDialog::onTestClicked()
                 }
             )");
         } else {
-            m_statusLabel->setText(QString("连接失败: %1").arg(error));
+            m_statusLabel->setText(tr("Connection failed: %1").arg(error));
             m_statusLabel->setStyleSheet(R"(
                 QLabel {
                     color: #f44336;
