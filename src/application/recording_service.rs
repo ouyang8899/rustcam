@@ -24,6 +24,65 @@ impl RecordingService {
         }
     }
 
+    /// 回收僵尸录制任务
+    ///
+    /// 上一轮进程异常退出时，recording 任务会残留在 starting/recording 状态。
+    /// 调度器把"存在活动任务"视为"正在录制"从而**静默跳过**该流，
+    /// 导致该设备的定时/报警录制永久无法启动（无任何错误日志）。
+    /// 这里在服务启动时核对媒体服务器：仍在录制的保留，其余标记为 error。
+    pub async fn recover_stale_recordings(&self) -> Result<usize> {
+        let active = self.repo.list_active_recordings().await?;
+        if active.is_empty() {
+            return Ok(0);
+        }
+
+        let mut recovered = 0usize;
+        for mut recording in active {
+            let format_str = Self::format_to_str(recording.format.clone());
+            let cache_key = format!(
+                "{}/{}",
+                recording.device_tag.as_deref().unwrap_or(""),
+                recording.channel_tag.as_deref().unwrap_or("")
+            );
+            let app = self
+                .repo
+                .streams_cache()
+                .get(&cache_key)
+                .map(|s| s.app.clone())
+                .unwrap_or_else(|| "live".to_string());
+
+            let still_recording = match self.cluster.get_server(&recording.server_tag) {
+                Some(adapter) => adapter
+                    .is_recording(&recording.stream_key(), format_str)
+                    .await
+                    .unwrap_or(false),
+                None => false,
+            };
+
+            if still_recording {
+                continue;
+            }
+
+            recording.set_error("服务重启后录制未在媒体服务器上恢复，已自动回收".to_string());
+            if let Err(e) = self.repo.update_recording(&recording.clone()).await {
+                tracing::error!(
+                    "[RecordingService] Failed to persist stale recording cleanup: {}",
+                    e
+                );
+                continue;
+            }
+            recovered += 1;
+        }
+
+        if recovered > 0 {
+            tracing::warn!(
+                "[RecordingService] Recovered {} stale recording(s) that blocked the scheduler",
+                recovered
+            );
+        }
+        Ok(recovered)
+    }
+
     pub async fn create_recording(
         &self,
         req: CreateRecordingRequest,

@@ -44,21 +44,30 @@ impl RecordingSchedulerService {
         }
     }
 
-    pub async fn start(self: Arc<Self>) {
-        let (tx, _rx) = tokio::sync::watch::channel(());
-        *self.shutdown_tx.write().await = Some(tx);
+  pub async fn start(self: Arc<Self>) {
+      let (tx, _rx) = tokio::sync::watch::channel(());
+      *self.shutdown_tx.write().await = Some(tx);
 
-        let self_clone = self.clone();
-        tokio::spawn(async move {
-            self_clone.run_scheduler().await;
-        });
+      // 开机回收僵尸录制任务：否则残留的 starting/recording 记录会让本流
+      // 的定时录制被静默跳过
+      let self_clone = self.clone();
+      tokio::spawn(async move {
+          if let Err(e) = self_clone.recording_service.recover_stale_recordings().await {
+              tracing::error!("[RecordingScheduler] Stale recording recovery failed: {}", e);
+          }
+      });
 
-        let self_clone = self.clone();
-        tokio::spawn(async move {
-            self_clone.run_event_listener().await;
-        });
+      let self_clone = self.clone();
+      tokio::spawn(async move {
+          self_clone.run_scheduler().await;
+      });
 
-    }
+      let self_clone = self.clone();
+      tokio::spawn(async move {
+          self_clone.run_event_listener().await;
+      });
+
+  }
 
     async fn run_scheduler(self: Arc<Self>) {
         let mut ticker = interval(Duration::from_secs(self.check_interval_secs));
@@ -317,6 +326,10 @@ impl RecordingSchedulerService {
 
             if within_window && !is_alarm_recording {
                 if has_active {
+                    tracing::debug!(
+                        "[RecordingScheduler] Skip: an active recording already exists for {}",
+                        stream_key
+                    );
                     continue;
                 }
                 if let Err(e) = self.start_timed_recording(policy, &stream_key).await {

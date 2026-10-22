@@ -1211,14 +1211,22 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
         Ok(count as usize)
     }
 
-    pub async fn find_active_recording_by_stream_key(&self, stream_key: &str) -> Result<Option<Recording>> {
-        let rows = recording_select_active(&self.rb)
-            .await.map_err(|e| AppError::Internal(e.to_string()))?;
-        let recording = rows.into_iter()
-            .filter_map(|r| Recording::try_from(r).ok())
-            .find(|r| r.stream_key() == stream_key);
-        Ok(recording)
-    }
+  pub async fn find_active_recording_by_stream_key(&self, stream_key: &str) -> Result<Option<Recording>> {
+      let rows = recording_select_active(&self.rb)
+          .await.map_err(|e| AppError::Internal(e.to_string()))?;
+      let recording = rows.into_iter()
+          .filter_map(|r| Recording::try_from(r).ok())
+          .find(|r| r.stream_key() == stream_key);
+      Ok(recording)
+  }
+
+  /// 列出所有处于活动状态（starting/recording）的录制任务
+  pub async fn list_active_recordings(&self) -> Result<Vec<Recording>> {
+      let rows = recording_select_active(&self.rb)
+          .await.map_err(|e| AppError::Internal(e.to_string()))?;
+      Ok(rows.into_iter().filter_map(|r| Recording::try_from(r).ok()).collect())
+  }
+
 
     pub async fn get_recording(&self, id: i64) -> Result<Option<Recording>> {
         let rows = recording_select_by_id(&self.rb, id)
