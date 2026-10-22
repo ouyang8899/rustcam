@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dashmap::DashMap;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{ AsyncReadExt, BufReader };
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinSet;
@@ -130,7 +130,6 @@ impl TcpRtspRtpServer {
         protocol_deps: ProtocolDeps,
     ) -> anyhow::Result<Self> {
         let listener = TcpListener::bind(&config.bind_addr).await?;
-        tracing::info!("[TcpRtspRtpServer] 监听 {}", config.bind_addr);
         Ok(Self {
             listener,
             event_bus,
@@ -148,7 +147,6 @@ impl TcpRtspRtpServer {
     }
 
     pub async fn run(self: Arc<Self>) -> anyhow::Result<()> {
-        tracing::info!("[TcpRtspRtpServer] 启动 {}", self.config.bind_addr);
 
         let cleanup_handle = self.start_cleanup_task();
 
@@ -201,7 +199,6 @@ impl TcpRtspRtpServer {
                 }
 
                 _ = self.shutdown_token.cancelled() => {
-                    tracing::info!("[TcpRtspRtpServer] 收到关闭信号");
                     break;
                 }
             }
@@ -221,7 +218,6 @@ impl TcpRtspRtpServer {
     }
 
     async fn shutdown(&self) {
-        tracing::info!("[TcpRtspRtpServer] 关闭中...");
         self.shutdown_token.cancel();
 
         let entries: Vec<(String, Arc<ConnectionEntry>)> = self
@@ -244,7 +240,6 @@ impl TcpRtspRtpServer {
         }
 
         self.connections.clear();
-        tracing::info!("[TcpRtspRtpServer] 关闭完成");
     }
 
     fn start_cleanup_task(self: &Arc<Self>) -> tokio::task::JoinHandle<()> {
@@ -285,11 +280,6 @@ impl TcpRtspRtpServer {
                     self.connections.remove(&key);
                     continue;
                 }
-                tracing::info!(
-                    "[TcpRtspRtpServer] 连接 {} 空闲超时 ({}s)，清理",
-                    key,
-                    idle_secs
-                );
                 self.connections.remove(&key);
                 entry.abort.cancel();
 
@@ -346,7 +336,6 @@ impl TcpRtspRtpServer {
         addr: SocketAddr,
         shutdown_token: CancellationToken,
     ) -> anyhow::Result<()> {
-        tracing::info!("[TcpRtspRtpServer] 新连接来自 {}", addr);
 
         let _ = stream.set_nodelay(true);
 
@@ -422,19 +411,16 @@ impl TcpRtspRtpServer {
                 biased;
 
                 _ = entry.abort.cancelled() => {
-                    tracing::info!("[TcpRtspRtpServer] 连接 {} 被主动关闭", addr);
                     break;
                 }
 
                 _ = shutdown_token.cancelled() => {
-                    tracing::info!("[TcpRtspRtpServer] 连接 {} 收到服务关闭信号", addr);
                     break;
                 }
 
                 read = reader.read(&mut buffer) => {
                     match read {
                         Ok(0) => {
-                            tracing::debug!("[TcpRtspRtpServer] 连接 {} 被对端关闭", addr);
                             break;
                         }
                         Ok(n) => {
@@ -442,16 +428,8 @@ impl TcpRtspRtpServer {
                             entry.update_activity();
 
                             if tracing::enabled!(tracing::Level::TRACE) {
-                                if let Ok(s) = std::str::from_utf8(&buffer[..n]) {
-                                    tracing::trace!(
-                                        "[TcpRtspRtpServer] RECV {} bytes from {}: {}",
-                                        n, addr, s
-                                    );
+                                if let Ok(_s) = std::str::from_utf8(&buffer[..n]) {
                                 } else {
-                                    tracing::trace!(
-                                        "[TcpRtspRtpServer] RECV {} bytes from {} (binary)",
-                                        n, addr
-                                    );
                                 }
                             }
 

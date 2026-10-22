@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use crate::domain::{Channel, DeviceStatus};
+use crate::domain::{ Channel };
 use crate::error::Result;
 
 pub struct ChannelService {

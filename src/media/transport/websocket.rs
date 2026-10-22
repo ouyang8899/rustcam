@@ -1,12 +1,12 @@
 use std::sync::Arc;
 use std::future::Future;
 use async_trait::async_trait;
-use bytes::{Bytes, BufMut, BytesMut};
+use bytes::{ BytesMut };
 use tokio::sync::{broadcast, mpsc, Mutex};
 use futures_util::SinkExt;
 use std::collections::HashMap;
 use crate::media::errors::{MediaError, Result};
-use crate::media::node::{DataType, MediaNode, MediaTransportCallback};
+use crate::media::node::{ DataType, MediaNode };
 use axum::extract::ws::{Message, WebSocket};
 
 pub struct WebSocketMediaTransport {
@@ -28,7 +28,6 @@ impl WebSocketMediaTransport {
                     match receiver.recv().await {
                         Some(data) => data,
                         None => {
-                            tracing::debug!("[WebSocket] Channel closed, stopping loop");
                             break;
                         }
                     }
@@ -114,7 +113,7 @@ impl WebSocketMediaNodeTransport {
     {
         use futures_util::StreamExt;
         let sender = self.sender.clone();
-        let (mut ws_sender, mut ws_receiver) = socket.split();
+        let (ws_sender, mut ws_receiver) = socket.split();
         let ws_sender = Arc::new(Mutex::new(ws_sender));
         let ws_sender_clone = ws_sender.clone();
         let mut rx = sender.subscribe();
@@ -124,7 +123,6 @@ impl WebSocketMediaNodeTransport {
                     msg = ws_receiver.next() => {
                         match msg {
                             Some(Ok(Message::Binary(data))) => {
-                                tracing::debug!("[WebSocket] Binary message received, len={}", data.len());
                                 let mut result = HashMap::new();
                                 result.insert(DataType::OrgData, BytesMut::from(data));
                                 let f = on_media_data(result);
@@ -140,7 +138,6 @@ impl WebSocketMediaNodeTransport {
                                 let _ = s.send(Message::Pong(data)).await;
                             }
                             Some(Ok(Message::Close(_))) | None => {
-                                tracing::info!("[WebSocketMediaNodeTransport] WebSocket closed");
                                 if let Some(tx) = shutdown_tx.clone() {
                                     let _ = tx.send(()).await;
                                 }
@@ -170,7 +167,6 @@ impl WebSocketMediaNodeTransport {
                                 tracing::warn!("[WebSocketMediaNodeTransport] Receiver lagged {} messages", n);
                             }
                             Err(broadcast::error::RecvError::Closed) => {
-                                tracing::info!("[WebSocketMediaNodeTransport] Channel closed");
                                 if let Some(tx) = shutdown_tx.clone() {
                                     let _ = tx.send(()).await;
                                 }
@@ -198,7 +194,6 @@ impl WebSocketMediaNodeTransport {
                                 let _ = ws_sender.send(Message::Pong(data)).await;
                             }
                             Some(Ok(Message::Close(_))) | None => {
-                                tracing::info!("[WebSocketMediaNodeTransport] WebSocket closed");
                                 break;
                             }
                             Some(Err(e)) => {

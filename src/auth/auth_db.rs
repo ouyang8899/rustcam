@@ -2,7 +2,7 @@ use rbatis::rbatis::RBatis;
 use rbs::Value;
 use rbdc_pg::PgDriver;
 use async_trait::async_trait;
-use std::sync::Arc;
+
 use argon2::PasswordHasher;
 use uuid::Uuid;
 use crate::error::Result;
@@ -14,9 +14,19 @@ pub struct PostgresAuthRepository {
 }
 
 impl PostgresAuthRepository {
+
+    pub fn with_rb(rb: RBatis) -> Self {
+        Self { rb }
+    }
+
+    pub async fn init(&self, default_username: &str, default_password: &str) {
+        self.init_tables().await;
+        self.seed_default_data(default_username, default_password).await;
+    }
+
     pub async fn new(database_url: &str, default_username: &str, default_password: &str) -> anyhow::Result<Self> {
         let rb = RBatis::new();
-        rb.init(PgDriver {}, database_url).ok();
+        let _init_res = rb.init(PgDriver {}, database_url);
         let repo = Self { rb };
         repo.init_tables().await;
         repo.seed_default_data(default_username, default_password).await;
@@ -36,7 +46,6 @@ impl PostgresAuthRepository {
                 tracing::warn!("[AuthDB] init_tables warning (may already exist): {}", e);
             }
         }
-        tracing::info!("[AuthDB] init_tables completed");
     }
 
     async fn seed_default_data(&self, default_username: &str, default_password: &str) {
@@ -58,7 +67,7 @@ impl PostgresAuthRepository {
             tracing::warn!("[AuthDB] seed_default_data (role may exist): {}", e);
         }
 
-        let salt = password_hash::phc::SaltString::generate();
+        let _salt = password_hash::phc::SaltString::generate();
         let hash = match argon2::Argon2::default().hash_password(default_password.as_bytes()) {
             Ok(h) => h.to_string(),
             Err(e) => {
@@ -77,7 +86,6 @@ impl PostgresAuthRepository {
             tracing::warn!("[AuthDB] seed_default_data (user_roles may exist): {}", e);
         }
 
-        tracing::info!("[AuthDB] seed_default_data completed");
     }
 }
 

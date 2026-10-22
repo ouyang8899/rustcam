@@ -5,7 +5,6 @@ use crate::api::response::ApiResponse;
 use crate::error::AppError;
 use crate::domain::player_layout::{PlayerLayout, CreateLayoutRequest, UpdateLayoutRequest};
 
-/// GET /api/v1/layouts
 pub async fn list_layouts_handler(
     State(state): State<Arc<FullState>>,
 ) -> Result<Json<ApiResponse<Vec<PlayerLayout>>>, AppError> {
@@ -13,7 +12,6 @@ pub async fn list_layouts_handler(
     Ok(Json(ApiResponse::success(layouts)))
 }
 
-/// GET /api/v1/layouts/:id
 pub async fn get_layout_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i32>,
@@ -23,7 +21,6 @@ pub async fn get_layout_handler(
     Ok(Json(ApiResponse::success(layout)))
 }
 
-/// POST /api/v1/layouts
 pub async fn create_layout_handler(
     State(state): State<Arc<FullState>>,
     Json(req): Json<CreateLayoutRequest>,
@@ -32,7 +29,6 @@ pub async fn create_layout_handler(
     Ok(Json(ApiResponse::success(layout)))
 }
 
-/// PUT /api/v1/layouts/:id
 pub async fn update_layout_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i32>,
@@ -42,7 +38,6 @@ pub async fn update_layout_handler(
     Ok(Json(ApiResponse::success(())))
 }
 
-/// DELETE /api/v1/layouts/:id
 pub async fn delete_layout_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i32>,
@@ -51,7 +46,6 @@ pub async fn delete_layout_handler(
     Ok(Json(ApiResponse::success(())))
 }
 
-/// PUT /api/v1/layouts/:id/default
 pub async fn set_default_layout_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i32>,

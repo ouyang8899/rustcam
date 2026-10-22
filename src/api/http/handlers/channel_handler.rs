@@ -1,14 +1,13 @@
 use std::sync::Arc;
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
     Json,
 };
 use serde::{Deserialize, Serialize};
 use crate::api::response::ApiResponse;
 use crate::api::state::FullState;
-use crate::application::ChannelService;
-use crate::domain::{Channel, DeviceStatus, DeviceType, Protocol};
+
+use crate::domain::{ Channel, DeviceStatus, Protocol };
 use crate::error::AppError;
 use crate::protocol::adapter_manager;
 use crate::api::http::handlers::device_handler::ChannelWithMediaServer;
@@ -114,28 +113,24 @@ pub async fn get_channel_play_links_handler(
     Ok(Json(ApiResponse::success(play_links)))
 }
 
-/// POST /api/v1/channels/{device_tag}/{channel_tag}/start
-/// 启动 GB28181 通道的流（发送 INVITE）
 pub async fn start_channel_stream_handler(
     State(state): State<Arc<FullState>>,
     Path((device_tag, channel_tag)): Path<(String, String)>,
 ) -> Result<Json<ApiResponse<StartChannelResult>>, AppError> {
     let device = state.app.registry.device_service.get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
-    
+
     if device.protocol != Protocol::Gb28181 {
         return Err(AppError::BadRequest("Only GB28181 devices support this operation".to_string()));
     }
-    
+
     let adapter = adapter_manager::get_adapter(&device_tag)
         .ok_or_else(|| AppError::BadRequest(format!("GB28181 adapter not found for device {}", device_tag)))?;
-    
+
     let mut guard = adapter.lock().await;
     guard.start(&device_tag, &channel_tag).await
         .map_err(|e| AppError::Internal(format!("Failed to start stream: {}", e)))?;
-    
-    tracing::info!("[Channel] Started GB28181 stream: device={}, channel={}", device_tag, channel_tag);
-    
+
     Ok(Json(ApiResponse::success(StartChannelResult {
         device_tag: device_tag.clone(),
         channel_tag: channel_tag.clone(),

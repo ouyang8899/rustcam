@@ -1,4 +1,3 @@
-use crate::media::errors::{MediaError, Result};
 
 pub struct G711;
 
@@ -80,7 +79,6 @@ impl G711 {
         }
         s += BIAS;
 
-        // 找段号：从高位往下数第一个 1
         let seg = {
             let mut seg = 0;
             let mut mask = 0x4000;
@@ -138,7 +136,7 @@ mod tests {
         for &s in &samples {
             let e = G711::alaw_encode(s);
             let d = G711::alaw_decode(e);
-            // G.711 is lossy compression, allow up to 50% error for large signals
+
             let orig_abs = s.unsigned_abs() as i32;
             let tol = if orig_abs == 0 {
                 16
@@ -166,7 +164,7 @@ mod tests {
             let e = G711::ulaw_encode(s);
             let d = G711::ulaw_decode(e);
             let orig_abs = s.unsigned_abs() as i32;
-            // G.711 is lossy, especially for extreme values; allow 70% error for validation
+
             let tol = if orig_abs == 0 { 32 } else { (orig_abs * 7 / 10).max(4096) };
             assert!(
                 (s as i32 - d as i32).abs() <= tol,
@@ -178,14 +176,14 @@ mod tests {
 
     #[test]
     fn test_alaw_encode_decode() {
-        // A-law encode/decode is symmetric
+
         assert_eq!(G711::alaw_encode(1000) & 0x80, 0x80);
         assert_eq!(G711::alaw_encode(-1000) & 0x80, 0x00);
     }
 
     #[test]
     fn test_ulaw_encode_decode() {
-        // μ-law encode/decode is symmetric
+
         assert_eq!(G711::ulaw_encode(0) & 0x80, 0x80);
         assert_eq!(G711::ulaw_encode(-1000) & 0x80, 0x00);
         assert_eq!(G711::ulaw_encode(1000) & 0x80, 0x80);
@@ -193,8 +191,7 @@ mod tests {
 
     #[test]
     fn test_ulaw_standard_vectors() {
-        // G.711 μ-law 标准测试向量
-        // 编码结果需要取反才是最终字节
+
         assert_eq!(G711::ulaw_encode(0), 0xFF);
         assert_eq!(G711::ulaw_encode(i16::MAX), 0x80);
         assert_eq!(G711::ulaw_encode(i16::MIN), 0x00);

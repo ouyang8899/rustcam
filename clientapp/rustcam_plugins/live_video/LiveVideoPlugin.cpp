@@ -223,8 +223,6 @@ void LiveVideoPlugin::buildDeviceTrees(const QJsonArray& regionsData, const QJso
     QList<DeviceTreeNode::Ptr> regionNodes;
     QList<DeviceTreeNode::Ptr> groupNodes;
 
-
-
     QMap<QString, QList<DeviceTreeNode::Ptr>> regionDeviceMap;
     QMap<QString, QList<DeviceTreeNode::Ptr>> groupDeviceMap;
 
@@ -278,7 +276,7 @@ void LiveVideoPlugin::buildDeviceTrees(const QJsonArray& regionsData, const QJso
         channelNode->metadata = meta;
 
         QString deviceTag = obj["device_tag"].toString();
-       // deviceChannelMap[deviceTag].append(channelNode);
+
         std::unordered_map<QString, DeviceTreeNode::Ptr>::iterator it = allDeviceMap.find(deviceTag);
         if (it != allDeviceMap.end()) {
             it->second->children.append(channelNode);
@@ -294,10 +292,6 @@ void LiveVideoPlugin::buildDeviceTrees(const QJsonArray& regionsData, const QJso
         groupNodes.append(parseGroupNode(v.toObject(), groupDeviceMap));
     }
 
-    //addDevicesToTree(regionNodes, regionDeviceMap, allDeviceMap,);
-    //addDevicesToTree(groupNodes, groupDeviceMap, allDeviceMap);
-    //addChannelsToTree(regionNodes, deviceChannelMap);
-    //addChannelsToTree(groupNodes, deviceChannelMap);
     for (auto& d: allDeviceMap) {
         if (!d.second->inGroup) {
             groupNodes.append(d.second);
@@ -354,37 +348,6 @@ DeviceTreeNode::Ptr LiveVideoPlugin::parseGroupNode(const QJsonObject& obj, cons
     }
     return node;
 }
-
-//void LiveVideoPlugin::addDevicesToTree(QList<DeviceTreeNode::Ptr>& nodes,
-//    const QMap<QString, QList<DeviceTreeNode::Ptr>>& deviceMap,
-//    const std::unordered_map<QString, DeviceTreeNode::Ptr>& allDevcieMap)
-//{
-//    for (DeviceTreeNode::Ptr& node : nodes) {
-//        QList<DeviceTreeNode::Ptr> devices = deviceMap.value(node->key);
-//        for (const DeviceTreeNode::Ptr& device : devices) {
-//            node->children.append(device);
-//        }
-//        if (!node->children.isEmpty()) {
-//            addDevicesToTree(node->children, deviceMap);
-//        }
-//    }
-//}
-
-//void LiveVideoPlugin::addChannelsToTree(QList<DeviceTreeNode>& nodes, const QMap<QString, QList<DeviceTreeNode>>& channelMap)
-//{
-//    for (DeviceTreeNode& node : nodes) {
-//        if (node.type == "device") {
-//            QString deviceTag = node.key;
-//            QList<DeviceTreeNode> channels = channelMap.value(deviceTag);
-//            for (const DeviceTreeNode& ch : channels) {
-//                node.children.append(ch);
-//            }
-//        }
-//        if (!node.children.isEmpty()) {
-//            addChannelsToTree(node.children, channelMap);
-//        }
-//    }
-//}
 
 QWidget* LiveVideoPlugin::createWorkspace(QWidget* parent)
 {

@@ -59,7 +59,6 @@ impl SipUdpServer {
         deps: ProtocolDeps,
     ) -> anyhow::Result<Self> {
         let socket = UdpSocket::bind(&config.bind_addr).await?;
-        tracing::info!("[SipUdpServer] Bound to {}", config.bind_addr);
         Ok(Self {
             socket: Arc::new(socket),
             event_bus,
@@ -77,8 +76,7 @@ impl SipUdpServer {
     }
 
     pub async fn run(&self) -> anyhow::Result<()> {
-        tracing::info!("[SipUdpServer] Listening on {}", self.config.bind_addr);
-        
+
         let cleanup_handle = self.start_cleanup_task();
         self.join_handles.lock().await.push(cleanup_handle);
 
@@ -93,22 +91,18 @@ impl SipUdpServer {
                                 tracing::warn!("[SipUdpServer] Max adapters limit reached, dropping packet from {}", addr);
                                 continue;
                             }
-                            
+
                             self.metrics.bytes_received(n);
                             let data = buf[..n].to_vec();
                             let addr_key = addr.to_string();
 
-                            if let Ok(msg) = String::from_utf8(data.clone()) {
-                                tracing::info!("[SipUdpServer] RECV from {}:\n{}", addr_key, msg);
+                            if let Ok(_msg) = String::from_utf8(data.clone()) {
                             } else {
-                                tracing::info!("[SipUdpServer] RECV {} bytes from {} (binary)", n, addr_key);
                             }
 
                             let entry = if let Some(existing) = self.adapters.get(&addr_key) {
-                                tracing::debug!("[SipUdpServer] Found existing adapter for {}", addr_key);
                                 existing.value().clone()
                             } else {
-                                tracing::debug!("[SipUdpServer] Creating new SIP adapter for {}", addr_key);
                                 match self.get_or_create_adapter(&addr_key).await {
                                     Ok(entry) => entry,
                                     Err(e) => {
@@ -128,7 +122,6 @@ impl SipUdpServer {
                                         self.metrics.event_received();
 
                                         if matches!(&event, SignalEvent::DeviceOffline { .. }) {
-                                            tracing::info!("[SipUdpServer] Device {} sent disconnect, removing adapter", addr_key);
                                             let _ = guard.on_disconnected().await;
                                             drop(guard);
                                             self.adapters.remove(&addr_key);
@@ -140,9 +133,7 @@ impl SipUdpServer {
 
                                         if let SignalEvent::StopPlay { session_type, .. } = &event {
                                             if *session_type == SessionType::Broadcast {
-                                                tracing::info!("[SipUdpServer] Broadcast StopPlay - not removing adapter (managed by signaling)");
                                             } else {
-                                                tracing::info!("[SipUdpServer] Device {} sent StopPlay, removing adapter", addr_key);
                                                 let _ = guard.on_disconnected().await;
                                                 drop(guard);
                                                 self.adapters.remove(&addr_key);
@@ -172,7 +163,6 @@ impl SipUdpServer {
                     }
                 }
                 _ = self.shutdown_token.cancelled() => {
-                    tracing::info!("[SipUdpServer] Shutdown signal received");
                     break;
                 }
             }
@@ -183,10 +173,9 @@ impl SipUdpServer {
     }
 
     async fn shutdown(&self) {
-        tracing::info!("[SipUdpServer] Shutting down...");
-        
+
         self.shutdown_token.cancel();
-        
+
         let keys: Vec<String> = self.adapters.iter().map(|e| e.key().clone()).collect();
         for key in keys {
             if let Some((_, entry)) = self.adapters.remove(&key) {
@@ -199,8 +188,7 @@ impl SipUdpServer {
         for handle in handles.drain(..) {
             let _ = handle.await;
         }
-        
-        tracing::info!("[SipUdpServer] Shutdown complete");
+
     }
 
     async fn get_or_create_adapter(
@@ -208,11 +196,8 @@ impl SipUdpServer {
         addr_key: &str,
     ) -> anyhow::Result<Arc<UdpAdapterEntry>> {
         if let Some(entry) = self.adapters.get(addr_key) {
-            tracing::debug!("[SipUdpServer] get_or_create: found existing for {}", addr_key);
             return Ok(entry.value().clone());
         }
-
-        tracing::info!("[SipUdpServer] Creating new SIP adapter for {}", addr_key);
 
         let mut adapter: Box<dyn SignalAdapter + Send + Sync> = Box::new(Gb28181Adapter::new(
             self.deps.clone(),
@@ -229,9 +214,8 @@ impl SipUdpServer {
         })?;
         let _ = adapter.set_udp_peer(addr).await;
         let _ = adapter.on_connected(addr).await;
-        
+
         if let Ok(local_addr) = self.socket.local_addr() {
-            tracing::info!("[SipUdpServer] Setting local_addr to {} for adapter", local_addr);
             let _ = adapter.set_local_addr(local_addr).await;
         }
 
@@ -262,12 +246,12 @@ impl SipUdpServer {
                     _ = interval.tick() => {
                         let keys: Vec<String> = adapters.iter().map(|e| e.key().clone()).collect();
                         for key in keys {
-                            if let Some(entry) = adapters.get(&key) {
-                                let mut guard = entry.value().adapter.lock().await;
-                                if guard.needs_timeout_check() {
-                                    tracing::info!("[SipUdpServer] Adapter {} registration timeout, handling", key);
-                                    guard.handle_registration_timeout().await;
-                                }
+
+                            let adapter_arc = { adapters.get(&key).map(|e| e.value().adapter.clone()) };
+                            let Some(adapter_arc) = adapter_arc else { continue; };
+                            let mut guard = adapter_arc.lock().await;
+                            if guard.needs_timeout_check() {
+                                guard.handle_registration_timeout().await;
                             }
                         }
 
@@ -282,7 +266,6 @@ impl SipUdpServer {
 
                         for key in expired {
                             if let Some((_, entry)) = adapters.remove(&key) {
-                                tracing::info!("[SipUdpServer] Adapter {} expired, cleaning up", key);
                                 let mut guard = entry.adapter.lock().await;
                                 let _ = guard.on_disconnected().await;
                                 let event = SignalEvent::DeviceOffline {
@@ -297,7 +280,6 @@ impl SipUdpServer {
                         }
                     }
                     _ = shutdown_token.cancelled() => {
-                        tracing::info!("[SipUdpServer] Cleanup task received shutdown signal");
                         break;
                     }
                 }

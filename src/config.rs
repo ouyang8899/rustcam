@@ -2,7 +2,7 @@ use anyhow::Context;
 use serde::Deserialize;
 use std::path::Path;
 
-use crate::auth::config::JwtConfig;
+use crate::auth::config::{AuthConfig, JwtConfig};
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct LogConfig {
@@ -45,6 +45,8 @@ pub struct AppConfig {
     pub rtsp_auth: RtspAuthConfig,
     pub signaling_server: SignalingServerConfig,
     pub jwt: JwtConfig,
+    #[serde(default)]
+    pub auth: AuthConfig,
     #[serde(default)]
     pub log: LogConfig,
     #[serde(default)]
@@ -155,15 +157,15 @@ pub struct ClusterConfig {
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct RecoveryConfig {
-    /// 定期检查已离线流的间隔秒数（默认 30）
+
     pub check_interval_secs: u64,
-    /// 重试退避基础秒数，采用指数退避 5s→10s→20s→40s→...（默认 5）
+
     pub base_backoff_secs: u64,
-    /// 单次重试最大退避秒数上限（默认 300，即 5 分钟）
+
     pub max_backoff_secs: u64,
-    /// 设备离线后最大自动重试次数，超过后进入终态 Error 需要人工介入（默认 20）
+
     pub max_retries: u8,
-    /// 同时允许的最大并发恢复任务数，防止媒体服务器被突发请求压垮（默认 10）
+
     pub max_concurrent_recoveries: u32,
 }
 
@@ -396,8 +398,9 @@ impl Default for AppConfig {
             onvif: OnvifConfig::default(),
             rtsp_auth: RtspAuthConfig::default(),
             signaling_server: SignalingServerConfig::default(),
-            jwt: JwtConfig::default(),
-            log: LogConfig::default(),
+        jwt: JwtConfig::default(),
+        auth: AuthConfig::default(),
+        log: LogConfig::default(),
             recovery: RecoveryConfig::default(),
             rtsp_server: TcpRtpServerConfig::default(),
         }
@@ -414,7 +417,6 @@ impl AppConfig {
         if !path.exists() {
             let default_config = AppConfig::default();
             default_config.save_to_file(path)?;
-            tracing::info!("Created default config at {:?}", path);
             return Ok(default_config);
         }
 

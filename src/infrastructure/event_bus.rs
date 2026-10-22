@@ -1,8 +1,8 @@
 use async_trait::async_trait;
-use std::collections::HashMap;
+
 use std::sync::Arc;
 use dashmap::DashMap;
-use tokio::sync::{broadcast, Mutex, RwLock};
+use tokio::sync::{ broadcast };
 use crate::protocol::event::{SignalEvent, EventHandler, FnEventHandler};
 use crate::domain::traits::EventPublisher;
 use crate::error::AppError;
@@ -22,43 +22,40 @@ impl EventBus {
     }
 
     pub async fn publish(&self, event: SignalEvent) -> anyhow::Result<()> {
-        let event_type = event.event_type();
-        tracing::info!("[EventBus] Publishing event: {}, handlers: {}, receivers: {}", event_type, self.handlers.len(), self.tx.receiver_count());
+        let _event_type = event.event_type();
         self.tx.send(event.clone()).map_err(|e| anyhow::anyhow!("broadcast send: {}", e))?;
 
-        // 1. 发送到广播 channel（原有订阅者）
-      //  let _ = self.tx.send(event.clone());
-
-        // 2. 触发回调（新增）
         let event_type = event.event_type();
 
-        // 触发精确匹配的回调
-        if let Some(handlers) = self.handlers.get(&event_type) {
-            for handler in handlers.value() {
-                let handler = handler.clone();
-                let event = event.clone();
-                tokio::spawn(async move {
-                    handler.handle(event).await;
-                });
-            }
+        let exact_handlers: Vec<Arc<dyn EventHandler>> = self
+            .handlers
+            .get(&event_type)
+            .map(|h| h.value().clone())
+            .unwrap_or_default();
+        for handler in exact_handlers {
+            let event = event.clone();
+            tokio::spawn(async move {
+                handler.handle(event).await;
+            });
         }
 
-        // 触发 "*" 通配符回调（监听所有事件）
-        if let Some(handlers) = self.handlers.get("*") {
-            for handler in handlers.value() {
-                let handler = handler.clone();
-                let event = event.clone();
-                tokio::spawn(async move {
-                    handler.handle(event).await;
-                });
-            }
+        let wildcard_handlers: Vec<Arc<dyn EventHandler>> = self
+            .handlers
+            .get("*")
+            .map(|h| h.value().clone())
+            .unwrap_or_default();
+        for handler in wildcard_handlers {
+            let event = event.clone();
+            tokio::spawn(async move {
+                handler.handle(event).await;
+            });
         }
 
         Ok(())
     }
 
     pub fn on(&self, event_type: &str, handler: Arc<dyn EventHandler>) {
-     //   let handler = Arc::new(Mutex::new(handler));
+
         self.handlers
             .entry(event_type.to_string())
             .or_default()
@@ -80,7 +77,7 @@ impl EventBus {
     pub fn subscribe(&self) -> broadcast::Receiver<SignalEvent> {
         self.tx.subscribe()
     }
-    /// 订阅并在后台循环处理（便捷方法）
+
     pub fn subscribe_with_handler<F, Fut>(&self, mut f: F)
     where
         F: FnMut(SignalEvent) -> Fut + Send + 'static,

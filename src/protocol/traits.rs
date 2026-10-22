@@ -4,7 +4,6 @@ use crate::infrastructure::cluster::ClusterManager;
 use crate::protocol::adapter_manager::AdapterEntry;
 use crate::config::AppConfig;
 
-/// 协议适配器依赖
 #[derive(Clone)]
 pub struct ProtocolDeps {
     pub device_lookup: Arc<dyn DeviceLookup>,
@@ -59,10 +58,6 @@ impl std::fmt::Debug for ProtocolDeps {
             .finish()
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-// 测试支持 (仅在 cfg(test) 下编译)
-// ═══════════════════════════════════════════════════════════════
 
 #[cfg(test)]
 impl ProtocolDeps {
@@ -120,7 +115,7 @@ impl ProtocolDeps {
             async fn stop_streams_by_channel(&self, _: &str, _: &str) -> Result<(), AppError> { Ok(()) }
             async fn generate_token(&self, _: &str) -> Result<String, AppError> { Ok("test_token".into()) }
             async fn validate_token(&self, _: &str) -> Option<String> { Some("test_device".into()) }
-            async fn build_play_links(&self, device: &crate::domain::Device, token: &str, stream_id: &str) -> crate::domain::device::PlayLinks {
+            async fn build_play_links(&self, _device: &crate::domain::Device, token: &str, stream_id: &str) -> crate::domain::device::PlayLinks {
                 crate::domain::device::PlayLinks {
                     token: token.to_string(), stream_id: stream_id.to_string(), expires_at: 0,
                     ports: Default::default(),
@@ -142,7 +137,6 @@ impl ProtocolDeps {
             }
         }
 
-        // ✅ 使用修复后的 CacheStore trait 方法（非泛型）
         struct TestCacheStore;
         #[async_trait::async_trait]
         impl CacheStore for TestCacheStore {

@@ -9,6 +9,14 @@ export const useRecordingStore = defineStore('recordings', {
     loading: false,
     error: null,
     total: 0,
+    policies: [],
+    policyLoading: false,
+    policyTotal: 0,
+    recordingFiles: [],
+    filesLoading: false,
+    filesTotal: 0,
+    filesPage: 1,
+    filesLimit: 50,
   }),
 
   actions: {
@@ -79,7 +87,64 @@ export const useRecordingStore = defineStore('recordings', {
     },
 
     async fetchFiles(id) {
-      return await api.getRecordingFiles(id)
+      return await api.getRecordingFilesById(id)
+    },
+
+    async fetchRecordingFiles(params) {
+      this.filesLoading = true
+      try {
+        const data = await api.getRecordingFilesWithParams(params)
+        if (params.page && params.page > 1) {
+          this.recordingFiles = [...this.recordingFiles, ...(data.files || [])]
+        } else {
+          this.recordingFiles = data.files || []
+        }
+        this.filesTotal = data.total || 0
+        this.filesPage = data.page || 1
+        this.filesLimit = data.limit || 50
+        return data
+      } finally {
+        this.filesLoading = false
+      }
+    },
+
+    async getRecordingFilePlayUrl(fileId) {
+      return await api.getRecordingFilePlayUrl(fileId)
+    },
+
+    async fetchPolicies(params = {}) {
+      this.policyLoading = true
+      try {
+        const data = await api.getRecordingPolicies(params)
+        this.policies = data.items || data
+        this.policyTotal = data.total || this.policies.length
+        return data
+      } finally {
+        this.policyLoading = false
+      }
+    },
+
+    async createPolicy(data) {
+      const policy = await api.createRecordingPolicy(data)
+      this.policies.unshift(policy)
+      this.policyTotal++
+      ElMessage.success('录制策略已创建')
+      return policy
+    },
+
+    async updatePolicy(id, data) {
+      const policy = await api.updateRecordingPolicy(id, data)
+      const idx = this.policies.findIndex(p => p.id === id)
+      if (idx !== -1) this.policies[idx] = policy
+      ElMessage.success('录制策略已更新')
+      return policy
+    },
+
+    async deletePolicy(id) {
+      await api.deleteRecordingPolicy(id)
+      this.policies = this.policies.filter(p => p.id !== id)
+      this.policyTotal--
+      ElMessage.success('录制策略已删除')
     },
   },
 })

@@ -274,9 +274,27 @@ void PlaybackPlugin::onCellClicked(int cellId, const QString& deviceId)
     Q_UNUSED(deviceId)
 }
 
-void PlaybackPlugin::onDeviceSelected(const QString& deviceId, const QString& deviceName)
-{
+void PlaybackPlugin::onDeviceSelected(const QString& deviceId, const QString& deviceName) {
     Q_UNUSED(deviceName)
+    if (deviceId.isEmpty()) {
+        LOG_WARNING("PlaybackPlugin", "Empty device selected");
+        return;
+    }
+
+    auto deviceList = DataManager::instance()->deviceList();
+    bool found = false;
+    for (const auto& node : deviceList) {
+        if (node->key == deviceId) {
+            found = true;
+            break;
+        }
+    }
+
+    if (!found) {
+        LOG_WARNING("PlaybackPlugin", QString("Device not found: %1").arg(deviceId));
+        return;
+    }
+
     m_currentDeviceId = deviceId;
     if (m_sidePanel) {
         m_sidePanel->setSelectedDate(QDate::currentDate());

@@ -30,9 +30,9 @@ pub struct CreateRecordingReq {
     pub max_file_size_mb: Option<u32>,
     pub output_path: Option<String>,
     pub labels: Option<Vec<String>>,
+    pub pre_record_secs: Option<u32>,
 }
 
-/// GET /api/v1/recordings
 pub async fn list_recordings_handler(
     State(state): State<Arc<FullState>>,
     Query(q): Query<PaginationQuery>,
@@ -49,7 +49,6 @@ pub async fn list_recordings_handler(
     })))
 }
 
-/// POST /api/v1/recordings
 pub async fn create_recording_handler(
     State(state): State<Arc<FullState>>,
     Json(req): Json<CreateRecordingReq>,
@@ -81,6 +80,7 @@ pub async fn create_recording_handler(
         max_file_size_mb: req.max_file_size_mb,
         output_path: req.output_path,
         labels: req.labels,
+        pre_record_secs: req.pre_record_secs,
     };
 
     let media_server = device.media_server_tag.clone().unwrap_or_else(|| "auto".to_string());
@@ -92,7 +92,6 @@ pub async fn create_recording_handler(
     Ok(Json(ApiResponse::success(recording)))
 }
 
-/// GET /api/v1/recordings/:id
 pub async fn get_recording_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -102,7 +101,6 @@ pub async fn get_recording_handler(
     Ok(Json(ApiResponse::success(recording)))
 }
 
-/// POST /api/v1/recordings/:id/start
 pub async fn start_recording_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -111,7 +109,6 @@ pub async fn start_recording_handler(
     Ok(Json(ApiResponse::success(recording)))
 }
 
-/// POST /api/v1/recordings/:id/stop
 pub async fn stop_recording_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -120,7 +117,6 @@ pub async fn stop_recording_handler(
     Ok(Json(ApiResponse::success(recording)))
 }
 
-/// POST /api/v1/recordings/:id/pause
 pub async fn pause_recording_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -129,7 +125,6 @@ pub async fn pause_recording_handler(
     Ok(Json(ApiResponse::success(recording)))
 }
 
-/// POST /api/v1/recordings/:id/resume
 pub async fn resume_recording_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -138,7 +133,6 @@ pub async fn resume_recording_handler(
     Ok(Json(ApiResponse::success(recording)))
 }
 
-/// DELETE /api/v1/recordings/:id
 pub async fn delete_recording_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -147,15 +141,13 @@ pub async fn delete_recording_handler(
     Ok(Json(ApiResponse::success(())))
 }
 
-/// GET /api/v1/recordings/stats
 pub async fn recording_stats_handler(
     State(state): State<Arc<FullState>>,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
     let stats = state.app.registry.recording_service.get_stats().await?;
-    Ok(Json(stats))
+    Ok(Json(ApiResponse::success(stats)))
 }
 
-/// GET /api/v1/recordings/:id/files
 pub async fn recording_files_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -164,7 +156,6 @@ pub async fn recording_files_handler(
     Ok(Json(ApiResponse::success(files)))
 }
 
-/// GET /api/v1/recordings/files
 pub async fn all_recording_files_handler(
     State(state): State<Arc<FullState>>,
 ) -> Result<Json<ApiResponse<Vec<crate::adapter::media_server::RecordingFile>>>, AppError> {

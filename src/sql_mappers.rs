@@ -3,7 +3,7 @@ use rbatis::rbdc::datetime::DateTime as RbatisDateTime;
 use rbatis::sql;
 use crate::domain::server::{Server, ServerType};
 use crate::domain::{Device, Protocol, DeviceStatus, DeviceType, PushUrl, PullUrl, Recording, RecordingState, RecordingFormat, Stream, StreamState, StreamConfig, Channel};
-use crate::domain::stream::make_stream_key;
+
 use crate::domain::region::RegionRow;
 use crate::error::AppError;
 
@@ -96,7 +96,6 @@ impl TryFrom<DeviceRow> for Device {
         let mut ext = row.extended.clone().unwrap_or(serde_json::Value::Object(Default::default()));
         let ext_obj = ext.as_object().cloned().unwrap_or_default();
 
-        // 合并协议特有字段到 extended（保证数据不丢失）
         if let Some(obj) = ext.as_object_mut() {
             if row.rtsp_url.is_some() {
                 obj.insert("rtsp_url".to_string(), serde_json::json!(row.rtsp_url));
@@ -668,7 +667,7 @@ pub struct RecordingRow {
     pub id: i64,
     pub device_tag: Option<String>,
     pub channel_tag: Option<String>,
-    pub media_server_name: String,
+    pub server_tag: String,
     pub state: String,
     pub format: String,
     pub output_path: Option<String>,
@@ -680,6 +679,7 @@ pub struct RecordingRow {
     pub error_message: Option<String>,
     pub labels: Option<String>,
     pub filename: Option<String>,
+    pub max_duration_secs: Option<i32>,
 }
 
 impl TryFrom<RecordingRow> for Recording {
@@ -720,7 +720,7 @@ impl TryFrom<RecordingRow> for Recording {
             id: row.id,
             device_tag: row.device_tag,
             channel_tag: row.channel_tag,
-            media_server_name: row.media_server_name,
+            server_tag: row.server_tag,
             state,
             format,
             output_path: row.output_path,
@@ -732,6 +732,8 @@ impl TryFrom<RecordingRow> for Recording {
             error_message: row.error_message,
             labels,
             filename: row.filename,
+            pre_record_secs: None,
+            max_duration_secs: row.max_duration_secs.map(|v| v as u32),
         })
     }
 }
@@ -746,7 +748,7 @@ impl Recording {
             id: self.id,
             device_tag: self.device_tag.clone(),
             channel_tag: self.channel_tag.clone(),
-            media_server_name: self.media_server_name.clone(),
+            server_tag: self.server_tag.clone(),
             state: state_str,
             format: format_str,
             output_path: self.output_path.clone(),
@@ -758,18 +760,19 @@ impl Recording {
             error_message: self.error_message.clone(),
             labels: labels_json,
             filename: self.filename.clone(),
+            max_duration_secs: self.max_duration_secs.map(|v| v as i32),
         }
     }
 }
 
-#[sql("SELECT id, device_tag, channel_tag, media_server_name, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename FROM recordings ORDER BY created_at DESC")]
+#[sql("SELECT id, device_tag, channel_tag, server_tag, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename, max_duration_secs FROM recordings ORDER BY created_at DESC")]
 pub async fn recording_select_all(
     rb: &dyn rbatis::Executor,
 ) -> rbatis::Result<Vec<RecordingRow>> {
     impled!()
 }
 
-#[sql("SELECT id, device_tag, channel_tag, media_server_name, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename FROM recordings ORDER BY created_at DESC LIMIT $1 OFFSET $2")]
+#[sql("SELECT id, device_tag, channel_tag, server_tag, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename, max_duration_secs FROM recordings ORDER BY created_at DESC LIMIT $1 OFFSET $2")]
 pub async fn recording_select_paginated(
     rb: &dyn rbatis::Executor,
     limit: i64,
@@ -785,7 +788,7 @@ pub async fn recording_count_all(
     impled!()
 }
 
-#[sql("SELECT id, device_tag, channel_tag, media_server_name, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename FROM recordings WHERE id = $1")]
+#[sql("SELECT id, device_tag, channel_tag, server_tag, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename, max_duration_secs FROM recordings WHERE id = $1")]
 pub async fn recording_select_by_id(
     rb: &dyn rbatis::Executor,
     id: i64,
@@ -793,14 +796,14 @@ pub async fn recording_select_by_id(
     impled!()
 }
 
-#[sql("SELECT id, device_tag, channel_tag, media_server_name, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename FROM recordings WHERE state IN ('recording', 'starting') ORDER BY created_at DESC")]
+#[sql("SELECT id, device_tag, channel_tag, server_tag, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename, max_duration_secs FROM recordings WHERE state IN ('recording', 'starting') ORDER BY created_at DESC")]
 pub async fn recording_select_active(
     rb: &dyn rbatis::Executor,
 ) -> rbatis::Result<Vec<RecordingRow>> {
     impled!()
 }
 
-#[sql("SELECT id, device_tag, channel_tag, media_server_name, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename FROM recordings WHERE device_tag = $1 ORDER BY created_at DESC")]
+#[sql("SELECT id, device_tag, channel_tag, server_tag, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename, max_duration_secs FROM recordings WHERE device_tag = $1 ORDER BY created_at DESC")]
 pub async fn recording_select_by_device_tag(
     rb: &dyn rbatis::Executor,
     device_tag: &str,
@@ -808,13 +811,17 @@ pub async fn recording_select_by_device_tag(
     impled!()
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct RecordingInsertResult {
+    pub id: i64,
+}
+
 #[html_sql("sql/recording.html")]
 pub async fn recording_insert(
     rb: &dyn rbatis::Executor,
-    id: i64,
     device_tag: Option<&str>,
     channel_tag: Option<&str>,
-    media_server_name: &str,
+    server_tag: &str,
     state: &str,
     format: &str,
     output_path: Option<String>,
@@ -826,7 +833,8 @@ pub async fn recording_insert(
     error_message: Option<String>,
     labels: Option<String>,
     filename: Option<String>,
-) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    max_duration_secs: Option<i32>,
+) -> rbatis::Result<Vec<RecordingInsertResult>> {
     impled!()
 }
 
@@ -835,7 +843,7 @@ pub async fn recording_update(
     rb: &dyn rbatis::Executor,
     device_tag: Option<&str>,
     channel_tag: Option<&str>,
-    media_server_name: Option<String>,
+    server_tag: Option<String>,
     state: Option<String>,
     format: Option<String>,
     output_path: Option<String>,
@@ -1288,6 +1296,12 @@ pub async fn alarm_select_all(
     offset: i64,
 ) -> rbatis::Result<Vec<AlarmRow>> { impled!() }
 
+#[sql("SELECT id, device_id, device_tag, alarm_type, alarm_time, alarm_method, alarm_priority, description, processed, created_at FROM alarms WHERE id = $1")]
+pub async fn alarm_select_by_id(
+    rb: &dyn rbatis::Executor,
+    id: i64,
+) -> rbatis::Result<Vec<AlarmRow>> { impled!() }
+
 #[sql("SELECT COUNT(*) FROM alarms WHERE device_id = $1")]
 pub async fn alarm_count_by_device(rb: &dyn rbatis::Executor, device_id: i64) -> rbatis::Result<i64> { impled!() }
 
@@ -1296,10 +1310,6 @@ pub async fn alarm_count_all(rb: &dyn rbatis::Executor) -> rbatis::Result<i64> {
 
 #[sql("UPDATE alarms SET processed = $1 WHERE id = $2")]
 pub async fn alarm_mark_processed(rb: &dyn rbatis::Executor, processed: bool, id: i64) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
-
-// ============================================
-// GB28181 Reference Data Queries
-// ============================================
 
 use crate::domain::gb28181_ref::{GbDeviceType, GbIndustryCode, GbNetworkCode};
 
@@ -1573,3 +1583,310 @@ pub async fn broadcast_session_select_by_device_tag(
 pub async fn broadcast_session_select_all(
     rb: &dyn rbatis::Executor,
 ) -> rbatis::Result<Vec<BroadcastSessionRow>> { impled!() }
+
+use crate::domain::recording_policy::{PolicyType, ScheduleType, SegmentType, RecordingPolicy, TimeWindow, RecordingSegment};
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct RecordingPolicyRow {
+    pub id: i64,
+    pub device_tag: String,
+    pub channel_tag: String,
+    pub policy_type: String,
+    pub enabled: bool,
+    pub schedule_type: Option<String>,
+    pub cron_expr: Option<String>,
+    pub alarm_type: Option<String>,
+    pub pre_record_secs: Option<i32>,
+    pub post_record_secs: Option<i32>,
+    pub format: String,
+    pub max_duration_secs: Option<i32>,
+    pub max_file_size_mb: Option<i32>,
+    pub output_path: Option<String>,
+    pub created_at: RbatisDateTime,
+    pub updated_at: RbatisDateTime,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct RecordingTimeWindowRow {
+    pub id: i64,
+    pub policy_id: i64,
+    pub start_time: String,
+    pub end_time: String,
+    pub days: Vec<i32>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct RecordingSegmentRow {
+    pub id: i64,
+    pub recording_id: Option<i64>,
+    pub device_tag: String,
+    pub channel_tag: String,
+    pub start_time: RbatisDateTime,
+    pub end_time: RbatisDateTime,
+    pub duration_secs: Option<i64>,
+    pub file_size: Option<i64>,
+    pub file_path: String,
+    pub server_tag: Option<String>,
+    pub segment_type: String,
+    pub alarm_id: Option<i64>,
+    pub play_url: Option<String>,
+}
+
+impl TryFrom<RecordingPolicyRow> for RecordingPolicy {
+    type Error = crate::error::AppError;
+
+    fn try_from(row: RecordingPolicyRow) -> Result<Self, Self::Error> {
+        let policy_type = PolicyType::from_str(&row.policy_type)
+            .ok_or_else(|| crate::error::AppError::Internal(format!("Invalid policy type: {}", row.policy_type)))?;
+
+        let schedule_type = row.schedule_type.as_ref().map(|s| {
+            ScheduleType::from_str(s).unwrap_or(ScheduleType::TimeWindows)
+        });
+
+        let format = match row.format.to_uppercase().as_str() {
+            "HLS" => crate::domain::recording::RecordingFormat::Hls,
+            "FLV" => crate::domain::recording::RecordingFormat::Flv,
+            "TS" => crate::domain::recording::RecordingFormat::Ts,
+            _ => crate::domain::recording::RecordingFormat::Mp4,
+        };
+
+        Ok(RecordingPolicy {
+            id: row.id,
+            device_tag: row.device_tag,
+            channel_tag: row.channel_tag,
+            policy_type,
+            enabled: row.enabled,
+            schedule_type,
+            cron_expr: row.cron_expr,
+            alarm_type: row.alarm_type,
+            pre_record_secs: row.pre_record_secs.unwrap_or(0) as u32,
+            post_record_secs: row.post_record_secs.unwrap_or(30) as u32,
+            format,
+            max_duration_secs: row.max_duration_secs.unwrap_or(3600) as u32,
+            max_file_size_mb: row.max_file_size_mb.unwrap_or(512) as u32,
+            output_path: row.output_path,
+            time_windows: Vec::new(),
+            created_at: chrono::DateTime::from_timestamp(row.created_at.unix_timestamp(), 0)
+                .unwrap_or_else(chrono::Utc::now),
+            updated_at: chrono::DateTime::from_timestamp(row.updated_at.unix_timestamp(), 0)
+                .unwrap_or_else(chrono::Utc::now),
+        })
+    }
+}
+
+impl TryFrom<RecordingTimeWindowRow> for TimeWindow {
+    type Error = crate::error::AppError;
+
+    fn try_from(row: RecordingTimeWindowRow) -> Result<Self, Self::Error> {
+        Ok(TimeWindow {
+            id: row.id,
+            policy_id: row.policy_id,
+            start_time: row.start_time,
+            end_time: row.end_time,
+            days: row.days,
+        })
+    }
+}
+
+impl TryFrom<RecordingSegmentRow> for RecordingSegment {
+    type Error = crate::error::AppError;
+
+    fn try_from(row: RecordingSegmentRow) -> Result<Self, Self::Error> {
+        let segment_type = SegmentType::from_str(&row.segment_type)
+            .ok_or_else(|| crate::error::AppError::Internal(format!("Invalid segment type: {}", row.segment_type)))?;
+
+        Ok(RecordingSegment {
+            id: row.id,
+            recording_id: row.recording_id,
+            device_tag: row.device_tag,
+            channel_tag: row.channel_tag,
+            start_time: chrono::DateTime::from_timestamp(row.start_time.unix_timestamp(), 0)
+                .unwrap_or_else(chrono::Utc::now),
+            end_time: chrono::DateTime::from_timestamp(row.end_time.unix_timestamp(), 0)
+                .unwrap_or_else(chrono::Utc::now),
+            duration_secs: row.duration_secs.unwrap_or(0) as u64,
+            file_size: row.file_size.unwrap_or(0) as u64,
+            file_path: row.file_path,
+            server_tag: row.server_tag,
+            segment_type,
+            alarm_id: row.alarm_id,
+            play_url: row.play_url,
+        })
+    }
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct RecordingPolicyInsertResult {
+    pub id: i64,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct RecordingSegmentInsertResult {
+    pub id: i64,
+}
+
+#[html_sql("sql/recording_policy.html")]
+pub async fn policy_insert(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+    channel_tag: &str,
+    policy_type: &str,
+    enabled: bool,
+    schedule_type: Option<&str>,
+    cron_expr: Option<&str>,
+    alarm_type: Option<&str>,
+    pre_record_secs: i32,
+    post_record_secs: i32,
+    format: &str,
+    max_duration_secs: i32,
+    max_file_size_mb: i32,
+    output_path: Option<&str>,
+    created_at: Option<RbatisDateTime>,
+    updated_at: Option<RbatisDateTime>,
+) -> rbatis::Result<Vec<RecordingPolicyInsertResult>> { impled!() }
+
+#[html_sql("sql/recording_policy.html")]
+pub async fn policy_update(
+    rb: &dyn rbatis::Executor,
+    id: i64,
+    device_tag: Option<&str>,
+    channel_tag: Option<&str>,
+    policy_type: Option<&str>,
+    enabled: Option<bool>,
+    schedule_type: Option<&str>,
+    cron_expr: Option<&str>,
+    alarm_type: Option<&str>,
+    pre_record_secs: Option<i32>,
+    post_record_secs: Option<i32>,
+    format: Option<&str>,
+    max_duration_secs: Option<i32>,
+    max_file_size_mb: Option<i32>,
+    output_path: Option<&str>,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+#[html_sql("sql/recording_policy.html")]
+pub async fn policy_delete_by_id(
+    rb: &dyn rbatis::Executor,
+    id: i64,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+#[html_sql("sql/recording_policy.html")]
+pub async fn policy_select_all(
+    rb: &dyn rbatis::Executor,
+) -> rbatis::Result<Vec<RecordingPolicyRow>> { impled!() }
+
+#[html_sql("sql/recording_policy.html")]
+pub async fn policy_select_by_id(
+    rb: &dyn rbatis::Executor,
+    id: i64,
+) -> rbatis::Result<Vec<RecordingPolicyRow>> { impled!() }
+
+#[html_sql("sql/recording_policy.html")]
+pub async fn policy_select_by_device_tag(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+) -> rbatis::Result<Vec<RecordingPolicyRow>> { impled!() }
+
+#[html_sql("sql/recording_policy.html")]
+pub async fn policy_select_by_device_and_channel(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+    channel_tag: &str,
+) -> rbatis::Result<Vec<RecordingPolicyRow>> { impled!() }
+
+#[html_sql("sql/recording_policy.html")]
+pub async fn policy_select_by_alarm_triggered(
+    rb: &dyn rbatis::Executor,
+    alarm_type: &str,
+) -> rbatis::Result<Vec<RecordingPolicyRow>> { impled!() }
+
+#[html_sql("sql/recording_time_window.html")]
+pub async fn time_window_insert(
+    rb: &dyn rbatis::Executor,
+    policy_id: i64,
+    start_time: &str,
+    end_time: &str,
+    days: &str,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+#[html_sql("sql/recording_time_window.html")]
+pub async fn time_window_delete_by_policy_id(
+    rb: &dyn rbatis::Executor,
+    policy_id: i64,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+#[html_sql("sql/recording_time_window.html")]
+pub async fn time_window_delete_by_id(
+    rb: &dyn rbatis::Executor,
+    id: i64,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+#[html_sql("sql/recording_time_window.html")]
+pub async fn time_window_select_by_policy_id(
+    rb: &dyn rbatis::Executor,
+    policy_id: i64,
+) -> rbatis::Result<Vec<RecordingTimeWindowRow>> { impled!() }
+
+#[html_sql("sql/recording_segment.html")]
+pub async fn segment_insert(
+    rb: &dyn rbatis::Executor,
+    recording_id: Option<i64>,
+    device_tag: &str,
+    channel_tag: &str,
+    start_time: RbatisDateTime,
+    end_time: RbatisDateTime,
+    duration_secs: i64,
+    file_size: i64,
+    file_path: &str,
+    server_tag: Option<&str>,
+    segment_type: &str,
+    alarm_id: Option<i64>,
+    play_url: Option<&str>,
+) -> rbatis::Result<Vec<RecordingSegmentInsertResult>> { impled!() }
+
+#[html_sql("sql/recording_segment.html")]
+pub async fn segment_update(
+    rb: &dyn rbatis::Executor,
+    id: i64,
+    end_time: Option<RbatisDateTime>,
+    duration_secs: Option<i64>,
+    file_size: Option<i64>,
+    file_path: Option<&str>,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+#[html_sql("sql/recording_segment.html")]
+pub async fn segment_select_by_id(
+    rb: &dyn rbatis::Executor,
+    id: i64,
+) -> rbatis::Result<Vec<RecordingSegmentRow>> { impled!() }
+
+#[html_sql("sql/recording_segment.html")]
+pub async fn segment_select_by_device_channel_time(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+    channel_tag: Option<&str>,
+    start_time: RbatisDateTime,
+    end_time: RbatisDateTime,
+) -> rbatis::Result<Vec<RecordingSegmentRow>> { impled!() }
+
+#[html_sql("sql/recording_segment.html")]
+pub async fn segment_select_paginated(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+    channel_tag: Option<&str>,
+    start_time: RbatisDateTime,
+    end_time: RbatisDateTime,
+    segment_type: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> rbatis::Result<Vec<RecordingSegmentRow>> { impled!() }
+
+#[html_sql("sql/recording_segment.html")]
+pub async fn segment_count_by_device_channel_time(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+    channel_tag: Option<&str>,
+    start_time: RbatisDateTime,
+    end_time: RbatisDateTime,
+    segment_type: Option<&str>,
+) -> rbatis::Result<i64> { impled!() }

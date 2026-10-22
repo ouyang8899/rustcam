@@ -100,7 +100,6 @@ impl SipTcpServer {
         protocol_deps: ProtocolDeps,
     ) -> anyhow::Result<Self> {
         let listener = TcpListener::bind(&config.bind_addr).await?;
-        tracing::info!("[SipTcpServer] Bound to {}", config.bind_addr);
         let max_connections = config.max_connections;
         Ok(Self {
             listener,
@@ -116,8 +115,7 @@ impl SipTcpServer {
     }
 
     pub async fn run(&self) -> anyhow::Result<()> {
-        tracing::info!("[SipTcpServer] Listening on {}", self.config.bind_addr);
-        
+
         let cleanup_handle = self.start_cleanup_task();
         self.join_handles.lock().await.push(cleanup_handle);
 
@@ -131,7 +129,7 @@ impl SipTcpServer {
                                 drop(stream);
                                 continue;
                             }
-                            
+
                             self.metrics.connection_opened();
                             let permit = self.connection_semaphore.clone().acquire_owned().await.unwrap();
                             let event_bus = self.event_bus.clone();
@@ -157,7 +155,6 @@ impl SipTcpServer {
                     }
                 }
                 _ = self.shutdown_token.cancelled() => {
-                    tracing::info!("[SipTcpServer] Shutdown signal received");
                     break;
                 }
             }
@@ -168,14 +165,13 @@ impl SipTcpServer {
     }
 
     async fn shutdown(&self) {
-        tracing::info!("[SipTcpServer] Shutting down...");
-        
+
         self.shutdown_token.cancel();
-        
+
         let addrs: Vec<String> = self.connections.iter()
             .map(|e| e.key().clone())
             .collect();
-        
+
         for addr_key in addrs {
             if let Some((_, entry)) = self.connections.remove(&addr_key) {
                 let adapter = entry.adapter.clone();
@@ -188,8 +184,7 @@ impl SipTcpServer {
         for handle in handles.drain(..) {
             let _ = handle.await;
         }
-        
-        tracing::info!("[SipTcpServer] Shutdown complete");
+
     }
 
     fn start_cleanup_task(&self) -> tokio::task::JoinHandle<()> {
@@ -212,7 +207,6 @@ impl SipTcpServer {
                         ).await;
                     }
                     _ = shutdown_token.cancelled() => {
-                        tracing::info!("[SipTcpServer] Cleanup task received shutdown signal");
                         break;
                     }
                 }
@@ -223,7 +217,7 @@ impl SipTcpServer {
     async fn cleanup_connections(
         connections: &Arc<DashMap<String, Arc<TcpConnectionEntry>>>,
         event_bus: &Arc<EventBus>,
-        idle_timeout_secs: i64,
+        _idle_timeout_secs: i64,
         connection_timeout: u64,
     ) {
         let addrs: Vec<String> = connections.iter()
@@ -231,43 +225,42 @@ impl SipTcpServer {
             .collect();
 
         for addr_key in addrs {
-            if let Some(entry) = connections.get(&addr_key) {
-                let adapter = entry.adapter.clone();
-                let idle_timeout = {
-                    let guard = adapter.lock().await;
-                    if guard.needs_timeout_check() {
-                        tracing::info!("[SipTcpServer] Adapter {} registration timeout, handling", addr_key);
-                        drop(guard);
-                        let mut guard = adapter.lock().await;
-                        guard.handle_registration_timeout().await;
-                        guard.idle_timeout().unwrap_or(300) as i64
-                    } else {
-                        guard.idle_timeout().unwrap_or(300) as i64
-                    }
-                };
 
-                if entry.is_idle(idle_timeout) {
-                    if let Some((_, entry)) = connections.remove(&addr_key) {
-                        tracing::info!("[SipTcpServer] Connection {} idle timeout, cleaning up", addr_key);
-                        
-                        let remote_addr = entry.remote_addr;
-                        let device_tag = entry.get_device_tag().await;
-                        
-                        let adapter = entry.adapter.clone();
-                        {
-                            let mut guard = adapter.lock().await;
-                            let _ = guard.on_disconnected().await;
-                        }
-                        
-                        if let Some(tag) = device_tag {
-                            let event = SignalEvent::DeviceOffline {
-                                device_id: 0,
-                                device_tag: Some(tag),
-                                reason: Some(format!("TCP idle timeout from {}", remote_addr)),
-                            };
-                            if let Err(e) = event_bus.publish(event).await {
-                                tracing::error!("[SipTcpServer] Failed to publish DeviceOffline: {}", e);
-                            }
+            let entry_arc = { connections.get(&addr_key).map(|e| e.value().clone()) };
+            let Some(entry_arc) = entry_arc else { continue; };
+            let adapter = entry_arc.adapter.clone();
+            let idle_timeout = {
+                let guard = adapter.lock().await;
+                if guard.needs_timeout_check() {
+                    drop(guard);
+                    let mut guard = adapter.lock().await;
+                    guard.handle_registration_timeout().await;
+                    guard.idle_timeout().unwrap_or(300) as i64
+                } else {
+                    guard.idle_timeout().unwrap_or(300) as i64
+                }
+            };
+
+            if entry_arc.is_idle(idle_timeout) {
+                if let Some((_, entry)) = connections.remove(&addr_key) {
+
+                    let remote_addr = entry.remote_addr;
+                    let device_tag = entry.get_device_tag().await;
+
+                    let adapter = entry.adapter.clone();
+                    {
+                        let mut guard = adapter.lock().await;
+                        let _ = guard.on_disconnected().await;
+                    }
+
+                    if let Some(tag) = device_tag {
+                        let event = SignalEvent::DeviceOffline {
+                            device_id: 0,
+                            device_tag: Some(tag),
+                            reason: Some(format!("TCP idle timeout from {}", remote_addr)),
+                        };
+                        if let Err(e) = event_bus.publish(event).await {
+                            tracing::error!("[SipTcpServer] Failed to publish DeviceOffline: {}", e);
                         }
                     }
                 }
@@ -302,7 +295,6 @@ impl SipTcpServer {
         connections: Arc<DashMap<String, Arc<TcpConnectionEntry>>>,
         shutdown_token: CancellationToken,
     ) -> anyhow::Result<()> {
-        tracing::info!("[SipTcpServer] New SIP connection from {}", addr);
 
         let mut adapter: Box<dyn SignalAdapter + Send + Sync> = Box::new(Gb28181Adapter::new(
             deps,
@@ -313,7 +305,7 @@ impl SipTcpServer {
                 adapter_manager::remove_adapter(&device_tag);
             }),
         ));
-        
+
         adapter.on_connected(addr).await?;
 
         let (reader, write_half) = stream.into_split();
@@ -325,7 +317,7 @@ impl SipTcpServer {
             guard.set_adapter_entry(adapter_arc.clone());
         }
         let entry = Arc::new(TcpConnectionEntry::new(adapter_arc.clone(), addr));
-        
+
         connections.insert(addr.to_string(), entry.clone());
 
         let mut reader = BufReader::new(reader);
@@ -338,24 +330,21 @@ impl SipTcpServer {
                 result = tokio::time::timeout(read_timeout, reader.read(&mut buffer)) => {
                     match result {
                         Ok(Ok(0)) => {
-                            tracing::debug!("[SipTcpServer] Connection {} closed by peer", addr);
                             break;
                         }
                         Ok(Ok(n)) => {
                             metrics.bytes_received(n);
                             entry.update_activity();
 
-                            if let Ok(msg) = String::from_utf8(buffer[..n].to_vec()) {
-                                tracing::info!("[SipTcpServer] RECV from {}:\n{}", addr, msg);
+                            if let Ok(_msg) = String::from_utf8(buffer[..n].to_vec()) {
                             } else {
-                                tracing::info!("[SipTcpServer] RECV {} bytes from {} (binary)", n, addr);
                             }
-                            
+
                             let parse_result = {
                                 let mut guard = adapter_arc.lock().await;
                                 guard.parse(&buffer[..n]).await
                             };
-                            
+
                             match parse_result {
                                 Ok(events) => {
                                     for event in &events {
@@ -365,7 +354,7 @@ impl SipTcpServer {
                                             }
                                         }
                                     }
-                                    
+
                                     for event in events {
                                         metrics.event_received();
                                         if let Err(e) = event_bus.publish(event).await {
@@ -400,21 +389,20 @@ impl SipTcpServer {
                     }
                 }
                 _ = shutdown_token.cancelled() => {
-                    tracing::info!("[SipTcpServer] Connection {} shutdown requested", addr);
                     break;
                 }
             }
         }
 
         connections.remove(&addr.to_string());
-        
+
         let device_tag = entry.get_device_tag().await;
         let remote_addr = entry.remote_addr;
         {
             let mut guard = adapter_arc.lock().await;
             let _ = guard.on_disconnected().await;
         }
-        
+
         if let Some(tag) = device_tag {
             let event = SignalEvent::DeviceOffline {
                 device_id: 0,

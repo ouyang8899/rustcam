@@ -160,4 +160,4 @@ void MapView::handleJavaScriptResult(QVariant result) {
 }
 
 #include "MapView.moc"
-#endif // RUSTCAM_WITH_WEBENGINE
+#endif

@@ -55,6 +55,30 @@ pub struct ServerProtocolPorts {
     pub ws_flv: Option<u16>,
 }
 
+impl ServerProtocolPorts {
+
+    pub fn is_empty(&self) -> bool {
+        self.rtsp.is_none()
+            && self.rtmp.is_none()
+            && self.hls.is_none()
+            && self.http.is_none()
+            && self.https.is_none()
+            && self.webrtc.is_none()
+            && self.rtp_tcp.is_none()
+            && self.http_flv.is_none()
+            && self.ws_flv.is_none()
+    }
+
+    pub fn fill_missing_from(&mut self, other: &ServerProtocolPorts) {
+        macro_rules! fill {
+            ($($f:ident),*) => {
+                $(if self.$f.is_none() { self.$f = other.$f; })*
+            };
+        }
+        fill!(rtsp, rtmp, hls, http, https, webrtc, rtp_tcp, http_flv, ws_flv);
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Server {
     pub id: i64,

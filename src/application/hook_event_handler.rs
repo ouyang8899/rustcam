@@ -3,7 +3,7 @@ use crate::infrastructure::{DbRepository, EventBus};
 use crate::infrastructure::RedisStore;
 use crate::protocol::event::SignalEvent;
 use crate::domain::{Session, SessionType, SessionState, Stream, StreamState};
-use crate::domain::traits::EventPublisher;
+
 use crate::application::recording_service::RecordingService;
 use uuid::Uuid;
 
@@ -32,7 +32,7 @@ impl HookEventHandler {
         }
     }
 
-    pub async fn start(mut self) {
+    pub async fn start(self) {
         tokio::spawn(async move {
             loop {
                 match self.event_bus.subscribe().recv().await {
@@ -46,7 +46,6 @@ impl HookEventHandler {
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        tracing::info!("[HookEventHandler] Event bus closed, stopping");
                         break;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -79,8 +78,6 @@ impl HookEventHandler {
     }
 
     async fn handle_hook_play(&self, media_server_tag: &str, stream_id: &str, client_ip: Option<String>) {
-        tracing::info!("[HookEventHandler] HookPlay: server={}, stream={}, ip={:?}", 
-            media_server_tag, stream_id, client_ip);
 
         let stream_key = stream_id;
         if let Some(mut s) = self.find_stream_by_stream_key(stream_key).await {
@@ -94,7 +91,7 @@ impl HookEventHandler {
         session.state = SessionState::Active;
         session.client_ip = client_ip;
         session.media_server_tag = Some(media_server_tag.to_string());
-        
+
         if let Some(stream) = self.find_stream_by_stream_key(stream_key).await {
             session.device_tag = stream.device_tag.clone();
             session.channel_tag = stream.channel_tag.clone();
@@ -107,12 +104,9 @@ impl HookEventHandler {
         }
 
         self.db.sessions_cache().insert(session.id, session);
-        tracing::info!("[HookEventHandler] HookPlay: session created, stream={}", stream_id);
     }
 
-    async fn handle_hook_publish(&self, media_server_tag: &str, stream_id: &str, client_ip: Option<String>, device_tag_from_params: Option<String>, channel_tag_from_params: Option<String>) {
-        tracing::info!("[HookEventHandler] HookPublish: server={}, stream={}, ip={:?}", 
-            media_server_tag, stream_id, client_ip);
+    async fn handle_hook_publish(&self, media_server_tag: &str, stream_id: &str, _client_ip: Option<String>, device_tag_from_params: Option<String>, channel_tag_from_params: Option<String>) {
 
         let (device_tag, channel_tag) = if let (Some(dt), Some(ct)) = (&device_tag_from_params, &channel_tag_from_params) {
             (dt.clone(), ct.clone())
@@ -122,7 +116,7 @@ impl HookEventHandler {
         };
 
         let cache_key = format!("{}/{}", device_tag, channel_tag);
-        if let Some(mut s) = self.db.streams_cache().get(&cache_key).map(|s| s.clone()) {
+        if let Some(s) = self.db.streams_cache().get(&cache_key).map(|s| s.clone()) {
             let mut s = s;
             s.update_keepalive();
             if s.state == StreamState::Idle || s.state == StreamState::Error {
@@ -131,7 +125,6 @@ impl HookEventHandler {
             if let Err(e) = self.db.update_stream(&s).await {
                 tracing::warn!("[HookEventHandler] HookPublish: failed to update stream: {}", e);
             }
-            tracing::info!("[HookEventHandler] HookPublish: updated push stream {} (device_tag={})", stream_id, device_tag);
             return;
         }
 
@@ -156,24 +149,19 @@ impl HookEventHandler {
             return;
         }
 
-        tracing::info!("[HookEventHandler] HookPublish: registered push stream {} on server {}", stream_id, media_server_tag);
     }
 
-    async fn handle_hook_unpublish(&self, media_server_tag: &str, stream_id: &str) {
-        tracing::info!("[HookEventHandler] HookUnpublish: server={}, stream={}", media_server_tag, stream_id);
+    async fn handle_hook_unpublish(&self, _media_server_tag: &str, stream_id: &str) {
 
         if let Some(mut s) = self.find_stream_by_stream_key(stream_id).await {
             s.stopped();
             if let Err(e) = self.db.update_stream(&s).await {
                 tracing::warn!("[HookEventHandler] HookUnpublish: failed to update stream: {}", e);
             }
-            tracing::info!("[HookEventHandler] HookUnpublish: stream {} stopped", stream_id);
         }
     }
 
-    async fn handle_hook_stream_update(&self, media_server_tag: &str, stream_id: &str, regist: bool, reader_count: Option<u32>, total_reader_count: Option<u32>, bytes_speed: Option<u64>) {
-        tracing::info!("[HookEventHandler] HookStreamUpdate: server={}, stream={}, regist={}, readers={:?}/{:?}", 
-            media_server_tag, stream_id, regist, reader_count, total_reader_count);
+    async fn handle_hook_stream_update(&self, media_server_tag: &str, stream_id: &str, regist: bool, _reader_count: Option<u32>, _total_reader_count: Option<u32>, _bytes_speed: Option<u64>) {
 
         if !regist {
             self.handle_hook_unpublish(media_server_tag, stream_id).await;
@@ -191,8 +179,9 @@ impl HookEventHandler {
         }
 
         if let Some(device_id) = self.find_device_id_by_push_stream(stream_id).await {
-            if let Some(device) = self.db.devices_cache().get(&device_id) {
-                let mut device = (*device).clone();
+
+            let cached_device = self.db.device_cached(&device_id);
+            if let Some(mut device) = cached_device {
                 device.set_online();
                 if let Err(e) = self.db.update_device(&device).await {
                     tracing::warn!("[HookEventHandler] HookStreamUpdate: failed to update device online status: {}", e);
@@ -224,11 +213,10 @@ impl HookEventHandler {
         Some(device_tag)
     }
 
-    async fn start_recording_if_enabled(&self, device_tag: &str, channel_tag: &str, media_server: &str, app: &str, stream_key: &str) {
+    async fn start_recording_if_enabled(&self, device_tag: &str, _channel_tag: &str, media_server: &str, _app: &str, stream_key: &str) {
         let device = match self.db.devices_cache().get(device_tag).map(|r| r.value().clone()) {
             Some(d) => d,
             None => {
-                tracing::debug!("[HookEventHandler] Device {} not found in cache, skipping recording", device_tag);
                 return;
             }
         };
@@ -250,8 +238,7 @@ impl HookEventHandler {
             .start_recording_for_stream(device_tag.to_string(), stream_key, media_server, &config)
             .await
         {
-            Ok(Some(rec)) => {
-                tracing::info!("[HookEventHandler] Recording {} auto-started for stream {}", rec.id, stream_key);
+            Ok(Some(_rec)) => {
             }
             Ok(None) => {}
             Err(e) => {
@@ -260,9 +247,7 @@ impl HookEventHandler {
         }
     }
 
-    async fn handle_hook_stream_changed(&self, media_server_tag: &str, stream_id: &str, regist: bool) {
-        tracing::info!("[HookEventHandler] HookStreamChanged: server={}, stream={}, regist={}",
-            media_server_tag, stream_id, regist);
+    async fn handle_hook_stream_changed(&self, _media_server_tag: &str, stream_id: &str, regist: bool) {
 
         if !regist {
             if let Some(s) = self.find_stream_by_stream_key(stream_id).await {
@@ -310,9 +295,7 @@ impl HookEventHandler {
                 tracing::warn!("[HookEventHandler] HookStreamChanged: failed to update stream: {}", e);
             }
             if let Some(ref dt) = device_tag {
-                tracing::debug!("[HookEventHandler] HookStreamChanged: looking for channel device_tag={}, channel_tag={}", dt, channel_tag.as_deref().unwrap_or(dt));
                 if let Ok(Some(mut channel)) = self.db.get_channel(dt, channel_tag.as_deref().unwrap_or(dt)).await {
-                    tracing::info!("[HookEventHandler] HookStreamChanged: found channel, updating status to Online");
                     channel.status = crate::domain::DeviceStatus::Online;
                     if let Err(e) = self.db.update_channel(&channel).await {
                         tracing::warn!("[HookEventHandler] HookStreamChanged: failed to update channel status: {}", e);
@@ -335,8 +318,8 @@ impl HookEventHandler {
         let all_offline = channels.iter().all(|c| c.status == crate::domain::DeviceStatus::Offline);
         let has_online = channels.iter().any(|c| c.status == crate::domain::DeviceStatus::Online);
 
-        if let Some(device) = self.db.devices_cache().get(device_tag) {
-            let mut device = (*device).clone();
+        let cached_device = self.db.device_cached(device_tag);
+        if let Some(mut device) = cached_device {
             if all_offline && !has_online {
                 if device.status != crate::domain::DeviceStatus::Maintaining {
                     device.set_offline();

@@ -48,7 +48,7 @@
               <el-table-column label="文件路径" prop="output_path" min-width="200" show-overflow-tooltip>
                 <template #default="{ row }"><span>{{ row.output_path || '-' }}</span></template>
               </el-table-column>
-              <el-table-column label="媒体服务器" prop="media_server_name" show-overflow-tooltip />
+              <el-table-column label="媒体服务器" prop="server_tag" show-overflow-tooltip />
               <el-table-column label="时长" width="100">
                 <template #default="{ row }"><span>{{ formatDuration(row.duration_secs) }}</span></template>
               </el-table-column>

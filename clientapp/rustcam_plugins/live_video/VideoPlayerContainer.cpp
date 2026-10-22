@@ -31,7 +31,6 @@ VideoPlayerContainer::VideoPlayerContainer(QWidget* parent)
 
     connect(m_navBar, &NavigationBar::layoutSelected, this, &VideoPlayerContainer::onLayoutSelected);
 
-    qDebug() << "VideoPlayerContainer created, size:" << size();
 }
 
 VideoPlayerContainer::~VideoPlayerContainer() {
@@ -51,7 +50,6 @@ void VideoPlayerContainer::initialize()
 void VideoPlayerContainer::onLayoutsReady() {
     disconnect(DataManager::instance(), &DataManager::layoutsLoaded, this, &VideoPlayerContainer::onLayoutsReady);
     m_layouts = DataManager::instance()->layouts();
-    qDebug() << "Using layouts from DataManager:" << m_layouts.size();
 
     m_navBar->setLayouts(m_layouts);
 

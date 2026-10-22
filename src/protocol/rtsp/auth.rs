@@ -259,7 +259,7 @@ pub fn build_www_authenticate(realm: &str, nonce: &str) -> String {
 }
 
 pub fn authenticate(
-    ctx: &RtspAuthContext,
+    _ctx: &RtspAuthContext,
     authorization: Option<&str>,
     method: &str,
     uri: &str,

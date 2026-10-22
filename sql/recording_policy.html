@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="recording_policy">
+
+<insert id="policy_insert">
+INSERT INTO recording_policies (
+    device_tag, channel_tag, policy_type, enabled,
+    schedule_type, cron_expr,
+    alarm_type, pre_record_secs, post_record_secs,
+    format, max_duration_secs, max_file_size_mb, output_path,
+    created_at, updated_at
+) VALUES (
+    #{device_tag}, #{channel_tag}, #{policy_type}, #{enabled},
+    #{schedule_type}, #{cron_expr},
+    #{alarm_type}, #{pre_record_secs}, #{post_record_secs},
+    #{format}, #{max_duration_secs}, #{max_file_size_mb}, #{output_path},
+    #{created_at}, #{updated_at}
+)
+RETURNING id
+</insert>
+
+<update id="policy_update">
+UPDATE recording_policies
+<set>
+<if test="device_tag != null">device_tag = #{device_tag},</if>
+<if test="channel_tag != null">channel_tag = #{channel_tag},</if>
+<if test="policy_type != null">policy_type = #{policy_type},</if>
+<if test="enabled != null">enabled = #{enabled},</if>
+<if test="schedule_type != null">schedule_type = #{schedule_type},</if>
+<if test="cron_expr != null">cron_expr = #{cron_expr},</if>
+<if test="alarm_type != null">alarm_type = #{alarm_type},</if>
+<if test="pre_record_secs != null">pre_record_secs = #{pre_record_secs},</if>
+<if test="post_record_secs != null">post_record_secs = #{post_record_secs},</if>
+<if test="format != null">format = #{format},</if>
+<if test="max_duration_secs != null">max_duration_secs = #{max_duration_secs},</if>
+<if test="max_file_size_mb != null">max_file_size_mb = #{max_file_size_mb},</if>
+<if test="output_path != null">output_path = #{output_path},</if>
+updated_at = NOW()
+</set>
+WHERE id = #{id}
+</update>
+
+<delete id="policy_delete_by_id">
+DELETE FROM recording_policies WHERE id = #{id}
+</delete>
+
+<select id="policy_select_all">
+SELECT id, device_tag, channel_tag, policy_type, enabled,
+       schedule_type, cron_expr,
+       alarm_type, pre_record_secs, post_record_secs,
+       format, max_duration_secs, max_file_size_mb, output_path,
+       created_at, updated_at
+FROM recording_policies
+ORDER BY created_at DESC
+</select>
+
+<select id="policy_select_by_id">
+SELECT id, device_tag, channel_tag, policy_type, enabled,
+       schedule_type, cron_expr,
+       alarm_type, pre_record_secs, post_record_secs,
+       format, max_duration_secs, max_file_size_mb, output_path,
+       created_at, updated_at
+FROM recording_policies
+WHERE id = #{id}
+</select>
+
+<select id="policy_select_by_device_tag">
+SELECT id, device_tag, channel_tag, policy_type, enabled,
+       schedule_type, cron_expr,
+       alarm_type, pre_record_secs, post_record_secs,
+       format, max_duration_secs, max_file_size_mb, output_path,
+       created_at, updated_at
+FROM recording_policies
+WHERE device_tag = #{device_tag}
+ORDER BY created_at DESC
+</select>
+
+<select id="policy_select_by_device_and_channel">
+SELECT id, device_tag, channel_tag, policy_type, enabled,
+       schedule_type, cron_expr,
+       alarm_type, pre_record_secs, post_record_secs,
+       format, max_duration_secs, max_file_size_mb, output_path,
+       created_at, updated_at
+FROM recording_policies
+WHERE device_tag = #{device_tag} AND channel_tag = #{channel_tag}
+ORDER BY created_at DESC
+</select>
+
+<select id="policy_select_by_alarm_triggered">
+SELECT id, device_tag, channel_tag, policy_type, enabled,
+       schedule_type, cron_expr,
+       alarm_type, pre_record_secs, post_record_secs,
+       format, max_duration_secs, max_file_size_mb, output_path,
+       created_at, updated_at
+FROM recording_policies
+WHERE policy_type = 'AlarmTriggered' AND enabled = true AND alarm_type = #{alarm_type}
+ORDER BY created_at DESC
+</select>
+
+</mapper>

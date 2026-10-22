@@ -12,8 +12,8 @@ default_password = "admin"
 
 [database]
 url = "postgres://postgres:123456@192.168.1.7:5435/rustcam?options=-c%20client_encoding=UTF8"
-max_connections = 10
-debug_sql = true
+max_connections = 32
+debug_sql = false
 
 [redis]
 # url = "redis://:123456@127.0.0.1:6379/"
@@ -29,14 +29,16 @@ weight = 100
 enabled = true
 server_tag = "default"
 [media_servers.servers.protocol_ports]
+# 端口需与 ZLMediaKit 的 config.ini 保持一致
+# (http=80 / https=443 / rtsp=554 / rtmp=1935)
 rtsp = 554
 rtmp = 1935
 hls = 8083
-http = 8080
-https = 8443
+http = 80
+https = 443
 webrtc = 8000
-rtp_tcp = 6000
-http_flv = 8088
+rtp_tcp = 10000
+http_flv = 80
 ws_flv = 8089
 
 
@@ -88,7 +90,7 @@ access_token_expire_minutes = 60
 refresh_token_expire_days = 30
 
 [log]
-level = "debug"
+level = "info"
 sql = false
 http = false
 media_server = false

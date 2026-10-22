@@ -41,6 +41,5 @@ impl WsService {
             }
         });
 
-        tracing::info!("[WsService] Started periodic stats push");
     }
 }

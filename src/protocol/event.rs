@@ -13,12 +13,12 @@ pub trait EventHandler: Send + Sync {
     async fn handle(&self, event: SignalEvent);
 }
 pub struct FnEventHandler<F> {
-    f: F,  // 存储闭包
+    f: F,
 }
 impl<F, Fut> FnEventHandler<F>
 where
-    F: Fn(SignalEvent) -> Fut + Send + Sync,  // F 是接收事件、返回 Future 的闭包
-    Fut: std::future::Future<Output = ()> + Send,  // Future 必须可 Send
+    F: Fn(SignalEvent) -> Fut + Send + Sync,
+    Fut: std::future::Future<Output = ()> + Send,
 {
     pub fn new(f: F) -> Self {
         Self { f }
@@ -120,6 +120,11 @@ pub enum SignalEvent {
         message: String,
         timestamp: DateTime<Utc>,
     },
+    AlarmRecovered {
+        device_id: String,
+        alarm_type: String,
+        timestamp: DateTime<Utc>,
+    },
     QueryDeviceInfo {
         device_tag: Option<String>,
     },
@@ -191,7 +196,7 @@ pub enum SignalEvent {
         event_type: String,
         channels: Vec<CatalogChannel>,
     },
-    // 事件驱动的音频通话
+
     StartAudioTalk {
         node_id: MediaNodeId,
     },
@@ -280,7 +285,7 @@ pub enum SignalEvent {
     },
 }
 impl SignalEvent {
-    /// 获取事件类型字符串
+
     pub fn event_type(&self) -> String {
         match self {
             SignalEvent::DeviceRegister { .. } => "device_register".to_string(),
@@ -298,6 +303,7 @@ impl SignalEvent {
             SignalEvent::PlaybackResult { .. } => "playback_result".to_string(),
             SignalEvent::PtzControl { .. } => "ptz_control".to_string(),
             SignalEvent::Alarm { .. } => "alarm".to_string(),
+            SignalEvent::AlarmRecovered { .. } => "alarm_recovered".to_string(),
             SignalEvent::QueryDeviceInfo { .. } => "query_device_info".to_string(),
             SignalEvent::QueryDeviceStatus { .. } => "query_device_status".to_string(),
             SignalEvent::QueryDeviceConfig { .. } => "query_device_config".to_string(),
@@ -344,6 +350,7 @@ impl SignalEvent {
             SignalEvent::PlaybackResult { device_tag, .. } => device_tag.clone(),
             SignalEvent::PtzControl { device_id, .. } => Some(device_id.clone()),
             SignalEvent::Alarm { device_id, .. } => Some(device_id.clone()),
+            SignalEvent::AlarmRecovered { device_id, .. } => Some(device_id.clone()),
             SignalEvent::QueryDeviceInfo { device_tag, .. } => device_tag.clone(),
             SignalEvent::QueryDeviceStatus { device_tag, .. } => device_tag.clone(),
             SignalEvent::QueryDeviceConfig { device_tag, .. } => device_tag.clone(),

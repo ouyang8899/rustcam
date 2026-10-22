@@ -302,9 +302,9 @@
       <el-empty v-else description="暂无播放链接" />
     </el-dialog>
 
-    <el-affix position="bottom" :offset="20" v-if="copied">
-      <el-alert title="已复制到剪贴板" type="success" :closable="false" show-icon />
-    </el-affix>
+    <div v-if="copied" class="fixed-toast toast-success">
+      已复制到剪贴板
+    </div>
   </div>
 </template>
 
@@ -993,6 +993,25 @@ async function copyLink(text) {
   color: var(--text-secondary);
 }
 .mono { font-family: var(--font-mono); }
+
+.fixed-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  z-index: 3000;
+  padding: 10px 20px;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 14px;
+  line-height: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  max-width: 80vw;
+}
+
+.toast-success { background-color: #67c23a; }
+.toast-error { background-color: #f56c6c; }
 
 .group-header { display: flex; align-items: center; justify-content: space-between; }
 .devices-layout { margin-top: 0; }

@@ -152,7 +152,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useMediaServerStore } from '../stores/mediaServerStore'
 import { Refresh, Plus, Edit, Delete, Close } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import StatusDot from '../components/common/StatusDot.vue'
 
 const store = useMediaServerStore()
@@ -297,6 +297,15 @@ async function toggleServer(server) {
 }
 async function refreshAll() { refreshingAll.value = true; await store.checkAllStatus(); refreshingAll.value = false }
 async function confirmDelete(server) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除媒体服务器 "${server.name || server.server_tag}" 吗？`,
+      '确认删除',
+      { type: 'warning' }
+    )
+  } catch {
+    return // 用户取消
+  }
   try {
     await store.deleteServer(server.server_tag)
     if (selectedServer.value?.server_tag === server.server_tag) selectedServer.value = null

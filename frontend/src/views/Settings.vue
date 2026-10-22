@@ -92,12 +92,12 @@
         </el-col>
       </el-row>
 
-      <el-affix position="bottom" :offset="20" v-if="successMsg">
-        <el-alert :title="successMsg" type="success" :closable="false" show-icon />
-      </el-affix>
-      <el-affix position="bottom" :offset="20" v-if="errorMsg">
-        <el-alert :title="errorMsg" type="error" :closable="false" show-icon />
-      </el-affix>
+      <div v-if="successMsg" class="fixed-toast toast-success">
+        {{ successMsg }}
+      </div>
+      <div v-if="errorMsg" class="fixed-toast toast-error">
+        {{ errorMsg }}
+      </div>
     </div>
   </div>
 </template>
@@ -145,7 +145,8 @@ async function fetchServers() {
     const data = await res.json()
     if (data.code === 200) {
       config.value.media_servers.servers = data.data.map(s => ({
-        id: s.id, name: s.name, url: s.url, api_key: s.api_key, server_type: s.server_type, weight: s.weight, enabled: s.enabled
+        id: s.id, server_tag: s.server_tag, name: s.name, url: s.url, api_key: s.api_key,
+        server_type: s.server_type, weight: s.weight, enabled: s.enabled
       }))
     }
   } catch (e) { console.error('Failed to fetch servers:', e); errorMsg.value = '加载媒体服务器失败'; setTimeout(() => { errorMsg.value = '' }, 5000) }
@@ -159,8 +160,31 @@ async function saveServers() {
   saving.value = true; errorMsg.value = ''
   try {
     for (const server of config.value.media_servers.servers) {
-      if (server.id) await authFetch(`/api/v1/servers/${server.id}`, { method: 'PUT', body: JSON.stringify(server) })
-      else await authFetch('/api/v1/servers', { method: 'POST', body: JSON.stringify(server) })
+      if (!server.server_tag) {
+        throw new Error('缺少 server_tag，无法保存')
+      }
+      // API 路径参数为 server_tag（不是数字 id）
+      const res = await authFetch(`/api/v1/servers/${encodeURIComponent(server.server_tag)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: server.name,
+          url: server.url,
+          api_key: server.api_key,
+          server_type: server.server_type,
+          weight: server.weight,
+          enabled: server.enabled,
+          server_tag: server.server_tag,
+        }),
+      })
+      // authFetch 不会因 HTTP 错误状态抛异常，必须显式检查
+      if (!res.ok) {
+        let detail = ''
+        try {
+          const body = await res.json()
+          detail = body.message || body.msg || ''
+        } catch { /* 忽略解析失败 */ }
+        throw new Error(detail || `HTTP ${res.status}`)
+      }
     }
     successMsg.value = '保存成功'; setTimeout(() => { successMsg.value = '' }, 3000)
     await fetchServers()
@@ -171,4 +195,23 @@ async function saveServers() {
 
 <style scoped>
 .mono { font-family: var(--font-mono); }
+
+.fixed-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  z-index: 3000;
+  padding: 10px 20px;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 14px;
+  line-height: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  max-width: 80vw;
+}
+
+.toast-success { background-color: #67c23a; }
+.toast-error { background-color: #f56c6c; }
 </style>

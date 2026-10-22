@@ -157,11 +157,9 @@ mod tests {
 </env:Envelope>"#;
 
         let uri = extract_element_text(body, "Uri");
-        println!("Extracted URI: {:?}", uri);
 
         assert!(uri.is_some(), "URI should be extracted");
         let uri_str = uri.unwrap();
-        println!("Final URI string: {}", uri_str);
 
         assert!(
             uri_str.contains("transportmode=unicast&profile=Profile_1"),

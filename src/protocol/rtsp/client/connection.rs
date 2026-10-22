@@ -31,7 +31,6 @@ enum ParsedMessage {
 
 impl TcpConnection {
     pub async fn connect(addr: SocketAddr) -> Result<Self, RtspError> {
-        tracing::info!("[RTSP Connection] Connecting to {}", addr);
         let stream =
             tokio::time::timeout(std::time::Duration::from_secs(5), TcpStream::connect(addr))
                 .await
@@ -39,7 +38,6 @@ impl TcpConnection {
                 .map_err(|e| RtspError::ConnectionFailed(e.to_string()))?;
 
         let _ = stream.set_nodelay(true);
-        tracing::info!("[RTSP Connection] TCP connected to {}", addr);
 
         let (read_half, write_half) = stream.into_split();
         Ok(Self {
@@ -55,10 +53,6 @@ impl TcpConnection {
     }
 
     pub fn mark_closed(&self) {
-        eprintln!(
-            "[Connection] mark_closed called, thread_id={:?}",
-            std::thread::current().id()
-        );
         self.closed.store(true, Ordering::Release);
     }
 
@@ -66,8 +60,6 @@ impl TcpConnection {
         if self.is_closed() {
             return Err(RtspError::ConnectionFailed("连接已关闭".into()));
         }
-        let data_str = String::from_utf8_lossy(data);
-        eprintln!("[Connection] send {} bytes:\n{}", data.len(), data_str);
         let mut write_half = self.write_half.lock().await;
         write_half
             .write_all(data)
@@ -89,15 +81,9 @@ impl TcpConnection {
 
     pub async fn send_request(&self, data: &[u8], cseq: u32) -> Result<String, RtspError> {
         if self.is_closed() {
-            eprintln!("[Connection] send_request: connection is closed!");
             return Err(RtspError::ConnectionFailed("连接已关闭".into()));
         }
 
-        eprintln!(
-            "[Connection] send_request: sending cseq={}, is_closed={}",
-            cseq,
-            self.is_closed()
-        );
         let (tx, rx) = oneshot::channel::<String>();
         {
             let mut pending = self.pending_responses.lock().await;
@@ -110,57 +96,29 @@ impl TcpConnection {
             pending.insert(cseq, tx);
         }
 
-        let data_str = String::from_utf8_lossy(data);
-        eprintln!(
-            "[Connection] send_request: cseq={}, sending {} bytes",
-            cseq,
-            data.len()
-        );
+        let _data_str = String::from_utf8_lossy(data);
 
         if let Err(e) = self.send(data).await {
             self.pending_responses.lock().await.remove(&cseq);
-            eprintln!(
-                "[Connection] send_request: cseq={} send FAILED: {}",
-                cseq, e
-            );
             return Err(e);
         }
-
-        eprintln!(
-            "[Connection] send_request: cseq={} sent successfully, waiting for response...",
-            cseq
-        );
 
         match tokio::time::timeout(std::time::Duration::from_secs(RESPONSE_TIMEOUT_SECS), rx).await
         {
             Ok(Ok(response)) => {
-                eprintln!(
-                    "[Connection] send_request: cseq={} got response, len={}",
-                    cseq,
-                    response.len()
-                );
                 Ok(response)
             }
             Ok(Err(_)) => {
                 self.pending_responses.lock().await.remove(&cseq);
-                eprintln!(
-                    "[Connection] send_request: cseq={} channel CLOSED (rx returned Err)",
-                    cseq
-                );
                 Err(RtspError::ConnectionFailed("连接已关闭".into()))
             }
             Err(_) => {
                 self.pending_responses.lock().await.remove(&cseq);
-                eprintln!(
-                    "[Connection] send_request: cseq={} TIMEOUT after {}s",
-                    cseq, RESPONSE_TIMEOUT_SECS
-                );
                 Err(RtspError::Timeout(format!("等待 CSeq {} 响应超时", cseq)))
             }
         }
     }
 
-    /// 唯一的 TCP 读循环。从连接到断开，永不切换。
     pub async fn run_receive_loop(
         self: Arc<Self>,
         on_data: Arc<dyn Fn(ReceivedData) + Send + Sync>,
@@ -183,7 +141,6 @@ impl TcpConnection {
                     }
                     Some(ParsedMessage::Rtsp(response)) => {
                         let cseq = Self::extract_cseq(&response);
-                        eprintln!("[TCP Receiver] 收到 RTSP 响应, cseq={:?}", cseq);
                         match cseq {
                             Some(cseq) => {
                                 let tx = {
@@ -192,25 +149,16 @@ impl TcpConnection {
                                 };
                                 match tx {
                                     Some(tx) => {
-                                        eprintln!(
-                                            "[TCP Receiver] 发送响应到等待的请求 cseq={}",
-                                            cseq
-                                        );
                                         let _ = tx.send(response);
                                     }
                                     None => {
-                                        eprintln!("[TCP Receiver] 收到未知 CSeq={} 的响应", cseq)
                                     }
                                 }
                             }
-                            None => eprintln!("[TCP Receiver] RTSP 响应缺少 CSeq 头"),
+                            None => {}
                         }
                     }
                     None => {
-                        tracing::debug!(
-                            "[TCP Receiver] 数据不完整，需要更多数据, read_buf.len={}",
-                            read_buf.len()
-                        );
                         break;
                     }
                 }
@@ -223,10 +171,6 @@ impl TcpConnection {
             }
 
             let mut read_half = self.read_half.lock().await;
-            tracing::debug!(
-                "[TCP Receiver] 等待读取数据... read_buf.len={}",
-                read_buf.len()
-            );
 
             tokio::select! {
                 readable = read_half.readable() => {
@@ -234,30 +178,25 @@ impl TcpConnection {
                         Ok(()) => {
                             match read_half.read(&mut chunk).await {
                                 Ok(0) => {
-                                    eprintln!("[TCP Receiver] 服务器关闭连接 (EOF)");
                                     self.mark_closed();
                                     break 'outer;
                                 }
                                 Ok(n) => {
-                                    eprintln!("[TCP Receiver] 读取 {} 字节, read_buf.len={}", n, read_buf.len());
                                     read_buf.extend_from_slice(&chunk[..n]);
                                 }
-                                Err(e) => {
-                                    eprintln!("[TCP Receiver] 读错误: {}", e);
+                                Err(_e) => {
                                     self.mark_closed();
                                     break 'outer;
                                 }
                             }
                         }
-                        Err(e) => {
-                            eprintln!("[TCP Receiver] readable 错误: {}", e);
+                        Err(_e) => {
                             self.mark_closed();
                             break 'outer;
                         }
                     }
                 }
                 _ = &mut shutdown_rx => {
-                    eprintln!("[TCP Receiver] 收到关闭信号");
                     break 'outer;
                 }
             }
@@ -274,7 +213,6 @@ impl TcpConnection {
             tracing::warn!("[TCP Receiver] 连接断开，取消 {} 个等待中的请求", cancelled);
         }
         on_closed();
-        tracing::info!("[TCP Receiver] Stopped");
     }
 
     fn try_parse_message(buf: &mut Vec<u8>) -> Option<ParsedMessage> {
@@ -282,16 +220,11 @@ impl TcpConnection {
             return None;
         }
 
-        let first_byte_display = if buf[0] == 0x24 {
+        let _first_byte_display = if buf[0] == 0x24 {
             format!("0x24 (RTP)")
         } else {
             format!("0x{:02x} ('{}')", buf[0], buf[0] as char)
         };
-        eprintln!(
-            "[TCP Receiver] try_parse_message: first byte={}, buf.len()={}",
-            first_byte_display,
-            buf.len()
-        );
 
         if buf[0] == 0x24 {
             if buf.len() < 4 {
@@ -324,28 +257,15 @@ impl TcpConnection {
         let header_end = match buf.windows(4).position(|w| w == b"\r\n\r\n") {
             Some(pos) => pos + 4,
             None => {
-                eprintln!("[TCP Receiver] try_parse_response: no header end found");
                 return None;
             }
         };
 
-        eprintln!(
-            "[TCP Receiver] try_parse_response: header_end={}, buf.len()={}",
-            header_end,
-            buf.len()
-        );
-
         let header_str = std::str::from_utf8(&buf[..header_end]).ok()?;
-        eprintln!("[TCP Receiver] header:\n{}", header_str);
         let content_length = Self::find_content_length(header_str);
 
         let total_len = header_end + content_length;
         if buf.len() < total_len {
-            eprintln!(
-                "[TCP Receiver] try_parse_response: buf.len()={} < total_len={}",
-                buf.len(),
-                total_len
-            );
             return None;
         }
 

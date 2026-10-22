@@ -237,7 +237,7 @@ mod tests {
     fn test_verify_rejects_reused_nonce() {
         let pwd = "admin123";
         let (nonce, created, _) = UsernameToken::build_digest("admin", pwd);
-        let (_, _, digest) = UsernameToken::build_digest("admin", pwd);
+        let (_, _, _digest) = UsernameToken::build_digest("admin", pwd);
         let t1 = UsernameToken {
             username: "admin".to_string(),
             password: "any".to_string(),

@@ -5,7 +5,6 @@ use crate::api::response::ApiResponse;
 use crate::api::http::handlers::device_handler::{PaginatedResponse, SessionWithMediaServer};
 use crate::api::state::FullState;
 use crate::error::AppError;
-use crate::domain::Session;
 
 #[derive(Debug, Deserialize)]
 pub struct PaginationQuery {
@@ -22,7 +21,6 @@ impl PaginationQuery {
     pub fn state(&self) -> Option<&str> { self.state.as_deref() }
 }
 
-/// GET /api/v1/sessions
 pub async fn list_sessions_handler(
     State(state): State<Arc<FullState>>,
     Query(q): Query<PaginationQuery>,

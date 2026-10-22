@@ -70,7 +70,6 @@ fn build_command(req: &PtzControlRequest) -> Result<PtzCommand, AppError> {
     }
 }
 
-/// POST /api/v1/devices/:id/ptz
 pub async fn ptz_control_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -89,7 +88,6 @@ pub async fn ptz_control_handler(
     }
 }
 
-/// GET /api/v1/devices/:id/ptz/presets
 pub async fn get_ptz_presets_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -98,7 +96,6 @@ pub async fn get_ptz_presets_handler(
     Ok(Json(ApiResponse::success(presets)))
 }
 
-/// POST /api/v1/devices/:id/ptz/presets
 pub async fn create_ptz_preset_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -108,7 +105,6 @@ pub async fn create_ptz_preset_handler(
     Ok(Json(ApiResponse::success(preset)))
 }
 
-/// DELETE /api/v1/devices/:id/ptz/presets/:token
 pub async fn delete_ptz_preset_handler(
     State(state): State<Arc<FullState>>,
     Path((id, token)): Path<(i64, String)>,
@@ -117,7 +113,6 @@ pub async fn delete_ptz_preset_handler(
     Ok(Json(ApiResponse::success(())))
 }
 
-/// GET /api/v1/devices/:id/ptz/status
 pub async fn get_ptz_status_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -136,7 +131,6 @@ pub struct RenamePresetRequest {
     pub name: String,
 }
 
-/// PUT /api/v1/devices/:id/ptz/presets/:token
 pub async fn rename_ptz_preset_handler(
     State(state): State<Arc<FullState>>,
     Path((id, token)): Path<(i64, String)>,
@@ -146,19 +140,16 @@ pub async fn rename_ptz_preset_handler(
     Ok(Json(ApiResponse::success(preset)))
 }
 
-// ─── Channel-level PTZ handlers ─────────────────────────────────────────────
-
-/// POST /api/v1/channels/{device_tag}/{channel_tag}/ptz
 pub async fn channel_ptz_control_handler(
     State(state): State<Arc<FullState>>,
     Path((device_tag, channel_tag)): Path<(String, String)>,
     Json(req): Json<PtzControlRequest>,
 ) -> Result<Json<ApiResponse<PtzControlResult>>, AppError> {
     let command = build_command(&req)?;
-    
+
     let device = state.app.registry.device_service.get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("设备 {} 不存在", device_tag)))?;
-    
+
     match state.app.registry.device_service.handle_ptz_control(device.id, command.clone(), req.speed).await {
         Ok(result) => Ok(Json(ApiResponse::success(result))),
         Err(e) => {
@@ -168,10 +159,9 @@ pub async fn channel_ptz_control_handler(
     }
 }
 
-/// GET /api/v1/channels/{device_tag}/{channel_tag}/ptz/presets
 pub async fn get_channel_ptz_presets_handler(
     State(state): State<Arc<FullState>>,
-    Path((device_tag, channel_tag)): Path<(String, String)>,
+    Path((device_tag, _channel_tag)): Path<(String, String)>,
 ) -> Result<Json<ApiResponse<Vec<PtzPreset>>>, AppError> {
     let device = state.app.registry.device_service.get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("设备 {} 不存在", device_tag)))?;
@@ -179,10 +169,9 @@ pub async fn get_channel_ptz_presets_handler(
     Ok(Json(ApiResponse::success(presets)))
 }
 
-/// POST /api/v1/channels/{device_tag}/{channel_tag}/ptz/presets
 pub async fn create_channel_ptz_preset_handler(
     State(state): State<Arc<FullState>>,
-    Path((device_tag, channel_tag)): Path<(String, String)>,
+    Path((device_tag, _channel_tag)): Path<(String, String)>,
     Json(req): Json<CreatePresetRequest>,
 ) -> Result<Json<ApiResponse<PtzPreset>>, AppError> {
     let device = state.app.registry.device_service.get_device_by_device_tag(&device_tag)?
@@ -191,10 +180,9 @@ pub async fn create_channel_ptz_preset_handler(
     Ok(Json(ApiResponse::success(preset)))
 }
 
-/// DELETE /api/v1/channels/{device_tag}/{channel_tag}/ptz/presets/:token
 pub async fn delete_channel_ptz_preset_handler(
     State(state): State<Arc<FullState>>,
-    Path((device_tag, channel_tag, token)): Path<(String, String, String)>,
+    Path((device_tag, _channel_tag, token)): Path<(String, String, String)>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
     let device = state.app.registry.device_service.get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("设备 {} 不存在", device_tag)))?;
@@ -202,10 +190,9 @@ pub async fn delete_channel_ptz_preset_handler(
     Ok(Json(ApiResponse::success(())))
 }
 
-/// GET /api/v1/channels/{device_tag}/{channel_tag}/ptz/status
 pub async fn get_channel_ptz_status_handler(
     State(state): State<Arc<FullState>>,
-    Path((device_tag, channel_tag)): Path<(String, String)>,
+    Path((device_tag, _channel_tag)): Path<(String, String)>,
 ) -> Result<Json<ApiResponse<PtzStatus>>, AppError> {
     let device = state.app.registry.device_service.get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("设备 {} 不存在", device_tag)))?;
@@ -213,10 +200,9 @@ pub async fn get_channel_ptz_status_handler(
     Ok(Json(ApiResponse::success(status)))
 }
 
-/// PUT /api/v1/channels/{device_tag}/{channel_tag}/ptz/presets/:token
 pub async fn rename_channel_ptz_preset_handler(
     State(state): State<Arc<FullState>>,
-    Path((device_tag, channel_tag, token)): Path<(String, String, String)>,
+    Path((device_tag, _channel_tag, token)): Path<(String, String, String)>,
     Json(req): Json<RenamePresetRequest>,
 ) -> Result<Json<ApiResponse<PtzPreset>>, AppError> {
     let device = state.app.registry.device_service.get_device_by_device_tag(&device_tag)?

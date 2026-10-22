@@ -1,5 +1,5 @@
 use crate::media::errors::{MediaError, Result};
-use crate::media::node::{DataType, MediaNode, MediaTransportCallback};
+use crate::media::node::{ DataType, MediaNode };
 use crate::protocol::rtsp::client::client::{RtspClient, RtspClientCallback};
 use crate::protocol::rtsp::client::state::RtspState;
 use crate::protocol::rtsp::client::types::{MediaDirection, RtpTransportMode};
@@ -77,7 +77,6 @@ impl OnvifBackchannelTransport {
     }
 
     async fn reconnect(self: &Arc<Self>) -> Result<()> {
-        tracing::info!("[ONVIF Backchannel] reconnect: clearing state");
 
         {
             let mut guard = self.audio_tx.lock().unwrap();
@@ -101,11 +100,8 @@ impl OnvifBackchannelTransport {
 
     pub async fn connect(self: &Arc<Self>) -> Result<()> {
         if self.is_connected() {
-            tracing::debug!("[ONVIF Backchannel] already connected, skipping");
             return Ok(());
         }
-
-        tracing::info!("[ONVIF Backchannel] Connecting to {}", self.rtsp_url);
 
         let callback = Arc::new(OnvifBackchannelCallback {
             transport: Arc::downgrade(self),
@@ -134,11 +130,8 @@ impl OnvifBackchannelTransport {
             .await
             .map_err(|e| MediaError::Transport(format!("Failed to start RTSP client: {}", e)))?;
 
-        tracing::info!("[ONVIF Backchannel] Connected, testing with OPTIONS...");
-
         match client.options().await {
-            Ok(resp) => {
-                tracing::info!("[ONVIF Backchannel] OPTIONS success,{}", resp);
+            Ok(_resp) => {
             }
             Err(e) => {
                 tracing::error!("[ONVIF Backchannel] OPTIONS failed: {:?}", e);
@@ -146,15 +139,10 @@ impl OnvifBackchannelTransport {
             }
         };
 
-        tracing::info!("[ONVIF Backchannel] Trying DESCRIBE with backchannel require...");
         let describe_result = client.describe_with_backchannel().await;
 
         match &describe_result {
-            Ok(tracks) => {
-                tracing::info!(
-                    "[ONVIF Backchannel] DESCRIBE with backchannel success, {} tracks found",
-                    tracks.len()
-                );
+            Ok(_tracks) => {
             }
             Err(e) => {
                 tracing::error!(
@@ -173,7 +161,7 @@ impl OnvifBackchannelTransport {
             }
         }
 
-        let tracks = describe_result.map_err(|e| {
+        let _tracks = describe_result.map_err(|e| {
             if matches!(e, RtspError::BackchannelNotSupported) {
                 MediaError::Transport("Device does not support backchannel (551)".to_string())
             } else {
@@ -181,45 +169,29 @@ impl OnvifBackchannelTransport {
             }
         })?;
 
-        tracing::info!(
-            "[ONVIF Backchannel] DESCRIBE success, {} tracks found",
-            tracks.len()
-        );
-
         let bc_track = client.get_backchannel_track().await;
         let track = bc_track.ok_or_else(|| {
             MediaError::Transport("No backchannel track found in SDP".to_string())
         })?;
-        tracing::info!(
-            "[ONVIF Backchannel] Found backchannel track: {} codec={}",
-            track.track_id,
-            track.codec
-        );
         *self.backchannel_track_id.lock().unwrap() = Some(track.track_id.clone());
 
         client
             .setup(&track.track_id, MediaDirection::SendOnly)
             .await
             .map_err(|e| MediaError::Transport(format!("SETUP backchannel failed: {}", e)))?;
-        tracing::info!("[ONVIF Backchannel] SETUP backchannel success");
 
         client
             .play_with_backchannel()
             .await
             .map_err(|e| MediaError::Transport(format!("PLAY failed: {}", e)))?;
-        tracing::info!("[ONVIF Backchannel] PLAY success, backchannel ready");
 
         *self.rtsp_client.lock().unwrap() = Some(client_arc);
 
-        tracing::info!("[ONVIF Backchannel] Starting receive loop...");
         client
             .start()
             .await
             .map_err(|e| MediaError::Transport(format!("Failed to start RTSP client: {}", e)))?;
 
-        //self.start_pacer();
-
-        tracing::info!("[ONVIF Backchannel] Transport connected and ready");
         Ok(())
     }
 
@@ -227,7 +199,6 @@ impl OnvifBackchannelTransport {
         let rx = {
             let mut guard = self.audio_tx.lock().unwrap();
             if guard.is_some() {
-                tracing::debug!("[ONVIF Backchannel] pacer already started");
                 return;
             }
             let (tx, rx) = mpsc::channel::<Vec<u8>>(AUDIO_CHANNEL_CAPACITY);
@@ -236,7 +207,6 @@ impl OnvifBackchannelTransport {
         };
 
         if self.pacer_started.swap(true, Ordering::SeqCst) {
-            tracing::debug!("[ONVIF Backchannel] pacer start race lost");
             return;
         }
 
@@ -248,7 +218,6 @@ impl OnvifBackchannelTransport {
 
         let weak = self.me.clone();
         tokio::spawn(Self::pacer_loop(weak, rx, shutdown_rx));
-        tracing::info!("[ONVIF Backchannel] pacer started");
     }
 
     async fn pacer_loop(
@@ -264,7 +233,6 @@ impl OnvifBackchannelTransport {
             tokio::select! {
                 _ = interval.tick() => {}
                 _ = &mut shutdown_rx => {
-                    tracing::info!("[ONVIF Backchannel] pacer shutdown signal received");
                     break;
                 }
             }
@@ -283,7 +251,6 @@ impl OnvifBackchannelTransport {
                     }
                     Err(mpsc::error::TryRecvError::Empty) => break,
                     Err(mpsc::error::TryRecvError::Disconnected) => {
-                        tracing::info!("[ONVIF Backchannel] pacer exit, channel disconnected");
                         return;
                     }
                 }
@@ -307,7 +274,6 @@ impl OnvifBackchannelTransport {
             };
 
             let Some(this) = me.upgrade() else {
-                tracing::debug!("[ONVIF Backchannel] pacer exit, transport dropped");
                 return;
             };
 
@@ -325,7 +291,6 @@ impl OnvifBackchannelTransport {
 
     async fn send_rtp_packet(&self, payload: &[u8], timestamp: u32, seq: u16) -> Result<()> {
         if self.is_closing.load(Ordering::Relaxed) {
-            tracing::debug!("[ONVIF Backchannel] send_rtp_packet skipped - transport closing");
             return Ok(());
         }
 
@@ -373,8 +338,7 @@ struct OnvifBackchannelCallback {
 }
 
 impl RtspClientCallback for OnvifBackchannelCallback {
-    fn on_state_change(&self, state: &RtspState) {
-        tracing::debug!("[ONVIF Backchannel] state changed: {:?}", state);
+    fn on_state_change(&self, _state: &RtspState) {
     }
 
     fn on_rtp_packet(&self, _track_id: &str, _data: &[u8], _ssrc: u32) {}
@@ -388,16 +352,12 @@ impl RtspClientCallback for OnvifBackchannelCallback {
     ) {
         match report_type {
             RtcpReportType::ReceiverReport { .. } => {
-                tracing::debug!("[ONVIF Backchannel] Received RTCP Receiver Report");
             }
             RtcpReportType::SenderReport { .. } => {
-                tracing::debug!("[ONVIF Backchannel] Received RTCP Sender Report");
             }
             RtcpReportType::Bye { .. } => {
-                tracing::info!("[ONVIF Backchannel] RTCP Bye received");
             }
             RtcpReportType::Unknown => {
-                tracing::debug!("[ONVIF Backchannel] Received unknown RTCP report");
             }
         }
     }
@@ -406,26 +366,20 @@ impl RtspClientCallback for OnvifBackchannelCallback {
         tracing::error!("[ONVIF Backchannel] RTSP error: {}", error);
 
         let Some(transport) = self.transport.upgrade() else {
-            tracing::debug!("[ONVIF Backchannel] transport already dropped, skipping reconnect");
             return;
         };
 
         if transport.reconnect_in_progress.swap(true, Ordering::SeqCst) {
-            tracing::debug!("[ONVIF Backchannel] reconnect already in progress, skipping");
             return;
         }
 
-        tracing::info!("[ONVIF Backchannel] scheduling reconnect in 5s");
         let transport_clone = transport.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(5)).await;
 
-            tracing::info!("[ONVIF Backchannel] attempting reconnect");
-
             if let Err(e) = transport_clone.reconnect().await {
                 tracing::error!("[ONVIF Backchannel] reconnect failed: {}", e);
             } else {
-                tracing::info!("[ONVIF Backchannel] reconnect succeeded");
             }
 
             transport_clone
@@ -435,7 +389,6 @@ impl RtspClientCallback for OnvifBackchannelCallback {
     }
 
     fn on_teardown_complete(&self) {
-        tracing::info!("[ONVIF Backchannel] TEARDOWN complete");
     }
 }
 
@@ -491,7 +444,6 @@ impl crate::media::node::MediaTransport for OnvifBackchannelTransport {
     }
 
     async fn close(&self) -> Result<()> {
-        tracing::info!("[ONVIF Backchannel] Closing transport");
 
         self.is_closing.store(true, Ordering::SeqCst);
 

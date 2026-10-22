@@ -11,7 +11,7 @@ use crate::protocol::rtsp::common::{
 use crate::protocol::rtsp::sdp::{SdpDirection, SdpInfo, SdpParser};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+
 use tokio::sync::RwLock;
 use tokio::sync::{mpsc, oneshot};
 
@@ -31,7 +31,7 @@ pub struct RtspClient {
     host: String,
     port: u16,
     path: String,
-    /// 完整的 RTSP URI，如 `rtsp://192.168.1.211:554/Streaming/Channels/101`
+
     full_uri: String,
     callback: Arc<dyn RtspClientCallback>,
     auth_handler: RwLock<AuthHandler>,
@@ -45,7 +45,7 @@ pub struct RtspClient {
     transport_mode: RtpTransportMode,
     running: Arc<RwLock<bool>>,
     shutdown_tx: Mutex<Option<oneshot::Sender<()>>>,
-    /// TCP 接收 consumer 的发送端。teardown 时 take 掉，关闭 channel。
+
     tcp_data_tx: Mutex<Option<mpsc::Sender<ReceivedData>>>,
 }
 
@@ -79,8 +79,6 @@ impl RtspClient {
         }))
     }
 
-    /// 解析 `rtsp://[user:pass@]host[:port][/path]`，支持 IPv6 字面量。
-    /// 返回 (host, port, path, full_uri)
     fn parse_url(url: &str) -> Result<(String, u16, String, String), RtspError> {
         let rest = url
             .strip_prefix("rtsp://")
@@ -140,7 +138,6 @@ impl RtspClient {
         *cseq
     }
 
-    /// 发送 RTSP 请求；若收到 401 则解析 `WWW-Authenticate` 后重试一次。
     async fn send_request(&self, request: RequestBuilder) -> Result<String, RtspError> {
         let mut last_err: Option<RtspError> = None;
 
@@ -151,8 +148,7 @@ impl RtspClient {
                 let auth = self.auth_handler.read().await;
                 if auth.has_auth_method() {
                     let header = auth.build_authorization(request.method(), request.uri());
-                    if let Ok(ref h) = header {
-                        tracing::debug!("[RtspClient] Using existing auth method, header: {}", h);
+                    if let Ok(ref _h) = header {
                     }
                     header.ok()
                 } else {
@@ -175,11 +171,6 @@ impl RtspClient {
             }
 
             let data = req.build(cseq).into_bytes();
-            eprintln!(
-                "[Client] Sending {}:\n{}",
-                request.method(),
-                String::from_utf8_lossy(&data)
-            );
 
             let response = {
                 let conn_guard = self.connection.read().await;
@@ -191,16 +182,7 @@ impl RtspClient {
 
             match self.handle_response(&response).await {
                 Ok(()) => return Ok(response),
-                Err(RtspError::AuthFailed(msg)) if attempt == 0 => {
-                    eprintln!(
-                        "[Client] Received 401, preparing retry. Connection state: is_closed={}",
-                        self.connection
-                            .read()
-                            .await
-                            .as_ref()
-                            .map(|c| c.is_closed())
-                            .unwrap_or(true)
-                    );
+                Err(RtspError::AuthFailed(_msg)) if attempt == 0 => {
                     last_err = Some(RtspError::AuthFailed("认证重试".into()));
                     continue;
                 }
@@ -221,8 +203,6 @@ impl RtspClient {
             .next()
             .ok_or_else(|| RtspError::ProtocolError("响应为空".into()))?;
 
-        tracing::debug!("[RtspClient] handle_response: {}", status_line);
-
         let parts: Vec<&str> = status_line.split_whitespace().collect();
         if parts.len() < 2 {
             return Err(RtspError::ProtocolError("状态行无效".into()));
@@ -235,17 +215,14 @@ impl RtspClient {
         match status {
             200..=299 => Ok(()),
             401 => {
-                tracing::debug!("[RtspClient] Received 401, checking WWW-Authenticate");
                 for line in response.lines() {
                     if line.to_lowercase().starts_with("www-authenticate:") {
                         let value = line.splitn(2, ':').nth(1).unwrap_or("").trim().to_string();
-                        tracing::debug!("[RtspClient] WWW-Authenticate: {}", value);
                         let mut auth = self.auth_handler.write().await;
                         if let Err(e) = auth.parse_www_authenticate(&value) {
                             tracing::error!("[RtspClient] Failed to parse WWW-Authenticate: {}", e);
                             return Err(e);
                         }
-                        tracing::info!("[RtspClient] Parsed auth, retrying with credentials");
                         return Err(RtspError::AuthFailed("需要带认证信息重试".into()));
                     }
                 }
@@ -284,13 +261,7 @@ impl RtspClient {
         Ok(())
     }
 
-    /// 启动唯一的 TCP 读循环。
-    ///
-    /// - RTSP 响应由 `TcpConnection` 内部按 CSeq 路由。
-    /// - interleaved 帧通过 channel 交给 consumer。
-    /// - 连接断开时触发 `on_tcp_closed`。
     pub async fn start_rtsp_receive(self: &Arc<Self>) -> Result<(), RtspError> {
-        tracing::info!("[RtspClient] start_rtsp_receive: called");
 
         let connection = {
             let guard = self.connection.read().await;
@@ -302,7 +273,6 @@ impl RtspClient {
 
         let (started_tx, started_rx) = oneshot::channel::<()>();
 
-        // 1. 创建 channel，consumer 处理 RTP/RTCP
         let (tx, mut rx) = mpsc::channel::<ReceivedData>(TCP_RECV_CHANNEL_CAPACITY);
         {
             let mut guard = self.tcp_data_tx.lock().unwrap();
@@ -315,7 +285,6 @@ impl RtspClient {
         let conn_for_consumer = connection.clone();
 
         tokio::spawn(async move {
-            tracing::info!("[RtspClient] TCP consumer 任务启动");
             while let Some(data) = rx.recv().await {
                 if !*running.read().await {
                     break;
@@ -325,19 +294,15 @@ impl RtspClient {
                 }
                 Self::handle_tcp_data(&tracks, &callback, data).await;
             }
-            tracing::info!("[RtspClient] TCP consumer 已停止");
         });
 
-        // 2. on_data：把 interleaved 数据发给 consumer（非阻塞）
         let tx_for_callback = tx.clone();
         let on_data: Arc<dyn Fn(ReceivedData) + Send + Sync> = Arc::new(move |data| {
-            tracing::debug!("[RtspClient] on_data: 收到 interleaved 数据");
             if let Err(e) = tx_for_callback.try_send(data) {
                 tracing::warn!("TCP 接收通道已满/关闭，丢弃数据: {}", e);
             }
         });
 
-        // 3. on_closed：连接断开时通知上层
         let client_weak = Arc::downgrade(self);
         let on_closed: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
             if let Some(client) = client_weak.upgrade() {
@@ -347,7 +312,6 @@ impl RtspClient {
             }
         });
 
-        // 4. 启动唯一的读循环
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         {
             let mut guard = self.shutdown_tx.lock().unwrap();
@@ -355,27 +319,17 @@ impl RtspClient {
         }
 
         let started_tx_for_loop = started_tx;
-        let handle = tokio::spawn(async move {
-            tracing::info!("[RtspClient] receive loop 任务启动");
-            let send_result = started_tx_for_loop.send(());
-            tracing::info!("[RtspClient] started_tx.send() 结果: {:?}", send_result);
+        let _handle = tokio::spawn(async move {
+            let _send_result = started_tx_for_loop.send(());
             connection
                 .run_receive_loop(on_data, on_closed, shutdown_rx)
                 .await;
-            tracing::info!("[RtspClient] receive loop run_receive_loop 结束");
         });
-        tracing::info!(
-            "[RtspClient] tokio::spawn 完成, handle.is_finished={}",
-            handle.is_finished()
-        );
 
-        let rx_result = started_rx.await;
-        tracing::info!("[RtspClient] started_rx.await 结果: {:?}", rx_result);
-        tracing::info!("[RtspClient] start_rtsp_receive: 完成，receive loop 已启动");
+        let _rx_result = started_rx.await;
         Ok(())
     }
 
-    /// 连接断开时的清理。
     async fn on_tcp_closed(self: &Arc<Self>) {
         tracing::warn!("[RtspClient] TCP 连接已关闭");
         *self.running.write().await = false;
@@ -407,7 +361,6 @@ impl RtspClient {
             .header("Accept", "application/sdp");
 
         let response = self.send_request(request).await?;
-        tracing::info!("[ONVIF Backchannel] describe success,{}", response);
         let sdp_content = self.extract_sdp_content(&response)?;
         let sdp = SdpParser::parse(&sdp_content)
             .map_err(|e| RtspError::ProtocolError(format!("SDP 解析失败: {}", e)))?;
@@ -517,12 +470,6 @@ impl RtspClient {
                         .await
                     {
                         Ok((port, ssrc, server)) => {
-                            tracing::info!(
-                                "[RtspClient] 为 {} 分配 UDP 端口 RTP={} RTCP={}",
-                                track_id,
-                                port,
-                                port + 1
-                            );
                             Some((port, ssrc, server))
                         }
                         Err(e) => {
@@ -540,7 +487,7 @@ impl RtspClient {
             None
         };
 
-        let (transport_str, udp_info, tcp_channels) = if let Some((port, _, _)) = udp_alloc.as_ref()
+        let (transport_str, _udp_info, tcp_channels) = if let Some((port, _, _)) = udp_alloc.as_ref()
         {
             let s = match direction {
                 MediaDirection::RecvOnly => {
@@ -681,7 +628,6 @@ impl RtspClient {
 
                 *self.session_id.write().await = Some(session_id);
                 *self.session_timeout.write().await = timeout;
-                tracing::debug!("Session timeout: {} 秒", timeout);
                 return Ok(());
             }
         }
@@ -800,7 +746,6 @@ impl RtspClient {
         self.start_session_keepalive(Arc::clone(&self.running))
             .await;
 
-        // 注意：TCP 读循环已经在 start_rtsp_receive 里启动，这里不再启动。
     }
 
     fn spawn_udp_receive(
@@ -818,7 +763,6 @@ impl RtspClient {
 
             loop {
                 if !*running.read().await {
-                    tracing::info!("UDP 接收循环已停止 (track {})", track_id);
                     break;
                 }
 
@@ -836,15 +780,12 @@ impl RtspClient {
                                     if let Some(track) = guard.iter_mut().find(|t| t.track_id == track_id) {
                                         if track.remote_ssrc.is_none() && ssrc != 0 {
                                             track.remote_ssrc = Some(ssrc);
-                                            tracing::info!("UDP 学习远端 SSRC {} (track {})", ssrc, track_id);
                                         }
                                         if track.remote_ssrc == Some(ssrc) {
                                             if let Some(result) = track.rtcp_stats.update_from_rtp(seq, ts, arrival) {
                                                 match result {
-                                                    RtpUpdateResult::SequenceWraparound =>
-                                                        tracing::debug!("RTP 序列号回绕 (track {})", track_id),
-                                                    RtpUpdateResult::LargeJump(j) =>
-                                                        tracing::debug!("RTP 序列号大跳变 {} (track {})", j, track_id),
+                                                    RtpUpdateResult::SequenceWraparound => {}
+                                                    RtpUpdateResult::LargeJump(_j) => {}
                                                     RtpUpdateResult::SSRCConflict => {}
                                                 }
                                             }
@@ -898,7 +839,7 @@ impl RtspClient {
     ) {
         match data {
             ReceivedData::RtspResponse(resp) => {
-                // 不会发生：RTSP 响应由 TcpConnection 内部消化
+
                 tracing::warn!(
                     "TCP consumer 收到意外的 RTSP 响应: {:?}",
                     resp.lines().next()
@@ -918,20 +859,13 @@ impl RtspClient {
                     if let Some(track) = guard.iter_mut().find(|t| t.track_id == track_id) {
                         if track.remote_ssrc.is_none() && ssrc != 0 {
                             track.remote_ssrc = Some(ssrc);
-                            tracing::info!("TCP 学习远端 SSRC {} (track {})", ssrc, track_id);
                         }
                         if track.remote_ssrc == Some(ssrc) {
                             if let Some(result) = track.rtcp_stats.update_from_rtp(seq, ts, arrival)
                             {
                                 match result {
-                                    RtpUpdateResult::SequenceWraparound => {
-                                        tracing::debug!("RTP 序列号回绕 (track {})", track_id)
-                                    }
-                                    RtpUpdateResult::LargeJump(j) => tracing::debug!(
-                                        "RTP 序列号大跳变 {} (track {})",
-                                        j,
-                                        track_id
-                                    ),
+                                    RtpUpdateResult::SequenceWraparound => {}
+                                    RtpUpdateResult::LargeJump(_j) => {}
                                     RtpUpdateResult::SSRCConflict => {}
                                 }
                             }
@@ -987,7 +921,6 @@ impl RtspClient {
                 interval.tick().await;
 
                 if !*running.read().await {
-                    tracing::info!("RTCP 自动报告已停止");
                     break;
                 }
 
@@ -1042,7 +975,6 @@ impl RtspClient {
                 interval.tick().await;
 
                 if !*running.read().await {
-                    tracing::info!("Session keepalive 已停止");
                     break;
                 }
 

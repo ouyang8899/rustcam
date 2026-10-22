@@ -70,8 +70,11 @@ void ReplayPlayer::loadFile(const QString& url) {
         }, Qt::QueuedConnection);
     });
 
-    // Note: set_event_callback, set_volume, set_mute, can_seek are protected in MediaPlayer
-    // These features are stubbed here until we find a proper workaround
+    m_player->set_event_callback([this](BridgePlayer::MediaPlayerEvent event, const BridgePlayer::MediaPlayerStatus& status) {
+        QMetaObject::invokeMethod(this, [this, event, status]() {
+            onMediaPlayerEvent(event, status);
+        }, Qt::QueuedConnection);
+    });
 
     setState(State::Loading);
     BridgePlayer::PlayerManager::instance().play(m_playerId, url.toStdString());
@@ -85,6 +88,10 @@ void ReplayPlayer::play() {
 }
 
 void ReplayPlayer::pause() {
+    QMutexLocker locker(&m_mutex);
+    if (m_player) {
+        m_player->pause();
+    }
 }
 
 void ReplayPlayer::stop() {
@@ -103,29 +110,39 @@ void ReplayPlayer::stop() {
 }
 
 void ReplayPlayer::seek(int64_t positionMs) {
+    QMutexLocker locker(&m_mutex);
+    if (m_player) {
+        m_player->seek(positionMs);
+    }
 }
 
 void ReplayPlayer::setSpeed(double speed) {
     QMutexLocker locker(&m_mutex);
-    Q_UNUSED(speed);
+    if (m_player) {
+        m_player->set_speed(speed);
+    }
 }
 
 void ReplayPlayer::setVolume(double volume) {
     QMutexLocker locker(&m_mutex);
-    Q_UNUSED(volume);
-    // set_volume is protected in MediaPlayer - stubbed
+    if (m_player) {
+        m_player->set_volume(volume);
+    }
 }
 
 void ReplayPlayer::setMute(bool mute) {
     QMutexLocker locker(&m_mutex);
-    Q_UNUSED(mute);
-    // set_mute is protected in MediaPlayer - stubbed
+    if (m_player) {
+        m_player->set_mute(mute);
+    }
 }
 
 bool ReplayPlayer::canSeek() const {
     QMutexLocker locker(&m_mutex);
-    // can_seek is protected in MediaPlayer - assume seek is supported
-    return m_player != nullptr;
+    if (m_player) {
+        return m_player->can_seek();
+    }
+    return false;
 }
 
 void ReplayPlayer::setProgressCallback(ProgressCallback cb) {

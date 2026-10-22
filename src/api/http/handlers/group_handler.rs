@@ -7,7 +7,6 @@ use crate::domain::device_group::{
     DeviceGroup, DeviceGroupNode, CreateGroupRequest, UpdateGroupRequest, AssignGroupRequest,
 };
 
-/// GET /api/v1/groups/tree
 pub async fn list_group_tree_handler(
     State(state): State<Arc<FullState>>,
 ) -> Result<Json<ApiResponse<Vec<DeviceGroupNode>>>, AppError> {
@@ -15,7 +14,6 @@ pub async fn list_group_tree_handler(
     Ok(Json(ApiResponse::success(tree)))
 }
 
-/// GET /api/v1/groups
 pub async fn list_groups_handler(
     State(state): State<Arc<FullState>>,
 ) -> Result<Json<ApiResponse<Vec<DeviceGroup>>>, AppError> {
@@ -23,7 +21,6 @@ pub async fn list_groups_handler(
     Ok(Json(ApiResponse::success(groups)))
 }
 
-/// POST /api/v1/groups
 pub async fn create_group_handler(
     State(state): State<Arc<FullState>>,
     Json(req): Json<CreateGroupRequest>,
@@ -35,7 +32,6 @@ pub async fn create_group_handler(
     Ok(Json(ApiResponse::success(id)))
 }
 
-/// PUT /api/v1/groups/:id
 pub async fn update_group_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -45,7 +41,6 @@ pub async fn update_group_handler(
     Ok(Json(ApiResponse::success(())))
 }
 
-/// DELETE /api/v1/groups/:id
 pub async fn delete_group_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -54,7 +49,6 @@ pub async fn delete_group_handler(
     Ok(Json(ApiResponse::success(())))
 }
 
-/// PUT /api/v1/devices/:id/group
 pub async fn assign_device_group_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,

@@ -8,9 +8,8 @@ use crate::domain::SessionType;
 use crate::protocol::adapter::SignalAdapter;
 use crate::protocol::event::{SignalEvent, ProtocolType, TransportType, PtzCommand};
 use crate::protocol::traits::ProtocolDeps;
-use crate::error::{Result, AppError};  // ← 导入 crate::error::Result
+use crate::error::{Result, AppError};
 
-/// WebSocket 帧操作码
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum WsOpcode {
     Continuation = 0x0,
@@ -35,7 +34,6 @@ impl WsOpcode {
     }
 }
 
-/// WebSocket 帧
 struct WsFrame;
 
 impl WsFrame {
@@ -120,7 +118,6 @@ struct WsFrameData {
     payload: Vec<u8>,
 }
 
-/// WebSocket 协议适配器
 pub struct WebSocketAdapter {
     remote_addr: Option<SocketAddr>,
     device_id: Option<String>,
@@ -150,8 +147,7 @@ impl WebSocketAdapter {
 
         let json: serde_json::Value = match serde_json::from_str(&data_str) {
             Ok(j) => j,
-            Err(e) => {
-                tracing::debug!("[WebSocket] Invalid JSON: {}", e);
+            Err(_e) => {
                 return Ok(events);
             }
         };
@@ -308,7 +304,6 @@ impl SignalAdapter for WebSocketAdapter {
                         }
                         WsOpcode::Pong => {}
                         WsOpcode::Close => {
-                            tracing::info!("[WebSocket] Close frame received");
                             if let Some(ref write_arc) = self.write {
                                 let close = WsFrame::build_close_frame();
                                 let _ = write_arc.write().await.write_all(&close).await;
@@ -326,19 +321,16 @@ impl SignalAdapter for WebSocketAdapter {
 
     async fn on_connected(&mut self, addr: SocketAddr) -> Result<()> {
         self.remote_addr = Some(addr);
-        tracing::info!("[WebSocket] Connection from {}", addr);
         Ok(())
     }
 
     async fn on_disconnected(&mut self) -> Result<()> {
         if let Some(ref device_id) = self.device_id {
-            tracing::info!("[WebSocket] Device {} disconnected", device_id);
             let _ = self.deps.device_lookup.set_offline(device_id, Some("Connection closed")).await;
         }
         Ok(())
     }
 
-    // ✅ 修复：返回类型改为 crate::error::Result
     async fn send(&mut self, data: &[u8]) -> Result<()> {
         if let Some(ref write_arc) = self.write {
             let mut write = write_arc.write().await;

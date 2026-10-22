@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, State},
     Json,
 };
-use serde::{Deserialize, Serialize};
+use serde::{ Deserialize };
 use crate::api::state::FullState;
 use crate::api::response::ApiResponse;
 use crate::error::AppError;
@@ -23,48 +23,53 @@ pub struct CreateServerRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateServerRequest {
-    pub name: String,
-    pub url: String,
-    pub api_key: String,
-    pub server_type: String,
-    pub weight: u32,
-    pub enabled: bool,
-    pub server_tag: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub server_type: Option<String>,
+    #[serde(default)]
+    pub weight: Option<u32>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub server_tag: Option<String>,
     #[serde(default)]
     pub protocol_ports: Option<ServerProtocolPorts>,
 }
 
-/// GET /api/v1/servers
 pub async fn list_servers_handler(
     State(state): State<Arc<FullState>>,
 ) -> Result<Json<ApiResponse<Vec<serde_json::Value>>>, AppError> {
     let registry = &state.app.registry;
     let servers = registry.media_server_service.list();
+
     let mut result = Vec::new();
-
-        for server in servers {
-            let status = registry.media.cluster.get_server_status(&server.server_tag).await;
-            result.push(serde_json::json!({
-                "id": server.id,
-                "name": server.name,
-                "url": server.url,
-                "api_key": server.api_key,
-                "server_type": server.server_type,
-                "server_tag": server.server_tag,
-                "weight": server.weight,
-                "enabled": server.enabled,
-                "online": status.as_ref().map(|s| s.online).unwrap_or(false),
-                "session_count": status.as_ref().map(|s| s.session_count).unwrap_or(0),
-                "cpu_usage": status.as_ref().map(|s| s.cpu_usage).unwrap_or(0.0),
-                "memory_usage": status.as_ref().map(|s| s.memory_usage).unwrap_or(0.0),
-                "protocol_ports": server.protocol_ports,
-            }));
-        }
-
-        Ok(Json(ApiResponse::success(result)))
+    for server in servers.iter() {
+        let status = registry.infra.redis.get_server_status(&server.server_tag).await.ok().flatten();
+        result.push(serde_json::json!({
+            "id": server.id,
+            "name": server.name,
+            "url": server.url,
+            "api_key": server.api_key,
+            "server_type": server.server_type,
+            "server_tag": server.server_tag,
+            "weight": server.weight,
+            "enabled": server.enabled,
+            "online": status.as_ref().map(|s| s.online).unwrap_or(false),
+            "session_count": status.as_ref().map(|s| s.session_count).unwrap_or(0),
+            "cpu_usage": status.as_ref().map(|s| s.cpu_usage).unwrap_or(0.0),
+            "memory_usage": status.as_ref().map(|s| s.memory_usage).unwrap_or(0.0),
+            "protocol_ports": server.protocol_ports,
+        }));
     }
 
-    /// POST /api/v1/servers
+    Ok(Json(ApiResponse::success(result)))
+}
+
     pub async fn create_server_handler(
         State(state): State<Arc<FullState>>,
         Json(req): Json<CreateServerRequest>,
@@ -106,7 +111,6 @@ pub async fn list_servers_handler(
         }))))
     }
 
-    /// GET /api/v1/servers/:tag
 pub async fn get_server_handler(
     State(state): State<Arc<FullState>>,
     Path(tag): Path<String>,
@@ -134,7 +138,6 @@ pub async fn get_server_handler(
     }))))
 }
 
-/// PUT /api/v1/servers/:tag
 pub async fn update_server_handler(
     State(state): State<Arc<FullState>>,
     Path(tag): Path<String>,
@@ -144,12 +147,24 @@ pub async fn update_server_handler(
     let old = registry.media_server_service.get(&tag)
         .ok_or_else(|| AppError::NotFound(format!("Server {} not found", tag)))?;
 
-    let server_type = ServerType::from_str(&req.server_type)
-        .ok_or_else(|| AppError::BadRequest(format!("Invalid server_type: {}", req.server_type)))?;
+    let server_type = match req.server_type.as_deref() {
+        Some(st) => Some(
+            ServerType::from_str(st)
+                .ok_or_else(|| AppError::BadRequest(format!("Invalid server_type: {}", st)))?,
+        ),
+        None => None,
+    };
 
     let server = registry.media_server_service.update(
-        &tag, req.name, req.url, req.api_key, server_type, req.weight,
-        req.server_tag.trim().to_string(), req.protocol_ports.unwrap_or_default(),
+        &tag,
+        req.name,
+        req.url,
+        req.api_key,
+        server_type,
+        req.weight,
+        req.enabled,
+        req.server_tag.map(|t| t.trim().to_string()),
+        req.protocol_ports,
     ).await.ok_or_else(|| AppError::NotFound(format!("Server {} not found", tag)))?;
 
     registry.media.cluster.unregister_server(&old.name);
@@ -171,7 +186,6 @@ pub async fn update_server_handler(
     }))))
 }
 
-/// DELETE /api/v1/servers/:tag
 pub async fn delete_server_handler(
     State(state): State<Arc<FullState>>,
     Path(tag): Path<String>,
@@ -186,7 +200,6 @@ pub async fn delete_server_handler(
     Ok(Json(ApiResponse::success(())))
 }
 
-/// GET /api/v1/servers/:tag/status
 pub async fn server_status_handler(
     State(state): State<Arc<FullState>>,
     Path(tag): Path<String>,
@@ -205,7 +218,6 @@ pub async fn server_status_handler(
     }))))
 }
 
-/// POST /api/v1/servers/:tag/refresh
 pub async fn refresh_server_handler(
     State(state): State<Arc<FullState>>,
     Path(tag): Path<String>,
@@ -222,7 +234,6 @@ pub async fn refresh_server_handler(
     }))))
 }
 
-/// POST /api/v1/servers/:tag/enable
 pub async fn enable_server_handler(
     State(state): State<Arc<FullState>>,
     Path(tag): Path<String>,
@@ -240,7 +251,6 @@ pub async fn enable_server_handler(
     }))))
 }
 
-/// POST /api/v1/servers/:tag/disable
 pub async fn disable_server_handler(
     State(state): State<Arc<FullState>>,
     Path(tag): Path<String>,
@@ -255,7 +265,6 @@ pub async fn disable_server_handler(
     }))))
 }
 
-/// GET /api/v1/servers/:tag/sessions
 pub async fn server_sessions_handler(
     State(state): State<Arc<FullState>>,
     Path(tag): Path<String>,

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use std::net::SocketAddr;
 use crate::domain::SessionType;
-use crate::protocol::event::{SignalEvent, ProtocolType, PtzCommand};
+use crate::protocol::event::{ SignalEvent, ProtocolType };
 use crate::protocol::adapter::SignalAdapter;
 use crate::error::Result;
 
@@ -119,12 +119,10 @@ impl SignalAdapter for RtspAdapter {
 
     async fn on_connected(&mut self, addr: SocketAddr) -> Result<()> {
         self.remote_addr = Some(addr);
-        tracing::info!("[RTSP] Connection from {}", addr);
         Ok(())
     }
 
     async fn on_disconnected(&mut self) -> Result<()> {
-        tracing::info!("[RTSP] Device disconnected");
         Ok(())
     }
 

@@ -16,8 +16,6 @@ pub async fn wfs_proxy_handler(
 ) -> impl IntoResponse {
     let url = &query.url;
 
-    tracing::info!("[WfsProxy] Received url={}", url);
-
     if url.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing url parameter").into_response();
     }
@@ -41,7 +39,6 @@ pub async fn wfs_proxy_handler(
 
             match body {
                 Ok(bytes) => {
-                    tracing::debug!("[WfsProxy] status={}, content_type={:?}, body_len={}", status, content_type, bytes.len());
                     let mut res = (status, bytes).into_response();
                     let headers = res.headers_mut();
                     headers.insert(

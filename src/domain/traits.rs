@@ -1,13 +1,9 @@
 use async_trait::async_trait;
-use std::sync::Arc;
-use crate::domain::{Device, DeviceStatus, Protocol, Stream, StreamState, Session, SessionType, Recording};
-use crate::adapter::media_server::{StreamInfo, Protocol as MediaProtocol};
+
+use crate::domain::{ Device, Protocol, Stream, Session, SessionType, Recording };
+use crate::adapter::media_server::{ StreamInfo };
 use crate::protocol::event::SignalEvent;
 use crate::error::AppError;
-
-// ═══════════════════════════════════════════════════════════════
-// 设备查询接口
-// ═══════════════════════════════════════════════════════════════
 
 #[async_trait]
 pub trait DeviceLookup: Send + Sync {
@@ -49,10 +45,6 @@ pub trait DeviceLookup: Send + Sync {
     async fn list_online_devices(&self) -> Vec<Device>;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 流管理接口
-// ═══════════════════════════════════════════════════════════════
-
 #[async_trait]
 pub trait StreamManager: Send + Sync {
     async fn start_pull_stream(
@@ -74,10 +66,6 @@ pub trait StreamManager: Send + Sync {
     async fn update_stream_state(&self, stream: &Stream) -> Result<(), AppError>;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 会话管理接口
-// ═══════════════════════════════════════════════════════════════
-
 #[async_trait]
 pub trait SessionManager: Send + Sync {
     async fn create_session(
@@ -91,19 +79,11 @@ pub trait SessionManager: Send + Sync {
     fn get_active_count(&self) -> usize;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 事件发布接口
-// ═══════════════════════════════════════════════════════════════
-
 #[async_trait]
 pub trait EventPublisher: Send + Sync {
     async fn publish(&self, event: SignalEvent) -> Result<(), AppError>;
     fn subscribe(&self) -> tokio::sync::broadcast::Receiver<SignalEvent>;
 }
-
-// ═══════════════════════════════════════════════════════════════
-// 录制管理接口
-// ═══════════════════════════════════════════════════════════════
 
 #[async_trait]
 pub trait RecordingManager: Send + Sync {
@@ -115,76 +95,47 @@ pub trait RecordingManager: Send + Sync {
     fn get_stats(&self) -> serde_json::Value;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 缓存存储接口 (dyn compatible)
-// ═══════════════════════════════════════════════════════════════
-
-/// 缓存存储接口
-///
-/// 提供 Redis 缓存操作。所有方法都是 dyn compatible 的，
-/// 可以用于 `Arc<dyn CacheStore>`。
-///
-/// 泛型序列化由调用方处理，trait 只接收/返回 `serde_json::Value`。
 #[async_trait]
 pub trait CacheStore: Send + Sync {
-    /// 设置缓存（接收 JSON 值）
+
     async fn set_json(&self, key: &str, value: &serde_json::Value, ttl_secs: Option<u64>) -> Result<(), AppError>;
 
-    /// 获取缓存（返回 JSON 值）
     async fn get_json(&self, key: &str) -> Result<Option<serde_json::Value>, AppError>;
 
-    /// 删除缓存
     async fn del(&self, key: &str) -> Result<(), AppError>;
 
-    /// 设置流信息
     async fn set_stream_info(&self, stream_key: &str, info: &StreamInfo) -> Result<(), AppError>;
 
-    /// 获取流信息
     async fn get_stream_info(&self, stream_key: &str) -> Result<Option<StreamInfo>, AppError>;
 
-    /// 删除流信息
     async fn delete_stream_info(&self, stream_key: &str) -> Result<(), AppError>;
 
-    /// 发布事件消息（接收 JSON 值）
     async fn publish_event_json(&self, event: &str, data: &serde_json::Value) -> Result<(), AppError>;
 
-    /// 自增计数器
     async fn incr(&self, key: &str) -> Result<i64, AppError>;
 
-    /// 检查键是否存在
     async fn exists(&self, key: &str) -> Result<bool, AppError>;
 
-    /// 设置过期时间
     async fn expire(&self, key: &str, seconds: u64) -> Result<(), AppError>;
 
-    /// 添加到集合
     async fn sadd(&self, key: &str, member: &str) -> Result<(), AppError>;
 
-    /// 从集合移除
     async fn srem(&self, key: &str, member: &str) -> Result<(), AppError>;
 
-    /// 获取集合所有成员
     async fn smembers(&self, key: &str) -> Result<Vec<String>, AppError>;
 
-    /// 设置哈希表字段
     async fn hset(&self, key: &str, field: &str, value: &str) -> Result<(), AppError>;
 
-    /// 批量设置哈希表字段
     async fn hmset(&self, key: &str, fields: &[(&str, &str)]) -> Result<(), AppError>;
 
-    /// 获取哈希表字段
     async fn hget(&self, key: &str, field: &str) -> Result<Option<String>, AppError>;
 
-    /// 获取哈希表所有字段
     async fn hgetall(&self, key: &str) -> Result<std::collections::HashMap<String, String>, AppError>;
 }
 
-/// CacheStore 的便捷扩展方法（自动处理序列化）
-///
-/// 这些方法有默认实现，不需要实现者重写。
 #[async_trait]
 pub trait CacheStoreExt: CacheStore {
-    /// 设置缓存（自动序列化）
+
     async fn set<T: serde::Serialize + Send + Sync>(
         &self,
         key: &str,
@@ -196,7 +147,6 @@ pub trait CacheStoreExt: CacheStore {
         self.set_json(key, &json, ttl_secs).await
     }
 
-    /// 获取缓存（自动反序列化）
     async fn get<T: serde::de::DeserializeOwned + Send + Sync>(
         &self,
         key: &str,
@@ -211,7 +161,6 @@ pub trait CacheStoreExt: CacheStore {
         }
     }
 
-    /// 发布事件（自动序列化）
     async fn publish_event<T: serde::Serialize + Send + Sync>(
         &self,
         event: &str,
@@ -223,6 +172,5 @@ pub trait CacheStoreExt: CacheStore {
     }
 }
 
-// 为所有实现 CacheStore 的类型自动实现 CacheStoreExt
 #[async_trait]
 impl<T: CacheStore + ?Sized> CacheStoreExt for T {}

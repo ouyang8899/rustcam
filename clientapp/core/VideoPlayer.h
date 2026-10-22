@@ -100,6 +100,11 @@ private:
     QString m_deviceName;
     bool m_fullscreen = false;
     bool m_audioEnabled = true;
+    double m_zoomScale = 1.0;
+    const double m_minScale = 1.0;
+    const double m_maxScale = 10.0;
+    const double m_zoomStep = 1.1;
+    bool m_zoomEnabled = false;
 };
 
 }

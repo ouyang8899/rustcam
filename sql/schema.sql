@@ -305,15 +305,15 @@ CREATE INDEX IF NOT EXISTS idx_gb_network_codes_sort ON gb_network_codes(sort_or
 
 -- Insert GB28181 reference data
 INSERT INTO gb_device_types (code, name, name_en, category, description, can_have_children, sort_order) VALUES
-('111', '数字视频录像机', 'DVR', 'frontend_device', 'DVR', FALSE, 10),
-('112', '视频服务器', 'Video Server', 'frontend_device', '视频服务器', FALSE, 11),
-('113', '编码器', 'Encoder', 'frontend_device', '编码器', FALSE, 12),
-('118', '网络视频录像机(NVR)', 'NVR', 'frontend_device', '网络视频录像机(NVR)', FALSE, 17),
-('131', '摄像机', 'Camera', 'frontend_peripheral', '摄像机', FALSE, 30),
-('132', '网络摄像机(IPC)', 'IPC', 'frontend_peripheral', '网络摄像机(IPC)', FALSE, 31),
-('200', '中心信令控制服务器', 'Central Signaling', 'platform', '中心信令控制服务器', FALSE, 50),
-('201', 'Web应用服务器', 'Web App Server', 'platform', 'Web应用服务器', FALSE, 51),
-('500', '视频图像信息综合应用平台', 'Video Platform', 'platform_external', '视频图像信息综合应用平台', FALSE, 90)
+('111', '鏁板瓧瑙嗛褰曞儚鏈?, 'DVR', 'frontend_device', 'DVR', FALSE, 10),
+('112', '瑙嗛鏈嶅姟鍣?, 'Video Server', 'frontend_device', '瑙嗛鏈嶅姟鍣?, FALSE, 11),
+('113', '缂栫爜鍣?, 'Encoder', 'frontend_device', '缂栫爜鍣?, FALSE, 12),
+('118', '缃戠粶瑙嗛褰曞儚鏈?NVR)', 'NVR', 'frontend_device', '缃戠粶瑙嗛褰曞儚鏈?NVR)', FALSE, 17),
+('131', '鎽勫儚鏈?, 'Camera', 'frontend_peripheral', '鎽勫儚鏈?, FALSE, 30),
+('132', '缃戠粶鎽勫儚鏈?IPC)', 'IPC', 'frontend_peripheral', '缃戠粶鎽勫儚鏈?IPC)', FALSE, 31),
+('200', '涓績淇′护鎺у埗鏈嶅姟鍣?, 'Central Signaling', 'platform', '涓績淇′护鎺у埗鏈嶅姟鍣?, FALSE, 50),
+('201', 'Web搴旂敤鏈嶅姟鍣?, 'Web App Server', 'platform', 'Web搴旂敤鏈嶅姟鍣?, FALSE, 51),
+('500', '瑙嗛鍥惧儚淇℃伅缁煎悎搴旂敤骞冲彴', 'Video Platform', 'platform_external', '瑙嗛鍥惧儚淇℃伅缁煎悎搴旂敤骞冲彴', FALSE, 90)
 ON CONFLICT (code) DO UPDATE SET
     name = EXCLUDED.name,
     name_en = EXCLUDED.name_en,
@@ -323,9 +323,9 @@ ON CONFLICT (code) DO UPDATE SET
     sort_order = EXCLUDED.sort_order;
 
 INSERT INTO gb_industry_codes (code, name, name_en, description, sort_order) VALUES
-('00', '社会治安路面接入', 'Social Security Road Access', '社会治安路面接入', 0),
-('01', '社会治安社区接入', 'Social Security Community Access', '社会治安社区接入', 1),
-('02', '社会治安内部接入', 'Social Security Internal Access', '社会治安内部接入', 2)
+('00', '绀句細娌诲畨璺潰鎺ュ叆', 'Social Security Road Access', '绀句細娌诲畨璺潰鎺ュ叆', 0),
+('01', '绀句細娌诲畨绀惧尯鎺ュ叆', 'Social Security Community Access', '绀句細娌诲畨绀惧尯鎺ュ叆', 1),
+('02', '绀句細娌诲畨鍐呴儴鎺ュ叆', 'Social Security Internal Access', '绀句細娌诲畨鍐呴儴鎺ュ叆', 2)
 ON CONFLICT (code) DO UPDATE SET
     name = EXCLUDED.name,
     name_en = EXCLUDED.name_en,
@@ -333,13 +333,72 @@ ON CONFLICT (code) DO UPDATE SET
     sort_order = EXCLUDED.sort_order;
 
 INSERT INTO gb_network_codes (code, name, name_en, description, sort_order) VALUES
-('0', '公安视频传输网0', 'Police Video Network 0', '公安视频传输网0', 0),
-('1', '公安视频传输网1', 'Police Video Network 1', '公安视频传输网1', 1),
-('2', '行业专网', 'Industry Private Network', '行业专网', 2)
+('0', '鍏畨瑙嗛浼犺緭缃?', 'Police Video Network 0', '鍏畨瑙嗛浼犺緭缃?', 0),
+('1', '鍏畨瑙嗛浼犺緭缃?', 'Police Video Network 1', '鍏畨瑙嗛浼犺緭缃?', 1),
+('2', '琛屼笟涓撶綉', 'Industry Private Network', '琛屼笟涓撶綉', 2)
 ON CONFLICT (code) DO UPDATE SET
     name = EXCLUDED.name,
     name_en = EXCLUDED.name_en,
     description = EXCLUDED.description,
     sort_order = EXCLUDED.sort_order;
 
+-- ============================================
+-- Recording Policies Table
+-- ============================================
+CREATE TABLE IF NOT EXISTS recording_policies (
+    id BIGSERIAL PRIMARY KEY,
+    device_tag VARCHAR(255) NOT NULL,
+    channel_tag VARCHAR(255) NOT NULL,
+    policy_type VARCHAR(50) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    schedule_type VARCHAR(50),
+    cron_expr TEXT,
+    alarm_type VARCHAR(255),
+    pre_record_secs INTEGER DEFAULT 0,
+    post_record_secs INTEGER DEFAULT 30,
+    format VARCHAR(50) NOT NULL DEFAULT 'MP4',
+    max_duration_secs INTEGER DEFAULT 3600,
+    max_file_size_mb INTEGER DEFAULT 512,
+    output_path TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(device_tag, channel_tag, policy_type)
+);
+CREATE INDEX IF NOT EXISTS idx_recording_policies_device_tag ON recording_policies(device_tag);
+CREATE INDEX IF NOT EXISTS idx_recording_policies_channel_tag ON recording_policies(channel_tag);
+CREATE INDEX IF NOT EXISTS idx_recording_policies_policy_type ON recording_policies(policy_type);
+CREATE INDEX IF NOT EXISTS idx_recording_policies_enabled ON recording_policies(enabled);
+
+-- ============================================
+-- Recording Time Windows Table
+-- ============================================
+CREATE TABLE IF NOT EXISTS recording_time_windows (
+    id BIGSERIAL PRIMARY KEY,
+    policy_id BIGINT NOT NULL REFERENCES recording_policies(id) ON DELETE CASCADE,
+    start_time VARCHAR(10) NOT NULL,
+    end_time VARCHAR(10) NOT NULL,
+    days INTEGER[] NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_recording_time_windows_policy_id ON recording_time_windows(policy_id);
+
+-- ============================================
+-- Recording Segments Table
+-- ============================================
+CREATE TABLE IF NOT EXISTS recording_segments (
+    id BIGSERIAL PRIMARY KEY,
+    recording_id BIGINT REFERENCES recordings(id),
+    device_tag VARCHAR(255) NOT NULL,
+    channel_tag VARCHAR(255) NOT NULL,
+    start_time TIMESTAMPTZ NOT NULL,
+    end_time TIMESTAMPTZ NOT NULL,
+    duration_secs BIGINT NOT NULL DEFAULT 0,
+    file_size BIGINT NOT NULL DEFAULT 0,
+    file_path TEXT NOT NULL,
+    server_tag VARCHAR(255),
+    segment_type VARCHAR(50) NOT NULL DEFAULT 'Normal',
+    alarm_id BIGINT REFERENCES alarms(id)
+);
+CREATE INDEX IF NOT EXISTS idx_recording_segments_device_channel_time ON recording_segments(device_tag, channel_tag, start_time, end_time);
+CREATE INDEX IF NOT EXISTS idx_recording_segments_recording_id ON recording_segments(recording_id);
+CREATE INDEX IF NOT EXISTS idx_recording_segments_alarm_id ON recording_segments(alarm_id);
 COMMIT;

@@ -1,6 +1,21 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AuthConfig {
+
+    #[serde(default)]
+    pub auto_init_schema: bool,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            auto_init_schema: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct JwtConfig {
     pub secret: String,
     pub access_token_expire_minutes: i64,

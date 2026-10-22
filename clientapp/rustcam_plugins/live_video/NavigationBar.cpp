@@ -15,8 +15,7 @@ namespace rustcam {
 NavigationBar::NavigationBar(QWidget* parent)
     : QWidget(parent)
 {
-    //setFixedHeight(50);
-    //setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+
     this->setStyleSheet("{background-color:red;}");
 }
 

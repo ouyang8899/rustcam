@@ -23,6 +23,7 @@ SELECT id, device_tag FROM devices ORDER BY id DESC LIMIT #{limit} OFFSET #{offs
 SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, latitude, longitude, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
 FROM devices
 <where>
+1=1
 <if test="search != null">AND (name LIKE #{search} OR host LIKE #{search} OR device_tag LIKE #{search})</if>
 <if test="region_code != null">AND region_code = #{region_code}</if>
 <if test="protocol != null">AND protocol = #{protocol}</if>
@@ -37,6 +38,7 @@ LIMIT #{limit} OFFSET #{offset}
 <select id="device_count">
 SELECT COUNT(*) FROM devices
 <where>
+1=1
 <if test="search != null">AND (name LIKE #{search} OR host LIKE #{search} OR device_tag LIKE #{search})</if>
 <if test="region_code != null">AND region_code = #{region_code}</if>
 <if test="protocol != null">AND protocol = #{protocol}</if>

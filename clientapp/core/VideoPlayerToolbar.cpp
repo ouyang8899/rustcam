@@ -396,11 +396,10 @@ void VideoPlayerToolbar::onZoomToggled(bool checked) {
 }
 
 void VideoPlayerToolbar::onZoomValueChanged(double value) {
-    m_zoomScale = static_cast<float>(value);
 
     if (m_videoPlayer && m_zoomEnabled) {
         QPoint center = QPoint(m_videoPlayer->width() / 2, m_videoPlayer->height() / 2);
-        m_videoPlayer->setZoom(m_zoomScale, center.x(), center.y());
+
     }
 
     updateZoomLabel();
@@ -408,7 +407,7 @@ void VideoPlayerToolbar::onZoomValueChanged(double value) {
 
 void VideoPlayerToolbar::updateZoomLabel() {
     if (m_zoomLabel) {
-        m_zoomLabel->setText(QString::number(m_zoomScale, 'f', 1) + "x");
+
     }
 }
 
@@ -531,33 +530,9 @@ bool VideoPlayerToolbar::eventFilter(QObject* obj, QEvent* event) {
 }
 
 void VideoPlayerToolbar::wheelEvent(QWheelEvent* event) {
-    if (!m_zoomEnabled || !m_videoPlayer) {
+
         QWidget::wheelEvent(event);
-        return;
-    }
 
-    QPoint delta = event->angleDelta();
-    if (delta.isNull()) {
-        QWidget::wheelEvent(event);
-        return;
-    }
-
-    int yDelta = delta.y();
-    float step = yDelta > 0 ? 0.1f : -0.1f;
-    float newScale = m_zoomScale + step;
-    newScale = qBound(1.0f, newScale, 10.0f);
-
-    if (qAbs(newScale - m_zoomScale) > 0.001f) {
-        m_zoomScale = newScale;
-
-        QPointF posF = event->position();
-        QPoint videoPos(static_cast<int>(posF.x()), static_cast<int>(posF.y()));
-        m_videoPlayer->setZoom(m_zoomScale, videoPos.x(), videoPos.y());
-
-        updateZoomLabel();
-    }
-
-    event->accept();
 }
 
 void VideoPlayerToolbar::setSelected(bool selected) {
@@ -656,22 +631,6 @@ void VideoPlayerToolbar::refreshIcons() {
     }
     if (m_fullscreenBtn) m_fullscreenBtn->setIcon(createColoredIcon(":/icons/ic_toolbar_fullscreen.svg", m_iconColor));
     if (m_moreBtn) m_moreBtn->setIcon(createColoredIcon(":/icons/ic_toolbar_more.svg", m_iconColor));
-}
-
-void VideoPlayerToolbar::handleWheelZoom(int x, int y, int delta) {
-    if (!m_zoomEnabled || !m_videoPlayer) {
-        return;
-    }
-
-    float step = delta > 0 ? 0.1f : -0.1f;
-    float newScale = m_zoomScale + step;
-    newScale = qBound(1.0f, newScale, 10.0f);
-
-    if (qAbs(newScale - m_zoomScale) > 0.001f) {
-        m_zoomScale = newScale;
-        m_videoPlayer->setZoom(m_zoomScale, x, y);
-        updateZoomLabel();
-    }
 }
 
 }

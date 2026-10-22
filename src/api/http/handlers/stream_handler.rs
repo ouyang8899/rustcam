@@ -11,7 +11,6 @@ use crate::domain::Stream;
 use crate::adapter::media_server::StreamInfo;
 use crate::api::state::FullState;
 
-/// 分页查询
 #[derive(Debug, Deserialize)]
 pub struct PaginationQuery {
     pub limit: Option<usize>,
@@ -27,7 +26,6 @@ impl PaginationQuery {
     pub fn state(&self) -> Option<&str> { self.state.as_deref() }
 }
 
-/// 设备流查询
 #[derive(Debug, Deserialize)]
 pub struct DeviceStreamsQuery {
     pub device_id: Option<i64>,
@@ -37,7 +35,6 @@ impl DeviceStreamsQuery {
     pub fn device_id(&self) -> Option<i64> { self.device_id }
 }
 
-/// 开始推流请求
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct StartStreamRequest {
@@ -46,13 +43,11 @@ pub struct StartStreamRequest {
     pub rtsp_url: Option<String>,
 }
 
-/// 播放查询
 #[derive(Debug, Deserialize)]
 pub struct StreamPlayQuery {
     pub protocol: crate::adapter::media_server::Protocol,
 }
 
-/// GET /api/v1/streams
 pub async fn list_streams_handler(
     State(state): State<Arc<FullState>>,
     Query(q): Query<PaginationQuery>,
@@ -71,7 +66,6 @@ pub async fn list_streams_handler(
     })))
 }
 
-/// GET /api/v1/streams/by-device/:device_tag
 pub async fn list_streams_by_device_handler(
     State(state): State<Arc<FullState>>,
     Path(device_tag): Path<String>,
@@ -81,7 +75,6 @@ pub async fn list_streams_by_device_handler(
     Ok(Json(ApiResponse::success(streams)))
 }
 
-/// GET /api/v1/streams/:id
 pub async fn get_stream_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -91,7 +84,6 @@ pub async fn get_stream_handler(
     Ok(Json(ApiResponse::success(stream)))
 }
 
-/// POST /api/v1/streams
 pub async fn start_stream_handler(
     State(state): State<Arc<FullState>>,
     Json(req): Json<StartStreamRequest>,
@@ -102,7 +94,6 @@ pub async fn start_stream_handler(
     Ok(Json(ApiResponse::success(stream_info)))
 }
 
-/// DELETE /api/v1/streams/:id
 pub async fn stop_stream_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -114,7 +105,6 @@ pub async fn stop_stream_handler(
     Ok(Json(ApiResponse::success(())))
 }
 
-/// POST /api/v1/streams/:id/restart
 pub async fn restart_stream_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -122,16 +112,15 @@ pub async fn restart_stream_handler(
     let registry = &state.app.registry;
     let stream = registry.stream_service.get_stream(id).await?
         .ok_or_else(|| AppError::NotFound(format!("Stream {} not found", id)))?;
-    
+
     let device_tag = stream.device_tag.clone().unwrap_or_default();
-    let device = registry.device_service.get_device_by_device_tag(&device_tag)?
+    let _device = registry.device_service.get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("Device with tag {} not found", device_tag)))?;
-    
+
     let stream_info = registry.stream_service.restart_stream_by_id(stream.id).await?;
     Ok(Json(ApiResponse::success(stream_info)))
 }
 
-/// GET /api/v1/streams/:id/play
 pub async fn get_stream_play_url(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -144,7 +133,6 @@ pub async fn get_stream_play_url(
     Ok(Json(ApiResponse::success(url)))
 }
 
-/// GET /api/v1/streams/:id/play-links
 pub async fn get_stream_play_links_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -162,7 +150,6 @@ pub async fn get_stream_play_links_handler(
     Ok(Json(ApiResponse::success(play_links)))
 }
 
-/// GET /api/v1/streams/:id/online
 pub async fn is_stream_online_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,

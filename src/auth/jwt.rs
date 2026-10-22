@@ -70,17 +70,6 @@ pub fn decode_token(token: &str, secret: &str) -> Result<Claims, AuthError> {
 }
 
 pub fn generate_tokens(user: &UserInfo, config: &JwtConfig) -> Result<(String, String), AuthError> {
-    tracing::debug!(
-        "[JWT] Generating tokens for user: {} (id={}), roles: {:?}",
-        user.username,
-        user.id,
-        user.roles
-    );
-    tracing::debug!(
-        "[JWT] Access token expires in: {} minutes, Refresh token expires in: {} days",
-        config.access_token_expire_minutes,
-        config.refresh_token_expire_days
-    );
 
     let access_token = encode_token(
         user.id,
@@ -99,12 +88,6 @@ pub fn generate_tokens(user: &UserInfo, config: &JwtConfig) -> Result<(String, S
         Duration::days(config.refresh_token_expire_days),
         &config.secret,
     )?;
-
-    tracing::debug!(
-        "[JWT] Tokens generated: access_len={}, refresh_len={}",
-        access_token.len(),
-        refresh_token.len()
-    );
 
     Ok((access_token, refresh_token))
 }

@@ -106,9 +106,10 @@ void VideoPlayer::play(const QString& url) {
     });
 
     setState(State::Connecting);
-    //setUpdatesEnabled(false);
-    emit connecting();
 
+    emit connecting();
+    QSize size = this->size();
+    BridgePlayer::PlayerManager::instance().set_player_output_size(m_playerId, size.width(), size.height());
     auto activePlayers = BridgePlayer::PlayerManager::instance().get_active_players();
     bool contains = activePlayers.find(m_playerId) != activePlayers.end();
     LOG_INFO("VideoPlayer", QString("play: active players count=%1, contains our playerId=%2")
@@ -207,7 +208,10 @@ void VideoPlayer::setSelected(bool selected) {
 
 void VideoPlayer::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
-
+    if (m_player) {
+        QSize size = this->size();
+        BridgePlayer::PlayerManager::instance().set_player_output_size(m_player->id(), size.width(), size.height());
+    }
     if (m_placeholderLabel) {
         int x = (width() - m_placeholderLabel->width()) / 2;
         int y = (height() - m_placeholderLabel->height()) / 2;
@@ -260,11 +264,39 @@ void VideoPlayer::leaveEvent(QEvent* event) {
 
 void VideoPlayer::wheelEvent(QWheelEvent* event) {
     if (m_toolbar) {
-        QPointF globalPosF = event->globalPosition();
-        QPoint globalPos(static_cast<int>(globalPosF.x()), static_cast<int>(globalPosF.y()));
-        QPoint localPos = mapFromGlobal(globalPos);
-        int delta = event->angleDelta().y();
-        m_toolbar->handleWheelZoom(localPos.x(), localPos.y(), delta);
+        if (!m_zoomEnabled) {
+            QWidget::wheelEvent(event);
+            return;
+        }
+        const int delta = event->angleDelta().y();
+        if (delta == 0) {
+            QWidget::wheelEvent(event);
+            return;
+        }
+        const double oldScale = m_zoomScale;
+        if (delta > 0) {
+            m_zoomScale *= m_zoomStep;
+        }
+        else {
+            m_zoomScale /= m_zoomStep;
+        }
+        m_zoomScale = qBound(m_minScale, m_zoomScale, m_maxScale);
+        if (qFuzzyCompare(oldScale, m_zoomScale)) {
+            QWidget::wheelEvent(event);
+            return;
+        }
+        const QPoint  mousePosInt = event->position().toPoint();
+        BridgePlayer::ZoomData::Ptr  zoom = std::make_shared<BridgePlayer::ZoomData>();
+        zoom->center = std::make_shared<BridgePlayer::Point2D>();
+        zoom->center->x = mousePosInt.x();
+        zoom->center->y = mousePosInt.y();
+        zoom->scale = m_zoomScale;
+        zoom->enable = true;
+        if (m_player) {
+            m_player->set_zoom(zoom);
+        }
+        event->accept();
+        return;
     }
     QWidget::wheelEvent(event);
 }
@@ -274,6 +306,9 @@ void VideoPlayer::setZoomEnabled(bool enabled) {
     if (m_player) {
         auto zoomData = std::make_shared<BridgePlayer::ZoomData>();
         zoomData->enable = enabled;
+        zoomData->scale = 1.0;
+        m_zoomScale = 1.0;
+        m_zoomEnabled = enabled;
         m_player->set_zoom(zoomData);
     }
 }
@@ -347,7 +382,7 @@ void VideoPlayer::onPlayerStatus(int code) {
             if (m_placeholderLabel) {
                 m_placeholderLabel->hide();
             }
-           // setUpdatesEnabled(true);
+
             emit connected();
             break;
         case BridgePlayer::PlayCode::START_PLAY:
@@ -359,7 +394,7 @@ void VideoPlayer::onPlayerStatus(int code) {
             if (m_player) {
                 applyOsdSettings();
             }
-           // setUpdatesEnabled(false);
+
             emit playing();
             emit started();
             break;
@@ -382,7 +417,7 @@ void VideoPlayer::onPlayerStatus(int code) {
             break;
         case BridgePlayer::PlayCode::STOP_PLAY:
             setState(State::Stopped);
-            //setUpdatesEnabled(true);
+
             if (m_placeholderLabel) {
                 m_placeholderLabel->show();
             }
@@ -390,7 +425,7 @@ void VideoPlayer::onPlayerStatus(int code) {
             break;
         case BridgePlayer::PlayCode::MEDIA_ERROR:
             setState(State::Error);
-            //setUpdatesEnabled(true);
+
             if (m_placeholderLabel) {
                 m_placeholderLabel->show();
             }

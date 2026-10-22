@@ -39,22 +39,20 @@ void setupSignalHandlers()
 }
 #if defined(Q_OS_WIN)
 static void forceConsole() {
-    // 已经有控制台就别折腾
+
     if (GetConsoleWindow() != nullptr) {
         return;
     }
 
     if (AllocConsole()) {
-        // 用 freopen 统一重定向 C 流
+
         FILE* f = nullptr;
         freopen_s(&f, "CONOUT$", "w", stdout);
         freopen_s(&f, "CONOUT$", "w", stderr);
         freopen_s(&f, "CONIN$", "r", stdin);
 
-        // 让 C++ 流与 C 流同步（默认就是 true，这里显式一下更稳）
         std::ios::sync_with_stdio(true);
 
-        // 关闭缓冲，调试时立刻可见
         setvbuf(stdout, nullptr, _IONBF, 0);
         setvbuf(stderr, nullptr, _IONBF, 0);
         std::cout.setf(std::ios::unitbuf);
@@ -90,7 +88,6 @@ int main(int argc, char* argv[])
     for (const QString& path : translationPaths) {
         if (translator.load(path)) {
             app.installTranslator(&translator);
-            qDebug() << "Loaded translation from:" << path;
             break;
         }
     }

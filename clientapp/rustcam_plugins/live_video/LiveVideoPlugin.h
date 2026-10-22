@@ -88,8 +88,7 @@ private:
                          const QJsonArray& devicesData, const QJsonArray& channelsData);
     DeviceTreeNode::Ptr parseRegionNode(const QJsonObject& obj, const QMap<QString, QList<DeviceTreeNode::Ptr>>& regionDeviceMap);
     DeviceTreeNode::Ptr parseGroupNode(const QJsonObject& obj, const QMap<QString, QList<DeviceTreeNode::Ptr>>& groupDeviceMap);
-    //void addDevicesToTree(QList<DeviceTreeNode>& nodes, const QMap<QString, QList<DeviceTreeNode>>& deviceMap,const std::unordered_map<QString, DeviceTreeNode::Ptr>& allDevcieMap);
-   // void addChannelsToTree(QList<DeviceTreeNode>& nodes, const QMap<QString, QList<DeviceTreeNode>>& channelMap, const std::unordered_map<QString, DeviceTreeNode::Ptr>& allDevcieMap);
+
     void onDeviceTreeItemClicked(const QVariantMap& meta);
     void onChannelPlayLinksReceived(bool success, const QJsonObject& response, const QString& error, const QString& title, const QString& itemId);
 

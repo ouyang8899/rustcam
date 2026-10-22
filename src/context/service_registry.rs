@@ -8,6 +8,7 @@ use crate::application::{
     MediaServerService, HookService, PlayerLayoutService,
     PlayService, WsBroadcaster, StreamRecoveryService,
     zlmediakit_hook::ZlMediaKitHookHandler, ChannelService,
+    RecordingPolicyService, RecordingSchedulerService,
 };
 use crate::domain::traits::{DeviceLookup, StreamManager, EventPublisher, CacheStore};
 use crate::domain::device::Protocol;
@@ -18,74 +19,60 @@ pub use crate::auth::casbin::CasbinManager;
 use crate::auth::auth_db::PostgresAuthRepository;
 use crate::media::MediaSessionManager;
 
-/// 服务注册中心
-///
-/// 集中管理所有 Service 实例，负责依赖注入和生命周期管理。
 #[derive(Clone)]
 pub struct ServiceRegistry {
-    /// 基础设施上下文
+
     pub infra: InfraContext,
 
-    /// 媒体上下文
     pub media: MediaContext,
 
-    /// 设备管理服务
     pub device_service: Arc<DeviceService>,
 
-    /// 流管理服务
     pub stream_service: Arc<StreamService>,
 
-    /// 流恢复服务
     pub stream_recovery_service: Arc<StreamRecoveryService>,
 
-    /// 会话管理服务
     pub session_service: Arc<SessionService>,
 
-    /// 录制管理服务
     pub recording_service: Arc<RecordingService>,
 
-    /// 媒体服务器管理服务
+    pub recording_policy_service: Arc<RecordingPolicyService>,
+
+    pub recording_scheduler_service: Arc<RecordingSchedulerService>,
+
     pub media_server_service: Arc<MediaServerService>,
 
-    /// WebHook 回调服务 (旧版兼容)
     pub hook_service: Arc<HookService>,
 
-    /// ZLMediaKit Hook 处理器
     pub zlmediakit_hook_handler: Arc<ZlMediaKitHookHandler>,
 
-    /// 播放器布局服务
     pub player_layout_service: Arc<PlayerLayoutService>,
 
-    /// 通道服务
     pub channel_service: Arc<ChannelService>,
 
-    /// 播放服务
     pub play_service: Arc<PlayService>,
 
-    /// WebSocket 广播器
     pub ws_broadcaster: Arc<WsBroadcaster>,
 
-    /// 协议层依赖 (Trait objects)
     pub protocol_deps: ProtocolDeps,
 
-    /// RTSP 信令会话管理器
     pub session_manager: Arc<MediaSessionManager>,
 }
 
 impl ServiceRegistry {
-    /// 创建服务注册中心
-    pub async fn new(config: AppConfig) -> anyhow::Result<Self> {
-        tracing::info!("[ServiceRegistry] Building service registry...");
 
-        // ── 第1层: 基础设施上下文 ──
-        // 先创建 DbRepository（不加载缓存）
+    pub async fn new(config: AppConfig) -> anyhow::Result<Self> {
+
         let db = Arc::new(
-            DbRepository::new_without_load(&config.database.url, config.database.debug_sql.unwrap_or(false))
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to initialize database: {}", e))?
+            DbRepository::new_without_load_with_pool(
+                &config.database.url,
+                config.database.debug_sql.unwrap_or(false),
+                config.database.max_connections as u64,
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to initialize database: {}", e))?
         );
 
-        // 同步配置服务器到数据库（load_caches 之前）
         for cfg in &config.media_servers.servers {
             let tag = if cfg.server_tag.is_empty() {
                 cfg.name.clone()
@@ -95,7 +82,6 @@ impl ServiceRegistry {
 
             let exists_in_db = db.server_exists_by_tag(&tag).await?;
             if !exists_in_db {
-                tracing::info!("[ServiceRegistry] Syncing config server '{}' to DB", tag);
                 let new_server = crate::domain::server::Server {
                     id: 0,
                     name: cfg.name.clone(),
@@ -112,62 +98,76 @@ impl ServiceRegistry {
                 if let Err(e) = db.create_server(&new_server).await {
                     tracing::warn!("[ServiceRegistry] Failed to sync config server to DB: {}", e);
                 }
+            } else if !cfg.protocol_ports.is_empty() {
+
+                if let Ok(Some(mut existing)) = db.get_server_by_tag(&tag).await {
+                    if existing.protocol_ports.is_empty() {
+                        existing.protocol_ports = cfg.protocol_ports.clone();
+                        existing.updated_at = chrono::Utc::now();
+                        if let Err(e) = db.update_server(&existing).await {
+                            tracing::warn!("[ServiceRegistry] Failed to fill protocol ports for '{}': {}", tag, e);
+                        } else {
+                        }
+                    }
+                }
             }
         }
 
-        // 加载缓存
         db.load_caches().await?;
 
-        // 构建 InfraContext
+        let configured_servers = config.media_servers.servers.clone();
+
         let infra = InfraContext::from_parts(db.clone(), Arc::new(config)).await?;
 
-        // ── 第2层: 媒体上下文 ──
         let cluster = Arc::new(ClusterManager::new_from_configs(vec![]));
 
-        // 媒体服务器管理服务（从数据库加载）
         let media_server_service = Arc::new(MediaServerService::new(
             infra.db.clone(),
             cluster.clone(),
+            configured_servers,
         ));
 
         let media = MediaContext::new(&infra, cluster,media_server_service.clone()).await?;
 
-        // ── 第3层: 业务服务 ──
-
-        // 录制服务
         let recording_service = Arc::new(RecordingService::new(
             infra.db.clone(),
             media.cluster.clone(),
         ));
 
-        // 流服务
+        let recording_policy_service = Arc::new(RecordingPolicyService::new(
+            infra.db.clone(),
+            media.cluster.clone(),
+        ));
+
+        let recording_scheduler_service = Arc::new(RecordingSchedulerService::new(
+            infra.clone(),
+            recording_policy_service.clone(),
+            recording_service.clone(),
+        ));
+
         let stream_service = Arc::new(StreamService::new(
             infra.clone(),
             media.clone(),
             recording_service.clone(),
         ));
 
-        // 流恢复服务
         let stream_recovery_service = Arc::new(StreamRecoveryService::new(
             infra.clone(),
             media.clone(),
             stream_service.clone(),
         ));
 
-        // 设备服务
         let device_service = Arc::new(DeviceService::new(
             infra.clone(),
             media.clone(),
             stream_service.clone(),
         ));
 
-        // 会话服务
         let session_service = Arc::new(SessionService::new(
             infra.clone(),
             media.clone(),
         ));
 
-        // Hook 服务
         let hook_service = Arc::new(HookService::new(
             infra.db.clone(),
             infra.redis.clone(),
@@ -178,7 +178,6 @@ impl ServiceRegistry {
             stream_service.clone(),
         ));
 
-        // ZLMediaKit Hook 处理器
         let zlmediakit_hook_handler = Arc::new(
             ZlMediaKitHookHandler::from_context(
                 &infra,
@@ -187,19 +186,14 @@ impl ServiceRegistry {
             ).with_stream_recovery_service(stream_recovery_service.clone())
         );
 
-
-
-        // 播放器布局服务
         let player_layout_service = Arc::new(PlayerLayoutService::new(
             infra.db.clone(),
         ));
 
-        // 通道服务
         let channel_service = Arc::new(ChannelService::new(
             infra.db.clone(),
         ));
 
-        // ── 第4层: 协议依赖 ──
         let register_fn: Arc<dyn Fn(String, AdapterEntry) + Send + Sync> =
             Arc::new(|key, entry| am_set(key, entry));
         let unregister_fn: Arc<dyn Fn(String) + Send + Sync> =
@@ -220,8 +214,6 @@ impl ServiceRegistry {
         let play_service = media.play_service.clone();
         let session_manager = Arc::new(MediaSessionManager::new());
 
-        tracing::info!("[ServiceRegistry] All services initialized");
-
         Ok(Self {
             infra,
             media,
@@ -230,6 +222,8 @@ impl ServiceRegistry {
             stream_recovery_service,
             session_service,
             recording_service,
+            recording_policy_service,
+            recording_scheduler_service,
             media_server_service,
             hook_service,
             zlmediakit_hook_handler,
@@ -242,14 +236,26 @@ impl ServiceRegistry {
         })
     }
 
-    /// 获取认证状态
     pub async fn get_auth_state(&self) -> anyhow::Result<AuthState> {
         let jwt_config = self.infra.config().jwt.clone();
         let default_username = self.infra.config().server.default_username.as_deref().unwrap_or("admin");
         let default_password = self.infra.config().server.default_password.as_deref().unwrap_or("admin");
-        let auth_repo = Arc::new(
-            PostgresAuthRepository::new(&self.infra.config().database.url, default_username, default_password).await?
-        );
+
+        if self.infra.config().auth.auto_init_schema {
+            let url = self.infra.config().database.url.clone();
+            let user = default_username.to_string();
+            let pass = default_password.to_string();
+            tokio::spawn(async move {
+                match PostgresAuthRepository::new(&url, &user, &pass).await {
+                    Ok(_) => {},
+                    Err(e) => tracing::warn!("[AuthState] auth schema init failed: {}", e),
+                }
+            });
+        } else {
+        }
+
+        let auth_repo = Arc::new(PostgresAuthRepository::with_rb(self.infra.db.rb().clone()));
+
         let casbin = Arc::new(
             CasbinManager::new(auth_repo.clone()).await
                 .map_err(|e| anyhow::anyhow!("Casbin init failed: {}", e))?
@@ -258,15 +264,13 @@ impl ServiceRegistry {
         Ok(AuthState::new(jwt_config, casbin, auth_repo))
     }
 
-    /// 启动所有后台服务
     pub async fn start_all(&self) {
-        tracing::info!("[ServiceRegistry] Starting all services...");
         self.device_service.start().await;
         self.session_service.start(self.infra.config().session.expiration_secs).await;
         self.stream_recovery_service.clone().start().await;
+        self.recording_scheduler_service.clone().start().await;
         self.start_health_monitor().await;
         self.start_ws_service().await;
-        tracing::info!("[ServiceRegistry] All services started");
     }
 
     async fn start_health_monitor(&self) {
@@ -292,35 +296,32 @@ impl ServiceRegistry {
         ws_service.start();
     }
 
-    /// 优雅关闭所有服务
     pub async fn graceful_shutdown(&self) {
-        tracing::info!("[ServiceRegistry] Initiating graceful shutdown...");
         self.device_service.stop().await;
         self.session_service.stop().await;
-        tracing::info!("[ServiceRegistry] Shutdown complete");
     }
 
-    /// 获取 Dashboard 数据
     pub async fn get_dashboard_data(&self) -> serde_json::Value {
         let device_stats = self.device_service.get_stats();
         let stream_stats = self.stream_service.get_stats().await;
         let servers = self.media_server_service.list();
 
         let mut server_statuses = Vec::new();
-        let mut total_sessions = 0u32;
         let mut online_count = 0usize;
 
-        tracing::debug!("[Dashboard] Fetching status for {} servers", servers.len());
         for server in &servers {
-            let status = self.media.cluster.get_server_status(&server.server_tag).await;
+
+            let status = self
+                .infra
+                .redis
+                .get_server_status(&server.server_tag)
+                .await
+                .ok()
+                .flatten();
             let online = status.as_ref().map(|s| s.online).unwrap_or(false);
             let sessions = status.as_ref().map(|s| s.session_count).unwrap_or(0);
 
-            tracing::debug!("[Dashboard] Server tag='{}', name='{}', online={}", 
-                server.server_tag, server.name, online);
-
             if online { online_count += 1; }
-            total_sessions += sessions;
 
             server_statuses.push(serde_json::json!({
                 "id": server.id,

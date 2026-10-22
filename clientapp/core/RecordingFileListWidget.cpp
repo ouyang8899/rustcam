@@ -44,7 +44,11 @@ QVariant RecordingFileListModel::data(const QModelIndex& index, int role) const 
         case EndTimeRole:
             return file.endTimeMs;
         case MediaServerRole:
-            return file.mediaServerName;
+            return file.serverTag;
+        case SegmentTypeRole:
+            return static_cast<int>(file.segmentType);
+        case AlarmIdRole:
+            return file.alarmId;
         case Qt::DisplayRole:
         case Qt::UserRole + 100:
             return file.filename;
@@ -72,6 +76,12 @@ void RecordingFileListModel::clearFiles() {
     endResetModel();
 }
 
+void RecordingFileListModel::addFile(const RecordingFile& file) {
+    beginInsertRows(QModelIndex(), m_files.size(), m_files.size());
+    m_files.append(file);
+    endInsertRows();
+}
+
 RecordingFile RecordingFileListModel::fileAt(int index) const {
     if (index >= 0 && index < m_files.size()) {
         return m_files[index];
@@ -93,7 +103,8 @@ RecordingFileListWidget::RecordingFileListWidget(QWidget* parent)
     m_model = new RecordingFileListModel(this);
     m_listView = new QListView(this);
     m_listView->setModel(m_model);
-    m_listView->setUniformItemSizes(true);
+    m_listView->setUniformItemSizes(false);
+    m_listView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     m_listView->setItemDelegate(new QStyledItemDelegate(this));
 
     m_listView->setStyleSheet(R"(
@@ -132,6 +143,11 @@ void RecordingFileListWidget::setFiles(const QList<RecordingFile>& files) {
 void RecordingFileListWidget::clearFiles() {
     m_model->clearFiles();
     m_countLabel->setText(tr("Recording Files (0)"));
+}
+
+void RecordingFileListWidget::addFile(const RecordingFile& file) {
+    m_model->addFile(file);
+    m_countLabel->setText(tr("Recording Files (%1)").arg(m_model->rowCount()));
 }
 
 void RecordingFileListWidget::onItemDoubleClicked(const QModelIndex& index) {

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use chrono::Utc;
+
 use crate::context::{InfraContext, MediaContext};
 use crate::domain::{Session, SessionType, SessionState};
 use crate::adapter::media_server::StreamInfo;
@@ -32,7 +32,6 @@ impl SessionService {
         let mut event_rx = self.infra.subscribe_events();
 
         tokio::spawn(async move {
-            tracing::info!("[SessionService] Started event listener");
             loop {
                 match event_rx.recv().await {
                     Ok(event) => {
@@ -55,14 +54,12 @@ impl SessionService {
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
-            tracing::info!("[SessionService] Started cleanup task");
             loop {
                 interval.tick().await;
                 Self::cleanup_expired_sessions(&repo, &redis, &cluster, exp_secs).await;
             }
         });
 
-        tracing::info!("[SessionService] Started");
     }
 
     pub async fn stop(&self) {
@@ -77,10 +74,8 @@ impl SessionService {
         event: &SignalEvent,
     ) -> anyhow::Result<()> {
         match event {
-            SignalEvent::StartPlay { device_tag, session_id, channel_id, session_type, .. } => {
-                tracing::info!("[SessionService] StartPlay: session={} type={} device={:?} channel={:?}", session_id, session_type, device_tag, channel_id);
+            SignalEvent::StartPlay { device_tag, session_id: _, channel_id, session_type, .. } => {
                 if *session_type == SessionType::Broadcast {
-                    tracing::info!("[SessionService] Broadcast session - skipping DB session creation (managed by signaling)");
                     return Ok(());
                 }
                 let mut session = Session::new(*session_type, 0i64);
@@ -93,19 +88,21 @@ impl SessionService {
             }
 
             SignalEvent::StopPlay { session_id, session_type, .. } => {
-                tracing::info!("[SessionService] StopPlay: session={} type={}", session_id, session_type);
                 if *session_type == SessionType::Broadcast {
-                    tracing::info!("[SessionService] Broadcast session - skipping DB session deletion (managed by signaling)");
                     return Ok(());
                 }
-                if let Some(session) = infra.db.sessions_cache()
-                    .iter()
-                    .find(|s| s.stream_key() == *session_id)
-                    .map(|s| s.clone())
-                {
-                    infra.db.sessions_cache().remove(&session.id);
-                    if let Err(e) = infra.db.delete_session(session.id).await {
-                        tracing::error!("[SessionService] Failed to delete session {}: {}", session.id, e);
+
+                let target_id = {
+                    let cache = infra.db.sessions_cache();
+                    cache
+                        .iter()
+                        .find(|s| s.stream_key() == *session_id)
+                        .map(|s| s.value().id)
+                };
+                if let Some(target_id) = target_id {
+                    infra.db.sessions_cache().remove(&target_id);
+                    if let Err(e) = infra.db.delete_session(target_id).await {
+                        tracing::error!("[SessionService] Failed to delete session {}: {}", target_id, e);
                     }
                 }
             }
@@ -135,7 +132,7 @@ impl SessionService {
         let device = self.infra.db.get_device_by_device_tag(device_tag)
             .ok_or_else(|| AppError::NotFound(format!("Device with tag {} not found", device_tag)))?;
         let app = device.app.unwrap_or_else(|| "live".to_string());
-        
+
         let stream_key = crate::domain::stream::make_stream_key(
             session.device_tag.as_deref().unwrap_or(""),
             session.channel_tag.as_deref().unwrap_or("")
@@ -201,25 +198,42 @@ impl SessionService {
     ) {
         let mut to_delete = Vec::new();
 
-        for entry in repo.sessions_cache().iter() {
-            let session = entry.value();
-            if session.state == SessionState::Terminated { continue; }
-            if session.is_expired() {
-                tracing::info!("[SessionService] Session {} expired", session.id);
-                let stream_key = session.stream_key();
-                if !stream_key.is_empty() {
-                    if let Some(server_id) = &session.media_server_tag {
-                        if let Some(server) = cluster.get_all_servers().iter().find(|s| s.name() == server_id) {
-                            let _ = server.remove_stream_proxy("live", &stream_key).await;
-                        }
-                        let _ = redis.delete_stream_info(&stream_key).await;
+        let expired: Vec<(i64, String, Option<String>)> = {
+            let cache = repo.sessions_cache();
+            cache
+                .iter()
+                .filter(|e| {
+                    let s = e.value();
+                    s.state != SessionState::Terminated && s.is_expired()
+                })
+                .map(|e| {
+                    let s = e.value();
+                    (s.id, s.stream_key(), s.media_server_tag.clone())
+                })
+                .collect()
+        };
+
+        for (session_id, stream_key, media_server_tag) in expired {
+            if !stream_key.is_empty() {
+                if let Some(server_id) = &media_server_tag {
+                    if let Some(server) = cluster.get_all_servers().iter().find(|s| s.name() == server_id) {
+                        let _ = server.remove_stream_proxy("live", &stream_key).await;
                     }
+                    let _ = redis.delete_stream_info(&stream_key).await;
                 }
-                let mut s = session.clone();
-                s.mark_terminated();
-                repo.sessions_cache().insert(s.id, s);
-                to_delete.push(session.id);
             }
+            let updated = {
+                let cache = repo.sessions_cache();
+                cache.get(&session_id).map(|s| {
+                    let mut s = s.clone();
+                    s.mark_terminated();
+                    s
+                })
+            };
+            if let Some(s) = updated {
+                repo.sessions_cache().insert(s.id, s);
+            }
+            to_delete.push(session_id);
         }
 
         for session_id in to_delete {

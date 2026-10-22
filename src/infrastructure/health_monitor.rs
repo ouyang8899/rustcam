@@ -40,11 +40,9 @@ impl HealthMonitor {
         let interval = Duration::from_secs(self.interval_secs);
 
         tokio::spawn(async move {
-            tracing::info!("[HealthMonitor] Started (interval: {}s)", self.interval_secs);
             let cluster_tags = self.cluster.get_all_server_tags().clone();
             for  config_tag in &cluster_tags {
                 if let Some(ref svc) = self.stream_recovery_service {
-                    tracing::info!("[HealthMonitor] Triggering stream recovery for server {}", config_tag);
                     svc.mark_streams_recovering_for_media_server(&config_tag).await;
                     svc.restart_streams_for_media_server(&config_tag).await;
                 }
@@ -52,8 +50,7 @@ impl HealthMonitor {
             loop {
                 let start = std::time::Instant::now();
                 self.sync_servers().await;
-                let elapsed = start.elapsed();
-                tracing::debug!("[HealthMonitor] Sync completed in {:?}", elapsed);
+                let _elapsed = start.elapsed();
                 tokio::time::sleep(interval).await;
             }
         });
@@ -67,7 +64,6 @@ impl HealthMonitor {
         for server in &servers {
             let tag = server.server_tag.clone();
 
-            // 优先复用 ClusterManager 中的 adapter
             let adapter = self.cluster.get_server(&tag)
                 .map(|a| Arc::clone(&a))
                 .or_else(|| self.create_adapter(server));
@@ -77,26 +73,22 @@ impl HealthMonitor {
                 None => continue,
             };
 
-            // 只调用一次 get_status 获取完整状态
             match adapter.get_status().await {
                 Ok(status) => {
                     let in_cluster = cluster_tags_set.contains(&tag);
 
                     if server.enabled {
                         if !in_cluster {
-                            // 在线且启用但不在 cluster 中 → 注册
-                            self.cluster.register_server(server.to_config());
-                            tracing::info!("[HealthMonitor] Server {} registered to cluster (online)", tag);
 
-                            // 触发该媒体服务器上的流恢复
+                            self.cluster.register_server(server.to_config());
+
                             if let Some(ref svc) = self.stream_recovery_service {
-                                tracing::info!("[HealthMonitor] Restarting streams on server {}", tag);
                                 svc.restart_streams_for_media_server(&tag).await;
                             }
                         }
                         self.update_server_status(&tag, &status).await;
                     } else {
-                        // 禁用状态，从 cluster 移除
+
                         if in_cluster {
                             self.cluster.unregister_server(&tag);
                             tracing::warn!("[HealthMonitor] Server {} is disabled, unregistered from cluster", tag);
@@ -105,7 +97,7 @@ impl HealthMonitor {
                     }
                 }
                 Err(e) => {
-                    // 获取状态失败，视为离线
+
                     tracing::warn!("[HealthMonitor] Server {} get_status failed: {}", tag, e);
                     if cluster_tags_set.contains(&tag) {
                         self.cluster.unregister_server(&tag);
@@ -147,7 +139,6 @@ impl HealthMonitor {
         }
         let _ = self.redis.expire(&key, HEARTBEAT_TTL_SECS).await;
         let _ = self.redis.sadd(ONLINE_SET_KEY, tag).await;
-        tracing::debug!("[HealthMonitor] Updated server {} (online)", tag);
     }
 
     async fn mark_server_offline(&self, name: &str) {

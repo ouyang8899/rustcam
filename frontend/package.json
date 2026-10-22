@@ -5,7 +5,11 @@
   "scripts": {
     "dev": "node ./node_modules/vite/bin/vite.js",
     "build": "node ./node_modules/vite/bin/vite.js build",
-    "preview": "node ./node_modules/vite/bin/vite.js preview"
+    "preview": "node ./node_modules/vite/bin/vite.js preview",
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:report": "playwright show-report",
+    "test:core": "playwright test tests/recording-policies.spec.js tests/recording-files.spec.js tests/recording-playback.spec.js"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",

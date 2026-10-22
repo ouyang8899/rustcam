@@ -14,7 +14,7 @@ use crate::media::rtp_server::{UDPRtpServer, RtpServerActive};
 use crate::protocol::adapter::SignalAdapter;
 use crate::protocol::event::{ProtocolType, PtzCommand, SignalEvent, TransportType};
 use crate::protocol::rtsp::auth::{
-    authenticate, build_www_authenticate, generate_nonce, RtspAuthContext,
+    build_www_authenticate, generate_nonce, RtspAuthContext,
 };
 use crate::protocol::rtsp::common::{
     parse_interleaved_channels, InterleavedBuilder, InterleavedFrame, InterleavedStats, RtcpPacket, RTSP_USER_AGENT,
@@ -248,15 +248,6 @@ impl RtspServerAdapter {
             .await
             .map_err(|e| AppError::MediaServerError(format!("UDP 端口分配失败: {}", e)))?;
 
-        tracing::info!(
-            "[RTSP] 分配 UDP 端口 RTP={} RTCP={} SSRC={} stream={} track={}",
-            rtp_port,
-            rtp_port + 1,
-            local_ssrc,
-            stream_key,
-            track_id
-        );
-
         Ok((rtp_port, rtp_port + 1, local_ssrc, server, bind_addr))
     }
 
@@ -264,7 +255,6 @@ impl RtspServerAdapter {
         if let Some(track) = self.udp_tracks.remove(track_id) {
             track.receive_handle.abort();
             track.rr_handle.abort();
-            tracing::debug!("[RTSP] 停止 UDP track 任务 track={}", track_id);
         }
     }
 
@@ -287,7 +277,6 @@ impl RtspServerAdapter {
         if let Some(port) = port {
             if let Some(manager) = crate::media::get_rtp_server_manager() {
                 manager.release(port, TransportType::Udp).await;
-                tracing::info!("[RTSP] 释放 UDP 端口 {} track={}", port, track_id);
             }
         }
     }
@@ -309,7 +298,6 @@ impl RtspServerAdapter {
 
     async fn start_udp_tracks(&mut self, device_id: i64) {
         if !self.udp_tracks.is_empty() {
-            tracing::debug!("[RTSP] UDP 任务已运行，跳过重复启动");
             return;
         }
 
@@ -382,19 +370,13 @@ impl RtspServerAdapter {
                 },
             );
 
-            tracing::info!(
-                "[RTSP] UDP track 已启动 track={} ch={}/{}",
-                track_id,
-                rtp_channel,
-                rtcp_channel
-            );
         }
     }
 
     fn spawn_udp_receive(
         &self,
         device_id: i64,
-        track_id: String,
+        _track_id: String,
         rtp_channel: u8,
         rtcp_channel: u8,
         server: Arc<UDPRtpServer>,
@@ -447,7 +429,6 @@ impl RtspServerAdapter {
                             data: rtp_buf[..len].to_vec(),
                         };
                         if tx.try_send(event).is_err() {
-                            tracing::trace!("[RTSP] UDP 事件队列已满，丢弃 RTP track={}", track_id);
                         }
                     }
 
@@ -539,17 +520,8 @@ impl RtspServerAdapter {
                     0,
                 );
 
-                match rtcp_socket.send_to(&rr, rtcp_addr).await {
-                    Ok(_) => tracing::trace!(
-                        "[RTSP] RTCP RR track={} → {} local={} remote={} frac={} lost={} jitter={}",
-                        track_id,
-                        rtcp_addr,
-                        local_ssrc,
-                        remote_ssrc,
-                        frac,
-                        lost,
-                        jitter
-                    ),
+                  match rtcp_socket.send_to(&rr, rtcp_addr).await {
+                      Ok(_) => {},
                     Err(e) => tracing::warn!(
                         "[RTSP] RTCP RR 发送失败 track={} target={}: {}",
                         track_id,
@@ -566,7 +538,7 @@ impl RtspServerAdapter {
         cseq: u32,
         authorization: Option<&str>,
         method: &str,
-        uri: &str,
+        _uri: &str,
         stream_key: &str,
     ) -> Option<String> {
         let rtsp_auth = &self.deps.config.rtsp_auth;
@@ -585,7 +557,6 @@ impl RtspServerAdapter {
         let www = build_www_authenticate(&rtsp_auth.realm, &nonce);
 
         let Some(_auth_header) = authorization else {
-            tracing::debug!("[RTSP] 需要认证 method={} stream={}", method, stream_key);
             return Some(RtspResponse::unauthorized(cseq, &www));
         };
 
@@ -659,7 +630,6 @@ impl RtspServerAdapter {
                     protocol: ProtocolType::Rtsp,
                 });
 
-                tracing::info!("[RTSP] ANNOUNCE stream={} device_id={}", stream_key, device_id);
                 (events, Some(RtspResponse::announce(cseq)))
             }
 
@@ -687,7 +657,6 @@ impl RtspServerAdapter {
                     &self.deps.config.server.host,
                     &sdp_tracks,
                 );
-                tracing::info!("[RTSP] DESCRIBE stream={}", stream_key);
                 (events, Some(RtspResponse::describe(cseq, &sdp)))
             }
 
@@ -750,14 +719,6 @@ impl RtspServerAdapter {
                         );
                     }
 
-                    tracing::info!(
-                        "[RTSP] SETUP(TCP) stream={} track={} ch={}-{}",
-                        stream_key,
-                        track_id,
-                        ch_rtp,
-                        ch_rtcp
-                    );
-
                     format!("RTP/AVP/TCP;unicast;interleaved={}-{}", ch_rtp, ch_rtcp)
                 } else {
                     let (rtp_port, rtcp_port, local_ssrc, server, server_ip) =
@@ -787,16 +748,6 @@ impl RtspServerAdapter {
                         tt.client_rtcp = Some(client_rtcp);
                         s.track_transports.insert(track_id.clone(), tt);
                     }
-
-                    tracing::info!(
-                        "[RTSP] SETUP(UDP) stream={} track={} ports={}/{} client={}/{}",
-                        stream_key,
-                        track_id,
-                        rtp_port,
-                        rtcp_port,
-                        client_rtp,
-                        client_rtcp
-                    );
 
                     format!(
                         "RTP/AVP;unicast;client_port={}-{};server_port={}-{};source={}",
@@ -863,8 +814,6 @@ impl RtspServerAdapter {
                     session_type: SessionType::Play,
                 });
 
-                tracing::info!("[RTSP] PLAY stream={}", stream_key);
-
                 (
                     events,
                     Some(RtspResponse::play(
@@ -921,7 +870,7 @@ impl RtspServerAdapter {
                     .unwrap_or("")
                     .trim_start_matches(';');
 
-                let (stream_key, device_id) = if let Some(sess) = get_session(sess_id) {
+                let (_stream_key, _device_id) = if let Some(sess) = get_session(sess_id) {
                     let s = sess.read().await;
                     (s.stream_key.clone(), self.device_id.unwrap_or(0))
                 } else {
@@ -944,7 +893,6 @@ impl RtspServerAdapter {
                 remove_session(sess_id);
                 self.session = None;
 
-                tracing::info!("[RTSP] TEARDOWN stream={}", stream_key);
                 (events, Some(RtspResponse::ok(cseq)))
             }
 
@@ -1087,7 +1035,6 @@ impl SignalAdapter for RtspServerAdapter {
 
     async fn on_connected(&mut self, addr: SocketAddr) -> Result<()> {
         self.remote_addr = Some(addr);
-        tracing::info!("[RTSP] 客户端接入: {}", addr);
         Ok(())
     }
 
@@ -1095,7 +1042,6 @@ impl SignalAdapter for RtspServerAdapter {
         self.release_all_udp_tracks().await;
 
         if let Some(sess_id) = self.session.take() {
-            tracing::info!("[RTSP] 客户端断开，清理会话: {}", sess_id);
             remove_session(&sess_id);
         }
 

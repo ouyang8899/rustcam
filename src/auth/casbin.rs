@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use casbin::{Enforcer, CoreApi, MgmtApi};
+use casbin::{ Enforcer, CoreApi };
 use tokio::sync::RwLock;
 use super::errors::Result;
 use super::repository::RoleRepository;

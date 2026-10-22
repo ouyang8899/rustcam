@@ -127,7 +127,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['play', 'pause', 'error', 'ended', 'stats', 'broadcastStatusChange'])
+const emit = defineEmits(['play', 'pause', 'error', 'ended', 'stats', 'broadcastStatusChange', 'timeupdate'])
 
 const videoRef = ref(null)
 const loading = ref(false)
@@ -140,6 +140,7 @@ const duration = ref(0)
 const bitrate = ref(0)
 const hideControls = ref(false)
 const hideControlsTimer = ref(null)
+const playbackRate = ref(1)
 
 const isBroadcasting = ref(false)
 const broadcastStatus = ref('idle')
@@ -234,6 +235,7 @@ async function initHls(url) {
     hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
       loading.value = false
       isVideoReady.value = true
+      applyPlaybackRate()
       if (props.autoplay || props.isLive) {
         video.play().catch(() => {})
       }
@@ -254,6 +256,7 @@ async function initHls(url) {
     video.addEventListener('loadedmetadata', () => {
       loading.value = false
       isVideoReady.value = true
+      applyPlaybackRate()
     })
   } else {
     error.value = 'HLS not supported'
@@ -282,6 +285,7 @@ async function initFlv(url) {
       console.log('[VideoPlayer] FLV LOADING_COMPLETE')
       loading.value = false
       isVideoReady.value = true
+      applyPlaybackRate()
       if (props.autoplay || props.isLive) {
         videoRef.value?.play().catch(() => {})
       }
@@ -324,6 +328,7 @@ async function initWsFlv(url) {
       console.log('[VideoPlayer] FLV LOADING_COMPLETE')
       loading.value = false
       isVideoReady.value = true
+      applyPlaybackRate()
     })
 
     flvInstance.on(flvjs.Events.ERROR, (errType, errDetail) => {
@@ -510,6 +515,34 @@ function toggleFullscreen() {
 function reconnect() {
   error.value = null
   initPlayer()
+}
+
+function seek(time) {
+  const video = videoRef.value
+  if (!video) return
+  if (isFinite(time) && time >= 0) {
+    video.currentTime = time
+  }
+}
+
+function applyPlaybackRate() {
+  const video = videoRef.value
+  if (!video) return
+  const r = Number(playbackRate.value)
+  if (!isFinite(r) || r <= 0) return
+  try {
+    video.defaultPlaybackRate = r
+    video.playbackRate = r
+  } catch (e) {
+    console.warn('[VideoPlayer] failed to apply playbackRate:', e)
+  }
+}
+
+function setPlaybackRate(rate) {
+  const r = Number(rate)
+  if (!isFinite(r) || r <= 0) return
+  playbackRate.value = r
+  applyPlaybackRate()
 }
 
 function updateStats() {
@@ -797,6 +830,7 @@ onMounted(() => {
 
     video.addEventListener('timeupdate', () => {
       currentTime.value = video.currentTime
+      emit('timeupdate', { currentTime: video.currentTime, duration: video.duration })
     })
 
     video.addEventListener('durationchange', () => {
@@ -847,7 +881,9 @@ defineExpose({
   reconnect,
   destroy: destroyPlayer,
   startBroadcast,
-  stopBroadcast
+  stopBroadcast,
+  seek,
+  setPlaybackRate
 })
 </script>
 

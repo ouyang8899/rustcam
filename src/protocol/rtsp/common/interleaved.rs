@@ -183,7 +183,7 @@ impl InterleavedStats {
             }
         } else {
             self.rtcp_frame_count += 1;
-            if let Some((ssrc, report_type)) = RtcpPacket::parse(&frame.payload) {
+            if let Some((_ssrc, report_type)) = RtcpPacket::parse(&frame.payload) {
                 if let RtcpReportType::SenderReport {
                     ntp_timestamp,
                     rtp_timestamp,

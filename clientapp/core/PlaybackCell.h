@@ -42,6 +42,7 @@ signals:
     void clicked();
     void cellIdChanged(int oldId, int newId);
     void deviceBound(const QString& deviceId);
+    void playbackProgressChanged(int64_t absoluteTimeMs);
 
 protected:
     void mousePressEvent(QMouseEvent* event) override;

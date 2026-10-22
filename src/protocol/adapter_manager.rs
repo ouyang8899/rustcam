@@ -48,14 +48,19 @@ pub fn set_default_deps(deps: ProtocolDeps) {
 }
 
 pub fn get_or_create_adapter(protocol: &Protocol, key: &str) -> Option<AdapterEntry> {
+
+    if let Some(existing) = ADAPTER_MAP.get(key) {
+        return Some(existing.value().clone());
+    }
+    let deps = DEFAULT_DEPS.read().unwrap().clone()?;
+    let factory = ADAPTER_FACTORIES.read().unwrap().get(protocol)?.clone();
+
+    let adapter: Box<dyn SignalAdapter + Send + Sync> = factory(deps, key);
+    let adapter_arc: AdapterEntry = Arc::new(Mutex::new(adapter));
     use dashmap::mapref::entry::Entry;
     match ADAPTER_MAP.entry(key.to_string()) {
         Entry::Occupied(entry) => Some(entry.get().clone()),
         Entry::Vacant(entry) => {
-            let deps = DEFAULT_DEPS.read().unwrap().clone()?;
-            let factory = ADAPTER_FACTORIES.read().unwrap().get(protocol)?.clone();
-            let adapter: Box<dyn SignalAdapter + Send + Sync> = factory(deps, key);
-            let adapter_arc: AdapterEntry = Arc::new(Mutex::new(adapter));
             entry.insert(adapter_arc.clone());
             Some(adapter_arc)
         }

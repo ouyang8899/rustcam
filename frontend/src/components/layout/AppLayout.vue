@@ -35,6 +35,8 @@ const routeNames = {
   '/sessions': '实时会话',
   '/recordings': '录像任务',
   '/recordings/files': '录像文件',
+  '/recording-policies': '录制策略',
+  '/recording-playback': '录像回放',
   '/servers': '媒体服务器',
   '/public': '公开直播',
   '/video-wall': '监控墙',

@@ -8,6 +8,7 @@
 #include "CoreExport.h"
 #include "PlayerLayout.h"
 #include "DataManager.h"
+#include "TimelineWidget.h"
 
 namespace rustcam {
 
@@ -41,23 +42,31 @@ signals:
 private slots:
     void onLayoutsReady();
     void onLayoutSelected(int index);
-    void onRecordingsReceived(bool success, const QJsonObject& response, const QString& error, const QString& deviceId);
+    void onRecordingsReceived(bool success, const QJsonObject& response, const QString& error, const QString& deviceId, qint64 loadStartTimeMs = 0);
     void onCellClicked();
+    void onTimeSelected(int64_t timeMs);
+    void onCellProgressChanged(const QString& cellId, int64_t timeMs);
 
 private:
     void calculateLayout(const PlayerLayout& layout);
     QString selectTargetCell();
+    void setupTimelineConnections();
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
 
     QWidget* m_videoArea;
     ReplayNavBar* m_navBar;
+    TimelineWidget* m_timeline;
     QList<PlayerLayout> m_layouts;
     PlayerLayout m_currentLayout;
     QMap<QString, PlaybackCell*> m_cells;
     QString m_selectedCellId;
     PlaybackController* m_controller;
+    int m_totalRecords;
+    int m_page;
+    int m_limit;
+    bool m_hasMore;
 };
 
 }

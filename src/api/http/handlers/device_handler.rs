@@ -1,14 +1,14 @@
 use std::sync::Arc;
 use axum::{
-    extract::{Path, State, Query, Extension},
+    extract::{Path, State, Query},
     Json,
 };
 use serde::{Deserialize, Serialize};
 use crate::api::state::FullState;
 use crate::api::response::ApiResponse;
 use crate::error::AppError;
-use crate::domain::{Device, CreateDeviceRequest, UpdateDeviceRequest, Protocol, DeviceWithChildren, Stream, Session, Channel};
-use crate::auth::CurrentUser;
+use crate::domain::{ Device, CreateDeviceRequest, UpdateDeviceRequest, Protocol, Stream, Session, Channel };
+
 use crate::protocol::onvif::OnvifDeviceClient;
 
 fn inject_rtsp_auth(url: &str, username: &str, password: &str) -> String {
@@ -31,7 +31,6 @@ fn inject_rtsp_auth(url: &str, username: &str, password: &str) -> String {
     url.to_string()
 }
 
-/// 分页查询参数
 #[derive(Debug, Deserialize)]
 pub struct PaginationQuery {
     pub limit: Option<usize>,
@@ -54,17 +53,11 @@ pub struct StartDeviceQuery {
     pub channel_tag: Option<String>,
 }
 
-/// 播放请求参数
 #[derive(Debug, Deserialize)]
 pub struct PlayRequest {
     pub protocol: Option<Protocol>,
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 设备 CRUD Handlers
-// ═══════════════════════════════════════════════════════════════
-
-/// GET /api/v1/devices
 pub async fn list_devices_handler(
     State(state): State<Arc<FullState>>,
     Query(q): Query<PaginationQuery>,
@@ -97,7 +90,6 @@ pub async fn list_devices_handler(
     })))
 }
 
-/// GET /api/v1/devices/online
 pub async fn list_online_devices_handler(
     State(state): State<Arc<FullState>>,
     Query(q): Query<PaginationQuery>,
@@ -114,7 +106,6 @@ pub async fn list_online_devices_handler(
     })))
 }
 
-/// POST /api/v1/devices
 pub async fn create_device_handler(
     State(state): State<Arc<FullState>>,
     Json(req): Json<CreateDeviceRequest>,
@@ -124,7 +115,6 @@ pub async fn create_device_handler(
     Ok(Json(ApiResponse::success(device)))
 }
 
-/// GET /api/v1/devices/:device_tag
 pub async fn get_device_handler(
     State(state): State<Arc<FullState>>,
     Path(device_tag): Path<String>,
@@ -134,7 +124,6 @@ pub async fn get_device_handler(
     Ok(Json(ApiResponse::success(device)))
 }
 
-/// PUT /api/v1/devices/:id
 pub async fn update_device_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
@@ -144,7 +133,6 @@ pub async fn update_device_handler(
     Ok(Json(ApiResponse::success(updated)))
 }
 
-/// PUT /api/v1/devices/by-tag/:device_tag
 pub async fn update_device_by_tag_handler(
     State(state): State<Arc<FullState>>,
     Path(device_tag): Path<String>,
@@ -154,18 +142,15 @@ pub async fn update_device_by_tag_handler(
     Ok(Json(ApiResponse::success(updated)))
 }
 
-/// DELETE /api/v1/devices/:device_tag
 pub async fn delete_device_handler(
     State(state): State<Arc<FullState>>,
     Path(device_tag): Path<String>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
     let registry = &state.app.registry;
 
-    // 检查设备存在
-    let device = registry.device_service.get_device_by_device_tag(&device_tag)?
+    let _device = registry.device_service.get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
 
-    // 停止关联的流
     let streams = registry.stream_service.list_all_streams().await
         .into_iter()
         .filter(|s| s.device_tag.as_ref() == Some(&device_tag) && s.state == crate::domain::StreamState::Active)
@@ -176,7 +161,6 @@ pub async fn delete_device_handler(
         let _ = registry.stream_service.stop_stream(&stream.app, &stream_key).await;
     }
 
-    // 停止关联的录制
     let recordings = registry.recording_service.list_device_recordings_by_device_tag(&device_tag).await?;
     for recording in recordings {
         if recording.state == crate::domain::RecordingState::Recording {
@@ -189,7 +173,6 @@ pub async fn delete_device_handler(
     Ok(Json(ApiResponse::success(())))
 }
 
-/// POST /api/v1/devices/:device_tag/play
 pub async fn play_device_handler(
     State(state): State<Arc<FullState>>,
     Path(device_tag): Path<String>,
@@ -218,7 +201,6 @@ pub struct PlaybackRequest {
     pub end_time: String,
 }
 
-/// POST /api/v1/devices/:id/playback
 pub async fn playback_device_handler(
     State(state): State<Arc<FullState>>,
     Path(device_tag): Path<String>,
@@ -256,7 +238,6 @@ pub async fn playback_device_handler(
     }
 }
 
-/// GET /api/v1/devices/:device_tag/play-links
 pub async fn get_play_links_handler(
     State(state): State<Arc<FullState>>,
     Path(device_tag): Path<String>,
@@ -281,7 +262,6 @@ pub async fn get_play_links_handler(
     Ok(Json(ApiResponse::success(play_links)))
 }
 
-/// GET /api/v1/devices/:device_tag/config?type=BasicParam
 #[derive(Debug, Deserialize)]
 pub struct DeviceConfigQuery {
     pub r#type: Option<String>,
@@ -298,7 +278,6 @@ pub async fn get_device_config_handler(
         .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
 
     let config_type = query.r#type.as_deref().unwrap_or("BasicParam");
-    tracing::info!("[DeviceConfig] Query device {} config type={}", device_tag, config_type);
 
     let config_xml = match device.protocol {
         Protocol::Gb28181 => {
@@ -318,7 +297,6 @@ pub async fn get_device_config_handler(
     Ok(Json(ApiResponse::success(config_xml)))
 }
 
-/// POST /api/v1/devices/:device_tag/stop
 pub async fn stop_device_handler(
     State(state): State<Arc<FullState>>,
     Path(device_tag): Path<String>,
@@ -345,7 +323,6 @@ pub async fn stop_device_handler(
     Ok(Json(ApiResponse::success(())))
 }
 
-/// POST /api/v1/devices/:device_tag/start
 pub async fn start_device_handler(
     State(state): State<Arc<FullState>>,
     Path(device_tag): Path<String>,
@@ -402,7 +379,6 @@ pub async fn start_device_handler(
                 let full_url = inject_rtsp_auth(&uri.uri, uname, pwd);
                 let stream_info = registry.stream_service.start_pull_stream(&device_tag, &device_tag, &full_url).await
                     .map_err(|e| AppError::Internal(format!("Failed to start stream for profile {}: {}", profile.token, e)))?;
-                tracing::info!("[ONVIF] Started stream: profile={} play_url={}", profile.token, stream_info.play_url);
                 started.push(stream_info);
             }
 
@@ -459,17 +435,12 @@ pub async fn start_device_handler(
     }
 }
 
-/// GET /api/v1/public/streams
 pub async fn list_public_streams_handler(
     State(state): State<Arc<FullState>>,
 ) -> Result<Json<ApiResponse<Vec<Device>>>, AppError> {
     let devices = state.app.registry.device_service.list_public_devices().await;
     Ok(Json(ApiResponse::success(devices)))
 }
-
-// ═══════════════════════════════════════════════════════════════
-// 分页响应类型
-// ═══════════════════════════════════════════════════════════════
 
 #[derive(Debug, Serialize)]
 pub struct PaginatedResponse<T> {

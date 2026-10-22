@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use axum::{
-    extract::{Path, State},  // ✅ Query 在这里
+    extract::{Path, State},
     Extension,
     Json,
 };
@@ -16,7 +16,6 @@ pub struct RegionQuery {
     pub parent: Option<String>,
 }
 
-/// GET /api/v1/regions
 pub async fn list_regions_handler(
     State(state): State<Arc<FullState>>,
     Query(q): Query<RegionQuery>,
@@ -29,7 +28,6 @@ pub async fn list_regions_handler(
     Ok(Json(ApiResponse::success(regions)))
 }
 
-/// GET /api/v1/regions/tree
 pub async fn list_region_tree_handler(
     State(state): State<Arc<FullState>>,
 ) -> Result<Json<ApiResponse<Vec<RegionNode>>>, AppError> {

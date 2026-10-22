@@ -115,9 +115,11 @@ pub fn generate_nonce() -> String {
 
 pub fn verify_nonce(nonce: &str) -> bool {
     let now = chrono::Utc::now().timestamp();
-    match GB_NONCE_STORE.get(nonce) {
-        Some(entry) => {
-            if *entry < now {
+
+    let expires = GB_NONCE_STORE.get(nonce).map(|e| *e);
+    match expires {
+        Some(expires) => {
+            if expires < now {
                 GB_NONCE_STORE.remove(nonce);
                 false
             } else {

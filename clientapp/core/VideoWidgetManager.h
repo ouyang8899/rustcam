@@ -15,27 +15,21 @@ class RUSTCAM_CORE_API VideoWidgetManager : public QObject {
 public:
     static VideoWidgetManager& instance();
 
-    // 布局应用
     void applyLayout(const PlayerLayout& layout, QWidget* parent);
     void clearLayout();
 
-    // 渲染目标
     quint64 allocateTarget(QWidget* widget);
     void releaseTarget(quint64 targetId);
 
-    // player 注册
     void registerPlayer(const QString& itemId, VideoPlayer* player);
     void unregisterPlayer(const QString& itemId);
 
-    // 播放控制
     void play(const QString& itemId, const QString& url);
     void stop(const QString& itemId);
     void stopAll();
 
-    // 切换渲染目标（layout 切换时）
     void switchTarget(const QString& itemId, quint64 targetId);
 
-    // 获取
     VideoPlayer* getPlayer(const QString& itemId);
     QWidget* getTarget(quint64 targetId);
     QList<VideoPlayer*> allPlayers() const;

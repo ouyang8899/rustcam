@@ -5,6 +5,8 @@ pub mod stream_handler;
 pub mod server_handler;
 pub mod session_handler;
 pub mod recording_handler;
+pub mod recording_policy_handler;
+pub mod recording_file_handler;
 pub mod ptz_handler;
 pub mod layout_handler;
 pub mod region_handler;

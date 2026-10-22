@@ -362,10 +362,10 @@ async function reloadCache() {
   try {
     const res = await authFetch('/api/v1/admin/reload-cache', { method: 'POST' })
     const data = await res.json()
-    if (data.code === 0) {
+    if (data.code === 200) {
       ElMessage.success(`缓存已重新加载，共 ${data.data.count} 个设备`)
     } else {
-      ElMessage.error(data.msg || '重新加载失败')
+      ElMessage.error(data.message || '重新加载失败')
     }
   } catch (e) {
     ElMessage.error('重新加载失败')

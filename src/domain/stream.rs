@@ -4,19 +4,19 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum StreamState {
-    /// 初始状态，未启动
+
     Idle,
-    /// 正在启动（等待媒体服务器确认）
+
     Starting,
-    /// 正在恢复（设备离线后重新上线，尝试拉流）
+
     Recovering,
-    /// 正常运行
+
     Active,
-    /// 正在停止
+
     Stopping,
-    /// 已停止（正常停止，不会自动重启）
+
     Stopped,
-    /// 异常状态（失败，自动重试）
+
     Error,
 }
 
@@ -41,7 +41,7 @@ impl std::fmt::Display for StreamState {
 }
 
 impl StreamState {
-    /// 流是否处于存活/活跃状态
+
     pub fn is_alive(&self) -> bool {
         matches!(
             self,
@@ -75,11 +75,11 @@ pub struct Stream {
     pub app: String,
     pub token: String,
     pub state: StreamState,
-    /// 当前重试次数
+
     pub retry_count: u8,
-    /// 最大重试次数（超过后进入 Stopped 状态，不再自动恢复）
+
     pub max_retries: u8,
-    /// 最后一次错误信息
+
     pub last_error: Option<String>,
     pub viewer_count: u32,
     pub bandwidth_in: u64,

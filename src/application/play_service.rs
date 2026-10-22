@@ -5,9 +5,8 @@ use crate::infrastructure::RedisStore;
 use crate::application::media_server_service::MediaServerService;
 use crate::domain::traits::{CacheStore, CacheStoreExt};
 use crate::infrastructure::cluster::ClusterManager;
-use crate::error::{AppError, Result};
+use crate::error::{ Result };
 
-/// 播放服务
 pub struct PlayService {
     redis: Arc<RedisStore>,
     token_ttl_secs: i64,
@@ -30,7 +29,6 @@ impl PlayService {
         }
     }
 
-    /// 生成播放 Token
     pub async fn generate_token(&self, device_id: &str) -> Result<String> {
         let token = Uuid::new_v4().to_string();
         let key = format!("play_token:{}", token);
@@ -54,11 +52,9 @@ impl PlayService {
         self.redis.sadd(&device_sessions_key, &token).await?;
         self.redis.expire(&device_sessions_key, self.token_ttl_secs as u64).await?;
 
-        tracing::debug!("[PlayService] Generated token for device: {}", device_id);
         Ok(token)
     }
 
-    /// 验证播放 Token
     pub async fn validate_token(&self, token: &str) -> Option<String> {
         let key = format!("play_token:{}", token);
 
@@ -73,7 +69,6 @@ impl PlayService {
         }
     }
 
-    /// 撤销播放 Token
     pub async fn revoke_token(&self, token: &str) -> Result<()> {
         let key = format!("play_token:{}", token);
 
@@ -83,11 +78,9 @@ impl PlayService {
         }
 
         self.redis.del(&key).await?;
-        tracing::debug!("[PlayService] Revoked token");
         Ok(())
     }
 
-    /// 构建播放链接
     pub async fn build_play_links(
         &self,
         device: &Device,
@@ -97,7 +90,6 @@ impl PlayService {
         self.build_play_links_with_server(device, token, stream_id, device.media_server_tag.as_deref(), None).await
     }
 
-    /// 构建播放链接，指定媒体服务器
     pub async fn build_play_links_with_server(
         &self,
         device: &Device,
@@ -109,7 +101,7 @@ impl PlayService {
         let expires_at = chrono::Utc::now().timestamp() + self.token_ttl_secs;
 
         let server_tag = media_server_name.or(device.media_server_tag.as_deref()).unwrap_or("default");
-        
+
         let rtsp_auth = match (
             device.playback_username.as_deref(),
             device.playback_password.as_deref(),
@@ -128,7 +120,7 @@ impl PlayService {
         }
 
         tracing::warn!("[PlayService] Media server {} not found, using fallback", server_tag);
-        
+
         let ports = self.media_server_service
             .get(server_tag)
             .or_else(|| self.media_server_service.get_enabled_servers().first().cloned())

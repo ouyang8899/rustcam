@@ -149,7 +149,7 @@ async function toggleMaintenance(val) {
   const newStatus = maintenanceMode.value ? 'Maintaining' : 'Online'
   maintenanceLoading.value = true
   try {
-    await deviceStore.updateDevice(device.value.device_tag, { status: newStatus })
+    await deviceStore.updateDevice(device.value.id, { status: newStatus }, device.value.device_tag)
     device.value.status = newStatus
     ElMessage.success(maintenanceMode.value ? '已开启维护模式' : '已关闭维护模式')
   } catch (e) {

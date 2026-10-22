@@ -6,11 +6,10 @@ use crate::infrastructure::DbRepository;
 use crate::infrastructure::RedisStore;
 use crate::infrastructure::cluster::ClusterManager;
 use crate::infrastructure::EventBus;
-use crate::error::{AppError, Result};
+use crate::error::{ Result };
 use crate::application::RecordingService;
 use crate::protocol::event::SignalEvent;
 
-/// Hook 基础响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookResponse {
     pub code: i32,
@@ -58,11 +57,11 @@ impl HookResponse {
     }
 
     pub fn rtsp_realm(realm: &str) -> Self {
-        Self { 
-            code: 0, 
+        Self {
+            code: 0,
             msg: Some("success".to_string()),
             realm: Some(realm.to_string()),
-            ..Default::default() 
+            ..Default::default()
         }
     }
 
@@ -103,7 +102,6 @@ impl Default for HookResponse {
     }
 }
 
-/// Hook 处理结果
 #[derive(Debug, Clone)]
 pub enum HookAction {
     Allow(HookResponse),
@@ -114,11 +112,11 @@ impl HookAction {
     pub fn allow() -> Self {
         HookAction::Allow(HookResponse::allow())
     }
-    
+
     pub fn deny(msg: &str) -> Self {
         HookAction::Deny(msg.to_string())
     }
-    
+
     pub fn to_response(self) -> HookResponse {
         match self {
             HookAction::Allow(r) => r,
@@ -127,7 +125,6 @@ impl HookAction {
     }
 }
 
-/// ZLMediaKit Hook 事件类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event")]
 pub enum ZlMediaKitHookEvent {
@@ -462,7 +459,6 @@ pub enum ZlMediaKitHookEvent {
     },
 }
 
-/// ZLMediaKit 流轨道信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ZlMediaKitStreamTrack {
     pub codec_type: Option<u8>,
@@ -477,7 +473,6 @@ pub struct ZlMediaKitStreamTrack {
     pub channels: Option<u8>,
 }
 
-/// ZLMediaKit 服务器心跳数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ZlMediaKitServerKeepaliveData {
     pub buffer: Option<u32>,
@@ -498,7 +493,7 @@ pub struct ZlMediaKitServerKeepaliveData {
     pub udp_session: Option<u32>,
 }
 
-/// ZLMediaKit Hook 处理器
+#[derive(Clone)]
 pub struct ZlMediaKitHookHandler {
     repo: Arc<DbRepository>,
     redis: Arc<RedisStore>,
@@ -541,62 +536,74 @@ impl ZlMediaKitHookHandler {
         )
     }
 
-    /// 验证请求是否来自已配置的媒体服务器
     fn validate_media_server(&self, media_server_tag: &str) -> Option<Arc<dyn crate::adapter::media_server::MediaServerAdapter>> {
         self.cluster.get_server(media_server_tag)
     }
 
-    /// 处理 hook 事件
     pub async fn handle(&self, event: ZlMediaKitHookEvent) -> HookResponse {
+
+        match &event {
+            ZlMediaKitHookEvent::OnHttpAccess { .. } | ZlMediaKitHookEvent::OnRtspAuth { .. } => {}
+            _ => {
+
+                let this = self.clone();
+                tokio::spawn(async move {
+                    this.handle_async(event).await;
+                });
+                return HookResponse::allow();
+            }
+        }
+
+        self.handle_async(event).await
+    }
+
+    async fn handle_async(&self, event: ZlMediaKitHookEvent) -> HookResponse {
         match event {
-            ZlMediaKitHookEvent::OnPlay { media_server_tag, stream, ip, port: _, schema: _, params, app, vhost: _ } => 
+            ZlMediaKitHookEvent::OnPlay { media_server_tag, stream, ip, port: _, schema: _, params, app, vhost: _ } =>
                 self.on_play(&media_server_tag, &stream, ip.as_ref(), params.as_ref(), app.as_ref()).await,
-            ZlMediaKitHookEvent::OnPublish { media_server_tag, stream, ip, app, vhost: _, params } => 
+            ZlMediaKitHookEvent::OnPublish { media_server_tag, stream, ip, app, vhost: _, params } =>
                 self.on_publish(&media_server_tag, &stream, ip.as_ref(), app.as_ref(), params.as_ref()).await,
-            ZlMediaKitHookEvent::OnStop { media_server_tag, stream, ip, params } => 
+            ZlMediaKitHookEvent::OnStop { media_server_tag, stream, ip, params } =>
                 self.on_stop(&media_server_tag, &stream, ip.as_ref(), params.as_ref()).await,
-            ZlMediaKitHookEvent::OnKeepalive { media_server_tag, stream, ip } => 
+            ZlMediaKitHookEvent::OnKeepalive { media_server_tag, stream, ip } =>
                 self.on_keepalive(&media_server_tag, stream.as_ref(), ip.as_ref()).await,
-            ZlMediaKitHookEvent::OnRtcpStats { media_server_tag, stream, bytes_sent, bytes_received } => 
+            ZlMediaKitHookEvent::OnRtcpStats { media_server_tag, stream, bytes_sent, bytes_received } =>
                 self.on_rtcp_stats(&media_server_tag, &stream, bytes_sent, bytes_received).await,
-            ZlMediaKitHookEvent::OnRecordDone { media_server_tag, stream, app, file_path, file_size, time_len } => 
+            ZlMediaKitHookEvent::OnRecordDone { media_server_tag, stream, app, file_path, file_size, time_len } =>
                 self.on_record_done(&media_server_tag, &stream, &app, file_path.as_ref(), file_size, time_len).await,
-            ZlMediaKitHookEvent::OnRecordTs { media_server_tag, stream, app, schema, file_path, file_size, segment_index, segment_duration, .. } => 
+            ZlMediaKitHookEvent::OnRecordTs { media_server_tag, stream, app, schema, file_path, file_size, segment_index, segment_duration, .. } =>
                 self.on_record_ts(&media_server_tag, &stream, &app, schema.as_deref(), file_path.as_ref(), file_size, segment_index, segment_duration).await,
-            ZlMediaKitHookEvent::OnFlowReport { media_server_tag, stream, ip, duration, total_bytes, player, .. } => 
+            ZlMediaKitHookEvent::OnFlowReport { media_server_tag, stream, ip, duration, total_bytes, player, .. } =>
                 self.on_flow_report(&media_server_tag, &stream, ip.as_ref(), duration, total_bytes, player).await,
-            ZlMediaKitHookEvent::OnHttpAccess { media_server_tag, ip, path, .. } => 
+            ZlMediaKitHookEvent::OnHttpAccess { media_server_tag, ip, path, .. } =>
                 self.on_http_access(&media_server_tag, ip.as_ref(), path.as_ref()).await,
-            ZlMediaKitHookEvent::OnRtspRealm { media_server_tag, stream, ip, params, .. } => 
+            ZlMediaKitHookEvent::OnRtspRealm { media_server_tag, stream, ip, params, .. } =>
                 self.on_rtsp_realm(&media_server_tag, &stream, ip.as_ref(), params.as_ref()).await,
-            ZlMediaKitHookEvent::OnRtspAuth { media_server_tag, stream, ip, params, user_name, .. } => 
+            ZlMediaKitHookEvent::OnRtspAuth { media_server_tag, stream, ip, params, user_name, .. } =>
                 self.on_rtsp_auth(&media_server_tag, &stream, ip.as_ref(), user_name.as_deref(), params.as_ref()).await,
-            ZlMediaKitHookEvent::OnShellLogin { media_server_tag, ip, user_name, .. } => 
+            ZlMediaKitHookEvent::OnShellLogin { media_server_tag, ip, user_name, .. } =>
                 self.on_shell_login(&media_server_tag, ip.as_ref(), user_name.as_deref()).await,
-            ZlMediaKitHookEvent::OnStreamChanged { media_server_tag, app, stream, regist, .. } => 
+            ZlMediaKitHookEvent::OnStreamChanged { media_server_tag, app, stream, regist, .. } =>
                 self.on_stream_changed(&media_server_tag, &app, &stream, regist).await,
-            ZlMediaKitHookEvent::OnStreamNoneReader { media_server_tag, app, stream, .. } => 
+            ZlMediaKitHookEvent::OnStreamNoneReader { media_server_tag, app, stream, .. } =>
                 self.on_stream_none_reader(&media_server_tag, &app, &stream).await,
-            ZlMediaKitHookEvent::OnStreamNotFound { media_server_tag, stream, ip, .. } => 
+            ZlMediaKitHookEvent::OnStreamNotFound { media_server_tag, stream, ip, .. } =>
                 self.on_stream_not_found(&media_server_tag, &stream, ip.as_ref()).await,
-            ZlMediaKitHookEvent::OnServerStarted { media_server_tag, .. } => 
+            ZlMediaKitHookEvent::OnServerStarted { media_server_tag, .. } =>
                 self.on_server_started(&media_server_tag).await,
-            ZlMediaKitHookEvent::OnServerKeepalive { media_server_tag, data } => 
+            ZlMediaKitHookEvent::OnServerKeepalive { media_server_tag, data } =>
                 self.on_server_keepalive(&media_server_tag, data.as_ref()).await,
-            ZlMediaKitHookEvent::OnServerExited { media_server_tag, .. } => 
+            ZlMediaKitHookEvent::OnServerExited { media_server_tag, .. } =>
                 self.on_server_exited(&media_server_tag).await,
-            ZlMediaKitHookEvent::OnSendRtpStopped { media_server_tag, stream_id, local_port, ssrc, ip, rtp } => 
+            ZlMediaKitHookEvent::OnSendRtpStopped { media_server_tag, stream_id, local_port, ssrc, ip, rtp } =>
                 self.on_send_rtp_stopped(&media_server_tag, stream_id.as_deref(), local_port, ssrc.as_deref(), ip.as_ref(), rtp).await,
-            ZlMediaKitHookEvent::OnRtpServerTimeout { media_server_tag, stream_id, .. } => 
+            ZlMediaKitHookEvent::OnRtpServerTimeout { media_server_tag, stream_id, .. } =>
                 self.on_rtp_server_timeout(&media_server_tag, stream_id.as_deref()).await,
         }
     }
 
-    async fn on_play(&self, media_server_tag: &str, stream: &str, ip: Option<&String>, params: Option<&String>, _app: Option<&String>) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_play: server={}, stream={}, ip={:?}, params={:?}",
-            media_server_tag, stream, ip, params);
+    async fn on_play(&self, media_server_tag: &str, stream: &str, ip: Option<&String>, _params: Option<&String>, _app: Option<&String>) -> HookResponse {
 
-        // 验证流是否存在
         if self.find_stream_by_stream_key(stream).is_none() {
             tracing::warn!("[ZlMediaKit Hook] on_play: stream not found, denying access: stream={}", stream);
             return HookResponse::deny("Stream not found");
@@ -615,16 +622,12 @@ impl ZlMediaKitHookHandler {
     }
 
     async fn on_publish(&self, media_server_tag: &str, stream: &str, ip: Option<&String>, _app: Option<&String>, _params: Option<&String>) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_publish: server={}, stream={}, ip={:?}",
-            media_server_tag, stream, ip);
 
-        // 验证 media_server_tag
         if self.validate_media_server(media_server_tag).is_none() {
             tracing::warn!("[ZlMediaKit Hook] on_publish: unknown media_server_tag={}", media_server_tag);
             return HookResponse::deny("Unknown media server");
         }
 
-        // 验证流是否存在
         if self.find_stream_by_stream_key(stream).is_none() {
             tracing::warn!("[ZlMediaKit Hook] on_publish: stream not found, denying push: stream={}", stream);
             return HookResponse::deny("Stream not found");
@@ -648,7 +651,6 @@ impl ZlMediaKitHookHandler {
     }
 
     async fn on_stop(&self, media_server_tag: &str, stream: &str, _ip: Option<&String>, _params: Option<&String>) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_stop: server={}, stream={}", media_server_tag, stream);
 
         let event = SignalEvent::HookUnpublish {
             media_server_tag: media_server_tag.to_string(),
@@ -672,8 +674,7 @@ impl ZlMediaKitHookHandler {
         HookResponse::allow()
     }
 
-    async fn on_keepalive(&self, media_server_tag: &str, stream_id: Option<&String>, _ip: Option<&String>) -> HookResponse {
-        tracing::trace!("[ZlMediaKit Hook] on_keepalive: server={}, stream={:?}", media_server_tag, stream_id);
+    async fn on_keepalive(&self, _media_server_tag: &str, stream_id: Option<&String>, _ip: Option<&String>) -> HookResponse {
 
         let Some(stream_id) = stream_id else {
             return HookResponse::allow();
@@ -687,21 +688,17 @@ impl ZlMediaKitHookHandler {
             self.repo.sessions_cache().insert(s.id, s);
         }
 
-        if let Err(e) = self.touch_stream_keepalive(stream_id).await {
-            tracing::trace!("[ZlMediaKit Hook] on_keepalive: failed to update stream keepalive: {}", e);
+        if let Err(_e) = self.touch_stream_keepalive(stream_id).await {
         }
 
         const STREAM_TTL_SECS: u64 = 86400;
-        if let Err(e) = self.redis.expire_key(&format!("stream:{}", stream_id), STREAM_TTL_SECS).await {
-            tracing::trace!("[ZlMediaKit Hook] on_keepalive: failed to refresh stream TTL: {}", e);
+        if let Err(_e) = self.redis.expire_key(&format!("stream:{}", stream_id), STREAM_TTL_SECS).await {
         }
 
         HookResponse::allow()
     }
 
-    async fn on_rtcp_stats(&self, media_server_tag: &str, stream: &str, bytes_sent: Option<u64>, bytes_received: Option<u64>) -> HookResponse {
-        tracing::trace!("[ZlMediaKit Hook] on_rtcp_stats: server={}, stream={}, bytes_sent={:?}, bytes_recv={:?}", 
-            media_server_tag, stream, bytes_sent, bytes_received);
+    async fn on_rtcp_stats(&self, _media_server_tag: &str, stream: &str, bytes_sent: Option<u64>, bytes_received: Option<u64>) -> HookResponse {
 
         let sessions = self.find_sessions_by_stream(stream).await;
         for session in sessions {
@@ -710,60 +707,43 @@ impl ZlMediaKitHookHandler {
             self.repo.sessions_cache().insert(s.id, s);
         }
 
-        if let Err(e) = self.update_stream_bandwidth(stream, bytes_received.unwrap_or(0), bytes_sent.unwrap_or(0)).await {
-            tracing::trace!("[ZlMediaKit Hook] on_rtcp_stats: failed to update bandwidth: {}", e);
+        if let Err(_e) = self.update_stream_bandwidth(stream, bytes_received.unwrap_or(0), bytes_sent.unwrap_or(0)).await {
         }
 
         HookResponse::allow()
     }
 
-    async fn on_record_done(&self, media_server_tag: &str, stream: &str, _app: &str, file_path: Option<&String>, file_size: Option<u64>, time_len: Option<f64>) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_record_done: server={}, stream={}, file={:?}, size={:?}, duration={:?}", 
-            media_server_tag, stream, file_path, file_size, time_len);
-
-        let filename = file_path
-            .and_then(|p| std::path::Path::new(p).file_name())
-            .and_then(|n| n.to_str())
-            .map(String::from)
-            .unwrap_or_else(|| stream.to_string());
+    async fn on_record_done(&self, _media_server_tag: &str, stream: &str, _app: &str, file_path: Option<&String>, file_size: Option<u64>, time_len: Option<f64>) -> HookResponse {
 
         let size = file_size.unwrap_or(0);
         let duration = time_len.map(|t| t as u64).unwrap_or(0);
 
-        if let Err(e) = self.recording_service.finalize_recording(stream, filename, size, duration).await {
+        if let Err(e) = self.recording_service.finalize_recording(stream, file_path.cloned(), size, duration).await {
             tracing::error!("[ZlMediaKit Hook] on_record_done: failed to finalize recording: {}", e);
         }
 
         HookResponse::allow()
     }
 
-    async fn on_record_ts(&self, media_server_tag: &str, stream: &str, app: &str, schema: Option<&str>, file_path: Option<&String>, file_size: Option<u64>, segment_index: Option<u32>, segment_duration: Option<f64>) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_record_ts: server={}, stream={}, app={}, schema={:?}, file={:?}, size={:?}, segment={:?}, duration={:?}", 
-            media_server_tag, stream, app, schema, file_path, file_size, segment_index, segment_duration);
+    async fn on_record_ts(&self, _media_server_tag: &str, _stream: &str, _app: &str, _schema: Option<&str>, _file_path: Option<&String>, _file_size: Option<u64>, _segment_index: Option<u32>, _segment_duration: Option<f64>) -> HookResponse {
 
         HookResponse::allow()
     }
 
-    async fn on_flow_report(&self, media_server_tag: &str, stream: &str, ip: Option<&String>, duration: Option<u32>, total_bytes: Option<u64>, player: Option<bool>) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_flow_report: server={}, stream={}, player={:?}, bytes={:?}, duration={:?}", 
-            media_server_tag, stream, player, total_bytes, duration);
+    async fn on_flow_report(&self, _media_server_tag: &str, _stream: &str, _ip: Option<&String>, _duration: Option<u32>, _total_bytes: Option<u64>, _player: Option<bool>) -> HookResponse {
         HookResponse::allow()
     }
 
-    async fn on_http_access(&self, media_server_tag: &str, ip: Option<&String>, path: Option<&String>) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_http_access: server={}, path={:?}, ip={:?}", media_server_tag, path, ip);
+    async fn on_http_access(&self, _media_server_tag: &str, _ip: Option<&String>, path: Option<&String>) -> HookResponse {
         let allowed_path = path.map(|s| s.as_str()).unwrap_or("");
         HookResponse::http_access(allowed_path, 600)
     }
 
-    async fn on_rtsp_realm(&self, media_server_tag: &str, stream: &str, ip: Option<&String>, _params: Option<&String>) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_rtsp_realm: server={}, stream={}, ip={:?}", media_server_tag, stream, ip);
+    async fn on_rtsp_realm(&self, _media_server_tag: &str, stream: &str, _ip: Option<&String>, _params: Option<&String>) -> HookResponse {
 
-        // 查找设备进行 RTSP 认证
         if let Some(device) = self.find_device_by_stream_key(stream) {
-            // 返回播放用户名作为 realm，用于 ZLMediaKit 挑战客户端
+
             let realm = device.playback_username.as_deref().unwrap_or("RustCam");
-            tracing::debug!("[ZlMediaKit Hook] on_rtsp_realm: using realm={} for stream={}", realm, stream);
             return HookResponse::rtsp_realm(realm);
         }
 
@@ -771,16 +751,13 @@ impl ZlMediaKitHookHandler {
         HookResponse::rtsp_realm("")
     }
 
-    async fn on_rtsp_auth(&self, media_server_tag: &str, stream: &str, ip: Option<&String>, user_name: Option<&str>, params: Option<&String>) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_rtsp_auth: server={}, stream={}, user={:?}", media_server_tag, stream, user_name);
+    async fn on_rtsp_auth(&self, _media_server_tag: &str, stream: &str, _ip: Option<&String>, user_name: Option<&str>, _params: Option<&String>) -> HookResponse {
 
-        // 查找设备进行密码验证
         let Some(device) = self.find_device_by_stream_key(stream) else {
             tracing::warn!("[ZlMediaKit Hook] on_rtsp_auth: device not found for stream={}", stream);
             return HookResponse::rtsp_auth_deny("Device not found");
         };
 
-        // 验证用户名匹配
         let expected_user = device.playback_username.as_deref().unwrap_or("");
         let provided_user = user_name.unwrap_or("");
         if !expected_user.is_empty() && provided_user != expected_user {
@@ -789,27 +766,21 @@ impl ZlMediaKitHookHandler {
             return HookResponse::rtsp_auth_deny("Invalid username");
         }
 
-        // 验证密码
         let expected_pass = device.playback_password.as_deref().unwrap_or("");
         if !expected_pass.is_empty() {
-            tracing::debug!("[ZlMediaKit Hook] on_rtsp_auth: requiring password verification for stream={}", stream);
-            // 返回密码，ZLMediaKit 会进行验证
+
             return HookResponse::rtsp_auth(false, expected_pass);
         }
 
-        // 设备没有设置密码，允许访问
-        tracing::debug!("[ZlMediaKit Hook] on_rtsp_auth: no password configured, allowing access for stream={}", stream);
         HookResponse::rtsp_auth(false, "")
     }
 
-    async fn on_shell_login(&self, media_server_tag: &str, ip: Option<&String>, user_name: Option<&str>) -> HookResponse {
+    async fn on_shell_login(&self, media_server_tag: &str, _ip: Option<&String>, user_name: Option<&str>) -> HookResponse {
         tracing::warn!("[ZlMediaKit Hook] on_shell_login: server={}, user={:?} - denying shell login", media_server_tag, user_name);
         HookResponse::deny("Shell login not allowed")
     }
 
     async fn on_stream_changed(&self, media_server_tag: &str, app: &str, stream: &str, regist: bool) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_stream_changed: server={}, app={}, stream={}, regist={}",
-            media_server_tag, app, stream, regist);
 
         let event = SignalEvent::HookStreamChanged {
             media_server_tag: media_server_tag.to_string(),
@@ -824,30 +795,23 @@ impl ZlMediaKitHookHandler {
         HookResponse::allow()
     }
 
-    async fn on_stream_none_reader(&self, media_server_tag: &str, app: &str, stream: &str) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_stream_none_reader: server={}, app={}, stream={}", 
-            media_server_tag, app, stream);
+    async fn on_stream_none_reader(&self, _media_server_tag: &str, _app: &str, _stream: &str) -> HookResponse {
         HookResponse::allow()
     }
 
-    async fn on_stream_not_found(&self, media_server_tag: &str, stream: &str, ip: Option<&String>) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_stream_not_found: server={}, stream={}, ip={:?}", 
-            media_server_tag, stream, ip);
+    async fn on_stream_not_found(&self, _media_server_tag: &str, _stream: &str, _ip: Option<&String>) -> HookResponse {
         HookResponse::allow()
     }
 
-    async fn on_server_started(&self, media_server_tag: &str) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_server_started: server={}, stream recovery will handle streams", media_server_tag);
+    async fn on_server_started(&self, _media_server_tag: &str) -> HookResponse {
         HookResponse::allow()
     }
 
-    async fn on_server_keepalive(&self, media_server_tag: &str, data: Option<&ZlMediaKitServerKeepaliveData>) -> HookResponse {
-        tracing::trace!("[ZlMediaKit Hook] on_server_keepalive: server={}, data={:?}", media_server_tag, data);
+    async fn on_server_keepalive(&self, _media_server_tag: &str, _data: Option<&ZlMediaKitServerKeepaliveData>) -> HookResponse {
         HookResponse::allow()
     }
 
     async fn on_server_exited(&self, media_server_tag: &str) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_server_exited: server={}", media_server_tag);
 
         if let Some(ref svc) = self.stream_recovery_service {
             svc.mark_streams_recovering_for_media_server(media_server_tag).await;
@@ -856,33 +820,26 @@ impl ZlMediaKitHookHandler {
         HookResponse::allow()
     }
 
-    async fn on_send_rtp_stopped(&self, media_server_tag: &str, stream_id: Option<&str>, local_port: Option<u16>, ssrc: Option<&str>, ip: Option<&String>, rtp: Option<bool>) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_send_rtp_stopped: server={}, stream_id={:?}, port={:?}, ssrc={:?}, ip={:?}, rtp={:?}", 
-            media_server_tag, stream_id, local_port, ssrc, ip, rtp);
+    async fn on_send_rtp_stopped(&self, _media_server_tag: &str, _stream_id: Option<&str>, _local_port: Option<u16>, _ssrc: Option<&str>, _ip: Option<&String>, _rtp: Option<bool>) -> HookResponse {
         HookResponse::allow()
     }
 
-    async fn on_rtp_server_timeout(&self, media_server_tag: &str, stream_id: Option<&str>) -> HookResponse {
-        tracing::info!("[ZlMediaKit Hook] on_rtp_server_timeout: server={}, stream_id={:?}", 
-            media_server_tag, stream_id);
+    async fn on_rtp_server_timeout(&self, _media_server_tag: &str, _stream_id: Option<&str>) -> HookResponse {
         HookResponse::allow()
     }
-
-    // ============== 辅助方法 ==============
 
     fn find_stream_by_stream_key(&self, stream_key: &str) -> Option<crate::domain::Stream> {
         if let Some((device_tag, channel_tag)) = crate::domain::parse_stream_key(stream_key) {
             let cache_key = format!("{}/{}", device_tag, channel_tag);
-            tracing::debug!("[ZlMediaKit Hook] find_stream_by_stream_key: stream_key={} -> cache_key={}", stream_key, cache_key);
             if let Some(s) = self.repo.streams_cache().get(&cache_key) {
                 return Some(s.clone());
             }
         }
-        // Fallback: try stream_key directly (for cases where device_tag == channel_tag)
+
         if let Some(s) = self.repo.streams_cache().get(stream_key) {
             return Some(s.clone());
         }
-        // Try replacing _ with / as last resort
+
         let cache_key = stream_key.replace('_', "/");
         if let Some(s) = self.repo.streams_cache().get(&cache_key) {
             return Some(s.clone());
@@ -938,17 +895,16 @@ impl ZlMediaKitHookHandler {
             .filter(|c| c.key().starts_with(&format!("{}/", device_tag)))
             .map(|c| c.value().clone())
             .collect::<Vec<_>>();
-        
+
         let any_online = channels.iter().any(|c| c.status == crate::domain::DeviceStatus::Online);
-        let new_device_status = if any_online { 
-            crate::domain::DeviceStatus::Online 
-        } else { 
-            crate::domain::DeviceStatus::Offline 
+        let new_device_status = if any_online {
+            crate::domain::DeviceStatus::Online
+        } else {
+            crate::domain::DeviceStatus::Offline
         };
 
         if let Some(mut device) = self.repo.devices_cache().get(device_tag).map(|d| d.value().clone()) {
             if device.status != new_device_status {
-                tracing::info!("[ZlMediaKit Hook] sync_device_status: device={} status={:?}", device_tag, new_device_status);
                 device.status = new_device_status;
                 if let Err(e) = self.repo.update_device(&device).await {
                     tracing::warn!("[ZlMediaKit Hook] sync_device_status: failed to update device: {}", e);
@@ -962,14 +918,14 @@ impl ZlMediaKitHookHandler {
             .unwrap_or((stream_id.to_string(), stream_id.to_string()));
 
         let cache_key = format!("{}/{}", device_tag, channel_tag);
-        if let Some(mut s) = self.repo.streams_cache().get(&cache_key) {
-            let mut s = s.value().clone();
+
+        let cached_stream = self.repo.stream_cached(&cache_key);
+        if let Some(mut s) = cached_stream {
             s.update_keepalive();
             if s.state == crate::domain::StreamState::Idle || s.state == crate::domain::StreamState::Error {
                 s.start();
             }
             self.repo.update_stream(&s).await?;
-            tracing::info!("[ZlMediaKit Hook] on_publish: updated push stream {} (device_tag={})", stream_id, device_tag);
             return Ok(());
         }
 
@@ -985,7 +941,6 @@ impl ZlMediaKitHookHandler {
         );
         stream.start();
         self.repo.create_stream(&stream).await?;
-        tracing::info!("[ZlMediaKit Hook] on_publish: registered push stream {} on server {}", stream_id, media_server_tag);
 
         Ok(())
     }
@@ -999,7 +954,7 @@ impl ZlMediaKitHookHandler {
                 }
             }
         }
-        
+
         let cache_key = stream_id.replace('_', "/");
         self.repo.streams_cache()
             .get(&cache_key)
@@ -1020,6 +975,5 @@ impl ZlMediaKitHookHandler {
     }
 }
 
-// Alias for backwards compatibility
 #[allow(unused)]
 pub type HookService = ZlMediaKitHookHandler;

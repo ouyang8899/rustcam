@@ -1,5 +1,5 @@
 use crate::media::errors::{MediaError, Result};
-use crate::media::node::{DataType, MediaNode, MediaTransportCallback};
+use crate::media::node::{ DataType, MediaNode };
 use crate::media::rtp_server::{TcpRtpServer, UDPRtpServer, RtpServerActive};
 use async_trait::async_trait;
 use bytes::BytesMut;
@@ -70,10 +70,6 @@ impl GB28181BroadcastVoiceTransport {
     }
 
     pub fn new_tcp_passive(server: Arc<TcpRtpServer>, ssrc: u32, payload_type: u8) -> Arc<Self> {
-        tracing::info!(
-            "[GB28181Broadcast] TCP Passive created on port {}",
-            server.port()
-        );
         Self::make_arc(
             BroadcastMode::TcpPassive {
                 server,
@@ -90,10 +86,6 @@ impl GB28181BroadcastVoiceTransport {
         ssrc: u32,
         payload_type: u8,
     ) -> Arc<Self> {
-        tracing::info!(
-            "[GB28181Broadcast] TCP Active created (connect pending) to {:?}",
-            remote
-        );
         Self::make_arc(
             BroadcastMode::TcpActive {
                 server,
@@ -135,7 +127,6 @@ impl GB28181BroadcastVoiceTransport {
                     Ok(data) => buffer.extend_from_slice(&data),
                     Err(mpsc::error::TryRecvError::Empty) => break,
                     Err(mpsc::error::TryRecvError::Disconnected) => {
-                        tracing::info!("[GB28181Broadcast] pacer exit, channel disconnected");
                         return;
                     }
                 }
@@ -159,7 +150,6 @@ impl GB28181BroadcastVoiceTransport {
             };
 
             let Some(this) = me.upgrade() else {
-                tracing::debug!("[GB28181Broadcast] pacer exit, transport dropped");
                 return;
             };
 
@@ -183,15 +173,8 @@ impl GB28181BroadcastVoiceTransport {
                 packet.extend_from_slice(header);
                 packet.extend_from_slice(payload);
 
-                let rtp_seq = u16::from_be_bytes([header[2], header[3]]);
-                let rtp_ts = u32::from_be_bytes([header[4], header[5], header[6], header[7]]);
-                tracing::trace!(
-                    "[GB28181Broadcast] UDP SEND to={} seq={} ts={} len={}",
-                    remote,
-                    rtp_seq,
-                    rtp_ts,
-                    payload.len()
-                );
+                let _rtp_seq = u16::from_be_bytes([header[2], header[3]]);
+                let _rtp_ts = u32::from_be_bytes([header[4], header[5], header[6], header[7]]);
 
                 if let Err(e) = socket.send_to(&packet, remote).await {
                     tracing::error!("[GB28181Broadcast] UDP send failed: {}", e);
@@ -209,14 +192,8 @@ impl GB28181BroadcastVoiceTransport {
                 frame.extend_from_slice(header);
                 frame.extend_from_slice(payload);
 
-                let rtp_seq = u16::from_be_bytes([header[2], header[3]]);
-                let rtp_ts = u32::from_be_bytes([header[4], header[5], header[6], header[7]]);
-                tracing::trace!(
-                    "[GB28181Broadcast] TCP SEND seq={} ts={} len={}",
-                    rtp_seq,
-                    rtp_ts,
-                    payload.len()
-                );
+                let _rtp_seq = u16::from_be_bytes([header[2], header[3]]);
+                let _rtp_ts = u32::from_be_bytes([header[4], header[5], header[6], header[7]]);
 
                 let mut guard = stream.lock().await;
                 if let Some(s) = guard.as_mut() {
@@ -244,7 +221,6 @@ impl GB28181BroadcastVoiceTransport {
                     .map_err(|e| MediaError::Transport(format!("TCP connect failed: {}", e)))?;
                 let mut guard = stream.lock().await;
                 *guard = Some(client_stream);
-                tracing::info!("[GB28181Broadcast] TCP Active connected to {:?}", remote);
                 Ok(())
             }
             _ => Err(MediaError::Transport("Not in TCP active mode".into())),
@@ -275,13 +251,8 @@ impl GB28181BroadcastVoiceTransport {
                         let socket = server.rtp_socket();
                         let mut buf = vec![0u8; 2048];
                         match socket.recv_from(&mut buf).await {
-                            Ok((len, from)) => {
+                            Ok((len, _from)) => {
                                 buf.truncate(len);
-                                tracing::trace!(
-                                    "[GB28181Broadcast] UDP RECV from={} len={}",
-                                    from,
-                                    len
-                                );
                                 BytesMut::from(&buf[..])
                             }
                             Err(e) => {
@@ -361,7 +332,6 @@ impl GB28181BroadcastVoiceTransport {
         }
         let weak = self.me.clone();
         tokio::spawn(Self::pacer_loop(weak, rx));
-        tracing::info!("[GB28181Broadcast] pacer started");
     }
 
     fn classify_rtp_packet(data: &[u8]) -> DataType {
@@ -513,11 +483,9 @@ impl crate::media::node::MediaTransport for GB28181BroadcastVoiceTransport {
     }
 
     async fn close(&self) -> Result<()> {
-        tracing::info!("[GB28181Broadcast] Closing transport");
 
         {
             let mut guard = self.audio_tx.lock().unwrap();
-            tracing::info!("[GB28181Broadcast] Dropping audio_tx sender");
             guard.take();
         }
 

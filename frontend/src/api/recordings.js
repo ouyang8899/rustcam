@@ -15,7 +15,7 @@ export async function getRecordingStats() {
   return res.data.data
 }
 
-export async function getRecordingFiles(id) {
+export async function getRecordingFilesById(id) {
   const res = await request.get(`/recordings/${id}/files`)
   return res.data.data || []
 }
@@ -53,4 +53,34 @@ export async function deleteRecording(id) {
 export async function getAllRecordingFiles() {
   const res = await request.get('/recordings/files')
   return res.data.data || []
+}
+
+export async function getRecordingFilesWithParams(params) {
+  const res = await request.get('/recordings/files', { params })
+  return res.data.data
+}
+
+export async function getRecordingFilePlayUrl(fileId) {
+  const res = await request.get(`/recordings/files/${fileId}/play-url`)
+  return res.data.data
+}
+
+export async function getRecordingPolicies(params) {
+  const res = await request.get('/recording-policies', { params })
+  return res.data.data
+}
+
+export async function createRecordingPolicy(data) {
+  const res = await request.post('/recording-policies', data)
+  return res.data.data
+}
+
+export async function updateRecordingPolicy(id, data) {
+  const res = await request.put(`/recording-policies/${id}`, data)
+  return res.data.data
+}
+
+export async function deleteRecordingPolicy(id) {
+  const res = await request.delete(`/recording-policies/${id}`)
+  return res.data
 }

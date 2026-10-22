@@ -6,7 +6,6 @@ use crate::application::ws_broadcaster::WsBroadcaster;
 use crate::monitoring::Metrics;
 use crate::protocol::event::SignalEvent;
 
-/// 基础设施上下文
 #[derive(Clone)]
 pub struct InfraContext {
     pub db: Arc<DbRepository>,
@@ -19,12 +18,15 @@ pub struct InfraContext {
 
 impl InfraContext {
     pub async fn new(config: AppConfig) -> anyhow::Result<Self> {
-        tracing::info!("[InfraContext] Initializing infrastructure...");
 
         let db = Arc::new(
-            DbRepository::new(&config.database.url, config.database.debug_sql.unwrap_or(false))
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to initialize database: {}", e))?
+            DbRepository::new_with_pool(
+                &config.database.url,
+                config.database.debug_sql.unwrap_or(false),
+                config.database.max_connections as u64,
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to initialize database: {}", e))?
         );
 
         let redis = match RedisStore::new(&config.redis.url).await {
@@ -40,12 +42,6 @@ impl InfraContext {
         let ws_broadcaster = Arc::new(WsBroadcaster::new());
         let config = Arc::new(config);
 
-        tracing::info!(
-            "[InfraContext] Initialized: db={}, redis={}",
-            config.database.url.split('@').last().unwrap_or("***"),
-            config.redis.url
-        );
-
         Ok(Self {
             db,
             redis,
@@ -57,7 +53,6 @@ impl InfraContext {
     }
 
     pub async fn from_parts(db: Arc<DbRepository>, config: Arc<AppConfig>) -> anyhow::Result<Self> {
-        tracing::info!("[InfraContext] Building from parts...");
 
         let redis = match RedisStore::new(&config.redis.url).await {
             Ok(r) => Arc::new(r),
@@ -70,12 +65,6 @@ impl InfraContext {
         let event_bus = Arc::new(EventBus::new());
         let metrics = Arc::new(Metrics::new());
         let ws_broadcaster = Arc::new(WsBroadcaster::new());
-
-        tracing::info!(
-            "[InfraContext] Initialized: db={}, redis={}",
-            config.database.url.split('@').last().unwrap_or("***"),
-            config.redis.url
-        );
 
         Ok(Self {
             db,
@@ -105,10 +94,6 @@ impl InfraContext {
     }
 }
 
-/// 基础设施上下文构建器（用于测试）
-///
-/// 仅在 `#[cfg(test)]` 下可用。
-/// 允许逐步注入依赖，未注入的依赖使用默认实现。
 #[cfg(test)]
 pub struct InfraContextBuilder {
     db: Option<Arc<DbRepository>>,

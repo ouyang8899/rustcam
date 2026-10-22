@@ -8,14 +8,19 @@
 #include <QCalendarWidget>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QFileInfo>
 #include <QtConcurrent>
 #include <QFutureWatcher>
+#include <QPushButton>
+#include <QMessageBox>
 
 namespace rustcam {
 
 PlaybackSidePanel::PlaybackSidePanel(QWidget* parent)
     : QWidget(parent)
     , m_selectedDate(QDate::currentDate())
+    , m_hasMore(false)
+    , m_currentPage(1)
 {
     setMinimumWidth(280);
     setMaximumWidth(350);
@@ -107,6 +112,23 @@ PlaybackSidePanel::PlaybackSidePanel(QWidget* parent)
     fileListLayout->setContentsMargins(0, 0, 0, 0);
     m_fileList = new RecordingFileListWidget(fileListFrame);
     fileListLayout->addWidget(m_fileList);
+
+    m_loadMoreBtn = new QPushButton(tr("加载更多"), fileListFrame);
+    m_loadMoreBtn->setStyleSheet(R"(
+        QPushButton {
+            background-color: #3e3e3e;
+            color: #e0e0e0;
+            border: none;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        QPushButton:hover {
+            background-color: #4e4e4e;
+        }
+    )");
+    m_loadMoreBtn->hide();
+    fileListLayout->addWidget(m_loadMoreBtn);
+
     mainLayout->addWidget(fileListFrame, 1);
 
     connect(m_regionTree, &DeviceTree::itemDoubleClicked, this, &PlaybackSidePanel::onDeviceItemDoubleClicked);
@@ -115,6 +137,7 @@ PlaybackSidePanel::PlaybackSidePanel(QWidget* parent)
     connect(m_timeline, &TimelineWidget::timeSelected, this, &PlaybackSidePanel::onTimeSelected);
     connect(m_timeline, &TimelineWidget::periodClicked, this, &PlaybackSidePanel::onPeriodClicked);
     connect(m_fileList, &RecordingFileListWidget::fileDoubleClicked, this, &PlaybackSidePanel::onFileDoubleClicked);
+    connect(m_loadMoreBtn, &QPushButton::clicked, this, &PlaybackSidePanel::onLoadMoreClicked);
 
     int dayStartMs = QDateTime(m_selectedDate, QTime(0, 0, 0)).toMSecsSinceEpoch();
     int dayEndMs = QDateTime(m_selectedDate, QTime(23, 59, 59)).toMSecsSinceEpoch();
@@ -188,17 +211,16 @@ void PlaybackSidePanel::onFileDoubleClicked(const RecordingFile& file) {
 }
 
 void PlaybackSidePanel::loadRecordingsForDate(const QString& deviceId, const QDate& date) {
-    int64_t startMs = QDateTime(date, QTime(0, 0, 0)).toMSecsSinceEpoch();
-    int64_t endMs = QDateTime(date, QTime(23, 59, 59)).toMSecsSinceEpoch();
+    QDateTime startDt = QDateTime(date, QTime(0, 0, 0));
+    QDateTime endDt = QDateTime(date, QTime(23, 59, 59));
 
-    QString endpoint = QString("/api/recordings/files?device_id=%1&start_time=%2&end_time=%3")
-        .arg(deviceId).arg(startMs).arg(endMs);
+    QString endpoint = QString("/api/v1/recordings/files?device_tag=%1&start_time=%2&end_time=%3&limit=50&page=1")
+        .arg(deviceId).arg(startDt.toString(Qt::ISODate)).arg(endDt.toString(Qt::ISODate));
 
     QFuture<QPair<bool, QJsonObject>> future = QtConcurrent::run([endpoint]() {
         QJsonObject response;
         QString error;
         bool success = ServerApi::instance()->getSync(endpoint, response, error);
-        Q_UNUSED(error)
         return QPair<bool, QJsonObject>(success, response);
     });
 
@@ -209,38 +231,67 @@ void PlaybackSidePanel::loadRecordingsForDate(const QString& deviceId, const QDa
 
         if (!result.first) {
             LOG_ERROR("PlaybackSidePanel", QString("loadRecordingsForDate failed"));
+            QMessageBox::warning(this, tr("加载失败"),
+                tr("无法加载录像文件，请检查网络连接。"));
             return;
         }
 
         QList<RecordingPeriod> periods;
         QList<RecordingFile> files;
 
-        QJsonArray clipsArray = result.second["clips"].toArray();
+        QJsonObject dataObj = result.second["data"].toObject();
+        QJsonArray clipsArray = dataObj["files"].toArray();
         for (const QJsonValue& v : clipsArray) {
             QJsonObject obj = v.toObject();
 
+            QString startTimeStr = obj["start_time"].toString();
+            QString endTimeStr = obj["end_time"].toString();
+            QDateTime startDt = QDateTime::fromString(startTimeStr, Qt::ISODate);
+            QDateTime endDt = QDateTime::fromString(endTimeStr, Qt::ISODate);
+            int64_t startTimeMs = startDt.toMSecsSinceEpoch();
+            int64_t endTimeMs = endDt.toMSecsSinceEpoch();
+
             RecordingPeriod period;
-            period.startTimeMs = obj["start_time"].toVariant().toLongLong();
-            period.endTimeMs = obj["end_time"].toVariant().toLongLong();
-            period.url = obj["url"].toString();
+            period.startTimeMs = startTimeMs;
+            period.endTimeMs = endTimeMs;
+            period.url = obj["play_url"].toString();
             period.fileId = obj["id"].toString();
             periods.append(period);
 
             RecordingFile file;
             file.id = period.fileId;
             file.url = period.url;
-            file.startTimeMs = period.startTimeMs;
-            file.endTimeMs = period.endTimeMs;
-            file.durationMs = period.endTimeMs - period.startTimeMs;
-            file.filename = obj["filename"].toString();
-            file.path = obj["path"].toString();
-            file.size = obj["size"].toVariant().toLongLong();
-            file.mediaServerName = obj["media_server_name"].toString();
+            file.startTimeMs = startTimeMs;
+            file.endTimeMs = endTimeMs;
+            file.durationMs = obj["duration_secs"].toVariant().toLongLong() * 1000;
+            QString filePath = obj["file_path"].toString();
+            file.path = filePath;
+            file.filename = QFileInfo(filePath).fileName();
+            file.size = obj["file_size"].toVariant().toLongLong();
+            file.serverTag = obj["server_tag"].toString();
+
+            QString segType = obj["segment_type"].toString();
+            if (segType == "alarm") {
+                file.segmentType = SegmentType::Alarm;
+            } else if (segType == "prebuffer") {
+                file.segmentType = SegmentType::PreBuffer;
+            } else {
+                file.segmentType = SegmentType::Normal;
+            }
+
+            if (obj.contains("alarm_id") && !obj["alarm_id"].isNull()) {
+                file.alarmId = obj["alarm_id"].toVariant().toLongLong();
+            }
+
             files.append(file);
         }
 
         m_timeline->setPeriods(periods);
         m_fileList->setFiles(files);
+
+        m_hasMore = dataObj["has_more"].toBool();
+        m_currentPage = 1;
+        m_loadMoreBtn->setVisible(m_hasMore);
 
         LOG_INFO("PlaybackSidePanel", QString("loadRecordingsForDate: deviceId=%1, date=%2, periods=%3, files=%4")
             .arg(deviceId).arg(date.toString("yyyy-MM-dd")).arg(periods.size()).arg(files.size()));
@@ -251,6 +302,89 @@ void PlaybackSidePanel::loadRecordingsForDate(const QString& deviceId, const QDa
 void PlaybackSidePanel::onLoadRecordingsForDevice(const QString& deviceId) {
     m_currentDeviceId = deviceId;
     loadRecordingsForDate(deviceId, m_selectedDate);
+}
+
+void PlaybackSidePanel::onLoadMoreClicked() {
+    if (m_currentDeviceId.isEmpty()) return;
+    int nextPage = m_currentPage + 1;
+    QDateTime startDt = QDateTime(m_selectedDate, QTime(0, 0, 0));
+    QDateTime endDt = QDateTime(m_selectedDate, QTime(23, 59, 59));
+
+    QString endpoint = QString("/api/v1/recordings/files?device_tag=%1&start_time=%2&end_time=%3&limit=50&page=%4")
+        .arg(m_currentDeviceId).arg(startDt.toString(Qt::ISODate)).arg(endDt.toString(Qt::ISODate)).arg(nextPage);
+
+    QFuture<QPair<bool, QJsonObject>> future = QtConcurrent::run([endpoint]() {
+        QJsonObject response;
+        QString error;
+        bool success = ServerApi::instance()->getSync(endpoint, response, error);
+        return QPair<bool, QJsonObject>(success, response);
+    });
+
+    QFutureWatcher<QPair<bool, QJsonObject>>* watcher = new QFutureWatcher<QPair<bool, QJsonObject>>(this);
+    connect(watcher, &QFutureWatcher<QPair<bool, QJsonObject>>::finished, this, [this, watcher, nextPage]() {
+        QPair<bool, QJsonObject> result = watcher->result();
+        watcher->deleteLater();
+
+        if (!result.first) {
+            LOG_ERROR("PlaybackSidePanel", QString("onLoadMoreClicked failed"));
+            QMessageBox::warning(this, tr("加载失败"),
+                tr("无法加载更多录像文件，请检查网络连接。"));
+            return;
+        }
+
+        QJsonObject dataObj = result.second["data"].toObject();
+        bool hasMore = dataObj["has_more"].toBool();
+        m_hasMore = hasMore;
+        m_currentPage = nextPage;
+
+        QJsonArray clipsArray = dataObj["files"].toArray();
+        for (const QJsonValue& v : clipsArray) {
+            QJsonObject obj = v.toObject();
+
+            QString startTimeStr = obj["start_time"].toString();
+            QString endTimeStr = obj["end_time"].toString();
+            QDateTime startDt = QDateTime::fromString(startTimeStr, Qt::ISODate);
+            QDateTime endDt = QDateTime::fromString(endTimeStr, Qt::ISODate);
+            int64_t startTimeMs = startDt.toMSecsSinceEpoch();
+            int64_t endTimeMs = endDt.toMSecsSinceEpoch();
+
+            RecordingPeriod period;
+            period.startTimeMs = startTimeMs;
+            period.endTimeMs = endTimeMs;
+            period.url = obj["play_url"].toString();
+            period.fileId = obj["id"].toString();
+
+            RecordingFile file;
+            file.id = period.fileId;
+            file.url = period.url;
+            file.startTimeMs = startTimeMs;
+            file.endTimeMs = endTimeMs;
+            file.durationMs = obj["duration_secs"].toVariant().toLongLong() * 1000;
+            QString filePath = obj["file_path"].toString();
+            file.path = filePath;
+            file.filename = QFileInfo(filePath).fileName();
+            file.size = obj["file_size"].toVariant().toLongLong();
+            file.serverTag = obj["server_tag"].toString();
+
+            QString segType = obj["segment_type"].toString();
+            if (segType == "alarm") {
+                file.segmentType = SegmentType::Alarm;
+            } else if (segType == "prebuffer") {
+                file.segmentType = SegmentType::PreBuffer;
+            } else {
+                file.segmentType = SegmentType::Normal;
+            }
+
+            if (obj.contains("alarm_id") && !obj["alarm_id"].isNull()) {
+                file.alarmId = obj["alarm_id"].toVariant().toLongLong();
+            }
+
+            m_fileList->addFile(file);
+        }
+
+        m_loadMoreBtn->setVisible(m_hasMore);
+    });
+    watcher->setFuture(future);
 }
 
 }

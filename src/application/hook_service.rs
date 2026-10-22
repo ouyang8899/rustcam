@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::collections::HashMap;
-use uuid::Uuid;
+
 use crate::context::{InfraContext, MediaContext};
 use crate::infrastructure::DbRepository;
 use crate::infrastructure::RedisStore;
@@ -12,20 +12,18 @@ use crate::application::RecordingService;
 use crate::application::StreamService;
 use crate::protocol::event::SignalEvent;
 
-/// Hook 处理结果
 #[derive(Debug, Clone)]
 pub enum HookAction {
-    /// 允许访问
+
     Allow,
-    /// 拒绝访问（带原因）
+
     Deny(String),
 }
 
-/// Hook 事件类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event")]
 pub enum HookEvent {
-    /// 播放事件
+
     #[serde(rename = "on_play")]
     OnPlay {
         #[serde(rename = "mediaServerId")]
@@ -46,7 +44,6 @@ pub enum HookEvent {
         vhost: Option<String>,
     },
 
-    /// 心跳事件
     #[serde(rename = "on_keepalive")]
     OnKeepalive {
         #[serde(rename = "mediaServerId")]
@@ -57,7 +54,6 @@ pub enum HookEvent {
         ip: Option<String>,
     },
 
-    /// 停止播放事件
     #[serde(rename = "on_stop")]
     OnStop {
         #[serde(rename = "mediaServerId")]
@@ -78,7 +74,6 @@ pub enum HookEvent {
         vhost: Option<String>,
     },
 
-    /// 推流事件
     #[serde(rename = "on_publish")]
     OnPublish {
         #[serde(rename = "mediaServerId")]
@@ -95,7 +90,6 @@ pub enum HookEvent {
         params: Option<String>,
     },
 
-    /// RTCP 统计事件
     #[serde(rename = "on_rtcp_stats")]
     OnRtcpStats {
         #[serde(rename = "mediaServerId")]
@@ -108,7 +102,6 @@ pub enum HookEvent {
         bytes_received: Option<u64>,
     },
 
-    /// 录制完成事件（MP4/TS/HLS 等）
     #[serde(rename = "on_record_mp4")]
     #[serde(alias = "on_record_ts")]
     #[serde(alias = "on_record_flv")]
@@ -128,7 +121,6 @@ pub enum HookEvent {
         time_len: Option<f64>,
     },
 
-    /// 流量上报事件
     #[serde(rename = "on_flow_report")]
     OnFlowReport {
         #[serde(rename = "mediaServerId")]
@@ -155,7 +147,6 @@ pub enum HookEvent {
         vhost: Option<String>,
     },
 
-    /// HTTP 访问事件
     #[serde(rename = "on_http_access")]
     OnHttpAccess {
         #[serde(rename = "mediaServerId")]
@@ -174,7 +165,6 @@ pub enum HookEvent {
         headers: HashMap<String, String>,
     },
 
-    /// RTSP 鉴权领域查询
     #[serde(rename = "on_rtsp_realm")]
     OnRtspRealm {
         #[serde(rename = "mediaServerId")]
@@ -189,7 +179,6 @@ pub enum HookEvent {
         vhost: Option<String>,
     },
 
-    /// RTSP 鉴权事件
     #[serde(rename = "on_rtsp_auth")]
     OnRtspAuth {
         #[serde(rename = "mediaServerId")]
@@ -207,7 +196,6 @@ pub enum HookEvent {
         must_no_encrypt: Option<bool>,
     },
 
-    /// Shell 登录事件
     #[serde(rename = "on_shell_login")]
     OnShellLogin {
         #[serde(rename = "mediaServerId")]
@@ -218,7 +206,6 @@ pub enum HookEvent {
         user_name: Option<String>,
     },
 
-    /// 流变更事件（注册/注销）
     #[serde(rename = "on_stream_changed")]
     OnStreamChanged {
         #[serde(rename = "mediaServerId")]
@@ -238,7 +225,6 @@ pub enum HookEvent {
         tracks: Option<Vec<StreamTrackInfo>>,
     },
 
-    /// 流无人观看事件
     #[serde(rename = "on_stream_none_reader")]
     OnStreamNoneReader {
         #[serde(rename = "mediaServerId")]
@@ -249,7 +235,6 @@ pub enum HookEvent {
         schema: Option<String>,
     },
 
-    /// 流未找到事件
     #[serde(rename = "on_stream_not_found")]
     OnStreamNotFound {
         #[serde(rename = "mediaServerId")]
@@ -264,7 +249,6 @@ pub enum HookEvent {
         vhost: Option<String>,
     },
 
-    /// 服务器启动事件
     #[serde(rename = "on_server_started")]
     OnServerStarted {
         #[serde(rename = "mediaServerId")]
@@ -273,7 +257,6 @@ pub enum HookEvent {
         config: HashMap<String, serde_json::Value>,
     },
 
-    /// 服务器心跳事件
     #[serde(rename = "on_server_keepalive")]
     OnServerKeepalive {
         #[serde(rename = "mediaServerId")]
@@ -281,7 +264,6 @@ pub enum HookEvent {
         data: Option<ServerKeepaliveData>,
     },
 
-    /// RTP 服务器超时事件
     #[serde(rename = "on_rtp_server_timeout")]
     OnRtpServerTimeout {
         media_server_id: String,
@@ -293,7 +275,6 @@ pub enum HookEvent {
     },
 }
 
-/// 流轨道信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamTrackInfo {
     pub codec_type: Option<u8>,
@@ -308,7 +289,6 @@ pub struct StreamTrackInfo {
     pub channels: Option<u8>,
 }
 
-/// 服务器心跳数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerKeepaliveData {
     pub buffer: Option<u32>,
@@ -329,43 +309,25 @@ pub struct ServerKeepaliveData {
     pub udp_session: Option<u32>,
 }
 
-/// Hook 服务
-///
-/// 处理来自媒体服务器的 WebHook 回调。
-/// 负责 Token 验证、会话创建、流量统计等。
-///
-/// # 依赖
-/// - DbRepository: 数据库操作
-/// - RedisStore: Redis 缓存
-/// - ClusterManager: 集群管理
-/// - session_expiry_secs: 会话过期时间
-/// - recording_service: 录制服务
 pub struct HookService {
-    /// 数据库仓库
+
     repo: Arc<DbRepository>,
-    /// Redis 存储
+
     redis: Arc<RedisStore>,
-    /// 集群管理器
+
     cluster: Arc<ClusterManager>,
-    /// 事件总线
+
     event_bus: Arc<EventBus>,
-    /// 会话过期时间（秒）
+
     session_expiry_secs: i64,
-    /// 录制服务
+
     recording_service: Arc<RecordingService>,
-    /// 流服务
+
     stream_service: Arc<StreamService>,
 }
 
 impl HookService {
-    /// 创建 Hook 服务
-    ///
-    /// # 参数
-    /// * `repo` - 数据库仓库
-    /// * `redis` - Redis 存储
-    /// * `cluster` - 集群管理器
-    /// * `event_bus` - 事件总线
-    /// * `session_expiry_secs` - 会话过期时间
+
     pub fn new(
         repo: Arc<DbRepository>,
         redis: Arc<RedisStore>,
@@ -386,9 +348,6 @@ impl HookService {
         }
     }
 
-    /// 从 InfraContext 和 MediaContext 创建 Hook 服务
-    ///
-    /// 便捷构造函数，自动从上下文中提取所需组件。
     #[allow(dead_code)]
     pub fn from_context(
         infra: &InfraContext,
@@ -411,13 +370,6 @@ impl HookService {
         }
     }
 
-    /// 处理 Hook 事件
-    ///
-    /// # 参数
-    /// * `event` - Hook 事件
-    ///
-    /// # 返回
-    /// HookAction::Allow 或 HookAction::Deny
     pub async fn handle(&self, event: HookEvent) -> HookAction {
         match event {
             HookEvent::OnPlay {
@@ -663,9 +615,6 @@ impl HookService {
         }
     }
 
-    /// 处理播放事件
-    ///
-    /// 验证 Token，发送 HookPlay 事件，由其他服务处理会话创建和流观看人数更新。
     async fn on_play(
         &self,
         media_server_id: &str,
@@ -674,14 +623,7 @@ impl HookService {
         params: Option<&str>,
         _app: Option<&str>,
     ) -> HookAction {
-        tracing::info!(
-            "[Hook] on_play: server={}, stream={}, ip={:?}",
-            media_server_id,
-            stream_id,
-            client_ip
-        );
 
-        // 解析 params 为 HashMap (格式: token=xxx&key=value)
         let params_map: HashMap<String, String> = params
             .map(|p| {
                 p.split('&')
@@ -696,7 +638,6 @@ impl HookService {
             })
             .unwrap_or_default();
 
-        // 提取 Token
         let token = params_map.get("token").map(|s| s.as_str());
 
         let _token = match token {
@@ -707,7 +648,6 @@ impl HookService {
             }
         };
 
-        // 验证 Token
         let _stream = match self.get_stream_by_token(_token).await {
             Ok(Some(s)) => s,
             Ok(None) => {
@@ -720,7 +660,6 @@ impl HookService {
             }
         };
 
-        // 发送 HookPlay 事件，由其他服务处理会话创建和流观看人数更新
         let event = SignalEvent::HookPlay {
             media_server_tag: media_server_id.to_string(),
             stream_id: stream_id.to_string(),
@@ -730,27 +669,16 @@ impl HookService {
             tracing::warn!("[Hook] on_play: failed to publish event: {}", e);
         }
 
-        tracing::info!("[Hook] on_play: event published, stream={}", stream_id);
-
         HookAction::Allow
     }
 
-    /// 处理停止事件
-    ///
-    /// 终止会话，更新流观看人数（最后一个观看者离开时触发流清理）。
     async fn on_stop(
         &self,
-        media_server_id: &str,
+        _media_server_id: &str,
         stream_id: &str,
-        client_ip: Option<&str>,
+        _client_ip: Option<&str>,
         _params: Option<&str>,
     ) {
-        tracing::info!(
-            "[Hook] on_stop: server={}, stream={}, ip={:?}",
-            media_server_id,
-            stream_id,
-            client_ip
-        );
 
         let sessions = self.find_sessions_by_stream(stream_id).await;
         let count = sessions.len();
@@ -761,11 +689,6 @@ impl HookService {
         }
 
         if count > 0 {
-            tracing::info!(
-                "[Hook] on_stop: {} session(s) terminated, stream={}",
-                count,
-                stream_id
-            );
         }
 
         if let Err(e) = self.decrement_stream_viewers(stream_id).await {
@@ -773,20 +696,12 @@ impl HookService {
         }
     }
 
-    /// 处理心跳事件
-    ///
-    /// 更新会话活跃时间，同时更新流的最后心跳时间。
     async fn on_keepalive(
         &self,
-        media_server_id: &str,
+        _media_server_id: &str,
         stream_id: Option<&str>,
         _client_ip: Option<&str>,
     ) {
-        tracing::debug!(
-            "[Hook] on_keepalive: server={}, stream={:?}",
-            media_server_id,
-            stream_id
-        );
 
         let Some(stream_id) = stream_id else {
             return;
@@ -800,37 +715,32 @@ impl HookService {
             self.repo.sessions_cache().insert(s.id, s);
         }
 
-        if let Err(e) = self.touch_stream_keepalive(stream_id).await {
-            tracing::debug!("[Hook] on_keepalive: failed to update stream keepalive: {}", e);
+        if let Err(_e) = self.touch_stream_keepalive(stream_id).await {
         }
 
         const STREAM_TTL_SECS: u64 = 86400;
-        if let Err(e) = self.redis.expire_key(&format!("stream:{}", stream_id), STREAM_TTL_SECS).await {
-            tracing::debug!("[Hook] on_keepalive: failed to refresh stream TTL: {}", e);
+        if let Err(_e) = self.redis.expire_key(&format!("stream:{}", stream_id), STREAM_TTL_SECS).await {
         }
 
         if let Some(stream) = self.find_stream_by_stream_key(stream_id) {
             if let Some(ref device_tag) = stream.device_tag {
-                if let Some(device) = self.repo.devices_cache().get(device_tag) {
-                    let mut device = (*device).clone();
+
+                let cached_device = self.repo.device_cached(device_tag);
+                if let Some(mut device) = cached_device {
                     device.set_online();
-                    if let Err(e) = self.repo.update_device(&device).await {
-                        tracing::debug!("[Hook] on_keepalive: failed to update device online status: {}", e);
+                    if let Err(_e) = self.repo.update_device(&device).await {
                     }
                 }
             }
         }
     }
 
-    /// 处理推流事件
-    ///
-    /// 当 RTMP/RTSP 推送流到达媒体服务器时，在本地记录流状态。
     async fn on_publish(
         &self,
         media_server_id: &str,
         stream_id: &str,
         client_ip: Option<&str>,
-        app: Option<&str>,
+        _app: Option<&str>,
         params: Option<&str>,
     ) {
         let params_map: std::collections::HashMap<String, String> = params
@@ -848,22 +758,10 @@ impl HookService {
             .unwrap_or_default();
 
         let protocol = params_map.get("protocol").map(|s| s.to_lowercase()).unwrap_or_default();
-        let is_rtmp = protocol == "rtmp" || protocol.is_empty();
+        let _is_rtmp = protocol == "rtmp" || protocol.is_empty();
         let device_tag = params_map.get("device_tag").cloned();
         let channel_tag = params_map.get("channel_tag").cloned();
 
-        tracing::info!(
-            "[Hook] on_publish: server={}, stream={}, ip={:?}, protocol={}, is_rtmp={}, device_tag={:?}, channel_tag={:?}",
-            media_server_id,
-            stream_id,
-            client_ip,
-            protocol,
-            is_rtmp,
-            device_tag,
-            channel_tag
-        );
-
-        // 发送 HookPublish 事件，由其他服务处理推流注册
         let event = SignalEvent::HookPublish {
             media_server_tag: media_server_id.to_string(),
             stream_id: stream_id.to_string(),
@@ -876,23 +774,13 @@ impl HookService {
         }
     }
 
-    /// 处理 RTCP 统计事件
-    ///
-    /// 更新会话流量统计，同时更新流带宽数据。
     async fn on_rtcp_stats(
         &self,
-        media_server_id: &str,
+        _media_server_id: &str,
         stream_id: &str,
         bytes_sent: Option<u64>,
         bytes_received: Option<u64>,
     ) {
-        tracing::debug!(
-            "[Hook] on_rtcp_stats: server={}, stream={}, sent={:?}, recv={:?}",
-            media_server_id,
-            stream_id,
-            bytes_sent,
-            bytes_received
-        );
 
         let sessions = self.find_sessions_by_stream(stream_id).await;
         for session in sessions {
@@ -904,12 +792,11 @@ impl HookService {
             self.repo.sessions_cache().insert(s.id, s);
         }
 
-        if let Err(e) = self.update_stream_bandwidth(
+        if let Err(_e) = self.update_stream_bandwidth(
             stream_id,
             bytes_received.unwrap_or(0),
             bytes_sent.unwrap_or(0),
         ).await {
-            tracing::debug!("[Hook] on_rtcp_stats: failed to update stream bandwidth: {}", e);
         }
     }
 
@@ -920,26 +807,19 @@ impl HookService {
         file_size: Option<u64>,
         time_len: Option<f64>,
     ) {
-        tracing::info!(
-            "[Hook] on_record_done: stream={}, file_path={:?}, file_size={:?}, time_len={:?}",
-            stream_id, file_path, file_size, time_len
-        );
-
-        let filename = file_path
-            .and_then(|p| std::path::Path::new(p).file_name())
-            .and_then(|n| n.to_str())
-            .map(String::from)
-            .unwrap_or_else(|| stream_id.to_string());
 
         let size = file_size.unwrap_or(0);
         let duration = time_len.map(|t| t as u64).unwrap_or(0);
 
-        if let Err(e) = self.recording_service.finalize_recording(stream_id, filename, size, duration).await {
+        if let Err(e) = self
+            .recording_service
+            .finalize_recording(stream_id, file_path.map(|s| s.to_string()), size, duration)
+            .await
+        {
             tracing::error!("[Hook] on_record_done: failed to finalize recording: {}", e);
         }
     }
 
-    /// 根据 Token 获取流信息
     async fn get_stream_by_token(
         &self,
         token: &str,
@@ -947,7 +827,6 @@ impl HookService {
         self.repo.get_stream_by_token(token).await
     }
 
-    /// 根据 stream_key 查找流
     fn find_stream_by_stream_key(&self, stream_key: &str) -> Option<crate::domain::Stream> {
         let (device_tag, channel_tag) = crate::domain::parse_stream_key(stream_key)?;
         let cache_key = format!("{}/{}", device_tag, channel_tag);
@@ -956,7 +835,6 @@ impl HookService {
             .map(|s| s.clone())
     }
 
-    /// 增加流观看人数
     async fn increment_stream_viewers(&self, stream_key: &str) -> Result<()> {
         if let Some(s) = self.find_stream_by_stream_key(stream_key) {
             let mut s = s;
@@ -966,7 +844,6 @@ impl HookService {
         Ok(())
     }
 
-    /// 减少流观看人数
     async fn decrement_stream_viewers(&self, stream_key: &str) -> Result<()> {
         if let Some(s) = self.find_stream_by_stream_key(stream_key) {
             let mut s = s;
@@ -976,7 +853,6 @@ impl HookService {
         Ok(())
     }
 
-    /// 更新流心跳时间
     async fn touch_stream_keepalive(&self, stream_key: &str) -> Result<()> {
         if let Some(s) = self.find_stream_by_stream_key(stream_key) {
             let mut s = s;
@@ -986,7 +862,6 @@ impl HookService {
         Ok(())
     }
 
-    /// 更新流带宽数据
     async fn update_stream_bandwidth(&self, stream_key: &str, bytes_in: u64, bytes_out: u64) -> Result<()> {
         if let Some(s) = self.find_stream_by_stream_key(stream_key) {
             let mut s = s;
@@ -996,9 +871,6 @@ impl HookService {
         Ok(())
     }
 
-    /// 注册推送流（RTMP/RTSP push）
-    ///
-    /// 尝试从 stream_id 匹配设备（stream_key 或 push_urls），若匹配则关联 device_id。
     async fn register_push_stream(&self, media_server_id: &str, stream_id: &str, device_tag_from_params: Option<&str>, channel_tag_from_params: Option<&str>) -> Result<()> {
         let (final_device_tag, final_channel_tag) = if let (Some(dt), Some(ct)) = (device_tag_from_params, channel_tag_from_params) {
             (dt.to_string(), ct.to_string())
@@ -1021,13 +893,10 @@ impl HookService {
         }
         stream.media_server_tag = media_server_id.to_string();
         self.repo.update_stream(&stream).await?;
-        tracing::info!("[Hook] on_publish: registered push stream {} on server {} (device_tag={})",
-            stream_id, media_server_id, final_device_tag);
 
         Ok(())
     }
 
-    /// 根据推送流的 stream_id 查找关联的设备 tag
     fn find_device_by_push_stream(&self, stream_id: &str) -> Option<String> {
         let (device_tag_from_stream, _channel_tag_from_stream) = crate::domain::parse_stream_key(stream_id)
             .or_else(|| {
@@ -1068,7 +937,6 @@ impl HookService {
         None
     }
 
-    /// 根据流标识查找活跃会话
     async fn find_sessions_by_stream(
         &self,
         stream_id: &str,
@@ -1088,61 +956,45 @@ impl HookService {
 
     async fn on_flow_report(
         &self,
-        media_server_id: &str,
-        stream: &str,
-        ip: Option<&str>,
-        port: Option<u32>,
-        params: Option<&str>,
-        duration: Option<u32>,
-        total_bytes: Option<u64>,
-        player: Option<bool>,
+        _media_server_id: &str,
+        _stream: &str,
+        _ip: Option<&str>,
+        _port: Option<u32>,
+        _params: Option<&str>,
+        _duration: Option<u32>,
+        _total_bytes: Option<u64>,
+        _player: Option<bool>,
     ) {
-        tracing::info!(
-            "[Hook] on_flow_report: server={}, stream={}, ip={:?}, duration={:?}, bytes={:?}, player={:?}",
-            media_server_id, stream, ip, duration, total_bytes, player
-        );
     }
 
     async fn on_http_access(
         &self,
-        media_server_id: &str,
-        ip: Option<&str>,
-        port: Option<u16>,
-        path: Option<&str>,
-        is_dir: Option<bool>,
+        _media_server_id: &str,
+        _ip: Option<&str>,
+        _port: Option<u16>,
+        _path: Option<&str>,
+        _is_dir: Option<bool>,
     ) -> HookAction {
-        tracing::info!(
-            "[Hook] on_http_access: server={}, ip={:?}, path={:?}, is_dir={:?}",
-            media_server_id, ip, path, is_dir
-        );
         HookAction::Allow
     }
 
     async fn on_rtsp_realm(
         &self,
-        media_server_id: &str,
-        stream_id: &str,
-        ip: Option<&str>,
+        _media_server_id: &str,
+        _stream_id: &str,
+        _ip: Option<&str>,
     ) -> HookAction {
-        tracing::info!(
-            "[Hook] on_rtsp_realm: server={}, stream={}, ip={:?}",
-            media_server_id, stream_id, ip
-        );
         HookAction::Allow
     }
 
     async fn on_rtsp_auth(
         &self,
-        media_server_id: &str,
-        stream_id: &str,
-        ip: Option<&str>,
-        user_name: Option<&str>,
-        must_no_encrypt: bool,
+        _media_server_id: &str,
+        _stream_id: &str,
+        _ip: Option<&str>,
+        _user_name: Option<&str>,
+        _must_no_encrypt: bool,
     ) -> HookAction {
-        tracing::info!(
-            "[Hook] on_rtsp_auth: server={}, stream={}, ip={:?}, user={:?}, must_no_encrypt={}",
-            media_server_id, stream_id, ip, user_name, must_no_encrypt
-        );
         HookAction::Allow
     }
 
@@ -1150,7 +1002,7 @@ impl HookService {
         &self,
         media_server_id: &str,
         ip: Option<&str>,
-        passwd: Option<&str>,
+        _passwd: Option<&str>,
         user_name: Option<&str>,
     ) -> HookAction {
         tracing::warn!(
@@ -1163,23 +1015,18 @@ impl HookService {
     async fn on_stream_changed(
         &self,
         media_server_id: &str,
-        app: &str,
+        _app: &str,
         stream: &str,
         regist: bool,
-        origin_type: Option<u8>,
-        origin_type_str: Option<&str>,
+        _origin_type: Option<u8>,
+        _origin_type_str: Option<&str>,
         reader_count: Option<u32>,
         total_reader_count: Option<u32>,
-        alive_second: Option<u32>,
+        _alive_second: Option<u32>,
         bytes_speed: Option<u64>,
-        tracks: Option<&Vec<StreamTrackInfo>>,
+        _tracks: Option<&Vec<StreamTrackInfo>>,
     ) {
-        tracing::info!(
-            "[Hook] on_stream_changed: server={}, app={}, stream={}, regist={}, origin_type={:?}, readers={:?}/{:?}",
-            media_server_id, app, stream, regist, origin_type_str, reader_count, total_reader_count
-        );
 
-        // 发送事件，由其他服务处理状态更新
         if !regist {
             let event = SignalEvent::HookUnpublish {
                 media_server_tag: media_server_id.to_string(),
@@ -1205,59 +1052,39 @@ impl HookService {
 
     async fn on_stream_none_reader(
         &self,
-        media_server_id: &str,
-        app: &str,
-        stream: &str,
+        _media_server_id: &str,
+        _app: &str,
+        _stream: &str,
     ) {
-        tracing::info!(
-            "[Hook] on_stream_none_reader: server={}, app={}, stream={}",
-            media_server_id, app, stream
-        );
     }
 
     async fn on_stream_not_found(
         &self,
-        media_server_id: &str,
-        stream_id: &str,
-        ip: Option<&str>,
+        _media_server_id: &str,
+        _stream_id: &str,
+        _ip: Option<&str>,
     ) -> HookAction {
-        tracing::info!(
-            "[Hook] on_stream_not_found: server={}, stream={}, ip={:?}",
-            media_server_id, stream_id, ip
-        );
         HookAction::Allow
     }
 
     async fn on_server_started(
         &self,
-        media_server_id: &str,
-        config: &std::collections::HashMap<String, serde_json::Value>,
+        _media_server_id: &str,
+        _config: &std::collections::HashMap<String, serde_json::Value>,
     ) {
-        tracing::info!(
-            "[Hook] on_server_started: server={}",
-            media_server_id
-        );
     }
 
     async fn on_server_keepalive(
         &self,
-        media_server_id: &str,
-        data: Option<&ServerKeepaliveData>,
+        _media_server_id: &str,
+        _data: Option<&ServerKeepaliveData>,
     ) {
-        tracing::debug!(
-            "[Hook] on_server_keepalive: server={}, data={:?}",
-            media_server_id, data
-        );
     }
 
     async fn on_rtp_server_timeout(
         &self,
-        media_server_id: &str,
-        stream_id: Option<&str>,
+        _media_server_id: &str,
+        _stream_id: Option<&str>,
     ) {
-        tracing::info!(
-            "[Hook] on_rtp_server_timeout: server={}, stream_id={:?}",
-            media_server_id, stream_id
-        );
     }
 }

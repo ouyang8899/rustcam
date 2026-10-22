@@ -14,7 +14,7 @@ use tokio::sync::RwLock;
 
 use crate::media::codec::AudioCodec;
 use crate::media::codec::G711;
-use crate::media::errors::{MediaError, Result};
+use crate::media::errors::{ Result };
 use crate::media::rtp::RtpHeader;
 
 static NODE_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -373,13 +373,6 @@ impl NodeMiddleware for LinearPcmToG711Middleware {
             return true;
         };
 
-        tracing::debug!(
-            "[LinearPcmToG711] in_samples={}, resampled(6:1)={}, encoded={}",
-            input_samples.len(),
-            samples.len(),
-            encoded.len()
-        );
-
         ctx.data
             .insert(DataType::Audio, BytesMut::from(encoded.as_slice()));
         ctx.data.remove(&DataType::OrgData);
@@ -397,22 +390,6 @@ pub struct RtpSendMiddleware {
     timestamp: AtomicU32,
     payload_type: u8,
 }
-
-// impl RtpSendMiddleware {
-//     pub fn new(ssrc: u32, payload_type: u8) -> Self {
-//         Self {
-//             name: "rtp_send".to_string(),
-//             ssrc,
-//             seq_num: AtomicU16::new(0),
-//             timestamp: AtomicU32::new(0),
-//             payload_type,
-//         }
-//     }
-
-//     pub fn set_timestamp(&self, timestamp: u32) {
-//         self.timestamp.store(timestamp, Ordering::Relaxed);
-//     }
-// }
 
 #[async_trait]
 impl NodeMiddleware for RtpSendMiddleware {
@@ -597,7 +574,6 @@ pub struct BasicMediaNode {
 #[async_trait]
 impl MediaTransportCallback for BasicMediaNode {
     async fn on_media_data(&self, data: HashMap<DataType, BytesMut>) {
-        tracing::debug!("[MediaNode] on_media_data called, data.len={}", data.len());
         let _ = self.sendto_receivers(data).await;
     }
 }
@@ -654,7 +630,6 @@ impl BasicMediaNode {
     }
 
     pub async fn stop(&self) -> Result<()> {
-        tracing::info!("[BasicMediaNode] stop() called for node {}", self.id.id);
         self.datatransport.close().await
     }
 
@@ -760,10 +735,6 @@ impl MediaNode for BasicMediaNode {
     }
 
     async fn run(self: Arc<Self>) {
-        tracing::debug!(
-            "[MediaNode] run() no-op (transport handles recv internally), node={}",
-            self.id.as_str()
-        );
     }
 
     async fn stop(&self) -> Result<()> {
@@ -815,20 +786,15 @@ impl MediaSession {
             .any(|n| n.value().node_type() == node_type)
     }
 
-    pub fn start_broadcast(&self, channel_tag: &str, node: Arc<dyn MediaNode>) {
+    pub fn start_broadcast(&self, _channel_tag: &str, node: Arc<dyn MediaNode>) {
         let node_id = node.id().clone();
         self.nodes.insert(node_id.clone(), node.clone());
         if let Some(bn) = node.as_any().downcast_ref::<BasicMediaNode>() {
             bn.inc_ref();
-            tracing::info!(
-                "[MediaSession] broadcast {} session created, node_id={}",
-                channel_tag,
-                node_id.id
-            );
         }
     }
 
-    pub async fn end_broadcast(&self, channel_tag: &str) -> bool {
+    pub async fn end_broadcast(&self, _channel_tag: &str) -> bool {
         let node_id = self
             .nodes
             .iter()
@@ -837,7 +803,6 @@ impl MediaSession {
 
         if let Some(node_id) = node_id {
             if let Some((_, removed)) = self.nodes.remove(&node_id) {
-                tracing::info!("[MediaSession] broadcast {} session removed", channel_tag);
                 if let Err(e) = removed.stop().await {
                     tracing::warn!("[MediaSession] Failed to stop broadcast node: {}", e);
                 }
@@ -848,7 +813,6 @@ impl MediaSession {
     }
 
     pub async fn end_all_broadcasts(&self) -> usize {
-        tracing::info!("[MediaSession] end_all_broadcasts called, checking {} nodes", self.nodes.len());
         let broadcast_node_ids: Vec<MediaNodeId> = self
             .nodes
             .iter()
@@ -856,12 +820,9 @@ impl MediaSession {
             .map(|n| n.key().clone())
             .collect();
 
-        tracing::info!("[MediaSession] found {} broadcast nodes to remove", broadcast_node_ids.len());
-
         let mut removed = 0;
         for node_id in &broadcast_node_ids {
             if let Some((_, removed_node)) = self.nodes.remove(node_id) {
-                tracing::info!("[MediaSession] broadcast node {} removed, calling stop()", node_id.id);
                 if let Err(e) = removed_node.stop().await {
                     tracing::warn!("[MediaSession] Failed to stop broadcast node: {}", e);
                 }
@@ -915,7 +876,6 @@ impl MediaSession {
 
     pub async fn remove_and_stop_node(&self, node_id: &MediaNodeId) -> bool {
         if let Some(node) = self.remove_node(node_id) {
-            tracing::info!("[MediaSession] remove_and_stop_node: {} removed, calling stop()", node_id.id);
             if let Err(e) = node.stop().await {
                 tracing::warn!("[MediaSession] Failed to stop node {}: {}", node_id.id, e);
             }
@@ -936,7 +896,6 @@ impl MediaSession {
 
     pub fn clear_nodes(&self) {
         self.nodes.retain(|_, _| false);
-        tracing::debug!("[MediaSession] All nodes cleared for session {}", self.id);
     }
 }
 
@@ -1013,7 +972,6 @@ static MEDIA_SESSION_MANAGER: OnceCell<Arc<MediaSessionManager>> = OnceCell::new
 pub async fn init_media_session_manager() {
     let manager = Arc::new(MediaSessionManager::new());
     MEDIA_SESSION_MANAGER.set(manager.clone()).ok();
-    tracing::info!("[MediaSessionManager] Initialized");
 }
 
 pub fn get_media_session_manager() -> Option<&'static Arc<MediaSessionManager>> {

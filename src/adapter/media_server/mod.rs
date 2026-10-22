@@ -13,9 +13,8 @@ pub fn format_rtsp_auth(auth: Option<(&str, &str)>) -> String {
 }
 
 pub fn host_with_port_from_config(config: &MediaServerConfig, protocol: Protocol) -> String {
-    let (host, url_port) = extract_host_and_port(&config.url);
-    tracing::debug!("[host_with_port] config.url={}, extracted host={}, url_port={:?}, protocol={:?}", config.url, host, url_port, protocol);
-    
+    let (host, _url_port) = extract_host_and_port(&config.url);
+
     let port = match protocol {
         Protocol::Rtsp => config.protocol_ports.rtsp.unwrap_or(554),
         Protocol::Rtmp => config.protocol_ports.rtmp.unwrap_or(1935),
@@ -32,16 +31,16 @@ pub fn extract_host_and_port(url: &str) -> (String, Option<u16>) {
     let url = url
         .trim_start_matches("http://")
         .trim_start_matches("https://");
-    
+
     let (host_port, _path) = if let Some(idx) = url.find('/') {
         (&url[..idx], &url[idx..])
     } else {
         (url, "")
     };
-    
+
     let dot_count = host_port.matches('.').count();
     let is_ipv4 = dot_count == 3 && host_port.chars().filter(|c| *c == ':').count() == 1;
-    
+
     if is_ipv4 {
         if let Some(idx) = host_port.rfind(':') {
             let host = &host_port[..idx];
@@ -50,14 +49,14 @@ pub fn extract_host_and_port(url: &str) -> (String, Option<u16>) {
             return (host.to_string(), port);
         }
     }
-    
+
     if let Some(idx) = host_port.find(':') {
         let host = &host_port[..idx];
         let port_str = &host_port[idx+1..];
         let port = port_str.parse::<u16>().ok();
         return (host.to_string(), port);
     }
-    
+
     (host_port.to_string(), None)
 }
 
@@ -149,6 +148,8 @@ pub trait MediaServerAdapter: Send + Sync {
     fn tag(&self) -> &str;
     fn server_type(&self) -> &str;
     fn secret(&self) -> &str;
+
+    fn http_base_url(&self) -> String;
     async fn is_online(&self) -> bool;
     async fn get_status(&self) -> anyhow::Result<ServerStatus>;
     async fn add_stream_proxy(&self, app: &str, stream_key: &str, rtsp_url: &str) -> anyhow::Result<StreamInfo>;
@@ -158,7 +159,16 @@ pub trait MediaServerAdapter: Send + Sync {
     async fn get_sessions(&self) -> anyhow::Result<Vec<serde_json::Value>>;
     async fn is_stream_online(&self, app: &str, stream_key: &str) -> anyhow::Result<bool>;
     async fn ptz_control(&self, stream_key: &str, command: &str, channel: u8) -> anyhow::Result<()>;
-    async fn start_recording(&self, app: &str, stream_key: &str, format: &str, output_path: Option<&str>) -> anyhow::Result<RecordingInfo>;
+
+    async fn start_recording(
+        &self,
+        app: &str,
+        stream_key: &str,
+        format: &str,
+        output_path: Option<&str>,
+        max_duration_secs: Option<u32>,
+        pre_record_secs: Option<u32>,
+    ) -> anyhow::Result<RecordingInfo>;
     async fn stop_recording(&self, app: &str, stream_key: &str, format: &str) -> anyhow::Result<()>;
     async fn is_recording(&self, stream_key: &str, format: &str) -> anyhow::Result<bool>;
     async fn list_recordings(&self, app: &str, stream_key: &str) -> anyhow::Result<Vec<RecordingFile>>;

@@ -1,4 +1,3 @@
-// 在现有 RedisStore 实现基础上添加:
 
 use async_trait::async_trait;
 use crate::domain::traits::{CacheStore, CacheStoreExt};
@@ -24,7 +23,7 @@ impl RedisStore {
 
     #[cfg(test)]
     pub fn new_mock() -> Self {
-        // Mock 实现用于测试
+
         panic!("Use a proper Redis mock for tests")
     }
 

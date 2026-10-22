@@ -8,6 +8,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include "CoreExport.h"
+#include "TimelineWidget.h"
 
 namespace rustcam {
 
@@ -20,7 +21,9 @@ struct RecordingFile {
     int64_t durationMs = 0;
     int64_t startTimeMs = 0;
     int64_t endTimeMs = 0;
-    QString mediaServerName;
+    QString serverTag;
+    SegmentType segmentType = SegmentType::Normal;
+    qint64 alarmId = 0;
 };
 
 class RecordingFileListModel : public QAbstractListModel {
@@ -35,7 +38,9 @@ public:
         DurationRole,
         StartTimeRole,
         EndTimeRole,
-        MediaServerRole
+        MediaServerRole,
+        SegmentTypeRole,
+        AlarmIdRole
     };
 
     explicit RecordingFileListModel(QObject* parent = nullptr);
@@ -46,6 +51,7 @@ public:
     QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
 
     void setFiles(const QList<RecordingFile>& files);
+    void addFile(const RecordingFile& file);
     void clearFiles();
     RecordingFile fileAt(int index) const;
 
@@ -63,6 +69,7 @@ public:
     ~RecordingFileListWidget();
 
     void setFiles(const QList<RecordingFile>& files);
+    void addFile(const RecordingFile& file);
     void clearFiles();
 
 signals:

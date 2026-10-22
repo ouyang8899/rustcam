@@ -57,7 +57,7 @@ pub struct Recording {
     pub id: i64,
     pub device_tag: Option<String>,
     pub channel_tag: Option<String>,
-    pub media_server_name: String,
+    pub server_tag: String,
     pub state: RecordingState,
     pub format: RecordingFormat,
     pub output_path: Option<String>,
@@ -69,20 +69,23 @@ pub struct Recording {
     pub error_message: Option<String>,
     pub labels: Vec<String>,
     pub filename: Option<String>,
+    pub pre_record_secs: Option<u32>,
+
+    pub max_duration_secs: Option<u32>,
 }
 
 impl Recording {
     pub fn new(
         device_tag: String,
         channel_tag: String,
-        media_server_name: String,
+        server_tag: String,
         format: RecordingFormat,
     ) -> Self {
         Self {
             id: 0,
             device_tag: Some(device_tag),
             channel_tag: Some(channel_tag),
-            media_server_name,
+            server_tag,
             state: RecordingState::Starting,
             format,
             output_path: None,
@@ -94,6 +97,8 @@ impl Recording {
             error_message: None,
             labels: Vec::new(),
             filename: None,
+            pre_record_secs: None,
+            max_duration_secs: None,
         }
     }
 
@@ -157,6 +162,7 @@ pub struct CreateRecordingRequest {
     pub max_file_size_mb: Option<u32>,
     pub output_path: Option<String>,
     pub labels: Option<Vec<String>>,
+    pub pre_record_secs: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

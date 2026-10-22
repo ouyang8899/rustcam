@@ -2,14 +2,9 @@ use async_trait::async_trait;
 use dashmap::DashMap;
 use uuid::Uuid;
 
-// ✅ 使用 auth 模块自己的错误类型，或使用 crate::error::Result
-use crate::error::Result;  // = Result<T, AppError>
+use crate::error::Result;
 
 use super::models::{Permission, Role, User};
-
-// ═══════════════════════════════════════════════════════════════
-// Repository Traits
-// ═══════════════════════════════════════════════════════════════
 
 #[async_trait]
 pub trait UserRepository: Send + Sync {
@@ -45,11 +40,6 @@ pub trait PermissionRepository: Send + Sync {
     async fn list(&self) -> Result<Vec<Permission>>;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// In-Memory Implementation
-// ═══════════════════════════════════════════════════════════════
-
-/// 内存中的认证仓库实现（用于测试和开发）
 pub struct InMemoryAuthRepository {
     users: DashMap<Uuid, User>,
     username_index: DashMap<String, Uuid>,

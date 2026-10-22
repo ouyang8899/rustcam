@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="recording_segment">
+
+<insert id="segment_insert">
+INSERT INTO recording_segments (
+    recording_id, device_tag, channel_tag, start_time, end_time,
+    duration_secs, file_size, file_path, server_tag,
+    segment_type, alarm_id, play_url
+) VALUES (
+    #{recording_id}, #{device_tag}, #{channel_tag}, #{start_time}, #{end_time},
+    #{duration_secs}, #{file_size}, #{file_path}, #{server_tag},
+    #{segment_type}, #{alarm_id}, #{play_url}
+)
+RETURNING id
+</insert>
+
+<update id="segment_update">
+UPDATE recording_segments
+<set>
+<if test="end_time != null">end_time = #{end_time},</if>
+<if test="duration_secs != null">duration_secs = #{duration_secs},</if>
+<if test="file_size != null">file_size = #{file_size},</if>
+<if test="file_path != null">file_path = #{file_path},</if>
+</set>
+WHERE id = #{id}
+</update>
+
+<select id="segment_select_by_id">
+SELECT id, recording_id, device_tag, channel_tag, start_time, end_time,
+       duration_secs, file_size, file_path, server_tag,
+       segment_type, alarm_id, play_url
+FROM recording_segments
+WHERE id = #{id}
+</select>
+
+<select id="segment_select_by_device_channel_time">
+SELECT id, recording_id, device_tag, channel_tag, start_time, end_time,
+       duration_secs, file_size, file_path, server_tag,
+       segment_type, alarm_id, play_url
+FROM recording_segments
+WHERE device_tag = #{device_tag}
+  AND (#{channel_tag}::text IS NULL OR channel_tag = #{channel_tag}::text)
+  AND start_time &lt;= #{end_time}
+  AND end_time &gt;= #{start_time}
+ORDER BY start_time ASC
+</select>
+
+<select id="segment_select_paginated">
+SELECT id, recording_id, device_tag, channel_tag, start_time, end_time,
+       duration_secs, file_size, file_path, server_tag,
+       segment_type, alarm_id, play_url
+FROM recording_segments
+WHERE device_tag = #{device_tag}
+  AND (#{channel_tag}::text IS NULL OR channel_tag = #{channel_tag}::text)
+  AND start_time &lt;= #{end_time}
+  AND end_time &gt;= #{start_time}
+  AND (#{segment_type}::text IS NULL OR segment_type = #{segment_type}::text)
+ORDER BY start_time ASC
+LIMIT #{limit} OFFSET #{offset}
+</select>
+
+<select id="segment_count_by_device_channel_time">
+SELECT COUNT(*) as count
+FROM recording_segments
+WHERE device_tag = #{device_tag}
+  AND (#{channel_tag}::text IS NULL OR channel_tag = #{channel_tag}::text)
+  AND start_time &lt;= #{end_time}
+  AND end_time &gt;= #{start_time}
+  AND (#{segment_type}::text IS NULL OR segment_type = #{segment_type}::text)
+</select>
+
+</mapper>

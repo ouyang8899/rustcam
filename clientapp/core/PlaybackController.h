@@ -38,12 +38,20 @@ private:
 class RUSTCAM_CORE_API PlaybackController : public QObject {
     Q_OBJECT
 public:
+    enum class SyncState {
+        Idle,
+        Syncing,
+        Synced
+    };
+
     explicit PlaybackController(QObject* parent = nullptr);
     ~PlaybackController();
 
     int64_t baseTimeMs() const { return m_baseTimeMs; }
     const QList<PlaybackGroup*>& groups() const { return m_groups; }
     PlaybackGroup* defaultGroup() { return m_defaultGroup; }
+
+    SyncState syncState() const { return m_syncState; }
 
     void setBaseTime(int64_t timeMs);
     void addGroup(PlaybackGroup* group);
@@ -62,6 +70,10 @@ signals:
     void baseTimeChanged(int64_t timeMs);
     void groupAdded(PlaybackGroup* group);
     void groupRemoved(int groupId);
+    void syncStateChanged(SyncState state);
+
+private slots:
+    void onBatchSync();
 
 private:
     int64_t m_baseTimeMs = 0;
@@ -69,6 +81,10 @@ private:
     PlaybackGroup* m_defaultGroup;
     int m_nextGroupId = 1;
     QMutex m_mutex;
+    SyncState m_syncState = SyncState::Idle;
+    int m_batchStartIndex = 0;
+    int64_t m_batchTimeMs = 0;
+    static constexpr int BATCH_SIZE = 4;
 };
 
 }

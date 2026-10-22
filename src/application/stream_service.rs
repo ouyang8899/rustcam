@@ -8,7 +8,6 @@ use crate::adapter::media_server::{StreamInfo, Protocol as MediaProtocol};
 use crate::error::{AppError, Result};
 use crate::application::recording_service::RecordingService;
 
-/// 流管理服务
 pub struct StreamService {
     infra: InfraContext,
     media: MediaContext,
@@ -24,12 +23,6 @@ impl StreamService {
         Self { infra, media, recording_service }
     }
 
-    /// 创建拉流
-    ///
-    /// 核心原则：设备必须绑定媒体服务器，所有操作都基于绑定关系
-    /// 1. 设备已绑定媒体服务器 → 使用绑定的服务器
-    /// 2. 设备未绑定 → 选择一个活跃服务器，绑定到设备
-    /// 3. 绑定的服务器必须在线，否则返回错误
     pub async fn start_pull_stream(
         &self,
         device_tag: &str,
@@ -68,7 +61,7 @@ impl StreamService {
             ))?;
 
         let app = device.app.clone().unwrap_or_else(|| "live".to_string());
-        
+
         let cache_key = format!("{}/{}", device_tag, channel_tag);
         let stream_key = crate::domain::make_stream_key(device_tag, channel_tag);
 
@@ -79,11 +72,9 @@ impl StreamService {
 
         let on_media_server = match server.is_stream_online(&app, &stream_key).await {
             Ok(true) => {
-                tracing::info!("[StreamService] Stream {} exists on media server {}", stream_key, server_tag);
                 true
             }
             Ok(false) => {
-                tracing::info!("[StreamService] Stream {} not on media server {}, will create", stream_key, server_tag);
                 false
             }
             Err(e) => {
@@ -123,7 +114,6 @@ impl StreamService {
         };
 
         if let Some(existing) = existing_in_cache {
-            tracing::info!("[StreamService] Stream {}/{} found in cache, state depends on proxy result", device_tag, channel_tag);
             let mut updated_stream = existing.clone();
             if existing.app != app {
                 updated_stream.app = app.clone();
@@ -142,7 +132,6 @@ impl StreamService {
         } else {
             let streams = self.infra.db.list_streams().await;
             if let Some(existing) = streams.iter().find(|s| s.device_tag.as_deref() == Some(device_tag) && s.channel_tag.as_deref() == Some(channel_tag)) {
-                tracing::info!("stream {}/{} exists in DB, state depends on proxy result", device_tag, channel_tag);
                 let mut updated = existing.clone();
                 if on_media_server {
                     updated.start();
@@ -197,12 +186,11 @@ impl StreamService {
         })
     }
 
-    /// 同步流状态到 cache 和 DB，确保为 active
     async fn sync_stream_to_active(&self, device_tag: &str, channel_tag: &str, server_tag: &str, _stream_key: &str, app: &str) -> Result<()> {
         let cache_key = format!("{}/{}", device_tag, channel_tag);
         let stream_key = crate::domain::make_stream_key(device_tag, channel_tag);
         let cache = self.infra.db.streams_cache();
-        
+
         let stream_to_update = {
             let existing = cache.iter()
                 .find(|r| r.key() == &cache_key);
@@ -236,16 +224,12 @@ impl StreamService {
         Ok(())
     }
 
-    /// 创建 GB28181 推流
-    ///
-    /// 核心原则：设备必须绑定媒体服务器，所有操作都基于绑定关系
     pub async fn start_gb28181_stream(
         &self,
         device_tag: &str,
         channel_tag: &str,
         stream_key: &str,
     ) -> Result<StreamInfo> {
-        tracing::info!("[StreamService] start_gb28181_stream called: device={}, channel={}, stream_key={}", device_tag, channel_tag, stream_key);
 
         let device = self.infra.db.devices_cache()
             .get(device_tag)
@@ -276,7 +260,7 @@ impl StreamService {
 
         let token = Uuid::new_v4().to_string();
         let media_server_stream_key = crate::domain::make_stream_key(device_tag, channel_tag);
-        let mut stream = Stream::new(server_tag.clone(), device_tag.to_string(), channel_tag.to_string(), app.clone(), token.clone());
+        let stream = Stream::new(server_tag.clone(), device_tag.to_string(), channel_tag.to_string(), app.clone(), token.clone());
         self.infra.db.create_stream(&stream).await?;
 
         self.start_recording_for_channel(device_tag, channel_tag, &server_tag, &app, &media_server_stream_key).await;
@@ -302,18 +286,13 @@ impl StreamService {
         Ok(stream_info)
     }
 
-    /// 停止流：通知媒体服务器关闭 proxy、清理所有观看 Session、更新状态
-    ///
-    /// 核心原则：必须找到媒体服务器才能停止流，否则没有任何意义
-    /// 使用 (app, stream_key) 唯一标识流
-    pub async fn stop_stream(&self, app: &str, stream_key: &str) -> Result<()> {
+    pub async fn stop_stream(&self, _app: &str, stream_key: &str) -> Result<()> {
         let (stream, server_tag) = {
             let cache_key = stream_key.replace('_', "/");
             let entry = self.infra.db.streams_cache().get(&cache_key).map(|s| s.clone());
             match entry {
                 Some(s) => (s.clone(), s.media_server_tag.clone()),
                 None => {
-                    tracing::debug!("[StreamService] stop_stream: stream {}/{} not in cache", app, stream_key);
                     return Ok(());
                 }
             }
@@ -323,8 +302,7 @@ impl StreamService {
             if let Err(e) = server.remove_stream_proxy(&stream.app, stream_key).await {
                 tracing::warn!("[StreamService] Failed to remove proxy on {}: {}", server_tag, e);
             }
-            if let Err(e) = server.close_rtp_server(stream_key).await {
-                tracing::debug!("[StreamService] close_rtp_server (optional): {}", e);
+            if let Err(_e) = server.close_rtp_server(stream_key).await {
             }
         } else {
             tracing::warn!("[StreamService] Media server '{}' not found, skipping proxy removal", server_tag);
@@ -344,11 +322,9 @@ impl StreamService {
             self.sync_device_status(dt, StreamState::Idle).await;
         }
 
-        tracing::info!("[StreamService] Stream stopped: {}", stream_key);
         Ok(())
     }
 
-    /// 重启流：先停止再启动
     pub async fn restart_stream_by_id(&self, stream_id: i64) -> Result<StreamInfo> {
         let stream = self.get_stream(stream_id).await?
             .ok_or_else(|| AppError::NotFound(format!("Stream {} not found", stream_id)))?;
@@ -370,7 +346,6 @@ impl StreamService {
 
         match adapter.is_stream_online(&app, &stream_key).await {
             Ok(true) => {
-                tracing::info!("[StreamService] Stream {} already online on {}, syncing state to Active", stream_key, tag);
                 let mut updated_stream = stream.clone();
                 updated_stream.start();
                 updated_stream.retry_count = 0;
@@ -392,7 +367,6 @@ impl StreamService {
                 return Ok(stream_info);
             }
             Ok(false) | Err(_) => {
-                tracing::info!("[StreamService] Stream {} not on media server {}, will add proxy", stream_key, tag);
             }
         }
 
@@ -422,7 +396,6 @@ impl StreamService {
             self.sync_device_status(dt, StreamState::Active).await;
         }
 
-        tracing::info!("[StreamService] Stream restarted: {} on {}", stream_key, tag);
         Ok(stream_info)
     }
 
@@ -435,10 +408,6 @@ impl StreamService {
         };
 
         if device.status == DeviceStatus::Maintaining {
-            tracing::debug!(
-                "[StreamService] Device {} is in Maintaining status, skipping sync",
-                device_tag
-            );
             return;
         }
 
@@ -449,10 +418,6 @@ impl StreamService {
         };
 
         if device.status != new_status {
-            tracing::info!(
-                "[StreamService] Syncing device {} status: {} -> {} (stream state: {:?})",
-                device_tag, device.status, new_status, stream_state
-            );
             device.status = new_status;
             if let Err(e) = self.infra.db.update_device(&device).await {
                 tracing::warn!("[StreamService] Failed to sync device status: {}", e);
@@ -460,9 +425,6 @@ impl StreamService {
         }
     }
 
-    /// 停止设备的所有流
-    ///
-    /// 包括：设备自身的流 + 推送流（device_id=0但stream_key属于该设备）
     pub async fn stop_streams_by_device(&self, device_tag: &str) -> Result<()> {
         let cache_key_prefix = format!("{}/", device_tag);
         let cache = self.infra.db.streams_cache();
@@ -481,7 +443,6 @@ impl StreamService {
         Ok(())
     }
 
-    /// 停止通道的流
     pub async fn stop_streams_by_channel(&self, device_tag: &str, channel_tag: &str) -> Result<()> {
         let cache_key = format!("{}/{}", device_tag, channel_tag);
         let cache = self.infra.db.streams_cache();
@@ -500,7 +461,6 @@ impl StreamService {
         Ok(())
     }
 
-    /// 终止流对应的所有播放 Session
     async fn terminate_sessions_for_stream(&self, stream_key: &str) {
         let session_ids: Vec<i64> = self.infra.db.sessions_cache()
             .iter()
@@ -512,43 +472,42 @@ impl StreamService {
 
         let count = session_ids.len();
         for session_id in session_ids {
-            if let Some(session) = self.infra.db.sessions_cache().get(&session_id) {
-                let mut s = session.clone();
-                s.terminate();
+
+            let updated = {
+                let cache = self.infra.db.sessions_cache();
+                cache.get(&session_id).map(|s| {
+                    let mut s = s.clone();
+                    s.terminate();
+                    s
+                })
+            };
+            if let Some(s) = updated {
                 self.infra.db.sessions_cache().insert(session_id, s);
             }
         }
         if count > 0 {
-            tracing::debug!("[StreamService] Terminated {} sessions for stream {}", count, stream_key);
         }
     }
 
-    /// 获取流
     pub async fn get_stream(&self, id: i64) -> Result<Option<Stream>> {
         Ok(self.infra.db.list_streams().await
             .into_iter()
             .find(|s| s.id == id))
     }
 
-    /// 获取所有流
     pub async fn list_all_streams(&self) -> Vec<Stream> {
         self.infra.db.list_streams().await
     }
 
-    /// 分页获取流列表
     pub async fn list_streams_paginated(&self, search: Option<&str>, state: Option<&str>, limit: usize, offset: usize) -> Vec<Stream> {
-        tracing::debug!("list_streams_paginated called with search={:?}, state={:?}, limit={}, offset={}", search, state, limit, offset);
         let streams = self.infra.db.list_streams_paginated(search, state, limit, offset).await;
-        tracing::debug!("list_streams_paginated returned {} streams", streams.len());
         streams
     }
 
-    /// 获取流总数
     pub async fn count_streams(&self, search: Option<&str>, state: Option<&str>) -> usize {
         self.infra.db.count_streams(search, state).await
     }
 
-    /// 获取活跃流
     pub async fn list_active_streams(&self) -> Vec<Stream> {
         self.infra.db.list_streams().await
             .into_iter()
@@ -556,7 +515,6 @@ impl StreamService {
             .collect()
     }
 
-    /// 根据设备标签获取流列表
     pub async fn get_streams_by_device(&self, device_tag: &str) -> Vec<Stream> {
         let cache_key_prefix = format!("{}/", device_tag);
         let cache = self.infra.db.streams_cache();
@@ -566,7 +524,6 @@ impl StreamService {
             .collect()
     }
 
-    /// 根据通道标签获取流列表
     pub async fn get_streams_by_channel(&self, device_tag: &str, channel_tag: &str) -> Vec<Stream> {
         let cache_key = format!("{}/{}", device_tag, channel_tag);
         let cache = self.infra.db.streams_cache();
@@ -581,7 +538,6 @@ impl StreamService {
         self.infra.db.streams_cache().get(&cache_key).map(|s| s.value().clone())
     }
 
-    /// 获取播放 URL
     pub async fn get_play_url(&self, stream_key: &str, protocol: MediaProtocol) -> Result<String> {
         let info = self.infra.redis.get_stream_info(stream_key)
             .await?
@@ -600,7 +556,6 @@ impl StreamService {
         }
     }
 
-    /// 获取流统计
     pub async fn get_stats(&self) -> serde_json::Value {
         let streams = self.infra.db.list_streams().await;
         let total = streams.len();
@@ -612,28 +567,21 @@ impl StreamService {
         })
     }
 
-    /// 根据 Token 获取流
     pub async fn get_stream_by_token(&self, token: &str) -> Result<Option<Stream>> {
         self.infra.db.get_stream_by_token(token).await
     }
 
-    /// 根据 (app, stream_key) 获取流
-    pub async fn get_stream_by_stream_key(&self, app: &str, stream_key: &str) -> Option<Stream> {
+    pub async fn get_stream_by_stream_key(&self, _app: &str, stream_key: &str) -> Option<Stream> {
         let cache_key = stream_key.replace('_', "/");
         self.infra.db.streams_cache()
             .get(&cache_key)
             .map(|s| s.clone())
     }
 
-    /// 更新流状态
     pub async fn update_stream_state(&self, stream: &Stream) -> Result<()> {
         self.infra.db.update_stream(stream).await
     }
 
-    /// 重启现有流（复用记录，不创建新记录）
-    /// 用于流恢复场景：设备重新上线后，重新拉流到媒体服务器
-    ///
-    /// 核心原则：使用流已绑定的媒体服务器
     pub async fn restart_stream(
         &self,
         stream_key: &str,
@@ -675,13 +623,9 @@ impl StreamService {
         }
         self.infra.redis.set_stream_info(stream_key, &stream_info).await?;
 
-        tracing::info!("[StreamService] Stream {} restarted on {}", stream_key, updated_stream.media_server_tag);
         Ok(stream_info)
     }
 
-    /// 重启 GB28181 推送流（复用记录）
-    ///
-    /// 核心原则：使用流已绑定的媒体服务器
     pub async fn restart_gb28181_stream(
         &self,
         stream_key: &str,
@@ -697,7 +641,7 @@ impl StreamService {
         };
 
         let server_tag = &stream.media_server_tag;
-        let server = self.media.cluster.get_server(server_tag)
+        let _server = self.media.cluster.get_server(server_tag)
             .ok_or_else(|| AppError::MediaServerError(
                 format!("Media server '{}' not found for stream", server_tag)
             ))?;
@@ -746,17 +690,15 @@ impl StreamService {
         }
         self.infra.redis.set_stream_info(stream_key, &stream_info).await?;
 
-        tracing::info!("[StreamService] GB28181 stream {} restarted on {}", stream_key, updated_stream.media_server_tag);
         Ok(stream_info)
     }
 
-    async fn start_recording_for_channel(&self, device_tag: &str, channel_tag: &str, media_server: &str, app: &str, stream_key: &str) {
+    async fn start_recording_for_channel(&self, device_tag: &str, _channel_tag: &str, media_server: &str, _app: &str, stream_key: &str) {
         let device = match self.infra.db.devices_cache()
             .get(device_tag)
             .map(|r| r.value().clone()) {
             Some(d) => d,
             None => {
-                tracing::debug!("[StreamService] Device {} not found in cache, skipping recording", device_tag);
                 return;
             }
         };
@@ -778,8 +720,7 @@ impl StreamService {
             .start_recording_for_stream(device_tag.to_string(), stream_key, media_server, &config)
             .await
         {
-            Ok(Some(rec)) => {
-                tracing::info!("[StreamService] Recording {} auto-started for stream {}", rec.id, stream_key);
+            Ok(Some(_rec)) => {
             }
             Ok(None) => {}
             Err(e) => {
@@ -788,10 +729,6 @@ impl StreamService {
         }
     }
 }
-
-// ═══════════════════════════════════════════════════════════
-// StreamManager Trait 实现
-// ═══════════════════════════════════════════════════════════
 
 #[async_trait]
 impl StreamManager for StreamService {

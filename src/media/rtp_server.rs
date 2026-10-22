@@ -1,10 +1,3 @@
-//! RTP/RTCP 底层 socket 封装
-//!
-//! 说明：
-//! - UDP：RTP 与 RTCP socket 分端口（rtcp = rtp + 1），`new` 时同步 bind 两个。
-//! - TCP：Passive 模式监听端口，Active 模式 bind 一个未连接的 socket。
-//! - socket 都用 `Arc` 共享；只要有一处引用（如接收任务），socket 就保持打开。
-//!   端口生命周期由上层 `RtpServerManager` 通过冷却机制管理。
 
 use crate::media::errors::{MediaError, Result};
 use std::sync::Arc;
@@ -39,10 +32,6 @@ pub struct RtpSession {
     pub active_at: std::time::Instant,
 }
 
-// ═══════════════════════════════════════════════════════════
-// UDP
-// ═══════════════════════════════════════════════════════════
-
 pub struct UDPRtpServer {
     rtp_socket: Arc<tokio::net::UdpSocket>,
     rtcp_socket: Arc<tokio::net::UdpSocket>,
@@ -71,13 +60,6 @@ impl UDPRtpServer {
         let rtcp_socket = tokio::net::UdpSocket::bind(format!("{}:{}", bind_addr, port + 1))
             .await
             .map_err(|e| MediaError::Transport(format!("RTCP bind {}:{} failed: {}", bind_addr, port + 1, e)))?;
-
-        tracing::info!(
-            "[UDPRtpServer] Created on {}:{} (RTCP {})",
-            bind_addr,
-            port,
-            port + 1
-        );
 
         Ok(Self {
             rtp_socket: Arc::new(rtp_socket),
@@ -131,31 +113,15 @@ impl UDPRtpServer {
         *self.allocated_at.write().await = Some(now);
         *self.active_at.write().await = Some(now);
 
-        tracing::info!(
-            "[UDPRtpServer] Port {} allocated SSRC={} device={} channel={}",
-            self.port,
-            ssrc,
-            device_tag,
-            channel_tag
-        );
         true
     }
 
     pub async fn release(&self) {
-        let ssrc = { self.ssrc.write().await.take() };
-        let tag = { self.device_tag.write().await.take() };
+        let _ssrc = { self.ssrc.write().await.take() };
+        let _tag = { self.device_tag.write().await.take() };
         self.channel_tag.write().await.take();
         self.allocated_at.write().await.take();
         self.active_at.write().await.take();
-
-        if let Some(ssrc) = ssrc {
-            tracing::info!(
-                "[UDPRtpServer] Port {} released SSRC={} device={}",
-                self.port,
-                ssrc,
-                tag.unwrap_or_default()
-            );
-        }
     }
 
     pub fn is_allocated_sync(&self) -> bool {
@@ -200,10 +166,6 @@ pub struct UdpRtpPacket {
     pub payload_type: u8,
 }
 
-// ═══════════════════════════════════════════════════════════
-// TCP
-// ═══════════════════════════════════════════════════════════
-
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex as TokioMutex;
@@ -232,8 +194,6 @@ impl TcpRtpServer {
             .await
             .map_err(|e| MediaError::Transport(format!("TCP RTP bind {}:{} failed: {}", bind_addr, port, e)))?;
 
-        tracing::info!("[TcpRtpServer] Passive created on {}:{}", bind_addr, port);
-
         Ok(Self {
             port,
             mode: TcpMode::Passive,
@@ -259,8 +219,6 @@ impl TcpRtpServer {
         socket
             .bind(addr)
             .map_err(|e| MediaError::Transport(format!("TCP bind {} failed: {}", addr, e)))?;
-
-        tracing::info!("[TcpRtpServer] Active created on {}:{}", bind_addr, port);
 
         Ok(Self {
             port,
@@ -312,29 +270,17 @@ impl TcpRtpServer {
         *self.allocated_at.write().await = Some(now);
         *self.active_at.write().await = Some(now);
 
-        tracing::info!(
-            "[TcpRtpServer] Port {} allocated SSRC={} device={}",
-            self.port,
-            ssrc,
-            device_tag
-        );
         true
     }
 
     pub async fn release(&self) {
         let ssrc = { self.ssrc.write().await.take() };
-        let tag = { self.device_tag.write().await.take() };
+        let _tag = { self.device_tag.write().await.take() };
         self.channel_tag.write().await.take();
         self.allocated_at.write().await.take();
         self.active_at.write().await.take();
 
         if let Some(ssrc) = ssrc {
-            tracing::info!(
-                "[TcpRtpServer] Port {} released SSRC={} device={}",
-                self.port,
-                ssrc,
-                tag.unwrap_or_default()
-            );
         }
     }
 

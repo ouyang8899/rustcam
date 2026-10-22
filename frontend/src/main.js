@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import * as ElementPlusIcons from '@element-plus/icons-vue'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import 'element-plus/dist/index.css'
 import router from './router'
 import App from './App.vue'
@@ -21,7 +22,7 @@ app.component('v-chart', VChart)
 
 app.use(pinia)
 app.use(router)
-app.use(ElementPlus, { size: 'small' })
+app.use(ElementPlus, { size: 'small', locale: zhCn })
 
 if (window.ClientApp) {
   const wsUrl = `ws://${window.location.hostname}:8080`

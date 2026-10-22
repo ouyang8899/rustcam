@@ -5,72 +5,36 @@ use std::fmt;
 use crate::domain::recording::RecordingFormat;
 use crate::domain::server::ServerProtocolPorts;
 
-/// GB28181 流媒体配置
-///
-/// ## 视频配置 (video_*)
-/// - video_codec: 视频编码格式。常见值:
-///   - "PS" (默认): MPEG-PS, 海康大华常用
-///   - "H264": 纯H.264, 适用于大部分设备
-///   - "H265": H.265/HEVC, 部分新设备支持
-///   - "JPEG": MJPEG
-///
-/// ## 音频配置 (audio_*)
-/// - audio_codec: 音频编码格式。常见值:
-///   - "PCMA" (默认): G.711 A-law
-///   - "PCMU": G.711 μ-law  
-///   - "AAC": AAC-LC, 部分设备支持
-///   - "NONE"/"OFF": 禁用音频
-///
-/// ## RTP负载类型 (payload_type)
-/// - video_payload_type: 视频RTP负载类型, 通常96-127。一般96即可
-/// - audio_payload_type: 音频RTP负载类型, 8(G.711)是标准值
-///
-/// ## H.264特定 (profile_level_id, sprop_parameter_sets)
-/// - profile_level_id: SPS/PPS的profile_level_id, 如"4D001F"(Main Profile)
-/// - sprop_parameter_sets: Base64编码的SPS/PPS, 可从设备能力获取
-///
-/// ## PS封装特定 (packaging_mode)
-/// - packaging_mode: "HIS" (默认) 表示96字节头封装
-///
-/// ## 传输模式 (stream_mode)
-/// - stream_mode: "recvonly"(默认) 仅接收, "sendonly"仅发送, "sendrecv"双向
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamConfig {
-    /// 视频编码格式: PS/H264/H265/JPEG, 默认"PS"
+
     #[serde(
         default = "default_video_codec",
         skip_serializing_if = "Option::is_none"
     )]
     pub video_codec: Option<String>,
 
-    /// 音频编码格式: PCMA/PCMU/AAC/NONE, 默认"PCMA"
     #[serde(
         default = "default_audio_codec",
         skip_serializing_if = "Option::is_none"
     )]
     pub audio_codec: Option<String>,
 
-    /// 视频RTP负载类型, 默认96
     #[serde(default = "default_video_pt", skip_serializing_if = "Option::is_none")]
     pub video_payload_type: Option<u8>,
 
-    /// 音频RTP负载类型, 默认8
     #[serde(default = "default_audio_pt", skip_serializing_if = "Option::is_none")]
     pub audio_payload_type: Option<u8>,
 
-    /// H.264/H.265的profile_level_id, 如"4D001F"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_level_id: Option<String>,
 
-    /// PS封装的packaging_mode, 默认"HIS"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub packaging_mode: Option<String>,
 
-    /// H.264的SPS/PPS参数, Base64编码
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sprop_parameter_sets: Option<String>,
 
-    /// 传输模式: recvonly/sendonly/sendrecv, 默认"recvonly"
     #[serde(
         default = "default_stream_mode",
         skip_serializing_if = "Option::is_none"

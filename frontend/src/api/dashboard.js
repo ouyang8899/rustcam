@@ -2,7 +2,7 @@ import { request } from '../utils/request'
 
 export async function getDashboard() {
   const res = await request.get('/dashboard')
-  return res.data
+  return res.data.data
 }
 
 export async function getStats() {

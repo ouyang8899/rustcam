@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::api::state::FullState;
 use crate::api::response::ApiResponse;
 use crate::error::AppError;
-use crate::domain::alarm::{Alarm, CreateAlarmRequest};
+use crate::domain::alarm::{ Alarm };
 
 #[derive(Debug, Deserialize)]
 pub struct AlarmQuery {
@@ -58,6 +58,11 @@ pub async fn mark_alarm_processed_handler(
     Json(req): Json<MarkProcessedRequest>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
     let registry = &state.app.registry;
+
+    if registry.infra.db.get_alarm(id).await?.is_none() {
+        return Err(AppError::NotFound(format!("Alarm {} not found", id)));
+    }
+
     registry.infra.db.mark_alarm_processed(id, req.processed).await
         .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
     Ok(Json(ApiResponse::success(())))

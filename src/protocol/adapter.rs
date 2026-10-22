@@ -10,10 +10,6 @@ use crate::protocol::matcher::ProtocolMatcher;
 use crate::protocol::adapter_manager::AdapterEntry;
 use crate::domain::EventPublisher;
 
-// ═══════════════════════════════════════════════════════════════
-// SignalAdapter Trait
-// ═══════════════════════════════════════════════════════════════
-
 #[async_trait]
 pub trait SignalAdapter: Send + Sync {
     async fn parse(&mut self, data: &[u8]) -> Result<Vec<SignalEvent>>;
@@ -24,7 +20,7 @@ pub trait SignalAdapter: Send + Sync {
 
     async fn send(&mut self, data: &[u8]) -> Result<()>;
 
-    async fn send_interleaved(&mut self, channel: u8, payload: &[u8]) -> Result<()> {
+    async fn send_interleaved(&mut self, _channel: u8, _payload: &[u8]) -> Result<()> {
         Ok(())
     }
 
@@ -46,7 +42,7 @@ pub trait SignalAdapter: Send + Sync {
 
     async fn start(&mut self, device_tag: &str, channel_tag: &str) -> Result<()>;
 
-    async fn start_playback(&mut self, device_tag: &str, start_time: chrono::DateTime<chrono::Utc>, end_time: chrono::DateTime<chrono::Utc>) -> Result<()> {
+    async fn start_playback(&mut self, _device_tag: &str, _start_time: chrono::DateTime<chrono::Utc>, _end_time: chrono::DateTime<chrono::Utc>) -> Result<()> {
         Ok(())
     }
 
@@ -111,13 +107,8 @@ pub trait SignalAdapter: Send + Sync {
     async fn handle_registration_timeout(&mut self) {}
 }
 
-// ═══════════════════════════════════════════════════════════════
-// AdapterFactory Trait
-// ═══════════════════════════════════════════════════════════════
-
-/// 适配器工厂 trait
 pub trait AdapterFactory: Send + Sync {
-    /// 创建适配器实例
+
     fn create(
         &self,
         deps: ProtocolDeps,
@@ -125,14 +116,11 @@ pub trait AdapterFactory: Send + Sync {
         unregister_fn: Arc<dyn Fn(String) + Send + Sync>,
     ) -> Box<dyn SignalAdapter>;
 
-    /// 协议类型
     fn protocol_type(&self) -> ProtocolType;
 
-    /// 工厂名称
     fn name(&self) -> &'static str;
 }
 
-/// 闭包适配器工厂
 struct ClosureAdapterFactory {
     create_fn: Box<dyn Fn(ProtocolDeps, Arc<dyn Fn(String, AdapterEntry) + Send + Sync>, Arc<dyn Fn(String) + Send + Sync>) -> Box<dyn SignalAdapter> + Send + Sync>,
     protocol_type: ProtocolType,
@@ -156,18 +144,13 @@ impl AdapterFactory for ClosureAdapterFactory {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// AdapterRegistry
-// ═══════════════════════════════════════════════════════════════
-
-/// 适配器注册表
 pub struct AdapterRegistry {
     factories: Vec<Box<dyn AdapterFactory>>,
     matchers: Vec<(ProtocolMatcher, ProtocolType)>,
 }
 
 impl AdapterRegistry {
-    /// 创建空的适配器注册表
+
     pub fn new() -> Self {
         Self {
             factories: Vec::new(),
@@ -175,12 +158,6 @@ impl AdapterRegistry {
         }
     }
 
-    /// 注册适配器工厂
-    ///
-    /// # 参数
-    /// * `factory` - 创建适配器的闭包，接收 (deps, register_fn, unregister_fn)
-    /// * `protocol_type` - 协议类型
-    /// * `name` - 适配器名称
     pub fn register_with_deps<F>(
         &mut self,
         factory: F,
@@ -197,7 +174,6 @@ impl AdapterRegistry {
         }));
     }
 
-    /// 注册协议匹配器
     pub fn register_matcher(
         &mut self,
         matcher: ProtocolMatcher,
@@ -206,7 +182,6 @@ impl AdapterRegistry {
         self.matchers.push((matcher, protocol));
     }
 
-    /// 根据数据包匹配协议类型
     pub fn match_protocol(&self, first_packet: &[u8]) -> Option<ProtocolType> {
         for (matcher, protocol) in &self.matchers {
             if matcher.matches(first_packet) {
@@ -216,7 +191,6 @@ impl AdapterRegistry {
         None
     }
 
-    /// 创建适配器实例
     pub fn create_adapter(
         &self,
         protocol: &ProtocolType,
@@ -232,7 +206,6 @@ impl AdapterRegistry {
         None
     }
 
-    /// 获取所有注册的协议类型
     pub fn registered_protocols(&self) -> Vec<ProtocolType> {
         self.factories.iter().map(|f| f.protocol_type()).collect()
     }

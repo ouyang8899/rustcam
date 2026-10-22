@@ -1,12 +1,11 @@
 use async_trait::async_trait;
 use quick_xml::events::Event;
 use quick_xml::Reader;
-use std::collections::HashMap;
+
 use std::net::SocketAddr;
-use std::sync::{Arc, Weak};
+use std::sync::{ Arc };
 use tokio::io::AsyncWriteExt;
 use tokio::net::tcp::OwnedWriteHalf;
-use tokio::sync::RwLock;
 
 use crate::domain::SessionType;
 use crate::error::{AppError, Result};
@@ -35,18 +34,13 @@ fn xml_escape(s: &str) -> String {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&apos;"),
+                '\'' => out.push_str("&apos;"),
             _ => out.push(c),
         }
     }
     out
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 辅助函数
-// ═══════════════════════════════════════════════════════════════
-
-/// 从字节中提取本地名称（去除命名空间前缀）
 fn local_name(name_bytes: &[u8]) -> &str {
     let name_str = std::str::from_utf8(name_bytes).unwrap_or("");
     if let Some(idx) = name_str.find(':') {
@@ -55,10 +49,6 @@ fn local_name(name_bytes: &[u8]) -> &str {
         name_str
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-// ONVIF 设备信息
-// ═══════════════════════════════════════════════════════════════
 
 #[derive(Debug, Clone, Default)]
 pub struct OnvifDeviceInfo {
@@ -69,10 +59,6 @@ pub struct OnvifDeviceInfo {
     pub hardware_id: String,
     pub password: Option<String>,
 }
-
-// ═══════════════════════════════════════════════════════════════
-// ONVIF 适配器
-// ═══════════════════════════════════════════════════════════════
 
 pub struct OnvifAdapter {
     device_id: Option<String>,
@@ -88,7 +74,7 @@ pub struct OnvifAdapter {
 
 impl OnvifAdapter {
     pub fn new(deps: ProtocolDeps) -> Self {
-        // ONVIF 模拟设备默认使用 RTSP 端口 8554
+
         let rtsp_port = deps
             .config
             .media_servers
@@ -128,10 +114,6 @@ impl OnvifAdapter {
         self.device_info = info;
         self
     }
-
-    // ═══════════════════════════════════════════════════════
-    // 消息解析
-    // ═══════════════════════════════════════════════════════
 
     fn extract_message(buffer: &[u8]) -> std::result::Result<Option<(usize, usize)>, &'static str> {
         let header_end = match memchr::memmem::find(buffer, b"\r\n\r\n") {
@@ -193,10 +175,6 @@ impl OnvifAdapter {
     fn action_name(soap_action: &str) -> &str {
         soap_action.rsplit('/').next().unwrap_or(soap_action).trim()
     }
-
-    // ═══════════════════════════════════════════════════════
-    // SOAP 响应构建
-    // ═══════════════════════════════════════════════════════
 
     fn build_soap_response(body: &str) -> String {
         format!(
@@ -398,10 +376,6 @@ impl OnvifAdapter {
         Self::build_soap_response(body)
     }
 
-    // ═══════════════════════════════════════════════════════
-    // XML 解析辅助方法
-    // ═══════════════════════════════════════════════════════
-
     fn extract_element_text(data: &[u8], element: &str) -> Option<String> {
         let mut reader = Reader::from_reader(data);
         reader.config_mut().trim_text(true);
@@ -530,10 +504,6 @@ impl OnvifAdapter {
         24
     }
 
-    // ═══════════════════════════════════════════════════════
-    // 发送方法
-    // ═══════════════════════════════════════════════════════
-
     async fn send_raw(&self, data: &[u8]) -> Result<()> {
         if let Some(ref write_arc) = self.write {
             let mut write = write_arc.write().await;
@@ -545,10 +515,6 @@ impl OnvifAdapter {
         }
         Ok(())
     }
-
-    // ═══════════════════════════════════════════════════════
-    // SOAP 请求处理
-    // ═══════════════════════════════════════════════════════
 
     fn handle_soap_action(&self, action: &str, data: &[u8]) -> Option<String> {
         if Self::action_name(action).contains("GetDeviceInformation") {
@@ -658,7 +624,6 @@ impl OnvifAdapter {
 </GetNetworkDefaultSettingsResponse>"#,
             ))
         } else {
-            tracing::debug!("[ONVIF] Unhandled action: {}", action);
             Some(Self::build_soap_fault(
                 "s:Client",
                 "ter:ActionNotSupported",
@@ -684,7 +649,6 @@ impl OnvifAdapter {
 
         let mut events = Vec::new();
 
-        // 认证检查
         if let Some(ref action) = soap_action {
             if let Some(token) = UsernameToken::from_xml(data) {
                 let password = self.device_info.password.as_deref().unwrap_or("admin");
@@ -704,7 +668,6 @@ impl OnvifAdapter {
             }
         }
 
-        // 生成事件
         if let Some(action) = soap_action.as_deref() {
             if Self::action_name(action).contains("GetDeviceInformation")
                 || Self::action_name(action).contains("GetCapabilities")
@@ -764,10 +727,6 @@ impl OnvifAdapter {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// SignalAdapter Trait Implementation
-// ═══════════════════════════════════════════════════════════════
-
 #[async_trait]
 impl SignalAdapter for OnvifAdapter {
     async fn parse(&mut self, data: &[u8]) -> Result<Vec<SignalEvent>> {
@@ -812,13 +771,11 @@ impl SignalAdapter for OnvifAdapter {
 
     async fn on_connected(&mut self, addr: SocketAddr) -> Result<()> {
         self.remote_addr = Some(addr);
-        tracing::info!("[ONVIF] Connection from {}", addr);
         Ok(())
     }
 
     async fn on_disconnected(&mut self) -> Result<()> {
         let device_id = self.device_id.as_deref().unwrap_or("unknown");
-        tracing::info!("[ONVIF] Device {} disconnected", device_id);
         self.recv_buffer.clear();
         if self.device_id.is_some() {
             let _ = self
@@ -875,10 +832,6 @@ impl SignalAdapter for OnvifAdapter {
         let parent_tag = match &device.parent_device_tag {
             Some(tag) => tag.clone(),
             None => {
-                tracing::debug!(
-                    "[ONVIF] PTZ device {} has no parent, using itself",
-                    channel_id
-                );
                 channel_id.to_string()
             }
         };
@@ -981,11 +934,9 @@ impl SignalAdapter for OnvifAdapter {
                     .map_err(|e| tracing::warn!("[ONVIF] RemovePreset failed: {}", e));
             }
             _ => {
-                tracing::debug!("[ONVIF] PTZ command {:?} not supported directly", command);
             }
         }
 
-        tracing::debug!("[ONVIF] PTZ sent: channel={} cmd={:?}", channel_id, command);
         Ok(())
     }
 
@@ -994,11 +945,6 @@ impl SignalAdapter for OnvifAdapter {
         device_tag: &str,
         requester_node_id: MediaNodeId,
     ) -> Result<()> {
-        tracing::info!(
-            "[ONVIF] start_audio_talk_internal: device_tag={} requester_node_id={}",
-            device_tag,
-            requester_node_id.id
-        );
 
         let try_send_error = |msg: &str| {
             let resp = SignalEvent::AudioTalkResponse {
@@ -1008,14 +954,10 @@ impl SignalAdapter for OnvifAdapter {
             };
             let _ = self.deps.event_publisher.clone().publish(resp);
         };
-        //不能保证重复生成媒体节点的安全，心里安慰
+
         if let Some(mgr) = get_media_session_manager() {
             let session = mgr.get_or_create(device_tag);
             if session.has_node_of_type(MediaNodeType::ONVIF_BROADCAST_VOICE) {
-                tracing::info!(
-                    "[ONVIF] ONVIF_BROADCAST_VOICE node already exists for device {}, sending ready",
-                    device_tag
-                );
                 let event = SignalEvent::AudioTalkReady {
                     node_id: requester_node_id.clone(),
                 };
@@ -1050,12 +992,6 @@ impl SignalAdapter for OnvifAdapter {
         let username = device.device_username.clone().unwrap_or_default();
         let password = device.device_password.clone().unwrap_or_default();
 
-        tracing::info!(
-            "[ONVIF] Creating backchannel transport: url={} user={}",
-            rtsp_url,
-            username
-        );
-
         let node_id = MediaNodeId::new(MediaNodeType::ONVIF_BROADCAST_VOICE, device_tag, None);
 
         let transport = OnvifBackchannelTransport::new(rtsp_url, username, password);
@@ -1073,24 +1009,15 @@ impl SignalAdapter for OnvifAdapter {
 
         transport.set_node(node.clone());
 
-        tracing::info!("[ONVIF] Connecting backchannel transport first to verify support...");
         if let Err(e) = transport.connect().await {
             tracing::error!("[ONVIF] Backchannel transport connect failed: {}", e);
             try_send_error(&format!("Backchannel connect failed: {}", e));
             return Ok(());
         }
 
-        tracing::info!(
-            "[ONVIF] Backchannel connected successfully, now adding node to mediasession..."
-        );
-
         if let Some(mgr) = get_media_session_manager() {
             let session = mgr.get_or_create(device_tag);
             if session.has_node_of_type(MediaNodeType::ONVIF_BROADCAST_VOICE) {
-                tracing::info!(
-                    "[ONVIF] ONVIF_BROADCAST_VOICE node already exists for device {}, skipping",
-                    device_tag
-                );
                 return Ok(());
             }
             if let Err(e) = session.add_node(node.clone()) {
@@ -1098,17 +1025,8 @@ impl SignalAdapter for OnvifAdapter {
                 try_send_error(&format!("Failed to add node: {}", e));
                 return Ok(());
             }
-            tracing::info!(
-                "[ONVIF] MediaNode added to session: {}_{}",
-                device_tag,
-                node_id.id
-            );
         }
 
-        tracing::info!(
-            "[ONVIF] Backchannel ready, sending AudioTalkReady for requester_node_id={}",
-            requester_node_id.id
-        );
         let event = SignalEvent::AudioTalkReady {
             node_id: requester_node_id.clone(),
         };
@@ -1121,7 +1039,6 @@ impl SignalAdapter for OnvifAdapter {
 
     async fn stop_audio_talk_internal(&mut self, node_id: MediaNodeId) -> Result<()> {
         let device_tag = &node_id.device_tag;
-        tracing::info!("[ONVIF] stop_audio_talk_internal: node_id={} device_tag={}", node_id.id, device_tag);
 
         let manager = match get_media_session_manager() {
             Some(m) => m,
@@ -1138,9 +1055,7 @@ impl SignalAdapter for OnvifAdapter {
                 .map(|n| n.id().clone());
 
             if let Some(bc_node_id) = bc_node_id {
-                tracing::info!("[ONVIF] Found ONVIF_BROADCAST_VOICE node={}, removing and stopping", bc_node_id.id);
-                let removed = session.remove_and_stop_node(&bc_node_id).await;
-                tracing::info!("[ONVIF] ONVIF_BROADCAST_VOICE node removed: {}", removed);
+                let _removed = session.remove_and_stop_node(&bc_node_id).await;
             } else {
                 tracing::warn!("[ONVIF] No ONVIF_BROADCAST_VOICE node found in session for device {}", device_tag);
             }

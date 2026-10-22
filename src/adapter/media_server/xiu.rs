@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use serde::Deserialize;
+
 use crate::adapter::media_server::{MediaServerAdapter, Protocol, RecordingInfo, RecordingFile, RtpTransport, ServerStatus, StreamInfo, host_with_port_from_config, format_rtsp_auth};
 use crate::config::MediaServerConfig;
 use crate::domain::device::PlayLinks;
@@ -26,6 +26,7 @@ impl MediaServerAdapter for XiuAdapter {
     fn tag(&self) -> &str { &self.config.server_tag }
     fn server_type(&self) -> &str { "xiu" }
     fn secret(&self) -> &str { &self.config.api_key }
+    fn http_base_url(&self) -> String { format!("http://{}", self.base_url) }
 
     async fn is_online(&self) -> bool {
         let url = format!("{}/api/status", self.base_url);
@@ -70,7 +71,7 @@ impl MediaServerAdapter for XiuAdapter {
     async fn get_sessions(&self) -> anyhow::Result<Vec<serde_json::Value>> { Ok(vec![]) }
     async fn is_stream_online(&self, _app: &str, _stream_key: &str) -> anyhow::Result<bool> { Ok(false) }
     async fn ptz_control(&self, _stream_key: &str, _command: &str, _channel: u8) -> anyhow::Result<()> { Ok(()) }
-    async fn start_recording(&self, _app: &str, _stream_key: &str, _format: &str, _output_path: Option<&str>) -> anyhow::Result<RecordingInfo> {
+    async fn start_recording(&self, _app: &str, _stream_key: &str, _format: &str, _output_path: Option<&str>, _max_duration_secs: Option<u32>, _pre_record_secs: Option<u32>) -> anyhow::Result<RecordingInfo> {
         Ok(RecordingInfo { stream_key: String::new(), output_path: String::new(), started_at: chrono::Utc::now().timestamp() })
     }
     async fn stop_recording(&self, _app: &str, _stream_key: &str, _format: &str) -> anyhow::Result<()> { Ok(()) }
@@ -91,7 +92,7 @@ impl MediaServerAdapter for XiuAdapter {
         rtsp_auth: Option<(&str, &str)>,
     ) -> anyhow::Result<PlayLinks> {
         let rtsp_host = self.host_with_port(Protocol::Rtsp);
-        let rtmp_host = self.host_with_port(Protocol::Rtmp);
+        let _rtmp_host = self.host_with_port(Protocol::Rtmp);
         let http_host = self.host_with_port(Protocol::Hls);
 
         let rtsp_auth_str = format_rtsp_auth(rtsp_auth);

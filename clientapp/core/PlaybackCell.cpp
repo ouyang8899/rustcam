@@ -30,6 +30,10 @@ PlaybackCell::PlaybackCell(QWidget* parent)
         showNoRecording(timeMs);
     });
 
+    connect(m_source, &StreamSource::playbackProgressChanged, this, [this](int64_t absoluteTimeMs) {
+        emit playbackProgressChanged(absoluteTimeMs);
+    });
+
     m_noRecordingLabel = new QLabel(this);
     m_noRecordingLabel->setAlignment(Qt::AlignCenter);
     m_noRecordingLabel->setObjectName("NoRecordingLabel");

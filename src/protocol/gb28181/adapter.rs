@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::io::{ AsyncWriteExt };
 use tokio::net::tcp::OwnedWriteHalf;
 
 use chrono::{DateTime, Utc};
@@ -12,7 +12,6 @@ use roxmltree::Document;
 
 use crate::protocol::gb28181::GB28181_USER_AGENT;
 
-/// GB28181 播放错误类型
 #[derive(Debug, Clone)]
 pub enum PlaybackError {
     DeviceOffline,
@@ -43,12 +42,11 @@ impl std::fmt::Display for PlaybackError {
 use crate::common_types::TransportType;
 use crate::context::registry;
 use crate::media::node::{
-    BasicMediaNode, DataType, MediaNode, MediaNodeId, MediaNodeType, RtpSendMiddleware,
+    BasicMediaNode, DataType, MediaNode, MediaNodeId, MediaNodeType,
     SendToReceiversMiddleware,
 };
-use crate::media::DataTransport;
-use crate::media::AudioCodec;
-use crate::protocol::event::{CatalogChannel, EventHandler, ProtocolType, PtzCommand, SignalEvent};
+
+use crate::protocol::event::{ CatalogChannel, ProtocolType, PtzCommand, SignalEvent };
 use crate::domain::SessionType;
 
 use crate::adapter::media_server::RtpTransport;
@@ -75,10 +73,10 @@ impl Default for Gb28181Version {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RegistrationState {
-    Init,        // 初始化
-    Registered,  // 注册完成，等待发送 catalog
-    CatalogSent, // 已发送 catalog，等待响应
-    Failed,      // 失败状态，需要重置
+    Init,
+    Registered,
+    CatalogSent,
+    Failed,
 }
 
 impl Default for RegistrationState {
@@ -165,16 +163,14 @@ pub struct SubSession {
     pub channel_id: String,
     pub stream_key: String,
     pub media_server_name: String,
-    /// SIP From URI - 格式: 平台ID@本地IP:端口 (无sip:前缀)
-    /// 例如: 31011500001000000001@192.168.1.7:5061
+
     pub from_uri: String,
-    /// SIP To URI - 格式: 设备ID@设备IP:设备端口 (无sip:前缀)
-    /// 例如: 12010100001320000011@192.168.1.211:5060
+
     pub to_uri: String,
     pub from_tag: String,
     pub to_tag: Option<String>,
     pub via_branch: String,
-    /// 媒体服务器IP (来自alloc_rtp_port返回的server_ip)
+
     pub server_ip: String,
     pub server_port: u16,
     pub transport: TransportType,
@@ -318,11 +314,6 @@ impl Gb28181Adapter {
 
     pub fn set_registration_state(&mut self, state: RegistrationState) {
         if self.registration_state != state {
-            tracing::info!(
-                "[GB28181] Registration state transition: {:?} -> {:?}",
-                self.registration_state,
-                state
-            );
             self.registration_state = state;
             self.wait_timer = None;
         }
@@ -355,11 +346,6 @@ impl Gb28181Adapter {
                     None => return,
                 };
                 if timer.should_retry() {
-                    tracing::info!(
-                        "[GB28181] Catalog timeout, retry {}/{}",
-                        timer.retry_count + 1,
-                        timer.max_retries
-                    );
                     timer.increment_retry();
                     timer.reset_with_time();
                     let query = self.build_catalog_query();
@@ -1086,7 +1072,7 @@ impl Gb28181Adapter {
             .unwrap_or_else(|| self.to_tag.as_deref().map(|t| format!(";tag={}", t)).unwrap_or_default());
         let contact_line = contact_override.map(|c| format!("Contact: <{}>\r\n", c)).unwrap_or_default();
         let call_id = call_id_override.unwrap_or_else(|| self.call_id.as_deref().unwrap_or("rustcam-call-id"));
-        
+
         let (content_type_line, content_length_line) = if let Some(len) = content_length {
             (
                 "Content-Type: application/sdp\r\n".to_string(),
@@ -1098,7 +1084,7 @@ impl Gb28181Adapter {
                 "Content-Length: 0\r\n".to_string()
             )
         };
-        
+
         format!(
             "SIP/2.0 {} {}\r\n\
              Via: {}\r\n\
@@ -1136,12 +1122,6 @@ impl Gb28181Adapter {
                 format!("sip:{}", device)
             }
         });
-        tracing::info!(
-            "[GB28181] build_401_response: from_uri='{}', from_tag='{}', to_tag='{}'",
-            from_uri,
-            self.from_tag.as_deref().unwrap_or(""),
-            self.to_tag.as_deref().unwrap_or("")
-        );
         let www_auth = format!(r#"Digest realm="{}", nonce="{}""#, realm, nonce);
         let response = format!(
             "SIP/2.0 401 Unauthorized\r\n\
@@ -1163,7 +1143,6 @@ impl Gb28181Adapter {
             GB28181_USER_AGENT,
             www_auth
         );
-        tracing::info!("[GB28181] 401 response:\n{}", response);
         response
     }
 
@@ -1341,12 +1320,12 @@ impl Gb28181Adapter {
         let video_pt = config
             .and_then(|c| c.video_payload_type)
             .unwrap_or_else(|| Self::codec_to_video_pt(&video_codec));
-        let audio_pt = config
+        let _audio_pt = config
             .and_then(|c| c.audio_payload_type)
             .unwrap_or_else(|| Self::codec_to_audio_pt(&audio_codec));
 
         let (video_encoding, video_clock) = Self::codec_to_rtp_map(&video_codec);
-        let (audio_encoding, audio_clock) = Self::codec_to_audio_rtp_map(&audio_codec);
+        let (_audio_encoding, _audio_clock) = Self::codec_to_audio_rtp_map(&audio_codec);
 
         let mut video_line = format!("m=video {} RTP/AVP {}\r\n", rtp_port, video_pt);
         video_line.push_str(&format!("a={}\r\n", stream_mode));
@@ -1407,9 +1386,6 @@ impl Gb28181Adapter {
         sdp.push_str(&audio_line);
         sdp.push_str(&format!("y={:010}\r\n", ssrc));
 
-        // f字段格式: f=v/编码格式/分辨率/帧率/码率类型/码率
-        // v=视频, 编码格式: PS/H264/H265等, 分辨率: 宽*高, 帧率: 数字, 码率类型: 1(可变码率)/0(固定码率), 码率: Kbps
-        // 参考: f=v/264/1920*1080/25/1/2048
         let video_encoding_for_f = match video_codec.to_uppercase().as_str() {
             "H264" | "H.264" | "AVC" => "264",
             "H265" | "H.265" | "HEVC" => "265",
@@ -1417,7 +1393,7 @@ impl Gb28181Adapter {
             "MPEG4" | "MP4V" => "mp4v",
             _ => "264",
         };
-        // 使用默认值: 1920*1080, 25fps, 可变码率, 2048Kbps
+
         let f_line = format!("f=v/{}/1920*1080/25/1/2048\r\n", video_encoding_for_f);
         sdp.push_str(&f_line);
 
@@ -1507,11 +1483,6 @@ impl Gb28181Adapter {
 "#,
             sn, source_id, target_id
         );
-        tracing::info!("[GB28181] build_broadcast_notification:");
-        tracing::info!("[GB28181]   source_id (platform): {}", source_id);
-        tracing::info!("[GB28181]   target_id (device): {}", target_id);
-        tracing::info!("[GB28181]   sn: {}", sn);
-        tracing::info!("[GB28181]   XML:\n{}", xml);
         xml
     }
 
@@ -1535,10 +1506,6 @@ impl Gb28181Adapter {
 
         let adapter = match adapter {
             Some(a) if a.is_online().await => {
-                tracing::info!(
-                    "[GB28181] Using device-associated media server: {}",
-                    server_name.unwrap()
-                );
                 a
             }
             _ => {
@@ -1565,13 +1532,6 @@ impl Gb28181Adapter {
             .await
         {
             Ok((port, ip)) => {
-                tracing::info!(
-                    "[GB28181] RTP allocated: stream={}, port={}, ip={}, server={}",
-                    stream_key,
-                    port,
-                    ip,
-                    tag
-                );
                 Ok((port, ip, tag))
             }
             Err(e) => {
@@ -1584,7 +1544,6 @@ impl Gb28181Adapter {
                                 .open_rtp_server(stream_key, 0, RtpTransport::Udp)
                                 .await
                                 .map(|(port, ip)| {
-                                    tracing::info!("[GB28181] RTP fallback: server={}", fb_tag);
                                     (port, ip, fb_tag)
                                 })
                                 .map_err(|e2| {
@@ -1624,7 +1583,6 @@ impl Gb28181Adapter {
             .map(|v| Self::parse_sip_uri(&v))
             .unwrap_or_else(|| "unknown".to_string());
 
-        tracing::info!("[GB28181] handle_register: device_id={}", device_id);
         self.device_tag = Some(device_id.clone());
         if let Some(from_hdr) = Self::get_header(headers, "From") {
             self.from_uri = Some(Self::parse_sip_uri_with_domain_only(&from_hdr));
@@ -1666,11 +1624,6 @@ impl Gb28181Adapter {
         let to_hdr = Self::get_header(headers, "To").unwrap_or_default();
         let (request_from_uri, request_from_tag) = Self::parse_from_to_uri_and_tag(&from_hdr);
         let (request_to_uri, _) = Self::parse_from_to_uri_and_tag(&to_hdr);
-        tracing::info!(
-            "[GB28181] REGISTER: {} (expires={}s)",
-            device_id,
-            self.registration_expires()
-        );
 
         let auth_header = headers
             .iter()
@@ -1682,11 +1635,6 @@ impl Gb28181Adapter {
                 .get()
                 .map(|c| c.1.clone())
                 .unwrap_or_else(|| device_id.clone());
-            tracing::info!(
-                "[GB28181] No Authorization header, sending 401 to {} with realm={}",
-                device_id,
-                server_realm
-            );
             return (
                 None,
                 Some(self.build_401_response(&via_branch, &cseq, &server_realm)),
@@ -1703,12 +1651,6 @@ impl Gb28181Adapter {
                 return (None, Some(self.build_403_response(&via_branch, &cseq)));
             }
         };
-        tracing::info!(
-            "[GB28181] Auth params: username={}, realm={}, nonce={}",
-            auth_params.username,
-            auth_params.realm,
-            auth_params.nonce
-        );
         if !verify_nonce(&auth_params.nonce) {
             let server_realm = super::get_gb28181_platform_config()
                 .get()
@@ -1741,7 +1683,6 @@ impl Gb28181Adapter {
                 return (None, Some(self.build_401_response(&via_branch, &cseq, &server_realm)));
             }
         };
-        tracing::info!("[GB28181] Device found: username={}", username);
         if auth_params.username != username {
             tracing::warn!(
                 "[GB28181] Username mismatch: auth={} vs db={}, sending 401 to trigger re-registration",
@@ -1757,7 +1698,6 @@ impl Gb28181Adapter {
 
         match verify_sip_digest(&auth_params, &password, "REGISTER") {
             VerifyResult::Valid => {
-                tracing::info!("[GB28181] Device {} authenticated", device_id);
                 consume_nonce(&auth_params.nonce);
                 self.device_id = Some(internal_id as i64);
 
@@ -1773,12 +1713,6 @@ impl Gb28181Adapter {
                 let _ = self.deps.device_lookup.set_online(&device_id).await;
 
                 if let Some((host, port)) = Self::parse_contact_host_port(headers) {
-                    tracing::info!(
-                        "[GB28181] Device {} Contact header parsed: host={}, port={}",
-                        device_id,
-                        host,
-                        port
-                    );
                     let _ = self
                         .deps
                         .device_lookup
@@ -1787,10 +1721,6 @@ impl Gb28181Adapter {
                 }
 
                 let event = if prev_state == RegistrationState::Init {
-                    tracing::info!(
-                        "[GB28181] Device {} registered as new, sending catalog query",
-                        device_id
-                    );
                     self.set_registration_state(RegistrationState::CatalogSent);
                     let query = self.build_catalog_query();
                     let _ = self.send(&query).await;
@@ -1808,7 +1738,6 @@ impl Gb28181Adapter {
                         protocol: ProtocolType::Gb28181,
                     }
                 } else {
-                    tracing::debug!("[GB28181] Device {} re-registered (keepalive)", device_id);
                     SignalEvent::DeviceKeepalive {
                         device_id: internal_id,
                         device_tag,
@@ -1875,7 +1804,6 @@ impl Gb28181Adapter {
 
                 self.waiting_for_reregister = true;
             } else {
-                tracing::debug!("[GB28181] Device in Init state, waiting for re-registration, ignoring MESSAGE");
             }
             return (None, None);
         }
@@ -1884,12 +1812,6 @@ impl Gb28181Adapter {
 
         if body.contains("<Response>") && body.contains("Broadcast") {
             let (accept, audio_port) = self.parse_broadcast_answer(body).unwrap_or((false, None));
-
-            tracing::info!(
-                "[GB28181] Broadcast answer received: accept={} audio_port={:?}",
-                accept,
-                audio_port
-            );
 
             if accept {
                 return (
@@ -1907,7 +1829,6 @@ impl Gb28181Adapter {
                     tracing::warn!("[GB28181] Device reported busy, attempting to clear session");
                     let sessions = self.sessions.read().await;
                     if let Some(session) = sessions.iter().find(|s| s.device_tag == device_tag && s.session_type == SessionType::Broadcast) {
-                        tracing::info!("[GB28181] Found broadcast SubSession, sending BYE");
                         let session_clone = session.clone();
                         drop(sessions);
                         if let Err(e) = self.send_bye_to_session(&session_clone).await {
@@ -1930,42 +1851,19 @@ impl Gb28181Adapter {
         }
 
         if body.contains("<Response>") && body.contains("Catalog") {
-            tracing::info!(
-                "[GB28181] Raw Catalog Response from {}:\n{}",
-                device_tag,
-                body
-            );
             let channels = self.parse_catalog_response(body);
-            tracing::debug!(
-                "[GB28181] parse_catalog_response returned {} channels",
-                channels.len()
-            );
             let channels = channels
                 .into_iter()
                 .map(|mut ch| {
                     if ch.parent_id.as_deref() != Some(&device_tag) {
-                        tracing::debug!(
-                            "[GB28181] Correcting ParentID for channel {}: {} -> {}",
-                            ch.device_id,
-                            ch.parent_id.as_deref().unwrap_or("<empty>"),
-                            device_tag
-                        );
                         ch.parent_id = Some(device_tag.clone());
                     }
                     ch
                 })
                 .collect::<Vec<_>>();
-            for (i, ch) in channels.iter().enumerate() {
-                tracing::debug!(
-                    "[GB28181]   channel[{}]: id={}, name={}, parental={}",
-                    i,
-                    ch.device_id,
-                    ch.name,
-                    ch.parental
-                );
+            for (_i, _ch) in channels.iter().enumerate() {
             }
             if channels.is_empty() {
-                tracing::info!("[GB28181] Catalog empty for device {} - IPC mode (device itself is the channel)", device_tag);
                 self.set_registration_state(RegistrationState::Registered);
                 let device_channel = CatalogChannel {
                     device_id: device_tag.clone(),
@@ -2028,12 +1926,6 @@ impl Gb28181Adapter {
             let channel_id =
                 Self::parse_channel_id(body).unwrap_or_else(|| "00000000000000000000".to_string());
             let catalog_xml = self.build_catalog_response(&channel_id);
-            tracing::info!(
-                "[GB28181] Catalog Response sent to {} (channel={}):\n{}",
-                device_tag,
-                channel_id,
-                catalog_xml
-            );
             let resp = format!(
                 "{}\r\n{}",
                 self.build_sip_response_only_headers_with_to(200, "OK", &via_branch, &cseq, Some(&request_from_uri), request_from_tag.as_deref(), Some(&request_to_uri), None, None, Some(&call_id), None)
@@ -2082,11 +1974,6 @@ impl Gb28181Adapter {
                 self.build_sip_response_only_headers_with_to(200, "OK", &via_branch, &cseq, Some(&request_from_uri), request_from_tag.as_deref(), Some(&request_to_uri), None, None, Some(&call_id), None),
                 self.build_device_config_response(&config_type)
             );
-            tracing::info!(
-                "[GB28181] DeviceConfig query: device={} type={}",
-                device_tag,
-                config_type
-            );
             return (
                 Some(SignalEvent::QueryDeviceConfig {
                     device_id: self.device_id_i64(),
@@ -2102,11 +1989,6 @@ impl Gb28181Adapter {
                 "{}{}",
                 self.build_sip_response_only_headers_with_to(200, "OK", &via_branch, &cseq, Some(&request_from_uri), request_from_tag.as_deref(), Some(&request_to_uri), None, None, Some(&call_id), None),
                 self.build_preset_list_response(&channel_id)
-            );
-            tracing::info!(
-                "[GB28181] PresetList query: device={} channel={}",
-                device_tag,
-                channel_id
             );
             return (
                 Some(SignalEvent::PresetQuery {
@@ -2127,13 +2009,6 @@ impl Gb28181Adapter {
                 "{}{}",
                 self.build_sip_response_only_headers_with_to(200, "OK", &via_branch, &cseq, Some(&request_from_uri), request_from_tag.as_deref(), Some(&request_to_uri), None, None, Some(&call_id), None),
                 self.build_preset_response(&channel_id, &preset_id, &preset_name, "SetPreset")
-            );
-            tracing::info!(
-                "[GB28181] SetPreset: device={} channel={} id={} name={}",
-                device_tag,
-                channel_id,
-                preset_id,
-                preset_name
             );
             return (
                 Some(SignalEvent::PresetSet {
@@ -2160,12 +2035,6 @@ impl Gb28181Adapter {
                     "GotoPreset"
                 )
             );
-            tracing::info!(
-                "[GB28181] GotoPreset: device={} channel={} index={}",
-                device_tag,
-                channel_id,
-                preset_index
-            );
             return (
                 Some(SignalEvent::PresetGoto {
                     device_id: self.device_id_i64(),
@@ -2191,12 +2060,6 @@ impl Gb28181Adapter {
                     "RemovePreset"
                 )
             );
-            tracing::info!(
-                "[GB28181] RemovePreset: device={} channel={} index={}",
-                device_tag,
-                channel_id,
-                preset_index
-            );
             return (
                 Some(SignalEvent::PresetRemove {
                     device_id: self.device_id_i64(),
@@ -2219,12 +2082,8 @@ impl Gb28181Adapter {
                 return (None, Some(resp));
             }
             RegistrationState::Registered => {
-                tracing::info!("[GB28181] Keepalive, Registered state");
             }
             RegistrationState::CatalogSent => {
-                tracing::info!(
-                    "[GB28181] Keepalive, CatalogSent state, waiting for catalog response"
-                );
             }
             RegistrationState::Failed => {
                 tracing::warn!("[GB28181] Keepalive in Failed state");
@@ -2264,12 +2123,6 @@ impl Gb28181Adapter {
 
         if let Some(session) = sub_session {
             if session.device_tag == session.channel_id {
-                tracing::info!(
-                    "[GB28181] Single device BYE: channel={}, stream={}, session_type={}",
-                    session.channel_id,
-                    session.stream_key,
-                    if session.session_type == SessionType::Broadcast { "Broadcast" } else { "Play/Playback" }
-                );
                 if session.session_type != SessionType::Broadcast {
                     if let Some(app) = self.get_device_app(&session.channel_id).await {
                         let _ = self
@@ -2279,7 +2132,6 @@ impl Gb28181Adapter {
                             .await;
                     }
                 } else {
-                    tracing::info!("[GB28181] Broadcast BYE - not stopping media stream (internal to platform)");
                 }
 
                 self.sessions.write().await.retain(|s| s.call_id != call_id);
@@ -2292,11 +2144,6 @@ impl Gb28181Adapter {
                     Some(self.build_sip_response_only_headers_with_to(200, "OK", &via_branch, &cseq, Some(&request_from_uri), request_from_tag.as_deref(), Some(&request_to_uri), None, None, Some(&call_id), None)),
                 );
             }
-            tracing::info!(
-                "[GB28181] Sub-device BYE: channel={}, stream={}",
-                session.channel_id,
-                session.stream_key
-            );
             if session.session_type != SessionType::Broadcast {
                 if let Some(app) = self.get_device_app(&session.channel_id).await {
                     let _ = self
@@ -2306,7 +2153,6 @@ impl Gb28181Adapter {
                         .await;
                 }
             } else {
-                tracing::info!("[GB28181] Sub-device Broadcast BYE - not stopping media stream (internal to platform)");
             }
 
             self.sessions.write().await.retain(|s| s.call_id != call_id);
@@ -2335,35 +2181,26 @@ impl Gb28181Adapter {
         headers: &[(String, String)],
     ) -> (Option<SignalEvent>, Option<String>) {
         let call_id = Self::get_header(headers, "Call-ID").unwrap_or_default();
-        
+
         if let Some((transport, node)) = self.pending_tcp_active.write().await.remove(&call_id) {
-            tracing::info!("[GB28181] ACK received for TCP active, connecting and activating");
             match transport.connect().await {
                 Ok(()) => {
                     transport.activate(node.clone());
-                    tracing::info!("[GB28181] TCP active transport activated and pending_tcp_active cleaned");
                 }
                 Err(e) => {
                     tracing::error!("[GB28181] TCP active connect failed: {}", e);
                 }
             }
         }
-        
+
         let sessions = self.sessions.read().await;
         if let Some(session) = sessions.iter().find(|s| s.call_id == call_id) {
-            tracing::info!(
-                "[GB28181] ACK for session: call_id={} channel={} stream={}",
-                call_id,
-                session.channel_id,
-                session.stream_key
-            );
 
             if let Some(ref source_node_id) = session.node_id {
                 if session.session_type == SessionType::Broadcast {
                     let event = crate::protocol::event::SignalEvent::AudioTalkReady {
                         node_id: source_node_id.clone(),
                     };
-                    tracing::info!("[GB28181] Publishing AudioTalkReady for broadcast after ACK, source_node_id={}", source_node_id.id);
                     let _ = self.deps.event_publisher.publish(event).await;
                 }
             }
@@ -2381,7 +2218,7 @@ impl Gb28181Adapter {
         &mut self,
         first_line: &str,
         headers: &[(String, String)],
-        body: &str,
+        _body: &str,
     ) -> (Option<SignalEvent>, Option<String>) {
         let call_id = Self::get_header(headers, "Call-ID").unwrap_or_default();
         let cseq_line = Self::get_header(headers, "CSeq").unwrap_or_default();
@@ -2396,21 +2233,8 @@ impl Gb28181Adapter {
             .cloned();
 
         let Some(session) = sub_session else {
-            tracing::debug!(
-                "[GB28181] Response for unknown session: {} status={}, cseq={}",
-                call_id,
-                first_line,
-                cseq_line
-            );
             return (None, None);
         };
-
-        tracing::info!(
-            "[GB28181] Response for sub-session: channel={} call_id={} status={}",
-            session.channel_id,
-            call_id,
-            first_line
-        );
 
         if !is_invite_response {
             return (None, None);
@@ -2480,26 +2304,19 @@ impl Gb28181Adapter {
             return (None, None);
         }
 
-        let udp_peer_str = self
+        let _udp_peer_str = self
             .udp_peer
             .map(|a| a.to_string())
             .unwrap_or_else(|| "NONE".to_string());
-        let via_header = Self::get_header(headers, "Via").unwrap_or_else(|| "MISSING".to_string());
-        let to_header = Self::get_header(headers, "To").unwrap_or_else(|| "MISSING".to_string());
-        let contact_header =
+        let _via_header = Self::get_header(headers, "Via").unwrap_or_else(|| "MISSING".to_string());
+        let _to_header = Self::get_header(headers, "To").unwrap_or_else(|| "MISSING".to_string());
+        let _contact_header =
             Self::get_header(headers, "Contact").unwrap_or_else(|| "MISSING".to_string());
-        tracing::info!("[GB28181] 200 OK received: call_id={}, udp_peer={}\n  Via: {}\n  To: {}\n  Contact: {}",
-            call_id, udp_peer_str, via_header, to_header, contact_header);
 
         let via_received = Self::parse_via_received(headers);
         let via_rport = Self::parse_via_rport(headers);
 
         if let (Some(received_ip), Some(rport)) = (&via_received, via_rport) {
-            tracing::debug!(
-                "[GB28181] NAT detected: device at {}:{}",
-                received_ip,
-                rport
-            );
             let sessions = &mut *self.sessions.write().await;
             if let Some(s) = sessions.iter_mut().find(|s| s.call_id == call_id) {
                 s.device_nated_ip = Some(received_ip.clone());
@@ -2528,74 +2345,38 @@ impl Gb28181Adapter {
             if let Some(s) = sessions.iter_mut().find(|s| s.call_id == call_id) {
                 s.to_tag = to_tag.clone();
             }
-            tracing::debug!(
-                "[GB28181] Stored device to_tag={} for channel={}",
-                to_tag.as_deref().unwrap_or(""),
-                session.channel_id
-            );
         }
 
-        // 解析200 OK的Contact头 - 用于ACK的Request-URI和To头
-        // Contact头格式: <sip:device_id@device_ip:device_port> 或 sip:device_id@device_ip:device_port
-        // 根据GB28181标准，ACK应该发送到Contact头指定的地址
-        // 返回 (device_id, host, port) - device_id用于ACK的To头
         let use_contact = headers
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case("Contact"))
-            .and_then(|(k, v)| {
+            .and_then(|(_k, v)| {
                 let v = v.trim();
-                tracing::debug!("[GB28181] Raw Contact header value: {:?}", v);
                 let uri = v
                     .strip_prefix('<')
                     .and_then(|s| s.strip_suffix('>'))
                     .or_else(|| Some(v))
                     .map(|s| s.to_string())?;
-                tracing::debug!("[GB28181] Contact URI after stripping <>: {:?}", uri);
 
-                // 解析 sip:device_id@host:port 格式
-                // 例如: sip:12010100001320000011@192.168.1.211:5060
                 let without_sip = uri
                     .strip_prefix("sip:")
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| uri.clone());
-                tracing::debug!("[GB28181] Contact without_sip: {:?}", without_sip);
-                // rsplitn(2, '@') 返回从右到左的元素
-                // 对于 "device_id@host:port" -> parts[0]="host:port", parts[1]="device_id"
+
                 let parts: Vec<&str> = without_sip.rsplitn(2, '@').collect();
-                tracing::debug!("[GB28181] Contact parts after rsplitn(2, '@'): {:?}", parts);
                 if parts.len() == 2 {
-                    // parts[0] 是 host:port (右侧，rsplit从右开始)
+
                     let host_port = parts[0].to_string();
-                    // parts[1] 是 device_id (左侧)
+
                     let device_id = parts[1].to_string();
-                    tracing::debug!(
-                        "[GB28181] Contact parsed: device_id={}, host_port={}",
-                        device_id,
-                        host_port
-                    );
                     let hp_parts: Vec<&str> = host_port.rsplitn(2, ':').collect();
-                    tracing::debug!(
-                        "[GB28181] Contact host_port parts after rsplitn(2, ':'): {:?}",
-                        hp_parts
-                    );
                     if hp_parts.len() == 2 {
-                        // hp_parts[0] = port, hp_parts[1] = host
+
                         let host = hp_parts[1];
                         let port: u16 = hp_parts[0].parse().ok()?;
-                        tracing::debug!(
-                            "[GB28181] Contact parsed final: device_id={}, host={}, port={}",
-                            device_id,
-                            host,
-                            port
-                        );
                         Some((device_id, host.to_string(), port))
                     } else {
-                        // 没有端口的情况，使用默认5060
-                        tracing::debug!(
-                            "[GB28181] Contact parsed (no port): device_id={}, host={}",
-                            device_id,
-                            host_port
-                        );
+
                         Some((device_id, host_port.to_string(), 5060))
                     }
                 } else {
@@ -2603,40 +2384,24 @@ impl Gb28181Adapter {
                 }
             });
 
-        // server_gb_domain - 平台域名
         let server_gb_domain = &self.deps.config.signaling_server.server_gb_domain;
 
-        // ACK目标地址和To头:
-        // 1. 优先使用Contact头中的地址 (GB28181标准)
-        // 2. 如果Contact无效，用 device_id@server_gb_domain (无端口)
-        // ack_target用于ACK的Request-URI，ack_to_uri用于ACK的To头(包含device_id)
         let (ack_target, ack_to_uri) = match use_contact {
             Some((device_id, host, port)) if port > 0 => {
-                // Contact头有有效端口，使用它
-                tracing::debug!(
-                    "[GB28181] Using Contact for ACK: device_id={} {}:{}",
-                    device_id,
-                    host,
-                    port
-                );
+
                 let target = format!("sip:{}@{}:{}", device_id, host, port);
-                // ACK的To头需要包含完整的 device_id@host:port
+
                 let to_uri = format!("{}@{}:{}", device_id, host, port);
                 (target, to_uri)
             }
             _ => {
-                // Contact无效，使用server_gb_domain (无端口)
-                tracing::debug!(
-                    "[GB28181] Using server_gb_domain for ACK: {}",
-                    server_gb_domain
-                );
+
                 let target = format!("sip:{}@{}", session.channel_id, server_gb_domain);
                 let to_uri = format!("{}@{}", session.channel_id, server_gb_domain);
                 (target, to_uri)
             }
         };
 
-        // Via头 - 格式: SIP/2.0/UDP IP:端口;rport;branch=xxx (rport在前)
         let via = if session.transport == TransportType::Tcp {
             format!(
                 "SIP/2.0/TCP {}:{};rport;branch={}",
@@ -2649,30 +2414,18 @@ impl Gb28181Adapter {
             )
         };
 
-        // From URI - session.from_uri 格式: 平台ID@本地IP:端口 (无sip:前缀)
-        // from_uri_full 格式: sip:31011500001000000001@192.168.1.7:5061
         let from_uri_full = if session.from_uri.starts_with("sip:") {
             session.from_uri.clone()
         } else {
             format!("sip:{}", session.from_uri)
         };
 
-        // To头 - 格式: <sip:device_id@host:port>;tag=xxx
-        // to_tag_to_use 来自200 OK的To头中的tag
         let to_tag_part = if to_tag_to_use.is_empty() {
             String::new()
         } else {
             format!(";tag={}", to_tag_to_use)
         };
 
-        // ACK消息格式 (RFC 3261):
-        // ACK sip:34020000001320000003@3402000000 SIP/2.0
-        // Via: SIP/2.0/UDP 39.100.155.146:15063;rport;branch=z9hG4bKxxx
-        // From: <sip:34020000002000000001@39.100.155.146:15063>;tag=xxx
-        // To: <sip:34020000001320000003@3402000000>;tag=xxx
-        // Call-ID: xxx
-        // CSeq: xxx ACK
-        // Content-Length: 0
         let ack = format!(
             "ACK {ack_target} SIP/2.0\r\n\
              Via: {via}\r\n\
@@ -2695,20 +2448,13 @@ impl Gb28181Adapter {
             user_agent = GB28181_USER_AGENT
         );
 
-        tracing::info!(
-            "[GB28181] Sending ACK: {}\n--- ACK START ---\n{}\n--- ACK END ---",
-            ack_target,
-            ack
-        );
         if let Err(e) = self.send(ack.as_bytes()).await {
             tracing::error!("[GB28181] ACK send failed: {}", e);
         } else {
-            tracing::info!("[GB28181] ACK sent successfully");
         }
 
         let channel_tag = &session.channel_id;
         let device_tag = self.device_tag_str();
-        tracing::debug!("[GB28181] 200 OK received, starting stream: device={} channel={} stream={} media_server={}", device_tag, channel_tag, session.stream_key, session.media_server_name);
         let start_result = self
             .deps
             .stream_manager
@@ -2716,9 +2462,6 @@ impl Gb28181Adapter {
             .await;
 
         if start_result.is_ok() {
-            tracing::debug!(
-                "[GB28181] Stream manager started successfully, updating session state"
-            );
             let sessions = &mut *self.sessions.write().await;
             if let Some(s) = sessions.iter_mut().find(|s| s.call_id == call_id) {
                 s.state = SubSessionState::Ok;
@@ -2731,18 +2474,11 @@ impl Gb28181Adapter {
                     .get_stream_by_stream_key(&app, &session.stream_key)
                     .await
                 {
-                    tracing::debug!("[GB28181] Stream found in manager, starting stream");
                     let mut s = stream.clone();
                     s.start();
                     let _ = self.deps.stream_manager.update_stream_state(&s).await;
                 }
             }
-
-            tracing::info!(
-                "[GB28181] Stream started: channel={} stream={}",
-                session.channel_id,
-                session.stream_key
-            );
 
             if session.session_type == SessionType::Playback {
                 let event = crate::protocol::event::SignalEvent::PlaybackResult {
@@ -2847,13 +2583,6 @@ impl Gb28181Adapter {
             .await
             .insert(sub_key, subscription);
 
-        tracing::info!(
-            "[GB28181] Device {} subscribed to event={} expires={}s",
-            device_tag,
-            event_type,
-            expires
-        );
-
         let resp = format!(
             "SIP/2.0 200 OK\r\n\
              Via: {}\r\n\
@@ -2904,7 +2633,6 @@ impl Gb28181Adapter {
             count += 1;
         }
         if count > 0 {
-            tracing::info!("[GB28181] Cleaned up {} expired subscriptions", count);
         }
         count
     }
@@ -2913,7 +2641,7 @@ impl Gb28181Adapter {
         &mut self,
         headers: &[(String, String)],
         body: &str,
-        first_line: &str,
+        _first_line: &str,
         via_branch: &str,
         cseq: &str,
     ) -> (Option<SignalEvent>, Option<String>) {
@@ -2921,36 +2649,26 @@ impl Gb28181Adapter {
 
         if self.to_tag.is_none() {
             self.to_tag = Some(uuid::Uuid::new_v4().to_string().replace("-", ""));
-            tracing::debug!("[GB28181] Generated to_tag for audio INVITE: {}", self.to_tag.as_ref().unwrap());
         }
 
         let sdp_info = self.parse_audio_invite_sdp(body);
 
         if let Some((ssrc, device_ip, device_audio_port)) = sdp_info {
-            tracing::info!(
-                "[GB28181] Audio INVITE from device: {} port:{} ssrc={}",
-                device_ip,
-                device_audio_port,
-                ssrc
-            );
 
             let setup_mode = self.parse_setup_mode(body);
-            tracing::info!("[GB28181] Media setup mode: {:?}", setup_mode);
 
             let direction = Self::parse_broadcast_direction(headers);
-            tracing::info!("[GB28181] Broadcast direction: {:?}", direction);
 
             let app = match self.deps.device_lookup.find_by_tag(&device_tag).await {
                 Some(d) => d.app.unwrap_or_else(|| "default".to_string()),
                 None => "default".to_string(),
             };
-            let broadcast_key = format!("{}_{}_broadcast", app, device_tag);
-            let session_key_device = format!("{}_{}", app, device_tag);
+            let _broadcast_key = format!("{}_{}_broadcast", app, device_tag);
+            let _session_key_device = format!("{}_{}", app, device_tag);
 
             let from_hdr = Self::get_header(headers, "From").unwrap_or_default();
             let (from_uri, _) = Self::parse_from_to_uri_and_tag(&from_hdr);
             let invite_device_id = Self::parse_device_id_from_from_uri(&from_uri);
-            tracing::info!("[GB28181] INVITE device_id from From URI: {:?}", invite_device_id);
 
             let source_node_id = {
                 let mut pending = self.pending_audio_talks.write().await;
@@ -2961,7 +2679,6 @@ impl Gb28181Adapter {
                         e.node_id.device_tag == device_tag
                     }
                 }) {
-                    tracing::info!("[GB28181] Matched pending entry by device_tag, removing from pending");
                     pending.remove(pos).node_id
                 } else {
                     tracing::error!("[GB28181] No matching pending audio talk found for device {} (invite_device_id: {:?})", device_tag, invite_device_id);
@@ -2982,7 +2699,6 @@ impl Gb28181Adapter {
                             .await
                         {
                             Ok((port, allocated_ssrc, _)) => {
-                                tracing::info!("[GB28181] UDP port allocated for broadcast: {} -> device {}:{}", port, device_ip, device_audio_port);
 
                                 let peer_addr: SocketAddr =
                                     format!("{}:{}", device_ip, device_audio_port)
@@ -3026,9 +2742,6 @@ impl Gb28181Adapter {
                                         if let Err(e) = session.add_node(node.clone()) {
                                             tracing::warn!("[GB28181] Failed to add broadcast node to session: {}", e);
                                         } else {
-                                            tracing::info!(
-                                                "[GB28181] Broadcast MediaNode added to session"
-                                            );
                                         }
                                     }
                                 }
@@ -3038,7 +2751,6 @@ impl Gb28181Adapter {
 
                                 let to_hdr = Self::get_header(headers, "To").unwrap_or_default();
                                 let (to_uri, _) = Self::parse_from_to_uri_and_tag(&to_hdr);
-                                tracing::info!("[GB28181] Audio INVITE response To URI: {}", to_uri);
 
                                 let contact_uri = format!(
                                     "sip:{}@{}:{}",
@@ -3046,15 +2758,12 @@ impl Gb28181Adapter {
                                     self.deps.config.signaling_server.rtp_bind_addr,
                                     self.deps.config.signaling_server.udp_signaling_port
                                 );
-                                tracing::debug!("[GB28181] Audio INVITE Contact URI: {}", contact_uri);
 
                                 let call_id = Self::get_header(headers, "Call-ID")
                                     .unwrap_or_else(|| self.call_id_str());
-                                tracing::debug!("[GB28181] Audio INVITE Call-ID: {}", call_id);
 
                                 let from_hdr = Self::get_header(headers, "From").unwrap_or_default();
                                 let (from_uri, from_tag) = Self::parse_from_to_uri_and_tag(&from_hdr);
-                                tracing::debug!("[GB28181] Audio INVITE From URI: {}, tag: {:?}", from_uri, from_tag);
 
                                 let cseq_num: u32 = cseq.split_whitespace().next()
                                     .and_then(|s| s.parse().ok())
@@ -3090,13 +2799,12 @@ impl Gb28181Adapter {
                                 {
                                     let mut sessions = self.sessions.write().await;
                                     sessions.push(session);
-                                    tracing::info!("[GB28181] Added broadcast SubSession for call_id={} with source_node_id={}", call_id, source_node_id.id);
                                 }
 
                                 let response = format!(
                                     "{}\r\n{}",
                                     self.build_sip_response_only_headers_with_to(
-                                        200, "OK", via_branch, cseq, 
+                                        200, "OK", via_branch, cseq,
                                         Some(&from_uri), from_tag.as_deref(),
                                         Some(&to_uri), None,
                                         Some(&contact_uri), Some(&call_id),
@@ -3108,7 +2816,6 @@ impl Gb28181Adapter {
                                 let event = crate::protocol::event::SignalEvent::AudioTalkReady {
                                     node_id: source_node_id.clone(),
                                 };
-                                tracing::info!("[GB28181] Publishing AudioTalkReady for source_node_id={}", source_node_id.id);
                                 let _ = self.deps.event_publisher.publish(event).await;
 
                                 return (
@@ -3146,13 +2853,11 @@ impl Gb28181Adapter {
                                     transport_ssrc,
                                     8,
                                 );
-                                
+
                                 tokio::spawn(async move {
-                                    tracing::info!("[GB28181] TCP passive: waiting for device connection on port {}", port);
                                     match transport.accept().await {
-                                        Ok(addr) => {
-                                            tracing::info!("[GB28181] Device {} connected from {} for broadcast (TCP passive)", device_tag_clone, addr);
-                                            
+                                        Ok(_addr) => {
+
                                             let node_id = MediaNodeId::new(
                                                 MediaNodeType::GB28181_BROADCAST_VOICE,
                                                 &device_tag_clone,
@@ -3161,7 +2866,7 @@ impl Gb28181Adapter {
                                             let node: Arc<dyn MediaNode> = Arc::new(
                                                 BasicMediaNode::new(node_id, transport.clone())
                                             );
-                                            
+
                                             node.add_send_chain(
                                                 MediaNodeType::WebSocket,
                                                 Box::new(SendToReceiversMiddleware::new(
@@ -3169,16 +2874,15 @@ impl Gb28181Adapter {
                                                     MediaNodeType::WebSocket,
                                                 )),
                                             );
-                                            
+
                                             transport.activate(node.clone());
-                                            
+
                                             if let Some(mgr) = crate::media::get_media_session_manager() {
                                                 let session = mgr.get_or_create(&device_tag_clone);
                                                 session.start_broadcast(&channel_id_clone, node.clone());
                                                 if let Err(e) = session.add_node(node.clone()) {
                                                     tracing::warn!("[GB28181] Failed to add TCP passive node to session: {}", e);
                                                 } else {
-                                                    tracing::info!("[GB28181] TCP passive MediaNode added to session");
                                                 }
                                             }
                                         }
@@ -3238,19 +2942,17 @@ impl Gb28181Adapter {
                                 {
                                     let mut sessions = self.sessions.write().await;
                                     sessions.push(session);
-                                    tracing::info!("[GB28181] Added TCP passive broadcast SubSession for call_id={} with source_node_id={}", call_id, source_node_id.id);
                                 }
 
                                 let event = crate::protocol::event::SignalEvent::AudioTalkReady {
                                     node_id: source_node_id.clone(),
                                 };
-                                tracing::info!("[GB28181] Publishing AudioTalkReady for TCP passive, source_node_id={}", source_node_id.id);
                                 let _ = self.deps.event_publisher.publish(event).await;
 
                                 let response = format!(
                                     "{}\r\n{}",
                                     self.build_sip_response_only_headers_with_to(
-                                        200, "OK", via_branch, cseq, 
+                                        200, "OK", via_branch, cseq,
                                         Some(&from_uri), from_tag.as_deref(),
                                         Some(&to_uri), None,
                                         Some(&contact_uri), Some(&call_id),
@@ -3279,11 +2981,6 @@ impl Gb28181Adapter {
                     }
                 }
                 SetupMode::TcpActive => {
-                    tracing::info!(
-                        "[GB28181] TCP active mode: platform connects to device {}:{}",
-                        device_ip,
-                        device_audio_port
-                    );
 
                     if let Some(manager) = crate::media::get_rtp_server_manager() {
                         match manager
@@ -3294,7 +2991,7 @@ impl Gb28181Adapter {
                                 let peer_addr: SocketAddr = format!("{}:{}", device_ip, device_audio_port)
                                     .parse()
                                     .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap());
-                                
+
                                 let call_id = Self::get_header(headers, "Call-ID")
                                     .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
@@ -3306,7 +3003,7 @@ impl Gb28181Adapter {
                                         transport_ssrc,
                                         8,
                                     );
-                                
+
                                 let node_id = MediaNodeId::new(
                                     MediaNodeType::GB28181_BROADCAST_VOICE,
                                     &self.device_tag.clone().unwrap_or_default(),
@@ -3315,7 +3012,7 @@ impl Gb28181Adapter {
                                 let node: Arc<dyn MediaNode> = Arc::new(
                                     BasicMediaNode::new(node_id, transport.clone())
                                 );
-                                
+
                                 node.add_send_chain(
                                     MediaNodeType::WebSocket,
                                     Box::new(SendToReceiversMiddleware::new(
@@ -3323,19 +3020,18 @@ impl Gb28181Adapter {
                                         MediaNodeType::WebSocket,
                                     )),
                                 );
-                                
+
                                 self.pending_tcp_active.write().await.insert(
                                     call_id.clone(),
                                     (transport.clone(), node.clone())
                                 );
-                                
+
                                 if let Some(mgr) = crate::media::get_media_session_manager() {
                                     let session = mgr.get_or_create(&device_tag);
                                     session.start_broadcast(&channel_id, node.clone());
                                     if let Err(e) = session.add_node(node.clone()) {
                                         tracing::warn!("[GB28181] Failed to add TCP active node to session: {}", e);
                                     } else {
-                                        tracing::info!("[GB28181] TCP active MediaNode added to session");
                                     }
                                 }
 
@@ -3391,13 +3087,12 @@ impl Gb28181Adapter {
                                 {
                                     let mut sessions = self.sessions.write().await;
                                     sessions.push(session);
-                                    tracing::info!("[GB28181] Added TCP active broadcast SubSession for call_id={} with source_node_id={}", call_id, source_node_id.id);
                                 }
 
                                 let response = format!(
                                     "{}\r\n{}",
                                     self.build_sip_response_only_headers_with_to(
-                                        200, "OK", via_branch, cseq, 
+                                        200, "OK", via_branch, cseq,
                                         Some(&from_uri), from_tag.as_deref(),
                                         Some(&to_uri), None,
                                         Some(&contact_uri), Some(&call_id),
@@ -3428,7 +3123,6 @@ impl Gb28181Adapter {
             }
         }
 
-
         (None, None)
     }
 
@@ -3450,50 +3144,6 @@ impl Gb28181Adapter {
         false
     }
 }
-
-// #[async_trait]
-// impl EventHandler for Gb28181Adapter {
-//     async fn handle(&mut self, event: SignalEvent) {
-//         let SignalEvent::PtzControl { device_id: did, command, speed } = event else { return; };
-//
-//         let dev_tag = self.device_tag_str();
-//         let dev_id_str = self.device_id_str();
-//         if Some(did.clone()) != dev_id_str && did != dev_tag {
-//             return;
-//         }
-//
-//         let spd = speed.unwrap_or(50);
-//         let xml = match command {
-//             PtzCommand::Up => Self::build_ptz_xml(&dev_tag, "up", spd),
-//             PtzCommand::Down => Self::build_ptz_xml(&dev_tag, "down", spd),
-//             PtzCommand::Left => Self::build_ptz_xml(&dev_tag, "left", spd),
-//             PtzCommand::Right => Self::build_ptz_xml(&dev_tag, "right", spd),
-//             PtzCommand::ZoomIn => Self::build_ptz_xml(&dev_tag, "zoom_in", spd),
-//             PtzCommand::ZoomOut => Self::build_ptz_xml(&dev_tag, "zoom_out", spd),
-//             PtzCommand::Stop => Self::build_ptz_xml(&dev_tag, "stop", 0),
-//             PtzCommand::ContinuousMove { pan, tilt, zoom } => {
-//                 if pan.abs() < 0.01 && tilt.abs() < 0.01 && zoom.abs() < 0.01 {
-//                     Self::build_ptz_xml(&dev_tag, "stop", 0)
-//                 } else {
-//                     let dir = Self::best_direction(pan, tilt, zoom);
-//                     let spd = ((pan.abs().max(tilt.abs()).max(zoom.abs()) * 100.0) as u8).clamp(1, 100);
-//                     Self::build_ptz_xml(&dev_tag, dir, spd)
-//                 }
-//             }
-//             _ => return,
-//         };
-//
-//         if let Some(ref write_arc) = self.write {
-//             let mut write = write_arc.write().await;
-//             let _ = write.write_all(xml.as_bytes()).await;
-//             let _ = write.flush().await;
-//         } else if let Some(ref addr) = self.udp_peer {
-//             if let Some(sender) = super::get_udp_sender() {
-//                 let _ = sender.send_to(xml.as_bytes(), *addr).await;
-//             }
-//         }
-//     }
-// }
 
 #[async_trait]
 impl SignalAdapter for Gb28181Adapter {
@@ -3523,7 +3173,6 @@ impl SignalAdapter for Gb28181Adapter {
             if let Some(ref via) = sip_msg.headers.via {
                 let via_transport = via.transport.to_uppercase();
                 if via_transport == "TCP" && self.transport == TransportType::Udp {
-                    tracing::info!("[GB28181] Detected TCP transport from Via header, switching from UDP to TCP");
                     self.transport = TransportType::Tcp;
                 }
             }
@@ -3565,7 +3214,7 @@ impl SignalAdapter for Gb28181Adapter {
             };
 
             if let Some(resp) = &response {
-                let peer_info = if self.write.is_some() {
+                let _peer_info = if self.write.is_some() {
                     format!("TCP (transport={:?})", self.transport)
                 } else {
                     format!(
@@ -3575,11 +3224,6 @@ impl SignalAdapter for Gb28181Adapter {
                             .unwrap_or_else(|| "unknown".to_string())
                     )
                 };
-                tracing::debug!(
-                    "[GB28181] Sending response via {}: {}",
-                    peer_info,
-                    &resp[..resp.len().min(200)]
-                );
                 if let Err(e) = self.send(resp.as_bytes()).await {
                     tracing::error!("[GB28181] Failed to send response: {}", e);
                 }
@@ -3601,11 +3245,6 @@ impl SignalAdapter for Gb28181Adapter {
     async fn on_disconnected(&mut self) -> Result<()> {
         let device_tag = self.device_tag_str();
         if !device_tag.is_empty() {
-            tracing::info!(
-                "[GB28181] Device {} disconnected, cleaning {} sessions",
-                device_tag,
-                self.sessions.read().await.len()
-            );
 
             let sessions: Vec<SubSession> = self.sessions.read().await.iter().cloned().collect();
             for session in &sessions {
@@ -3650,10 +3289,9 @@ impl SignalAdapter for Gb28181Adapter {
     }
 
     async fn send(&mut self, data: &[u8]) -> Result<()> {
-        let data_str = String::from_utf8_lossy(data);
+        let _data_str = String::from_utf8_lossy(data);
 
         if let Some(ref write_arc) = self.write {
-            tracing::info!("[GB28181] SEND TCP:\n{}", data_str);
             let mut write = write_arc.write().await;
             write
                 .write_all(data)
@@ -3664,7 +3302,6 @@ impl SignalAdapter for Gb28181Adapter {
         }
         if let Some(ref addr) = self.udp_peer {
             if let Some(sender) = super::get_udp_sender() {
-                tracing::info!("[GB28181] SEND UDP to {}:\n{}", addr, data_str);
                 if let Err(e) = sender.send_to(data, *addr).await {
                     tracing::error!("[GB28181] UDP send failed to {}: {}", addr, e);
                     return Err(AppError::Internal(format!("UDP send: {}", e)));
@@ -3696,7 +3333,6 @@ impl SignalAdapter for Gb28181Adapter {
     fn set_tcp_write(&mut self, write: OwnedWriteHalf) {
         self.write = Some(Arc::new(tokio::sync::RwLock::new(write)));
         if self.transport == TransportType::Udp {
-            tracing::info!("[GB28181] TCP connection established, setting transport to TCP");
             self.transport = TransportType::Tcp;
         }
     }
@@ -3721,7 +3357,7 @@ impl SignalAdapter for Gb28181Adapter {
 
         if let Some(ext) = &device.extended {
             if let Some(transport) = ext.get("gb_transport").and_then(|v| v.as_str()) {
-                let transport_str = match transport.to_uppercase().as_str() {
+                let _transport_str = match transport.to_uppercase().as_str() {
                     "TCP" => {
                         self.transport = TransportType::Tcp;
                         "TCP"
@@ -3731,11 +3367,6 @@ impl SignalAdapter for Gb28181Adapter {
                         "UDP"
                     }
                 };
-                tracing::info!(
-                    "[GB28181] Using transport {} for device {}",
-                    transport_str,
-                    device_tag
-                );
             }
         }
 
@@ -3750,7 +3381,7 @@ impl SignalAdapter for Gb28181Adapter {
             _ => unreachable!("GB28181 only supports TCP and UDP transport"),
         };
         let server_gb_id = &self.deps.config.signaling_server.server_gb_id;
-        let server_gb_domain = &self.deps.config.signaling_server.server_gb_domain;
+        let _server_gb_domain = &self.deps.config.signaling_server.server_gb_domain;
 
         let channel_id = if channel_tag.is_empty() {
             device_tag.to_string()
@@ -3764,8 +3395,6 @@ impl SignalAdapter for Gb28181Adapter {
         let device_host = device.host.clone();
         let device_port = device.port;
 
-        // local_ip: 平台本地IP地址（设备能访问到的地址）
-        // 优先级：local_addr(从socket获取) > external_ip配置 > detect_local_ip(设备IP) > remote_addr IP
         let local_ip = if let Some(ref local) = self.local_addr {
             local.ip().to_string()
         } else if let Some(ref ext_ip) = self.deps.config.signaling_server.external_ip {
@@ -3778,16 +3407,12 @@ impl SignalAdapter for Gb28181Adapter {
                 .unwrap_or_else(|| "127.0.0.1".to_string())
         };
 
-        // Via: SIP/2.0/UDP 192.168.1.211:5060;branch=z9hG4bKa396e08;rport
         let via = if self.transport == TransportType::Tcp {
             format!("SIP/2.0/TCP {local_ip}:{server_port};branch={branch};rport")
         } else {
             format!("SIP/2.0/UDP {local_ip}:{server_port};branch={branch};rport")
         };
 
-        // SDP c=: 媒体服务器地址 (从 ZLMediaKit URL 解析)
-        // 设备发送 RTP 到这个地址
-        // Example: c=IN IP4 192.168.1.100
         let sdp = self.build_sdp(
             &server_gb_id,
             &server_ip,
@@ -3799,15 +3424,10 @@ impl SignalAdapter for Gb28181Adapter {
         );
         let sdp_len = sdp.len();
 
-        // to_uri: 格式 "设备ID@设备IP:设备端口" (设备自己的地址)
-        // Example: "12010100001320000011@192.168.1.211:5060"
         let to_uri = format!("{}@{}:{}", channel_id, device_host, device_port);
 
-        // from_uri: 格式 "平台ID@平台IP:信令端口" (使用local_ip，设备回复到这里)
-        // Example: "31011500001000000001@192.168.1.211:5060"
         let from_uri = format!("{}@{}:{}", server_gb_id, local_ip, server_port);
-        // Subject格式: 发送者ID:发送方序列号,接收者ID:接收方序列号
-        // 实时播放时序列号用0
+
         let subject = format!(
             "{}:0,{}:0",
             Self::truncate_20(&channel_id),
@@ -3863,10 +3483,6 @@ impl SignalAdapter for Gb28181Adapter {
             }
         };
         if old_session.is_some() {
-            tracing::info!(
-                "[GB28181] start: cleaning up old session for channel={}",
-                old_session.as_ref().unwrap().channel_id
-            );
         }
         self.sessions.write().await.push(session);
 
@@ -3895,8 +3511,6 @@ impl SignalAdapter for Gb28181Adapter {
             user_agent = GB28181_USER_AGENT
         );
 
-        tracing::info!("[GB28181] Sending INVITE to device={}, stream={}, rtp={}, local_ip={}\n--- INVITE START ---\n{}\n--- INVITE END ---",
-            device_tag, stream_key, rtp_port, local_ip, invite);
         self.send(invite.as_bytes()).await?;
 
         Ok(())
@@ -3926,7 +3540,7 @@ impl SignalAdapter for Gb28181Adapter {
             _ => unreachable!("GB28181 only supports TCP and UDP transport"),
         };
         let server_gb_id = &self.deps.config.signaling_server.server_gb_id;
-        let server_gb_domain = &self.deps.config.signaling_server.server_gb_domain;
+        let _server_gb_domain = &self.deps.config.signaling_server.server_gb_domain;
 
         let channel_id = device_tag.to_string();
         let stream_key = format!("{}_{}", device_tag, channel_id);
@@ -3936,7 +3550,6 @@ impl SignalAdapter for Gb28181Adapter {
         let device_host = device.host.clone();
         let device_port = device.port;
 
-        // local_ip: 平台本地IP地址（设备能访问到的地址）
         let local_ip = if let Some(ref local) = self.local_addr {
             local.ip().to_string()
         } else if let Some(ref ext_ip) = self.deps.config.signaling_server.external_ip {
@@ -3955,7 +3568,6 @@ impl SignalAdapter for Gb28181Adapter {
             format!("SIP/2.0/UDP {local_ip}:{server_port};branch={branch};rport")
         };
 
-        // SDP c=: 媒体服务器地址 (从 ZLMediaKit URL 解析)
         let sdp = self.build_sdp(
             &server_gb_id,
             &server_ip,
@@ -4027,10 +3639,6 @@ impl SignalAdapter for Gb28181Adapter {
             }
         };
         if old_session.is_some() {
-            tracing::info!(
-                "[GB28181] start_playback: cleaning up old session for channel={}",
-                old_session.as_ref().unwrap().channel_id
-            );
         }
         self.sessions.write().await.push(session);
 
@@ -4059,19 +3667,8 @@ impl SignalAdapter for Gb28181Adapter {
             user_agent = GB28181_USER_AGENT
         );
 
-        tracing::info!(
-            "[GB28181] Sending Playback INVITE to device={}, stream={}, rtp={}, start={}, end={}",
-            device_tag,
-            stream_key,
-            rtp_port,
-            start_ntp,
-            end_ntp
-        );
         self.send(invite.as_bytes()).await?;
 
-        tracing::info!(
-            "[GB28181] Playback INVITE sent, waiting for device response asynchronously"
-        );
         Ok(())
     }
 
@@ -4081,7 +3678,7 @@ impl SignalAdapter for Gb28181Adapter {
         command: &crate::protocol::event::PtzCommand,
         speed: Option<u8>,
     ) -> Result<()> {
-        let device = self
+        let _device = self
             .deps
             .device_lookup
             .find_by_tag(channel_id)
@@ -4095,26 +3692,17 @@ impl SignalAdapter for Gb28181Adapter {
                 if pan.abs() < 0.01 && tilt.abs() < 0.01 && zoom.abs() < 0.01 {
                     let ptz_body = Self::build_ptz_xml(channel_id, "stop", 0);
                     let msg = self.build_ptz_message(channel_id, &ptz_body);
-                    tracing::debug!("[GB28181] PTZ: channel={} compound=stop", channel_id);
                     self.send(msg.as_bytes()).await?;
                 } else {
                     let ptz_body =
                         Self::build_ptz_xml_compound(channel_id, *pan, *tilt, *zoom);
                     let msg = self.build_ptz_message(channel_id, &ptz_body);
-                    tracing::debug!(
-                        "[GB28181] PTZ: channel={} compound=pan:{:.2} tilt:{:.2} zoom:{:.2}",
-                        channel_id,
-                        pan,
-                        tilt,
-                        zoom
-                    );
                     self.send(msg.as_bytes()).await?;
                 }
             }
             PtzCommand::Stop => {
                 let ptz_body = Self::build_ptz_xml(channel_id, "stop", 0);
                 let msg = self.build_ptz_message(channel_id, &ptz_body);
-                tracing::debug!("[GB28181] PTZ: channel={} dir=stop", channel_id);
                 self.send(msg.as_bytes()).await?;
             }
             _ => {
@@ -4134,12 +3722,6 @@ impl SignalAdapter for Gb28181Adapter {
 
                 let ptz_body = Self::build_ptz_xml(channel_id, direction, spd_val);
                 let msg = self.build_ptz_message(channel_id, &ptz_body);
-                tracing::debug!(
-                    "[GB28181] PTZ: channel={} dir={} spd={}",
-                    channel_id,
-                    direction,
-                    spd_val
-                );
                 self.send(msg.as_bytes()).await?;
             }
         }
@@ -4212,21 +3794,11 @@ impl SignalAdapter for Gb28181Adapter {
             user_agent = GB28181_USER_AGENT
         );
 
-        tracing::info!(
-            "[GB28181] Sending NOTIFY to device={} event={}",
-            device_tag,
-            event_type
-        );
         self.send(notify.as_bytes()).await?;
         Ok(())
     }
 
     async fn start_audio_talk_internal(&mut self, device_tag: &str, node_id: MediaNodeId) -> Result<()> {
-        tracing::info!(
-            "[GB28181] start_audio_talk_internal: device={} node_id={}",
-            device_tag,
-            node_id.id
-        );
 
         let device = self
             .deps
@@ -4270,7 +3842,6 @@ impl SignalAdapter for Gb28181Adapter {
     }
 
     async fn stop_audio_talk_internal(&mut self, node_id: MediaNodeId) -> Result<()> {
-        tracing::info!("[GB28181] stop_audio_talk_internal: node_id={}", node_id.id);
 
         let device_tag = self.device_tag_str();
         if device_tag.is_empty() {
@@ -4285,7 +3856,6 @@ impl SignalAdapter for Gb28181Adapter {
         {
             let sessions = self.sessions.read().await;
             if let Some(session) = sessions.iter().find(|s| s.device_tag == device_tag && s.session_type == SessionType::Broadcast) {
-                tracing::info!("[GB28181] Sending BYE to device {} for audio talk stop", device_tag);
                 if let Err(e) = self.send_bye_to_session(session).await {
                     tracing::warn!("[GB28181] Failed to send BYE: {}", e);
                 }
@@ -4293,12 +3863,7 @@ impl SignalAdapter for Gb28181Adapter {
         }
 
         if let Some(session) = manager.get(&device_tag) {
-            let removed = session.remove_and_stop_node(&node_id).await;
-            tracing::info!(
-                "[GB28181] Broadcast node removed for device {}: {}",
-                device_tag,
-                removed
-            );
+            let _removed = session.remove_and_stop_node(&node_id).await;
         }
 
         Ok(())
@@ -4359,10 +3924,6 @@ impl Gb28181Adapter {
             user_agent = GB28181_USER_AGENT
         );
 
-        tracing::info!(
-            "[GB28181] Sending REGISTER Expires:0 to device={} to force re-registration",
-            device_id
-        );
         self.send(register.as_bytes()).await?;
         Ok(())
     }
@@ -4370,9 +3931,6 @@ impl Gb28181Adapter {
 
 impl Gb28181Adapter {
     async fn send_broadcast_message(&mut self, target_id: &str, content: &str) -> Result<()> {
-        tracing::info!("[GB28181] send_broadcast_message: BEGIN");
-        tracing::info!("[GB28181]   target_id: {}", target_id);
-        tracing::info!("[GB28181]   content length: {} bytes", content.len());
 
         let device = self
             .deps
@@ -4380,44 +3938,27 @@ impl Gb28181Adapter {
             .find_by_tag(target_id)
             .await
             .ok_or_else(|| AppError::NotFound(format!("Device not found: {}", target_id)))?;
-        tracing::info!(
-            "[GB28181]   device found: host={} port={}",
-            device.host,
-            device.port
-        );
 
         let sn = self.seq.fetch_add(1, Ordering::SeqCst);
-        tracing::info!("[GB28181]   sequence number: {}", sn);
 
         let call_id = uuid::Uuid::new_v4().to_string().replace("-", "");
         let from_tag = uuid::Uuid::new_v4().to_string().replace("-", "");
         let branch = format!("z9hG4bK{}", &call_id[..7]);
-        tracing::info!("[GB28181]   call_id: {}", call_id);
-        tracing::info!("[GB28181]   from_tag: {}", from_tag);
-        tracing::info!("[GB28181]   branch: {}", branch);
 
         let server_port = match self.transport {
             TransportType::Tcp => self.deps.config.signaling_server.tcp_signaling_port,
             TransportType::Udp => self.deps.config.signaling_server.udp_signaling_port,
             _ => unreachable!("GB28181 only supports TCP and UDP transport"),
         };
-        tracing::info!(
-            "[GB28181]   server_port: {} (transport={:?})",
-            server_port,
-            self.transport
-        );
 
         let server_ip = &self.deps.config.signaling_server.bind_ip;
         let server_gb_id = &self.deps.config.signaling_server.server_gb_id;
         let server_gb_domain = &self.deps.config.signaling_server.server_gb_domain;
-        tracing::info!("[GB28181]   server_ip (from config): {}", server_ip);
-        tracing::info!("[GB28181]   server_gb_id: {}", server_gb_id);
 
         let device_host = device.host.clone();
         let device_port = device.port;
 
         let to_uri = format!("sip:{}@{}:{}", target_id, device_host, device_port);
-        tracing::info!("[GB28181]   to_uri: {}", to_uri);
 
         let via = if self.transport == TransportType::Tcp {
             format!(
@@ -4457,36 +3998,14 @@ impl Gb28181Adapter {
             user_agent = GB28181_USER_AGENT
         );
 
-        tracing::info!("[GB28181]   ============================================");
-        tracing::info!("[GB28181]   SIP MESSAGE to be sent ({} bytes):", msg.len());
-        tracing::info!(
-            "[GB28181]   {}",
-            msg.lines()
-                .map(|l| format!("   {}", l))
-                .collect::<Vec<_>>()
-                .join("\n")
-        );
-        tracing::info!("[GB28181]   ============================================");
-
-        tracing::info!("[GB28181] send_broadcast_message: calling self.send()...");
         self.send(msg.as_bytes()).await?;
-        tracing::info!("[GB28181] send_broadcast_message: send() completed successfully");
-        tracing::info!("[GB28181] send_broadcast_message: END");
         Ok(())
     }
 
     pub async fn send_broadcast_notification(&mut self, target_id: &str) -> Result<()> {
-        tracing::info!("[GB28181] send_broadcast_notification: BEGIN");
-        tracing::info!("[GB28181]   target_id: {}", target_id);
 
         let xml = self.build_broadcast_notification(target_id);
-        tracing::info!(
-            "[GB28181]   built Broadcast Notify XML ({} bytes):",
-            xml.len()
-        );
-        tracing::info!("[GB28181]   XML content:\n{}", xml);
 
-        tracing::info!("[GB28181] send_broadcast_notification: calling send_broadcast_message...");
         self.send_broadcast_message(target_id, &xml).await
     }
 
@@ -4525,12 +4044,12 @@ impl Gb28181Adapter {
 
     pub fn build_audio_invite_sdp(
         &self,
-        device_ip: &str,
+        _device_ip: &str,
         audio_port: u16,
         ssrc: u32,
         codecs: &[&str],
     ) -> String {
-        let (platform_id, platform_ip, platform_port) =
+        let (platform_id, platform_ip, _platform_port) =
             crate::protocol::gb28181::get_gb28181_platform_config()
                 .get()
                 .map(|(id, _, ip, port)| (id.as_str(), ip.as_str(), *port))
@@ -4540,7 +4059,7 @@ impl Gb28181Adapter {
             .iter()
             .map(|c| {
                 let pt = Self::codec_to_audio_pt(c);
-                let (encoding, clock) = Self::codec_to_audio_rtp_map(c);
+                let (encoding, _clock) = Self::codec_to_audio_rtp_map(c);
                 (*c, pt, encoding)
             })
             .collect();
@@ -4571,12 +4090,12 @@ a=ssrc:{}
 
     pub fn build_audio_invite_sdp_tcp(
         &self,
-        device_ip: &str,
+        _device_ip: &str,
         tcp_port: u16,
         ssrc: u32,
         codecs: &[&str],
     ) -> String {
-        let (platform_id, platform_ip, platform_port) =
+        let (platform_id, platform_ip, _platform_port) =
             crate::protocol::gb28181::get_gb28181_platform_config()
                 .get()
                 .map(|(id, _, ip, port)| (id.as_str(), ip.as_str(), *port))
@@ -4586,7 +4105,7 @@ a=ssrc:{}
             .iter()
             .map(|c| {
                 let pt = Self::codec_to_audio_pt(c);
-                let (encoding, clock) = Self::codec_to_audio_rtp_map(c);
+                let (encoding, _clock) = Self::codec_to_audio_rtp_map(c);
                 (*c, pt, encoding)
             })
             .collect();
@@ -4683,28 +4202,23 @@ a=ssrc:{}
     fn parse_broadcast_direction(headers: &[(String, String)]) -> BroadcastDirection {
         let subject = Self::get_header(headers, "Subject")
             .unwrap_or_default();
-        
-        tracing::info!("[GB28181] Subject header: {}", subject);
-        
+
         let (platform_id, _, _, _) = crate::protocol::gb28181::get_gb28181_platform_config()
             .get()
             .map(|(id, domain, ip, port)| (id.clone(), domain.clone(), ip.clone(), *port))
             .unwrap_or_else(|| (String::new(), String::new(), String::new(), 0));
-        
+
         let parts: Vec<&str> = subject.split(',').collect();
         if parts.len() != 2 {
             return BroadcastDirection::PlatformToDevice;
         }
-        
+
         let sender_part = parts[0].trim();
         let receiver_part = parts[1].trim();
-        
+
         let sender_id = sender_part.split(':').next().unwrap_or("").trim();
         let receiver_id = receiver_part.split(':').next().unwrap_or("").trim();
-        
-        tracing::info!("[GB28181] Direction check: sender={}, receiver={}, platform_id={}", 
-            sender_id, receiver_id, platform_id);
-        
+
         if sender_id.is_empty() || sender_id == platform_id {
             BroadcastDirection::PlatformToDevice
         } else if sender_id == receiver_id {
@@ -4773,26 +4287,15 @@ a=ssrc:{}
     pub async fn start_audio_talk(
         &mut self,
         device_tag: &str,
-        channel_tag: &str,
-        device_ip: &str,
-        device_audio_port: u16,
-        platform_audio_port: u16,
-        transport: TransportType,
-        node_id: MediaNodeId,
+        _channel_tag: &str,
+        _device_ip: &str,
+        _device_audio_port: u16,
+        _platform_audio_port: u16,
+        _transport: TransportType,
+        _node_id: MediaNodeId,
     ) -> Result<()> {
-        tracing::info!(
-            "[GB28181] start_audio_talk (standard broadcast flow): device={} channel={} ip={} port={} transport={:?} node_id={}",
-            device_tag, channel_tag, device_ip, device_audio_port, transport, node_id.id
-        );
-
-
 
         self.send_broadcast_notification(device_tag).await?;
-
-        tracing::info!(
-            "[GB28181] Broadcast notification sent to device {}, waiting for INVITE",
-            device_tag
-        );
 
         Ok(())
     }
@@ -4806,12 +4309,6 @@ a=ssrc:{}
         platform_audio_port: u16,
         tcp_server_port: Option<u16>,
     ) -> Result<()> {
-        tracing::info!(
-            "[GB28181] finish_audio_talk_setup: device={} codec={:?} transport={:?}",
-            device_tag,
-            codec,
-            transport
-        );
 
         let channel_id = {
             let sessions = self.sessions.read().await;
@@ -4835,16 +4332,11 @@ a=ssrc:{}
                         );
                         let transport_accept = transport_arc.clone();
                         let device_tag_clone = device_tag.to_string();
-                        let channel_id_clone = channel_id.clone();
+                        let _channel_id_clone = channel_id.clone();
 
                         tokio::spawn(async move {
                             match transport_accept.accept().await {
-                                Ok(addr) => {
-                                    tracing::info!(
-                                        "[GB28181] TCP accept succeeded for device {} from {}",
-                                        device_tag_clone,
-                                        addr
-                                    );
+                                Ok(_addr) => {
                                 }
                                 Err(e) => {
                                     tracing::warn!(
@@ -4867,27 +4359,11 @@ a=ssrc:{}
                         if let Some(mgr) = crate::media::get_media_session_manager() {
                             let session = mgr.get_or_create(device_tag);
                             session.add_node(node.clone())?;
-                            tracing::info!(
-                                "[GB28181] TCP MediaNode added to session: {}_{}",
-                                device_tag,
-                                channel_id_clone
-                            );
                         }
                     }
                 }
             }
-            tracing::info!(
-                "[GB28181] TCP Session confirmed for device {} with codec {:?}",
-                device_tag,
-                codec
-            );
         } else {
-            tracing::info!(
-                "[GB28181] Setting up UDP media for device {} peer={} port={}",
-                device_tag,
-                peer_addr,
-                platform_audio_port
-            );
 
             if let Some(manager) = crate::media::get_rtp_server_manager() {
                 if let Some(udp_server) = manager.get_udp_server(platform_audio_port).await {
@@ -4909,11 +4385,6 @@ a=ssrc:{}
                     if let Some(mgr) = crate::media::get_media_session_manager() {
                         let session = mgr.get_or_create(device_tag);
                         session.add_node(node.clone())?;
-                        tracing::info!(
-                            "[GB28181] UDP MediaNode added to session: {}_{}",
-                            device_tag,
-                            channel_id.clone()
-                        );
                     }
                 } else {
                     tracing::warn!(
@@ -4923,8 +4394,6 @@ a=ssrc:{}
                 }
             }
         }
-
-        tracing::info!("[GB28181] Media sessions created for device {}", device_tag);
 
         let node_id = {
             let sessions = self.sessions.read().await;
@@ -4944,17 +4413,12 @@ a=ssrc:{}
         if let Err(e) = self.deps.event_publisher.publish(event).await {
             tracing::warn!("[GB28181] Failed to publish AudioTalkReady event: {}", e);
         } else {
-            tracing::info!(
-                "[GB28181] Published AudioTalkReady event for device {}",
-                device_tag
-            );
         }
 
         Ok(())
     }
 
     pub async fn stop_audio_talk_v2(&self, device_tag: &str) -> Result<()> {
-        tracing::info!("[GB28181] stop_audio_talk_v2 called for device_tag={}", device_tag);
         let manager = match crate::media::get_media_session_manager() {
             Some(m) => m,
             None => {
@@ -4966,7 +4430,6 @@ a=ssrc:{}
         {
             let sessions = self.sessions.read().await;
             if let Some(session) = sessions.iter().find(|s| s.device_tag == device_tag && s.session_type == SessionType::Broadcast) {
-                tracing::info!("[GB28181] Sending BYE to device {} for audio talk stop", device_tag);
                 if let Err(e) = self.send_bye_to_session(session).await {
                     tracing::warn!("[GB28181] Failed to send BYE: {}", e);
                 }
@@ -4977,13 +4440,7 @@ a=ssrc:{}
 
         match manager.get(device_tag) {
             Some(session) => {
-                tracing::info!("[GB28181] Found session in manager, calling end_all_broadcasts");
-                let removed = session.end_all_broadcasts().await;
-                tracing::info!(
-                    "[GB28181] Broadcast sessions stopped: {} for device {}",
-                    removed,
-                    device_tag
-                );
+                let _removed = session.end_all_broadcasts().await;
             }
             None => {
                 tracing::warn!("[GB28181] No session found in manager for device_tag={}", device_tag);
@@ -5148,13 +4605,11 @@ a=ssrc:{}
         };
 
         for attempt in 1..=3 {
-            tracing::info!("[GB28181] BYE attempt {} to {}:{} via {:?}, call_id={}", attempt, session.device_host, session.device_port, session.transport, session.call_id);
             if let Err(e) = send_once().await {
                 tracing::warn!("[GB28181] BYE attempt {} failed: {}", attempt, e);
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 continue;
             }
-            tracing::info!("[GB28181] BYE sent successfully on attempt {}", attempt);
             return Ok(());
         }
 
@@ -5210,14 +4665,12 @@ a=ssrc:{}
 
         if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
             let addr = format!("{}:{}", device_host, device_port);
-            tracing::info!("[GB28181] Sending BYE to clear session to {}:{}", device_host, device_port);
             for attempt in 1..=3 {
                 if let Err(e) = sender.send_to(sip_msg.as_bytes(), &addr).await {
                     tracing::warn!("[GB28181] BYE clear attempt {} failed: {}", attempt, e);
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                     continue;
                 }
-                tracing::info!("[GB28181] BYE clear sent successfully on attempt {}", attempt);
                 return Ok(());
             }
             tracing::warn!("[GB28181] All BYE clear attempts failed");
@@ -5590,7 +5043,7 @@ mod tests {
 
     #[test]
     fn test_build_sdp_video_only() {
-        use chrono::{TimeZone, Utc};
+
         let deps = ProtocolDeps::for_test();
         let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
         adapter.device_tag = Some("12010100001320000011".to_string());
@@ -6068,8 +5521,6 @@ mod tests {
             .unwrap_or_else(|| uri.clone());
         assert_eq!(without_sip, "12010100001320000011@192.168.1.211:5060");
 
-        // rsplitn returns elements from RIGHT to LEFT
-        // "device_id@host:port" -> parts[0]="host:port", parts[1]="device_id"
         let parts: Vec<&str> = without_sip.rsplitn(2, '@').collect();
         assert_eq!(
             parts.len(),

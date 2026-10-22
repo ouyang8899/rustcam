@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+
 use tokio::net::UdpSocket;
 use tokio::sync::broadcast;
 
@@ -25,8 +25,6 @@ impl OnvifDiscoveryServer {
         let sock = UdpSocket::bind(&bind_addr).await?;
         sock.join_multicast_v4(MULTICAST_ADDR.parse().unwrap(), "0.0.0.0".parse().unwrap())?;
 
-        tracing::info!("[ONVIF Discovery] Server listening on {}:{}", MULTICAST_ADDR, DISCOVERY_PORT);
-
         let hello = self.build_hello();
         let _ = sock.send_to(hello.as_bytes(), format!("{}:{}", MULTICAST_ADDR, DISCOVERY_PORT)).await;
 
@@ -49,7 +47,6 @@ impl OnvifDiscoveryServer {
                 _ = self.shutdown_rx.recv() => {
                     let bye = self.build_bye();
                     let _ = sock.send_to(bye.as_bytes(), format!("{}:{}", MULTICAST_ADDR, DISCOVERY_PORT)).await;
-                    tracing::info!("[ONVIF Discovery] shutting down");
                     break;
                 }
             }

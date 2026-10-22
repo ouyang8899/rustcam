@@ -78,6 +78,16 @@ const routes = [
         component: () => import('../views/RecordingFiles.vue'),
       },
       {
+        path: 'recording-policies',
+        name: 'RecordingPolicies',
+        component: () => import('../views/RecordingPolicies.vue'),
+      },
+      {
+        path: 'recording-playback',
+        name: 'RecordingPlayback',
+        component: () => import('../views/RecordingPlayback.vue'),
+      },
+      {
         path: 'users',
         name: 'UserManagement',
         component: () => import('../views/UserManagement.vue'),

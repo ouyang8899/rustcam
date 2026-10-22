@@ -5,6 +5,7 @@
 #include <QVariantMap>
 #include <QDate>
 #include <QTabWidget>
+#include <QPushButton>
 #include "CoreExport.h"
 #include "DeviceTree.h"
 #include "TimelineWidget.h"
@@ -44,6 +45,7 @@ private slots:
     void onPeriodClicked(const RecordingPeriod& period);
     void onFileDoubleClicked(const RecordingFile& file);
     void onLoadRecordingsForDevice(const QString& deviceId);
+    void onLoadMoreClicked();
 
 private:
     void loadRecordingsForDate(const QString& deviceId, const QDate& date);
@@ -54,8 +56,11 @@ private:
     DeviceTree* m_deviceTree;
     TimelineWidget* m_timeline;
     RecordingFileListWidget* m_fileList;
+    QPushButton* m_loadMoreBtn;
     QDate m_selectedDate;
     QString m_currentDeviceId;
+    bool m_hasMore;
+    int m_currentPage;
 };
 
 }

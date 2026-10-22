@@ -90,6 +90,16 @@ void StreamSource::seekTo(int64_t absoluteTimeMs) {
 
     int clipIdx = findClipAt(absoluteTimeMs);
     if (clipIdx < 0) {
+        int nearestIdx = findNearestClip(absoluteTimeMs);
+        if (nearestIdx >= 0) {
+            const Clip& nearest = m_clips[nearestIdx];
+            int64_t gapMs = qAbs(absoluteTimeMs -
+                (absoluteTimeMs < nearest.startTimeMs ? nearest.startTimeMs : nearest.endTimeMs));
+            if (gapMs > 5000) {
+                LOG_WARNING("StreamSource", QString("Gap detected: %1ms at time %2").arg(gapMs).arg(absoluteTimeMs));
+                emit gapDetected(absoluteTimeMs, gapMs);
+            }
+        }
         stop();
         setState(State::NoRecording);
         if (m_noRecordingCallback) {
@@ -136,6 +146,21 @@ int StreamSource::findClipAt(int64_t absoluteTimeMs) const {
         }
     }
     return -1;
+}
+
+int StreamSource::findNearestClip(int64_t absoluteTimeMs) const {
+    if (m_clips.isEmpty()) return -1;
+    int nearestIdx = -1;
+    int64_t minDist = INT64_MAX;
+    for (int i = 0; i < m_clips.size(); ++i) {
+        const Clip& clip = m_clips[i];
+        int64_t dist = qAbs(absoluteTimeMs - clip.startTimeMs);
+        if (dist < minDist) {
+            minDist = dist;
+            nearestIdx = i;
+        }
+    }
+    return nearestIdx;
 }
 
 void StreamSource::switchToClip(int clipIndex) {
@@ -195,6 +220,7 @@ void StreamSource::onPlayerProgress(int64_t currentMs, int64_t durationMs) {
         const Clip& clip = m_clips[m_currentClipIndex];
         m_baseTimeMs = clip.startTimeMs + currentMs;
         m_lastProgressMs = currentMs;
+        emit playbackProgressChanged(m_baseTimeMs);
     }
 }
 

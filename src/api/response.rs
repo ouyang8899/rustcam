@@ -1,6 +1,5 @@
 use serde::Serialize;
 
-/// 统一 API 响应格式
 #[derive(Debug, Serialize)]
 pub struct ApiResponse<T: Serialize> {
     pub code: u16,
@@ -9,7 +8,7 @@ pub struct ApiResponse<T: Serialize> {
 }
 
 impl<T: Serialize> ApiResponse<T> {
-    /// 成功响应
+
     pub fn success(data: T) -> Self {
         Self {
             code: 200,
@@ -18,7 +17,6 @@ impl<T: Serialize> ApiResponse<T> {
         }
     }
 
-    /// 错误响应
     pub fn error(code: u16, message: &str) -> Self {
         Self {
             code,

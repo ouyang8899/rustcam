@@ -138,8 +138,7 @@ pub fn create_session(
     let session_id = session.session_id.clone();
     let arc = Arc::new(tokio::sync::RwLock::new(session));
     RTSP_SESSIONS.insert(session_id, arc.clone());
-    let count = RTSP_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
-    tracing::debug!("[RTSP] Session created (total: {})", count + 1);
+    let _count = RTSP_SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
     Some(arc)
 }
 
@@ -149,7 +148,6 @@ pub fn get_session(id: &str) -> Option<Arc<tokio::sync::RwLock<RtspSession>>> {
 
 pub fn remove_session(id: &str) {
     if RTSP_SESSIONS.remove(id).is_some() {
-        tracing::debug!("[RTSP] Session {} removed", id);
     }
 }
 
@@ -160,10 +158,15 @@ pub fn session_count() -> usize {
 pub fn get_session_by_stream_key(
     stream_key: &str,
 ) -> Option<Arc<tokio::sync::RwLock<RtspSession>>> {
-    RTSP_SESSIONS
-        .iter()
-        .find(|r| r.value().blocking_read().stream_key == stream_key)
-        .map(|r| r.value().clone())
+
+    let candidates: Vec<Arc<tokio::sync::RwLock<RtspSession>>> =
+        RTSP_SESSIONS.iter().map(|r| r.value().clone()).collect();
+    for c in candidates {
+        if c.blocking_read().stream_key == stream_key {
+            return Some(c);
+        }
+    }
+    None
 }
 
 pub fn cleanup_timed_out_sessions(timeout_secs: u64) -> usize {
@@ -176,7 +179,6 @@ pub fn cleanup_timed_out_sessions(timeout_secs: u64) -> usize {
         RTSP_SESSIONS.remove(id);
     }
     if !ids.is_empty() {
-        tracing::info!("[RTSP] Cleaned up {} timed-out sessions", ids.len());
     }
     ids.len()
 }
@@ -190,23 +192,24 @@ pub async fn cleanup_expired(cluster: Arc<crate::infrastructure::cluster::Cluste
 
     let mut removed = 0;
     for id in ids {
-        let Some(sess_guard) = RTSP_SESSIONS.get(&id) else {
-            continue;
-        };
-        let sess_guard = sess_guard; // suppress warning
-        let session = sess_guard.blocking_read();
 
-        let tag = match &session.media_server_name {
-            Some(t) => t.clone(),
+        let (tag, stream_id) = {
+            let Some(sess_guard) = RTSP_SESSIONS.get(&id) else {
+                continue;
+            };
+            let session = sess_guard.blocking_read();
+            let tag = session.media_server_name.clone();
+            let stream_id = session.stream_key.clone();
+            (tag, stream_id)
+        };
+
+        let tag = match tag {
+            Some(t) => t,
             None => {
-                drop(session);
                 RTSP_SESSIONS.remove(&id);
                 continue;
             }
         };
-
-        let stream_id = session.stream_key.clone();
-        drop(session);
 
         if stream_id.is_empty() {
             RTSP_SESSIONS.remove(&id);
@@ -217,7 +220,6 @@ pub async fn cleanup_expired(cluster: Arc<crate::infrastructure::cluster::Cluste
             if let Err(e) = adapter.close_rtp_server(&stream_id).await {
                 tracing::warn!("[RTSP] Cleanup: failed to close RTP server {} on {}: {}", stream_id, tag, e);
             } else {
-                tracing::info!("[RTSP] Cleanup: closed RTP server {} on {}", stream_id, tag);
             }
         }
         RTSP_SESSIONS.remove(&id);

@@ -4,9 +4,7 @@ use crate::adapter::media_server::{MediaServerAdapter, Protocol, RecordingInfo, 
 use crate::adapter::media_server::client::MediaServerClient;
 use crate::config::MediaServerConfig;
 use crate::domain::device::PlayLinks;
-use tracing::{info, error,debug, Level};
-use tracing_log::LogTracer;
-use tracing_subscriber::FmtSubscriber;
+
 pub struct ZlMediaKitAdapter {
     config: MediaServerConfig,
     client: MediaServerClient,
@@ -40,6 +38,10 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
     fn tag(&self) -> &str { &self.config.server_tag }
     fn server_type(&self) -> &str { "zlmediakit" }
     fn secret(&self) -> &str { &self.config.api_key }
+    fn http_base_url(&self) -> String {
+
+        self.config.url.trim_end_matches('/').to_string()
+    }
 
     async fn is_online(&self) -> bool {
         self.client.get::<serde_json::Value>("/index/api/getStatistic").await.is_ok()
@@ -81,14 +83,12 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         ];
 
         let ret_data: serde_json::Value = self.client.get_with_params("/index/api/addStreamProxy", &params).await?;
-        tracing::debug!("/index/api/addStreamProxy return = {}" , ret_data.to_string());
 
         if let Some(code_val) = ret_data.get("code") {
             let code = code_val.as_i64().unwrap_or(0);
             if code == -1 {
                 let msg = ret_data.get("msg").and_then(|v| v.as_str()).unwrap_or("");
                 if msg.contains("already exists") || msg.contains("该流已经存在") {
-                    tracing::info!("[ZlMediaKit] Stream {} already exists, treating as success", stream_key);
                 } else {
                     anyhow::bail!("ZLMediaKit addStreamProxy failed: code={}, msg={}", code, msg);
                 }
@@ -121,8 +121,7 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         };
 
         match self.client.post::<serde_json::Value, _>("/index/api/closeStream", &req).await {
-            Ok(resp) => {
-                tracing::debug!("[ZLMediaKit] closeStreams response: {:?}", resp);
+            Ok(_resp) => {
                 Ok(())
             }
             Err(e) => {
@@ -166,20 +165,13 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
             ("stream", &stream_key.to_string()),
         ];
 
-        tracing::info!("[ZLMediaKit] is_stream_online: app={}, stream={}", app, stream_key);
-
         #[derive(Deserialize)]
         struct Resp { code: i32, data: Option<Vec<serde_json::Value>>, msg: Option<String> }
         let resp: Resp = self.client.get_with_params("/index/api/getMediaList", &params).await?;
 
-        tracing::info!("[ZLMediaKit] is_stream_online: app={}, stream={} -> code={}, msg={:?}, data_count={}", 
-            app, stream_key, resp.code, resp.msg, resp.data.as_ref().map(|d| d.len()).unwrap_or(0));
-
-        // 检查返回的流是否匹配我们查询的 stream_key
         if let Some(data) = &resp.data {
             for item in data {
-                if let Some(item_stream) = item.get("stream").and_then(|v| v.as_str()) {
-                    tracing::info!("[ZLMediaKit] is_stream_online: found stream in response: stream={}", item_stream);
+                if let Some(_item_stream) = item.get("stream").and_then(|v| v.as_str()) {
                 }
             }
         }
@@ -188,10 +180,18 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
     }
 
     async fn ptz_control(&self, _stream_key: &str, _command: &str, _channel: u8) -> anyhow::Result<()> { Ok(()) }
-    async fn start_recording(&self, app: &str, stream_key: &str, format: &str, output_path: Option<&str>) -> anyhow::Result<RecordingInfo> {
+    async fn start_recording(
+        &self,
+        app: &str,
+        stream_key: &str,
+        format: &str,
+        output_path: Option<&str>,
+        max_duration_secs: Option<u32>,
+        pre_record_secs: Option<u32>,
+    ) -> anyhow::Result<RecordingInfo> {
         let record_type = match format.to_lowercase().as_str() {
             "hls" | "flv" | "ts" => 0,
-            _ => 1, // MP4
+            _ => 1,
         };
 
         #[derive(Deserialize)]
@@ -203,22 +203,28 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
             app: &'a str,
             stream: &'a str,
             r#type: u8,
+
+            #[serde(skip_serializing_if = "Option::is_none")]
+            customized_path: Option<&'a str>,
+
+            #[serde(skip_serializing_if = "Option::is_none")]
+            max_second: Option<u32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            preSec: Option<u32>,
         }
         let req = Req {
             vhost: "__defaultVhost__",
             app,
             stream: stream_key,
             r#type: record_type,
+            customized_path: output_path.filter(|p| !p.is_empty()),
+            max_second: max_duration_secs.filter(|s| *s > 0),
+            preSec: pre_record_secs,
         };
         let resp: ApiResp = self.client.post("/index/api/startRecord", &req).await?;
         if resp.code != 0 {
             return Err(anyhow::anyhow!("ZLMediaKit startRecord failed: {}", resp.msg.unwrap_or_default()));
         }
-
-        tracing::info!(
-            "[ZlMediaKit] Recording started: app={}, stream={}, format={}",
-            app, stream_key, format
-        );
 
         Ok(RecordingInfo {
             stream_key: stream_key.to_string(),
@@ -230,7 +236,7 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
     async fn stop_recording(&self, app: &str, stream_key: &str, format: &str) -> anyhow::Result<()> {
         let record_type = match format.to_lowercase().as_str() {
             "hls" | "flv" | "ts" => 0,
-            _ => 1, // MP4
+            _ => 1,
         };
 
         #[derive(Deserialize)]
@@ -252,11 +258,6 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         if resp.code != 0 {
             return Err(anyhow::anyhow!("ZLMediaKit stopRecord failed: {}", resp.msg.unwrap_or_default()));
         }
-
-        tracing::info!(
-            "[ZlMediaKit] Recording stopped: app={}, stream={}, format={}",
-            app, stream_key, format
-        );
 
         Ok(())
     }
@@ -351,25 +352,18 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
             ("tcp_mode", &tcp_mode.to_string()),
             ("stream_id", &stream_id.to_string()),
         ];
-        tracing::info!("[ZLMediaKit] open_rtp_server: stream_id={}, requested_port={}, enable_tcp={}, tcp_mode={}",
-            stream_id, port, enable_tcp, tcp_mode);
         let resp: Resp = self.client.get_with_params("/index/api/openRtpServer", &params).await?;
 
         if resp.code == -300 {
-            tracing::info!("[ZLMediaKit] open_rtp_server: stream_id={} already exists (code=-300), closing and retrying", stream_id);
             if let Err(e) = self.close_rtp_server(stream_id).await {
                 tracing::warn!("[ZLMediaKit] close_rtp_server failed: {}, proceeding with retry", e);
             }
             let resp: Resp = self.client.get_with_params("/index/api/openRtpServer", &params).await?;
             let actual_port = resp.port.unwrap_or(port);
-            tracing::info!("[ZLMediaKit] open_rtp_server result after retry: stream_id={}, actual_port={}, code={}",
-                stream_id, actual_port, resp.code);
             return Ok((actual_port, base_host_from_config(&self.config)));
         }
 
         let actual_port = resp.port.unwrap_or(port);
-        tracing::info!("[ZLMediaKit] open_rtp_server result: stream_id={}, actual_port={}, code={}",
-            stream_id, actual_port, resp.code);
         Ok((actual_port, base_host_from_config(&self.config)))
     }
 
@@ -404,15 +398,12 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         expires_at: i64,
         rtsp_auth: Option<(&str, &str)>,
     ) -> anyhow::Result<PlayLinks> {
-        tracing::info!("[ZLMediaKit] config.url={}, http_flv={:?}, hls={:?}", self.config.url, self.config.protocol_ports.http_flv, self.config.protocol_ports.hls);
         let rtsp_signaling_host = self.host_with_port(Protocol::Rtsp);
         let rtsp_media_host = self.host_with_port(Protocol::Rtsp);
         let hls_host = self.host_with_port(Protocol::Hls);
         let flv_host = self.host_with_port(Protocol::Flv);
         let ws_flv_host = self.host_with_port(Protocol::WsFlv);
         let webrtc_host = self.host_with_port(Protocol::WebRTC);
-
-        tracing::info!("[ZLMediaKit] hosts: rtsp={}, hls={}, flv={}, ws_flv={}, webrtc={}", rtsp_signaling_host, hls_host, flv_host, ws_flv_host, webrtc_host);
 
         let rtsp_auth_str = format_rtsp_auth(rtsp_auth);
 

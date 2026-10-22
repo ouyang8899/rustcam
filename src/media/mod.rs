@@ -35,7 +35,6 @@ pub async fn init_tcp_rtsp_rtp_server(
     ).await.map_err(|e| MediaError::Transport(e.to_string()))?;
     let server = Arc::new(server);
     TCP_RTSP_RTP_SERVER.set(server.clone()).ok();
-    tracing::info!("[TcpRtspRtpServer] Initialized");
     Ok(server)
 }
 

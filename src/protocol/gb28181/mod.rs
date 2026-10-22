@@ -8,8 +8,6 @@ pub use sip::{SipMessage, SipUri, SipMethod, SipNameAddr};
 
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use std::collections::HashMap;
 
 static UDP_SENDER: OnceCell<Arc<tokio::net::UdpSocket>> = OnceCell::new();
 

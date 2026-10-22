@@ -7,6 +7,7 @@
 #include <functional>
 #include "CoreExport.h"
 #include "ReplayPlayer.h"
+#include "TimelineWidget.h"
 
 namespace rustcam {
 
@@ -15,10 +16,12 @@ struct Clip {
     int64_t startTimeMs;
     int64_t endTimeMs;
     int64_t durationMs;
+    SegmentType segmentType = SegmentType::Normal;
+    int64_t alarmId = 0;
 
-    Clip() : startTimeMs(0), endTimeMs(0), durationMs(0) {}
+    Clip() : startTimeMs(0), endTimeMs(0), durationMs(0), segmentType(SegmentType::Normal), alarmId(0) {}
     Clip(const QString& u, int64_t start, int64_t end)
-        : url(u), startTimeMs(start), endTimeMs(end), durationMs(end - start) {}
+        : url(u), startTimeMs(start), endTimeMs(end), durationMs(end - start), segmentType(SegmentType::Normal), alarmId(0) {}
 };
 
 class RUSTCAM_CORE_API StreamSource : public QObject {
@@ -65,10 +68,13 @@ signals:
     void stateChanged(State state);
     void clipChanged(int oldIndex, int newIndex);
     void noRecording(int64_t timeMs);
+    void playbackProgressChanged(int64_t absoluteTimeMs);
+    void gapDetected(int64_t timeMs, int64_t gapMs);
 
 private:
     void setState(State newState);
     int findClipAt(int64_t absoluteTimeMs) const;
+    int findNearestClip(int64_t absoluteTimeMs) const;
     void switchToClip(int clipIndex);
     void onPlayerStateChanged(ReplayPlayer::State oldState, ReplayPlayer::State newState);
     void onPlayerProgress(int64_t currentMs, int64_t durationMs);

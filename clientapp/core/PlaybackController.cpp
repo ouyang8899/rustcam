@@ -1,5 +1,6 @@
 #include "PlaybackController.h"
 #include "common/Logger.h"
+#include <QTimer>
 
 namespace rustcam {
 
@@ -33,6 +34,12 @@ void PlaybackGroup::clearCells() {
 
 void PlaybackGroup::syncTo(int64_t baseTimeMs) {
     for (StreamSource* cell : m_cells) {
+        if (cell->state() != StreamSource::State::Playing) {
+            continue;
+        }
+        if (qAbs(cell->baseTimeMs() - baseTimeMs) < 100) {
+            continue;
+        }
         if (cell->isInRange(baseTimeMs)) {
             cell->seekTo(baseTimeMs);
             cell->play();
@@ -80,13 +87,39 @@ PlaybackController::~PlaybackController() {
 }
 
 void PlaybackController::setBaseTime(int64_t timeMs) {
-    if (m_baseTimeMs != timeMs) {
-        m_baseTimeMs = timeMs;
-        emit baseTimeChanged(timeMs);
+    if (m_baseTimeMs == timeMs) {
+        return;
+    }
 
-        for (PlaybackGroup* group : m_groups) {
-            group->syncTo(timeMs);
-        }
+    if (m_syncState == SyncState::Syncing) {
+        return;
+    }
+
+    m_baseTimeMs = timeMs;
+    emit baseTimeChanged(timeMs);
+
+    m_syncState = SyncState::Syncing;
+    emit syncStateChanged(m_syncState);
+
+    m_batchStartIndex = 0;
+    m_batchTimeMs = timeMs;
+    onBatchSync();
+}
+
+void PlaybackController::onBatchSync() {
+    int endIndex = qMin(m_batchStartIndex + BATCH_SIZE, m_groups.size());
+
+    for (int i = m_batchStartIndex; i < endIndex; ++i) {
+        m_groups[i]->syncTo(m_batchTimeMs);
+    }
+
+    m_batchStartIndex = endIndex;
+
+    if (m_batchStartIndex < m_groups.size()) {
+        QTimer::singleShot(0, this, &PlaybackController::onBatchSync);
+    } else {
+        m_syncState = SyncState::Synced;
+        emit syncStateChanged(m_syncState);
     }
 }
 

@@ -1,23 +1,22 @@
 use crate::api::FullState;
 use crate::application::ws_broadcaster::WsBroadcaster;
 use crate::domain::device::Protocol;
-use crate::domain::traits::{CacheStore, DeviceLookup, EventPublisher, StreamManager};
+
 use crate::error::AppError;
 use crate::media::{
-    AudioCodec, BasicMediaNode, DataType, LinearPcmToG711Middleware, MediaNode, MediaNodeId,
-    MediaNodeType, NullTransport, SendToReceiversMiddleware, WebSocketMediaNodeTransport,
+    AudioCodec, BasicMediaNode, LinearPcmToG711Middleware, MediaNode, MediaNodeId,
+    MediaNodeType, SendToReceiversMiddleware, WebSocketMediaNodeTransport,
 };
-use crate::protocol::adapter_manager::{self, AdapterEntry};
-use crate::protocol::traits::ProtocolDeps;
+use crate::protocol::adapter_manager::{ self };
+
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Path, State, WebSocketUpgrade};
-use bytes::{Bytes, BytesMut};
+use bytes::{ BytesMut };
 use futures_util::{SinkExt, StreamExt};
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, Mutex};
 
-/// WebSocket 连接处理器
+use std::sync::Arc;
+use tokio::sync::{ broadcast, mpsc };
+
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<Arc<FullState>>,
@@ -27,11 +26,6 @@ pub async fn ws_handler(
     Ok(ws.on_upgrade(move |socket| handle_socket(socket, broadcaster)))
 }
 
-/// 处理 WebSocket 连接
-///
-/// 同时处理：
-/// - 接收客户端消息（Ping/Pong/Close）
-/// - 发送服务端广播消息
 async fn handle_socket(socket: WebSocket, broadcaster: Arc<WsBroadcaster>) {
     let (mut sender, mut receiver) = socket.split();
     let mut broadcast_rx = broadcaster.subscribe();
@@ -40,8 +34,7 @@ async fn handle_socket(socket: WebSocket, broadcaster: Arc<WsBroadcaster>) {
         tokio::select! {
             msg = receiver.next() => {
                 match msg {
-                    Some(Ok(Message::Text(text))) => {
-                        tracing::debug!("[WebSocket] Received: {}", text);
+                    Some(Ok(Message::Text(_text))) => {
                     }
                     Some(Ok(Message::Ping(data))) => {
                         if sender.send(Message::Pong(data)).await.is_err() {
@@ -49,7 +42,6 @@ async fn handle_socket(socket: WebSocket, broadcaster: Arc<WsBroadcaster>) {
                         }
                     }
                     Some(Ok(Message::Close(_))) => {
-                        tracing::info!("[WebSocket] Client closed connection");
                         break;
                     }
                     Some(Err(e)) => {
@@ -57,7 +49,6 @@ async fn handle_socket(socket: WebSocket, broadcaster: Arc<WsBroadcaster>) {
                         break;
                     }
                     None => {
-                        tracing::info!("[WebSocket] Client disconnected");
                         break;
                     }
                     _ => {}
@@ -78,7 +69,6 @@ async fn handle_socket(socket: WebSocket, broadcaster: Arc<WsBroadcaster>) {
                         continue;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        tracing::info!("[WebSocket] Broadcast channel closed");
                         break;
                     }
                 }
@@ -86,20 +76,13 @@ async fn handle_socket(socket: WebSocket, broadcaster: Arc<WsBroadcaster>) {
         }
     }
 
-    tracing::info!("[WebSocket] Connection closed");
 }
 
-/// WebSocket audio talk handler (Browser -> Device)
 pub async fn audio_talk_handler(
     ws: WebSocketUpgrade,
     Path((device_tag, channel_id)): Path<(String, String)>,
     State(state): State<Arc<FullState>>,
 ) -> Result<axum::response::Response, AppError> {
-    tracing::info!(
-        "[AudioTalk] WebSocket connection request for device {} channel {}",
-        device_tag,
-        channel_id
-    );
     Ok(ws.on_upgrade(move |socket| handle_audio_talk(socket, device_tag, channel_id, state)))
 }
 
@@ -111,12 +94,6 @@ async fn handle_audio_talk(
 ) {
     let (tx, _rx) = broadcast::channel::<BytesMut>(100);
 
-    tracing::info!(
-        "[AudioTalk] WebSocket connected for device {} channel {}",
-        device_tag,
-        channel_id
-    );
-
     let transport = Arc::new(WebSocketMediaNodeTransport::new(tx));
 
     let device_protocol = {
@@ -127,11 +104,6 @@ async fn handle_audio_talk(
             .get_device_by_device_tag(&device_tag)
         {
             Ok(Some(device)) => {
-                tracing::info!(
-                    "[AudioTalk] Device {} protocol: {:?}",
-                    device_tag,
-                    device.protocol
-                );
                 Some(device.protocol)
             }
             Ok(None) => {
@@ -172,10 +144,6 @@ async fn handle_audio_talk(
 
     match device_protocol {
         Protocol::Gb28181 => {
-            tracing::info!(
-                "[AudioTalk] Setting up GB28181 broadcast for device {}",
-                device_tag
-            );
             ws_node.add_send_chain(
                 MediaNodeType::GB28181_BROADCAST_VOICE,
                 Box::new(LinearPcmToG711Middleware::new(AudioCodec::Pcma)),
@@ -189,10 +157,6 @@ async fn handle_audio_talk(
             );
         }
         Protocol::Onvif => {
-            tracing::info!(
-                "[AudioTalk] Setting up ONVIF broadcast for device {}",
-                device_tag
-            );
 
             if adapter_manager::get_or_create_adapter(&Protocol::Onvif, &device_tag).is_none() {
                 tracing::error!("[AudioTalk] ONVIF adapter factory not registered");
@@ -260,13 +224,9 @@ async fn handle_audio_talk(
         move |text| {
             let node_id = node_id_clone.clone();
             let state = state_clone.clone();
-            tracing::debug!("[AudioTalk] Received text message: {}", text);
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
                 let action = json.get("action").and_then(|v| v.as_str());
                 if action == Some("start_talk") {
-                    tracing::info!(
-                        "[AudioTalk] start_talk action received, publishing StartAudioTalk event"
-                    );
                     let event = crate::protocol::event::SignalEvent::StartAudioTalk { node_id };
                     let event_bus = state.app.registry.infra.event_bus.clone();
                     tokio::spawn(async move {
@@ -276,15 +236,9 @@ async fn handle_audio_talk(
                                 e
                             );
                         } else {
-                            tracing::info!(
-                                "[AudioTalk] StartAudioTalk event published successfully"
-                            );
                         }
                     });
                 } else if action == Some("stop_talk") {
-                    tracing::info!(
-                        "[AudioTalk] stop_talk action received, publishing StopAudioTalk event"
-                    );
                     let event = crate::protocol::event::SignalEvent::StopAudioTalk { node_id };
                     let event_bus = state.app.registry.infra.event_bus.clone();
                     tokio::spawn(async move {
@@ -294,9 +248,6 @@ async fn handle_audio_talk(
                                 e
                             );
                         } else {
-                            tracing::info!(
-                                "[AudioTalk] StopAudioTalk event published successfully"
-                            );
                         }
                     });
                 }
@@ -334,7 +285,6 @@ async fn handle_audio_talk(
                     }
                 }
                 _ = shutdown_rx.recv() => {
-                    tracing::info!("[AudioTalk] WebSocket disconnected, sending StopAudioTalk event");
                     let event = crate::protocol::event::SignalEvent::StopAudioTalk {
                         node_id: node_id_for_delete.clone(),
                     };
@@ -349,5 +299,4 @@ async fn handle_audio_talk(
             }
         }
     });
-    tracing::info!("[AudioTalk] Connection closed for device {}", device_tag);
 }

@@ -1,7 +1,7 @@
-use rsip::{message::HasHeaders, Header as RsipHeader, SipMessage as RsipSipMessage};
-use std::collections::HashMap;
-
+use rsip::{ message::HasHeaders, SipMessage as RsipSipMessage };
 use crate::protocol::gb28181::GB28181_USER_AGENT;
+
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct SipVia {
@@ -22,7 +22,7 @@ impl SipVia {
         let mut parts = s.split_whitespace();
         let protocol = parts.next()?;
         let protocol_parts: Vec<&str> = protocol.split('/').collect();
-        // SIP Via format: SIP/2.0/UDP or SIP/2.0/TCP
+
         let (protocol_name, protocol_version, transport) = match protocol_parts.len() {
             3 => (
                 protocol_parts[0].to_string(),
@@ -38,7 +38,7 @@ impl SipVia {
         };
 
         let sent_by = parts.next()?;
-        let (sent_by_host, port) = if let Some(pos) = sent_by.rfind(':') {
+        let (_sent_by_host, port) = if let Some(pos) = sent_by.rfind(':') {
             let potential_port: &str = &sent_by[pos + 1..];
             if potential_port.parse::<u16>().is_ok() {
                 (&sent_by[..pos], Some(potential_port.parse().ok()?))
@@ -49,7 +49,6 @@ impl SipVia {
             (sent_by, None)
         };
 
-        // sent_by might contain semicolon parameters like ";branch=..."
         let (final_sent_by, mut extension) = if let Some(semi_pos) = sent_by.find(';') {
             let host_part = &sent_by[..semi_pos];
             let params_part = &sent_by[semi_pos + 1..];
@@ -64,7 +63,7 @@ impl SipVia {
             (sent_by, HashMap::new())
         };
 
-        let mut via = Self {
+        let via = Self {
             protocol_name,
             protocol_version,
             transport,
@@ -1042,57 +1041,50 @@ impl SipMessageBuffer {
             let buffer_len = self.buffer.len();
             let msg_str = String::from_utf8_lossy(&self.buffer);
 
-            // 跳过开头的空白
             let leading_spaces = msg_str.len() - msg_str.trim_start().len();
             if leading_spaces > 0 {
                 self.buffer.drain(..leading_spaces);
                 continue;
             }
 
-            // 检查是否是空的或只有 \r\n\r\n
             let trimmed = msg_str.trim_start();
             if trimmed.is_empty() {
                 self.buffer.clear();
                 return None;
             }
 
-            // 如果以 \r\n\r\n 开头，跳过它
             if trimmed.starts_with("\r\n\r\n") {
                 let skip_pos = trimmed.as_ptr() as usize - msg_str.as_ptr() as usize;
                 self.buffer.drain(..skip_pos + 4);
                 continue;
             }
 
-            // 检查是否有有效的 SIP 消息开始
             if !Self::is_valid_sip_start(&msg_str) {
                 tracing::warn!(
                     "[SIP] Invalid SIP message start: {:?}",
                     &msg_str[..msg_str.len().min(80)]
                 );
-                // 尝试找到下一个可能的 SIP 消息开始
+
                 if let Some(crlf_pos) = msg_str.find("\r\n\r\n") {
                     let after_crlf = &msg_str[crlf_pos + 4..];
                     if let Some(next_start) = after_crlf.find(|c: char| !c.is_ascii_whitespace()) {
                         let after_next = &after_crlf[next_start..];
                         if Self::is_valid_sip_start(after_next) {
                             let skip_pos = crlf_pos + 4 + next_start;
-                            tracing::debug!("[SIP] Skipping to next message at pos {}", skip_pos);
                             self.buffer.drain(..skip_pos);
                             continue;
                         }
                     }
                 }
-                // 找不到有效的 SIP 消息，清除缓冲区
+
                 tracing::warn!("[SIP] No valid SIP message found, clearing buffer");
                 self.buffer.clear();
                 return None;
             }
 
-            // 查找消息结束位置
             let header_end = match msg_str.find("\r\n\r\n") {
                 Some(pos) => pos,
                 None => {
-                    tracing::debug!("[SIP] No header/body separator found, incomplete");
                     return None;
                 }
             };
@@ -1103,34 +1095,20 @@ impl SipMessageBuffer {
             let total_len = body_start + content_length;
 
             if buffer_len < total_len {
-                tracing::debug!(
-                    "[SIP] Incomplete message: have {}/{} bytes",
-                    buffer_len,
-                    total_len
-                );
                 return None;
             }
 
-            // 提取单个 SIP 消息并消费
             let single_msg = msg_str[..total_len].to_string();
             self.buffer.drain(..total_len);
 
-            tracing::debug!(
-                "[SIP] Parsing SIP message: len={}, content_length={}",
-                total_len,
-                content_length
-            );
-
-            // 使用 rsip 解析
             match rsip::SipMessage::try_from(single_msg.as_str()) {
                 Ok(rsip_msg) => {
-                    tracing::debug!("[SIP] rsip parsed successfully");
                     match SipMessage::from_rsip_message(&rsip_msg) {
                         Some(sip_msg) => return Some((sip_msg, total_len)),
                         None => {
                             let uri_preview = format!("{:?}", rsip_msg);
                             tracing::warn!("[SIP] Failed to convert rsip message: rsip_msg={}", &uri_preview[..uri_preview.len().min(200)]);
-                            // 回退到旧解析方式
+
                             match SipMessage::parse(&single_msg) {
                                 Some(msg) => return Some((msg, total_len)),
                                 None => {
@@ -1143,7 +1121,7 @@ impl SipMessageBuffer {
                 }
                 Err(e) => {
                     tracing::warn!("[SIP] rsip parse failed: {:?}", e);
-                    // 回退到旧解析方式
+
                     match SipMessage::parse(&single_msg) {
                         Some(msg) => return Some((msg, total_len)),
                         None => {
@@ -1166,28 +1144,18 @@ impl Default for SipMessageBuffer {
 impl SipMessage {
     pub fn from_buffer(buffer: &[u8]) -> Option<(SipMessage, usize)> {
         if buffer.len() < 4 {
-            tracing::debug!("[SIP] Buffer too short: {}", buffer.len());
             return None;
         }
 
         let msg_str = String::from_utf8_lossy(buffer);
-        tracing::debug!(
-            "[SIP] from_buffer: buffer_len={}, msg_start={:?}",
-            buffer.len(),
-            &msg_str[..msg_str.len().min(100)]
-        );
 
-        // 检查是否是空的心跳包（只有 \r\n\r\n）
         let trimmed = msg_str.trim_start();
         if trimmed.is_empty() || trimmed == "\r\n\r\n" {
-            tracing::debug!("[SIP] Empty heartbeat packet, skipping");
             return None;
         }
 
-        // 查找 header 和 body 的分隔符
         let header_end = msg_str.find("\r\n\r\n")?;
 
-        // 解析 Content-Length 来确定是否收到完整消息
         let header_section = &msg_str[..header_end];
         let content_length = header_section
             .lines()
@@ -1199,36 +1167,20 @@ impl SipMessage {
         let body_start = header_end + 4;
         let total_len = body_start + content_length;
 
-        // 检查是否收到完整的 body
         if buffer.len() < total_len {
-            tracing::debug!(
-                "[SIP] Incomplete SIP message: have {}/{} bytes (header_end={}, content_length={})",
-                buffer.len(),
-                total_len,
-                header_end,
-                content_length
-            );
             return None;
         }
 
-        // 提取单个 SIP 消息（可能包含后续的拼接数据）
         let single_msg = &msg_str[..total_len];
-        tracing::debug!(
-            "[SIP] Processing SIP message: len={}, content_length={}",
-            single_msg.len(),
-            content_length
-        );
 
-        // 使用 rsip 解析 SIP 消息
         match rsip::SipMessage::try_from(single_msg) {
             Ok(rsip_msg) => {
-                tracing::debug!("[SIP] rsip parsed successfully: {:?}", rsip_msg);
                 let sip_msg = SipMessage::from_rsip_message(&rsip_msg)?;
                 Some((sip_msg, total_len))
             }
             Err(e) => {
                 tracing::warn!("[SIP] rsip parse failed: {:?}", e);
-                // 回退到旧的解析方式
+
                 let msg = SipMessage::parse(single_msg)?;
                 Some((msg, total_len))
             }

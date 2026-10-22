@@ -8,7 +8,8 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::timeout;
 
-/// Redis 消息总线
+const REDIS_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 #[derive(Clone)]
 pub struct RedisBus {
     url: String,
@@ -19,7 +20,6 @@ pub struct RedisBus {
 impl RedisBus {
     pub async fn new(url: &str) -> anyhow::Result<Self> {
         let url = url.to_string();
-        tracing::debug!("[Redis] Connecting to: {}", url);
         let conn = Self::create_connection(&url).await?;
         Ok(Self {
             url,
@@ -51,17 +51,12 @@ impl RedisBus {
     }
 
     pub async fn reconnect(&self) -> anyhow::Result<()> {
-        tracing::debug!("[Redis] Reconnecting to: {}", self.url);
         let new_conn = Self::create_connection(&self.url).await?;
         let mut conn = self.conn.write().await;
         *conn = Some(new_conn);
         Ok(())
     }
 
-    /// 带重试的执行器
-    ///
-    /// 使用 `Pin<Box<dyn Future>>` 消除生命周期问题。
-    /// 闭包接收 `&mut MultiplexedConnection`，返回拥有所有权的 Future。
     async fn execute_with_retry<T, E>(
         &self,
         operation_name: &str,
@@ -77,7 +72,42 @@ impl RedisBus {
             let mut conn_guard = self.conn.write().await;
 
             if let Some(ref mut conn) = *conn_guard {
-                match f(conn).await {
+
+                let result = match tokio::time::timeout(
+                    REDIS_COMMAND_TIMEOUT,
+                    f(conn),
+                )
+                .await
+                {
+                    Ok(r) => r,
+                    Err(_) => {
+                        tracing::warn!(
+                            "[Redis] {} attempt {}/{} timed out after {:?}",
+                            operation_name,
+                            attempt + 1,
+                            self.max_retries + 1,
+                            REDIS_COMMAND_TIMEOUT
+                        );
+                        last_error = Some(anyhow::anyhow!(
+                            "Redis command '{}' timed out after {:?}",
+                            operation_name,
+                            REDIS_COMMAND_TIMEOUT
+                        ));
+
+                        *conn_guard = None;
+                        drop(conn_guard);
+
+                        if attempt < self.max_retries {
+                            match self.reconnect().await {
+                                Ok(()) => continue,
+                                Err(e) => return Err(e),
+                            }
+                        }
+                        break;
+                    }
+                };
+
+                match result {
                     Ok(result) => return Ok(result),
                     Err(e) => {
                         tracing::warn!(
@@ -99,7 +129,6 @@ impl RedisBus {
             if attempt < self.max_retries {
                 match self.reconnect().await {
                     Ok(()) => {
-                        tracing::debug!("[Redis] Reconnected for {}", operation_name);
                         continue;
                     }
                     Err(e) => return Err(e),
@@ -115,10 +144,6 @@ impl RedisBus {
             )
         }))
     }
-
-    // ═══════════════════════════════════════════════════════════
-    // 发布/订阅
-    // ═══════════════════════════════════════════════════════════
 
     pub async fn publish<T: Serialize>(&self, channel: &str, message: &T) -> anyhow::Result<()> {
         let msg = serde_json::to_string(message)?;
@@ -142,10 +167,6 @@ impl RedisBus {
     pub async fn subscribe(&self, _channel: &str) -> anyhow::Result<()> {
         Ok(())
     }
-
-    // ═══════════════════════════════════════════════════════════
-    // 键值操作
-    // ═══════════════════════════════════════════════════════════
 
     pub async fn set<T: Serialize>(
         &self, key: &str, value: &T, ttl_secs: Option<u64>,
@@ -226,10 +247,6 @@ impl RedisBus {
             .await
     }
 
-    // ═══════════════════════════════════════════════════════════
-    // 哈希表操作
-    // ═══════════════════════════════════════════════════════════
-
     pub async fn hset(&self, key: &str, field: &str, value: &str) -> anyhow::Result<()> {
         let key = key.to_string();
         let field = field.to_string();
@@ -290,10 +307,6 @@ impl RedisBus {
             .await
     }
 
-    // ═══════════════════════════════════════════════════════════
-    // 过期时间
-    // ═══════════════════════════════════════════════════════════
-
     pub async fn expire(&self, key: &str, seconds: u64) -> anyhow::Result<()> {
         let key = key.to_string();
         self.execute_with_retry("expire", move |conn| {
@@ -306,10 +319,6 @@ impl RedisBus {
     pub async fn expire_key(&self, key: &str, seconds: u64) -> anyhow::Result<()> {
         self.expire(key, seconds).await
     }
-
-    // ═══════════════════════════════════════════════════════════
-    // 集合操作
-    // ═══════════════════════════════════════════════════════════
 
     pub async fn sadd(&self, key: &str, member: &str) -> anyhow::Result<()> {
         let key = key.to_string();

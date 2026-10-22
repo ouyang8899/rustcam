@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+
 
 #[derive(Debug, Clone)]
 pub enum ReceivedData {
@@ -58,7 +58,6 @@ impl RtcpStats {
                 tracing::warn!("RTP sequence number wrap or severe reordering detected, prev={} curr={}", self.last_seq, seq);
                 result = Some(RtpUpdateResult::SequenceWraparound);
             } else if diff > 1000 {
-                tracing::debug!("RTP sequence jump detected, prev={} curr={}, possible packet loss or reordering", self.last_seq, seq);
                 self.lost_count = self.lost_count.wrapping_add(diff as u32);
                 result = Some(RtpUpdateResult::LargeJump(diff as u16));
             } else {
@@ -86,7 +85,6 @@ impl RtcpStats {
         self.last_rtp_time = rtp_timestamp;
 
         if self.packet_count > 0 && packet_count < self.packet_count {
-            tracing::info!("SSRC may have changed: packet_count decreased from {} to {}", self.packet_count, packet_count);
         }
         self.packet_count = packet_count;
         self.octet_count = octet_count;

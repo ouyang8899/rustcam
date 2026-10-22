@@ -1,7 +1,11 @@
 use std::sync::Arc;
 use dashmap::DashMap;
-use rbatis::rbdc::datetime::DateTime as RbatisDateTime;
-use rbatis::RBatis;
+
+pub const DEFAULT_MAX_CONNECTIONS: u64 = 50;
+  use rbatis::rbdc::datetime::DateTime as RbatisDateTime;
+  use rbatis::rbdc::db::Driver as RbdcDriver;
+  use rbatis::RBatis;
+use chrono::Utc;
 
 use crate::domain::server::Server;
 use crate::domain::{Alarm, CreateAlarmRequest, Channel, Device, DeviceStatus, Protocol, Recording, Session, Stream};
@@ -13,38 +17,43 @@ use crate::error::AppError;
 use crate::error::Result;
 use crate::sql_mappers::{
     device_select_all, server_select_all, session_select_all, session_select_paginated, session_count, stream_select_all, stream_select_paginated, stream_count,
-    recording_select_all, recording_select_paginated, recording_count_all, recording_select_by_id, recording_select_by_device_tag, recording_select_active, device_insert, device_update, device_delete_by_id,
-    device_delete_by_device_tag, device_select_by_parent_device_tag, device_select_paginated_tags,
+    recording_select_paginated, recording_count_all, recording_select_by_id, recording_select_by_device_tag, recording_select_active, device_insert, device_update,
+    device_delete_by_device_tag, device_select_by_parent_device_tag,
     device_select_paginated, device_count,
     group_select_all, group_insert, group_update, group_delete,
-    region_select_all, region_select_children,
+    region_select_all,
     server_insert, server_update, server_delete_by_id, server_select_by_tag,
     session_insert, session_delete_by_id,
-    stream_insert, stream_update, stream_select_by_token, stream_delete_by_device_tag,
+    stream_insert, stream_update, stream_select_by_token,
     recording_insert, recording_update, recording_delete_by_id,
-    alarm_insert, alarm_select_by_device, alarm_select_all,
+    alarm_insert, alarm_select_by_device, alarm_select_all, alarm_select_by_id,
     alarm_count_by_device, alarm_count_all, alarm_mark_processed,
     channel_insert, channel_update, channel_select_all, channel_select_paginated, channel_count,
     channel_select_by_device_tag, channel_select_by_device_tag_and_channel_tag,
-    channel_delete_by_device_tag, channel_delete_by_device_tag_and_channel_tag,
+    channel_delete_by_device_tag_and_channel_tag,
     ServerRow, GroupRow, SessionRow,
     layout_select_by_id, layout_select_all, layout_select_default,
     layout_insert, layout_update, layout_set_default, layout_delete,
+    policy_insert, policy_update, policy_delete_by_id, policy_select_all, policy_select_by_id,
+    policy_select_by_device_tag, policy_select_by_alarm_triggered,
+    time_window_insert, time_window_delete_by_policy_id, time_window_select_by_policy_id,
+    segment_insert,  segment_select_by_id, segment_select_paginated,
+    segment_count_by_device_channel_time,
 };
 use rbatis::RBatisRef;
 
 pub struct DbRepository {
     rb: RBatis,
     pub devices_cache: Arc<DashMap<String, Device>>,
-    /// 主缓存：key = "device_tag/channel_tag"
+
     pub channels_cache: Arc<DashMap<String, Channel>>,
     pub servers_cache: Arc<DashMap<i64, ServerRow>>,
     pub sessions_cache: Arc<DashMap<i64, Session>>,
-    /// 主缓存：key = "device_tag/channel_tag"
+
     pub streams_cache: Arc<DashMap<String, Stream>>,
-    /// 分组缓存：key = group_id, value = DeviceGroup (with device_count pre-computed)
+
     pub groups_cache: Arc<DashMap<i64, DeviceGroup>>,
-    /// 地区缓存：key = region_code, value = Region (with device_count pre-computed)
+
     pub regions_cache: Arc<DashMap<String, Region>>,
 }
 
@@ -65,11 +74,40 @@ fn format_cache_key(device_tag: Option<&str>, channel_tag: Option<&str>) -> Stri
 }
 
 impl DbRepository {
+
+    async fn init_pool(rb: &RBatis, url: &str, max_connections: u64) -> anyhow::Result<()> {
+        let driver = rbdc_pg::driver::PgDriver {};
+        let mut option = driver.default_option();
+        option.set_uri(url)
+            .map_err(|e| anyhow::anyhow!("DB option failed: {}", e))?;
+
+        let pool = crate::infrastructure::bb8_pool::Bb8Pool::new(
+            Arc::new(Box::new(driver)),
+            Arc::new(option),
+            max_connections.max(4) as u32,
+            std::time::Duration::from_secs(10),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("DB pool init failed: {}", e))?;
+
+        rb.init_pool(pool)
+            .map_err(|e| anyhow::anyhow!("DB pool init failed: {}", e))?;
+
+        Ok(())
+    }
+
     pub async fn new(url: &str, debug_sql: bool) -> anyhow::Result<Self> {
+        Self::new_with_pool(url, debug_sql, DEFAULT_MAX_CONNECTIONS).await
+    }
+
+    pub async fn new_with_pool(
+        url: &str,
+        debug_sql: bool,
+        max_connections: u64,
+    ) -> anyhow::Result<Self> {
         let rb = RBatis::new();
-        rb.init(rbdc_pg::driver::PgDriver {}, url).ok();
+        Self::init_pool(&rb, url, max_connections).await?;
         if debug_sql {
-            tracing::info!("[DB] debug_sql enabled - SQL will be logged at INFO level");
         }
         let repo = Self {
             rb,
@@ -86,10 +124,17 @@ impl DbRepository {
     }
 
     pub async fn new_without_load(url: &str, debug_sql: bool) -> anyhow::Result<Self> {
+        Self::new_without_load_with_pool(url, debug_sql, DEFAULT_MAX_CONNECTIONS).await
+    }
+
+    pub async fn new_without_load_with_pool(
+        url: &str,
+        debug_sql: bool,
+        max_connections: u64,
+    ) -> anyhow::Result<Self> {
         let rb = RBatis::new();
-        rb.init(rbdc_pg::driver::PgDriver {}, url).ok();
+        Self::init_pool(&rb, url, max_connections).await?;
         if debug_sql {
-            tracing::info!("[DB] debug_sql enabled - SQL will be logged at INFO for SQL");
         }
         let repo = Self {
             rb,
@@ -105,7 +150,7 @@ impl DbRepository {
     }
 
     pub async fn load_caches(&self) -> anyhow::Result<()> {
-        let devices = device_select_all(self.rb.acquire().await?.rb_ref())
+        let devices = device_select_all(&self.rb)
             .await
             .map_err(|e| anyhow::anyhow!("load devices: {}", e))?;
         for row in devices {
@@ -116,7 +161,7 @@ impl DbRepository {
             }
         }
 
-        let channels = channel_select_all(self.rb.acquire().await?.rb_ref())
+        let channels = channel_select_all(&self.rb)
             .await
             .map_err(|e| anyhow::anyhow!("load channels: {}", e))?;
         for row in channels {
@@ -126,14 +171,14 @@ impl DbRepository {
             }
         }
 
-        let servers = server_select_all(self.rb.acquire().await?.rb_ref())
+        let servers = server_select_all(&self.rb)
             .await
             .map_err(|e| anyhow::anyhow!("load servers: {}", e))?;
         for server in servers {
             self.servers_cache.insert(server.id, server);
         }
 
-        let sessions = session_select_all(self.rb.acquire().await?.rb_ref())
+        let sessions = session_select_all(&self.rb)
             .await
             .map_err(|e| anyhow::anyhow!("load sessions: {}", e))?;
         for row in sessions {
@@ -142,7 +187,7 @@ impl DbRepository {
             }
         }
 
-        let streams = stream_select_all(self.rb.acquire().await?.rb_ref())
+        let streams = stream_select_all(&self.rb)
             .await
             .map_err(|e| anyhow::anyhow!("load streams: {}", e))?;
         for row in streams {
@@ -155,29 +200,12 @@ impl DbRepository {
         self.load_groups_cache().await;
         self.load_regions_cache().await;
 
-        tracing::info!(
-            "[DB] Caches loaded: {} devices, {} channels, {} servers, {} sessions, {} streams, {} groups, {} regions",
-            self.devices_cache.len(),
-            self.channels_cache.len(),
-            self.servers_cache.len(),
-            self.sessions_cache.len(),
-            self.streams_cache.len(),
-            self.groups_cache.len(),
-            self.regions_cache.len(),
-        );
         self.recalculate_device_stats();
         Ok(())
     }
 
     async fn load_groups_cache(&self) {
-        let conn = match self.rb.acquire().await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("load_groups_cache acquire: {}", e);
-                return;
-            }
-        };
-        match group_select_all(conn.rb_ref()).await {
+        match group_select_all(&self.rb).await {
             Ok(rows) => {
                 for row in rows {
                     if let Ok(group) = DeviceGroup::try_from(row) {
@@ -190,14 +218,7 @@ impl DbRepository {
     }
 
     async fn load_regions_cache(&self) {
-        let conn = match self.rb.acquire().await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("load_regions_cache acquire: {}", e);
-                return;
-            }
-        };
-        match region_select_all(conn.rb_ref()).await {
+        match region_select_all(&self.rb).await {
             Ok(rows) => {
                 for row in rows {
                     let region = row.to_region();
@@ -209,10 +230,10 @@ impl DbRepository {
     }
 
     pub async fn reload_devices_cache(&self) -> anyhow::Result<usize> {
-        let devices = device_select_all(self.rb.acquire().await?.rb_ref())
+        let devices = device_select_all(&self.rb)
             .await
             .map_err(|e| anyhow::anyhow!("reload devices: {}", e))?;
-        let old_len = self.devices_cache.len();
+        let _old_len = self.devices_cache.len();
         self.devices_cache.clear();
         let mut count = 0;
         for row in devices {
@@ -223,15 +244,12 @@ impl DbRepository {
                 }
             }
         }
-        tracing::info!("[DB] Devices cache reloaded: {} -> {}", old_len, count);
         Ok(count)
     }
 
     pub fn recalculate_device_stats(&self) {
         let mut region_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
-        let mut group_counts: std::collections::HashMap<i64, u32> = std::collections::HashMap::new();
-
-        tracing::info!("[recalculate_device_stats] devices_cache size: {}", self.devices_cache.len());
+        let group_counts: std::collections::HashMap<i64, u32> = std::collections::HashMap::new();
 
         for device in self.devices_cache.iter() {
             let device = device.value();
@@ -241,7 +259,7 @@ impl DbRepository {
 
             if let Some(ref device_region) = device.region_code {
                 if !device_region.is_empty() {
-                    tracing::info!("[recalculate_device_stats] device_tag={:?} region_code={}", device.device_tag, device_region);
+
                     if let Some(count) = region_counts.get_mut(device_region) {
                         *count += 1;
                     } else {
@@ -251,12 +269,10 @@ impl DbRepository {
             }
         }
 
-        tracing::info!("[recalculate_device_stats] region_counts: {:?}", region_counts);
-
         for (code, count) in region_counts {
             if let Some(mut region) = self.regions_cache.get_mut(&code) {
                 region.device_count = count;
-                tracing::info!("[recalculate_device_stats] set region {} own_device_count = {}", code, count);
+
             }
         }
 
@@ -266,16 +282,11 @@ impl DbRepository {
             }
         }
 
-        tracing::debug!(
-            "[DB] Device stats recalculated"
-        );
     }
 
     pub fn rb(&self) -> &RBatis {
         &self.rb
     }
-
-    // ─── Device methods ───────────────────────────────────────────────
 
     pub fn devices_cache(&self) -> &Arc<DashMap<String, Device>> {
         &self.devices_cache
@@ -285,11 +296,22 @@ impl DbRepository {
         &self.channels_cache
     }
 
+    pub fn device_cached(&self, device_tag: &str) -> Option<Device> {
+        self.devices_cache.get(device_tag).map(|d| d.clone())
+    }
+
+    pub fn stream_cached(&self, cache_key: &str) -> Option<Stream> {
+        self.streams_cache.get(cache_key).map(|s| s.clone())
+    }
+
+    pub fn channel_cached(&self, cache_key: &str) -> Option<Channel> {
+        self.channels_cache.get(cache_key).map(|c| c.clone())
+    }
+
     pub async fn create_device(&self, device: &Device) -> Result<i64> {
         let device_tag = device.device_tag.as_ref().filter(|s| !s.is_empty()).map(|s| s.to_lowercase());
         let parent_device_tag = device.parent_device_tag.as_ref().filter(|s| !s.is_empty()).map(|s| s.to_lowercase());
 
-        // 从 extended 中提取协议特有字段
         let rtsp_url = device.extended.as_ref()
             .and_then(|e| e.get("rtsp_full_url"))
             .and_then(|v| v.as_str())
@@ -316,8 +338,8 @@ impl DbRepository {
 
         let device_type_str = device.device_type.to_string();
 
-        let result = device_insert(
-            self.rb.acquire().await?.rb_ref(),
+        let _result = device_insert(
+            &self.rb,
             Some(&device.name),
             Some(&protocol_to_str(&device.protocol)),
             Some(&status_to_str(&device.status)),
@@ -361,7 +383,7 @@ impl DbRepository {
     }
 
     pub async fn fetch_device_by_tag(&self, device_tag: &str) -> Result<Option<Device>> {
-        let rows: Vec<crate::sql_mappers::DeviceRow> = crate::sql_mappers::device_select_by_device_tag(self.rb.acquire().await?.rb_ref(), device_tag).await
+        let rows: Vec<crate::sql_mappers::DeviceRow> = crate::sql_mappers::device_select_by_device_tag(&self.rb, device_tag).await
             .map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(rows.into_iter().next().and_then(|r| Device::try_from(r).ok()))
     }
@@ -371,7 +393,7 @@ impl DbRepository {
     }
 
     pub async fn get_device_by_id(&self, id: i64) -> Result<Option<Device>> {
-        let rows: Vec<crate::sql_mappers::DeviceRow> = crate::sql_mappers::device_select_by_id(self.rb.acquire().await?.rb_ref(), id).await
+        let rows: Vec<crate::sql_mappers::DeviceRow> = crate::sql_mappers::device_select_by_id(&self.rb, id).await
             .map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(rows.into_iter().next().and_then(|r| Device::try_from(r).ok()))
     }
@@ -407,7 +429,7 @@ impl DbRepository {
 
     pub async fn list_devices_paginated(&self, limit: usize, offset: usize, search: Option<&str>, region_code: Option<&str>, protocol: Option<&str>, status: Option<&str>, device_type: Option<&str>, group_id: Option<i64>) -> anyhow::Result<Vec<Device>> {
         let search_pattern = search.map(|s| format!("%{}%", s.to_lowercase()));
-        let rows = device_select_paginated(self.rb.acquire().await?.rb_ref(), search_pattern.as_deref(), region_code, protocol, status, device_type, group_id, limit as i64, offset as i64).await.map_err(|e| anyhow::anyhow!("query devices: {}", e))?;
+        let rows = device_select_paginated(&self.rb, search_pattern.as_deref(), region_code, protocol, status, device_type, group_id, limit as i64, offset as i64).await.map_err(|e| anyhow::anyhow!("query devices: {}", e))?;
         let mut devices: Vec<Device> = rows.into_iter().filter_map(|row| Device::try_from(row).ok()).collect();
 
         for device in &mut devices {
@@ -428,7 +450,7 @@ impl DbRepository {
 
     pub async fn count_devices_filtered(&self, search: Option<&str>, region_code: Option<&str>, protocol: Option<&str>, status: Option<&str>, device_type: Option<&str>, group_id: Option<i64>) -> anyhow::Result<usize> {
         let search_pattern = search.map(|s| format!("%{}%", s.to_lowercase()));
-        let count = device_count(self.rb.acquire().await?.rb_ref(), search_pattern.as_deref(), region_code, protocol, status, device_type, group_id).await.map_err(|e| anyhow::anyhow!("count devices: {}", e))?;
+        let count = device_count(&self.rb, search_pattern.as_deref(), region_code, protocol, status, device_type, group_id).await.map_err(|e| anyhow::anyhow!("count devices: {}", e))?;
         Ok(count as usize)
     }
 
@@ -470,7 +492,6 @@ impl DbRepository {
         let push_urls_json = serde_json::to_value(&device.push_urls).ok();
         let pull_urls_json = serde_json::to_value(&device.pull_urls).ok();
 
-        // 从 extended 中提取协议特有字段
         let rtsp_url = extended_json.get("rtsp_full_url")
             .and_then(|v| v.as_str())
             .map(String::from);
@@ -487,7 +508,7 @@ impl DbRepository {
         let device_type_str = device.device_type.to_string();
 
         device_update(
-            self.rb.acquire().await?.rb_ref(),
+            &self.rb,
             device.id,
             Some(&device.name),
             Some(&protocol_to_str(&device.protocol)),
@@ -530,7 +551,7 @@ impl DbRepository {
     }
 
     pub async fn delete_device(&self, device_tag: &str) -> Result<()> {
-        device_delete_by_device_tag(self.rb.acquire().await?.rb_ref(), device_tag)
+        device_delete_by_device_tag(&self.rb, device_tag)
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         self.devices_cache.remove(device_tag);
         self.recalculate_device_stats();
@@ -538,7 +559,7 @@ impl DbRepository {
     }
 
     pub async fn get_children_by_parent_tag(&self, parent_tag: &str) -> Result<Vec<Device>> {
-        let rows = device_select_by_parent_device_tag(self.rb.acquire().await?.rb_ref(), parent_tag)
+        let rows = device_select_by_parent_device_tag(&self.rb, parent_tag)
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(rows.into_iter().filter_map(|r| Device::try_from(r).ok()).collect())
     }
@@ -550,8 +571,6 @@ impl DbRepository {
         }
         Ok(())
     }
-
-    // ─── Channel methods ────────────────────────────────────────────────
 
     pub async fn create_channel(&self, channel: &Channel) -> Result<i64> {
         let device_tag = if channel.device_tag.is_empty() { None } else { Some(channel.device_tag.to_lowercase()) };
@@ -567,7 +586,7 @@ impl DbRepository {
         channel_clone.parent_channel_tag = parent_channel_tag.clone();
 
         let result = channel_insert(
-            self.rb.acquire().await?.rb_ref(),
+            &self.rb,
             device_tag.as_deref(),
             channel_tag.as_deref(),
             Some(&channel.name),
@@ -612,7 +631,7 @@ impl DbRepository {
         channel_clone.parent_channel_tag = parent_channel_tag.clone();
 
         channel_update(
-            self.rb.acquire().await?.rb_ref(),
+            &self.rb,
             &device_tag,
             &channel_tag,
             Some(&channel.name),
@@ -643,7 +662,7 @@ impl DbRepository {
     }
 
     pub async fn get_channels_by_device_tag(&self, device_tag: &str) -> Result<Vec<Channel>> {
-        let rows = channel_select_by_device_tag(self.rb.acquire().await?.rb_ref(), device_tag)
+        let rows = channel_select_by_device_tag(&self.rb, device_tag)
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(rows.into_iter().filter_map(|r| Channel::try_from(r).ok()).collect())
     }
@@ -651,13 +670,11 @@ impl DbRepository {
     pub async fn get_channel(&self, device_tag: &str, channel_tag: &str) -> Result<Option<Channel>> {
         let device_tag = device_tag.to_lowercase();
         let channel_tag = channel_tag.to_lowercase();
-        tracing::debug!("[DB] get_channel: device_tag={}, channel_tag={}", device_tag, channel_tag);
         let rows = channel_select_by_device_tag_and_channel_tag(
-            self.rb.acquire().await?.rb_ref(),
+            &self.rb,
             &device_tag,
             &channel_tag,
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
-        tracing::debug!("[DB] get_channel result: {} rows", rows.len());
         Ok(rows.into_iter().filter_map(|r| Channel::try_from(r).ok()).next())
     }
 
@@ -682,7 +699,7 @@ impl DbRepository {
     }
 
     pub async fn list_all_channels(&self) -> Result<Vec<Channel>> {
-        let rows = channel_select_all(self.rb.acquire().await?.rb_ref())
+        let rows = channel_select_all(&self.rb)
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(rows.into_iter().filter_map(|r| Channel::try_from(r).ok()).collect())
     }
@@ -696,7 +713,7 @@ impl DbRepository {
         offset: usize,
     ) -> Result<Vec<Channel>> {
         let rows = channel_select_paginated(
-            self.rb.acquire().await?.rb_ref(),
+            &self.rb,
             device_tag.map(String::from),
             search.map(String::from),
             status.map(String::from),
@@ -713,7 +730,7 @@ impl DbRepository {
         status: Option<&str>,
     ) -> Result<usize> {
         let count = channel_count(
-            self.rb.acquire().await?.rb_ref(),
+            &self.rb,
             device_tag.map(String::from),
             search.map(String::from),
             status.map(String::from),
@@ -722,14 +739,12 @@ impl DbRepository {
     }
 
     pub async fn delete_channel(&self, device_tag: &str, channel_tag: &str) -> Result<()> {
-        channel_delete_by_device_tag_and_channel_tag(self.rb.acquire().await?.rb_ref(), device_tag, channel_tag)
+        channel_delete_by_device_tag_and_channel_tag(&self.rb, device_tag, channel_tag)
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         let key = format_cache_key(Some(device_tag), Some(channel_tag));
         self.channels_cache.remove(&key);
         Ok(())
     }
-
-    // ─── Group methods ────────────────────────────────────────────────
 
     pub async fn list_groups(&self) -> Vec<DeviceGroup> {
         self.groups_cache.iter().map(|g| g.value().clone()).collect()
@@ -737,7 +752,7 @@ impl DbRepository {
 
     pub async fn create_group(&self, req: &CreateGroupRequest) -> Result<i64> {
         let result = group_insert(
-            self.rb.acquire().await?.rb_ref(),
+            &self.rb,
             &req.name,
             req.parent_id,
             req.sort_order.unwrap_or(0) as i32,
@@ -747,7 +762,7 @@ impl DbRepository {
 
     pub async fn update_group(&self, id: i64, req: &UpdateGroupRequest) -> Result<()> {
         group_update(
-            self.rb.acquire().await?.rb_ref(),
+            &self.rb,
             id,
             req.name.as_deref().unwrap_or(""),
             req.parent_id,
@@ -757,7 +772,7 @@ impl DbRepository {
     }
 
     pub async fn delete_group(&self, id: i64) -> Result<()> {
-        group_delete(self.rb.acquire().await?.rb_ref(), id)
+        group_delete(&self.rb, id)
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(())
     }
@@ -776,8 +791,6 @@ impl DbRepository {
             .collect();
         build_group_tree_from_nodes(groups)
     }
-
-    // ─── Region methods ──────────────────────────────────────────────
 
     pub async fn list_regions(&self) -> Vec<Region> {
         self.regions_cache.iter().map(|r| r.value().clone()).collect()
@@ -843,8 +856,6 @@ impl DbRepository {
         vec![region_code.to_string()]
     }
 
-    // ─── Server methods ───────────────────────────────────────────────
-
     pub fn servers_cache(&self) -> &Arc<DashMap<i64, ServerRow>> {
         &self.servers_cache
     }
@@ -852,7 +863,7 @@ impl DbRepository {
     pub async fn create_server(&self, server: &Server) -> Result<i64> {
         let protocol_ports_json = serde_json::to_value(&server.protocol_ports).unwrap_or(serde_json::Value::Object(Default::default()));
         server_insert(
-            self.rb.acquire().await?.rb_ref(),
+            &self.rb,
             Some(&server.name),
             Some(&server.url),
             Some(&server.api_key),
@@ -863,8 +874,7 @@ impl DbRepository {
             Some(protocol_ports_json),
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
 
-        // 查询刚插入的记录获取实际 id
-        let rows = server_select_by_tag(self.rb.acquire().await?.rb_ref(), &server.server_tag)
+        let rows = server_select_by_tag(&self.rb, &server.server_tag)
             .await
             .map_err(|e| AppError::Internal(e.to_string()))?;
         let row = rows.into_iter().next()
@@ -877,7 +887,7 @@ impl DbRepository {
     pub async fn update_server(&self, server: &Server) -> Result<()> {
         let protocol_ports_json = serde_json::to_value(&server.protocol_ports).unwrap_or(serde_json::Value::Object(Default::default()));
         server_update(
-            self.rb.acquire().await?.rb_ref(),
+            &self.rb,
             server.id,
             &server.name,
             &server.url,
@@ -906,14 +916,14 @@ impl DbRepository {
     }
 
     pub async fn delete_server(&self, id: i64) -> Result<()> {
-        server_delete_by_id(self.rb.acquire().await?.rb_ref(), id)
+        server_delete_by_id(&self.rb, id)
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         self.servers_cache.remove(&id);
         Ok(())
     }
 
     pub async fn server_exists_by_tag(&self, tag: &str) -> anyhow::Result<bool> {
-        match server_select_by_tag(self.rb.acquire().await?.rb_ref(), tag).await {
+        match server_select_by_tag(&self.rb, tag).await {
             Ok(rows) => Ok(!rows.is_empty()),
             Err(e) => {
                 tracing::warn!("[DbRepository] server_exists_by_tag failed: {}", e);
@@ -922,7 +932,15 @@ impl DbRepository {
         }
     }
 
-    // ─── Session methods ──────────────────────────────────────────────
+    pub async fn get_server_by_tag(&self, tag: &str) -> Result<Option<crate::domain::server::Server>> {
+        let rows = server_select_by_tag(&self.rb, tag)
+            .await
+            .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(rows
+            .into_iter()
+            .next()
+            .and_then(|r| crate::domain::server::Server::try_from(r).ok()))
+    }
 
     pub fn sessions_cache(&self) -> &Arc<DashMap<i64, Session>> {
         &self.sessions_cache
@@ -936,7 +954,7 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
         let created_at_rb = RbatisDateTime::from_timestamp_millis(session.created_at.timestamp_millis());
         let last_activity_rb = RbatisDateTime::from_timestamp_millis(session.last_activity.timestamp_millis());
         session_insert(
-            self.rb.acquire().await?.rb_ref(),
+            &self.rb,
             Some(&session_type_str),
             session.device_tag.as_deref(),
             session.channel_tag.as_deref(),
@@ -956,15 +974,8 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
     }
 
     pub async fn list_sessions_paginated(&self, search: Option<&str>, state: Option<&str>, limit: usize, offset: usize) -> Vec<Session> {
-        let conn = match self.rb.acquire().await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("list_sessions_paginated acquire: {}", e);
-                return Vec::new();
-            }
-        };
         let rows = match session_select_paginated(
-            conn.rb_ref(),
+            &self.rb,
             search.map(String::from),
             state.map(String::from),
             limit as i64,
@@ -997,13 +1008,11 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
     }
 
     pub async fn delete_session(&self, id: i64) -> Result<()> {
-        session_delete_by_id(self.rb.acquire().await?.rb_ref(), id)
+        session_delete_by_id(&self.rb, id)
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         self.sessions_cache.remove(&id);
         Ok(())
     }
-
-    // ─── Stream methods ──────────────────────────────────────────────
 
     pub fn streams_cache(&self) -> &Arc<DashMap<String, Stream>> {
         &self.streams_cache
@@ -1013,7 +1022,7 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
         let device_tag = stream.device_tag.as_ref().filter(|s| !s.is_empty()).map(|s| s.to_lowercase());
         let channel_tag = stream.channel_tag.as_ref().filter(|s| !s.is_empty()).map(|s| s.to_lowercase());
         let id = stream_insert(
-            self.rb.acquire().await?.rb_ref(),
+            &self.rb,
             device_tag.as_deref(),
             channel_tag.as_deref(),
             Some(stream.media_server_tag.clone()),
@@ -1060,7 +1069,7 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
         let cache_key = format_cache_key(device_tag.as_deref(), channel_tag.as_deref());
 
         stream_update(
-            self.rb.acquire().await?.rb_ref(),
+            &self.rb,
             device_tag.as_deref(),
             channel_tag.as_deref(),
             Some(stream.media_server_tag.clone()),
@@ -1084,7 +1093,7 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
 
     pub async fn get_stream_by_token(&self, token: &str) -> Result<Option<Stream>> {
         let rows = stream_select_by_token(
-            self.rb.acquire().await?.rb_ref(),
+            &self.rb,
             token,
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
         match rows.first() {
@@ -1098,23 +1107,14 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
     }
 
     pub async fn list_streams_paginated(&self, search: Option<&str>, state: Option<&str>, limit: usize, offset: usize) -> Vec<Stream> {
-        tracing::debug!("[DB] list_streams_paginated: search={:?}, state={:?}, limit={}, offset={}", search, state, limit, offset);
-        let conn = match self.rb.acquire().await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("list_streams_paginated acquire: {}", e);
-                return Vec::new();
-            }
-        };
         let rows = match stream_select_paginated(
-            conn.rb_ref(),
+            &self.rb,
             search.map(String::from),
             state.map(String::from),
             limit as i64,
             offset as i64,
         ).await {
             Ok(r) => {
-                tracing::debug!("[DB] stream_select_paginated returned {} rows", r.len());
                 r
             }
             Err(e) => {
@@ -1153,15 +1153,12 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
         }
     }
 
-    // ─── Recording methods ─────────────────────────────────────────────
-
-    pub async fn create_recording(&self, recording: &Recording) -> Result<()> {
-        recording_insert(
-            self.rb.acquire().await?.rb_ref(),
-            recording.id,
+    pub async fn create_recording(&self, recording: &Recording) -> Result<i64> {
+        let result = recording_insert(
+            &self.rb,
             recording.device_tag.as_deref(),
             recording.channel_tag.as_deref(),
-            &recording.media_server_name,
+            &recording.server_tag,
             &recording.state.to_string(),
             &recording.format.to_string(),
             recording.output_path.clone(),
@@ -1173,16 +1170,19 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
             recording.error_message.clone(),
             serde_json::to_string(&recording.labels).ok(),
             recording.filename.clone(),
+            recording.max_duration_secs.map(|v| v as i32),
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
-        Ok(())
+
+        result.into_iter().next().map(|r| r.id)
+            .ok_or_else(|| AppError::Internal("Failed to insert recording".to_string()))
     }
 
     pub async fn update_recording(&self, recording: &Recording) -> Result<()> {
         recording_update(
-            self.rb.acquire().await?.rb_ref(),
+            &self.rb,
             recording.device_tag.as_deref(),
             recording.channel_tag.as_deref(),
-            Some(recording.media_server_name.clone()),
+            Some(recording.server_tag.clone()),
             Some(recording.state.to_string()),
             Some(recording.format.to_string()),
             recording.output_path.clone(),
@@ -1199,20 +1199,20 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
     }
 
     pub async fn list_recordings_paginated(&self, limit: usize, offset: usize) -> Result<Vec<Recording>> {
-        let rows = recording_select_paginated(self.rb.acquire().await?.rb_ref(), limit as i64, offset as i64)
+        let rows = recording_select_paginated(&self.rb, limit as i64, offset as i64)
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         let recordings: Vec<Recording> = rows.into_iter().filter_map(|r| Recording::try_from(r).ok()).collect();
         Ok(recordings)
     }
 
     pub async fn count_recordings(&self) -> Result<usize> {
-        let count = recording_count_all(self.rb.acquire().await?.rb_ref())
+        let count = recording_count_all(&self.rb)
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(count as usize)
     }
 
     pub async fn find_active_recording_by_stream_key(&self, stream_key: &str) -> Result<Option<Recording>> {
-        let rows = recording_select_active(self.rb.acquire().await?.rb_ref())
+        let rows = recording_select_active(&self.rb)
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         let recording = rows.into_iter()
             .filter_map(|r| Recording::try_from(r).ok())
@@ -1221,13 +1221,13 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
     }
 
     pub async fn get_recording(&self, id: i64) -> Result<Option<Recording>> {
-        let rows = recording_select_by_id(self.rb.acquire().await?.rb_ref(), id)
+        let rows = recording_select_by_id(&self.rb, id)
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(rows.into_iter().filter_map(|r| Recording::try_from(r).ok()).next())
     }
 
     pub async fn delete_recording(&self, id: i64) -> Result<()> {
-        recording_delete_by_id(self.rb.acquire().await?.rb_ref(), id)
+        recording_delete_by_id(&self.rb, id)
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(())
     }
@@ -1237,15 +1237,13 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
     }
 
     pub async fn list_recordings_by_device_tag(&self, device_tag: &str) -> Result<Vec<Recording>> {
-        let rows = recording_select_by_device_tag(self.rb.acquire().await?.rb_ref(), device_tag)
+        let rows = recording_select_by_device_tag(&self.rb, device_tag)
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         let recordings: Vec<Recording> = rows.into_iter()
             .filter_map(|r| Recording::try_from(r).ok())
             .collect();
         Ok(recordings)
     }
-
-    // ─── PTZ methods ─────────────────────────────────────────────────
 
     pub async fn log_ptz_control(
         &self,
@@ -1295,21 +1293,18 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
 
     pub async fn update_ptz_preset(&self, device_id: i64, token: &str, name: &str) -> Result<()> {
         let device_uuid = {
-            let conn = self.rb.acquire().await?;
-            let rows: Vec<crate::sql_mappers::DeviceRow> = crate::sql_mappers::device_select_by_id(conn.rb_ref(), device_id).await?;
+            let rows: Vec<crate::sql_mappers::DeviceRow> = crate::sql_mappers::device_select_by_id(&self.rb, device_id).await?;
             rows.into_iter().next()
                 .map(|r| r.id.to_string())
                 .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_id)))?
         };
-        crate::sql_mappers::ptz_preset_update(self.rb.acquire().await?.rb_ref(), device_uuid, name.to_string(), token.to_string()).await?;
+        crate::sql_mappers::ptz_preset_update(&self.rb, device_uuid, name.to_string(), token.to_string()).await?;
         Ok(())
     }
 
     pub async fn delete_ptz_preset(&self, _device_id: i64, _token: &str) -> Result<()> {
         Ok(())
     }
-
-    // ─── Layout methods ───────────────────────────────────────────────
 
     pub async fn get_layout(&self, id: i64) -> Option<PlayerLayout> {
         layout_select_by_id(&self.rb, id).await.ok()
@@ -1362,8 +1357,6 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
         Ok(())
     }
 }
-
-// ─── Helper functions ───────────────────────────────────────────────
 
 fn protocol_to_str(p: &Protocol) -> &'static str {
     match p {
@@ -1536,7 +1529,7 @@ impl DbRepository {
     pub async fn save_alarm(&self, alarm: &CreateAlarmRequest) -> Result<Alarm> {
         let alarm_time = RbatisDateTime::from_timestamp_millis(alarm.alarm_time.timestamp_millis());
         let rows = alarm_insert(
-            self.rb.acquire().await?.rb_ref(),
+            &self.rb,
             alarm.device_id,
             &alarm.device_tag,
             &alarm.alarm_type,
@@ -1552,11 +1545,11 @@ impl DbRepository {
         let limit = limit as i64;
         let offset = offset as i64;
         let rows = if let Some(did) = device_id {
-            alarm_select_by_device(self.rb.acquire().await?.rb_ref(), did, limit, offset)
+            alarm_select_by_device(&self.rb, did, limit, offset)
                 .await
                 .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?
         } else {
-            alarm_select_all(self.rb.acquire().await?.rb_ref(), limit, offset)
+            alarm_select_all(&self.rb, limit, offset)
                 .await
                 .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?
         };
@@ -1565,11 +1558,11 @@ impl DbRepository {
 
     pub async fn count_alarms(&self, device_id: Option<i64>) -> Result<i64> {
         let count = if let Some(did) = device_id {
-            alarm_count_by_device(self.rb.acquire().await?.rb_ref(), did)
+            alarm_count_by_device(&self.rb, did)
                 .await
                 .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?
         } else {
-            alarm_count_all(self.rb.acquire().await?.rb_ref())
+            alarm_count_all(&self.rb)
                 .await
                 .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?
         };
@@ -1577,9 +1570,240 @@ impl DbRepository {
     }
 
     pub async fn mark_alarm_processed(&self, alarm_id: i64, processed: bool) -> Result<()> {
-        alarm_mark_processed(self.rb.acquire().await?.rb_ref(), processed, alarm_id)
+        alarm_mark_processed(&self.rb, processed, alarm_id)
             .await
             .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
         Ok(())
+    }
+
+    pub async fn get_alarm(&self, alarm_id: i64) -> Result<Option<crate::domain::alarm::Alarm>> {
+        let rows = alarm_select_by_id(&self.rb, alarm_id)
+            .await
+            .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(rows.into_iter().next().map(|r| crate::domain::alarm::Alarm::from(r)))
+    }
+
+    pub async fn create_recording_policy(&self, policy: &crate::domain::recording_policy::RecordingPolicy) -> Result<i64> {
+        let created_at = RbatisDateTime::from_timestamp_millis(policy.created_at.timestamp_millis());
+        let updated_at = RbatisDateTime::from_timestamp_millis(policy.updated_at.timestamp_millis());
+
+        let result = policy_insert(
+            &self.rb,
+            &policy.device_tag,
+            &policy.channel_tag,
+            &policy.policy_type.to_string(),
+            policy.enabled,
+            policy.schedule_type.map(|s| s.to_string()).as_deref(),
+            policy.cron_expr.as_deref(),
+            policy.alarm_type.as_deref(),
+            policy.pre_record_secs as i32,
+            policy.post_record_secs as i32,
+            &policy.format.to_string(),
+            policy.max_duration_secs as i32,
+            policy.max_file_size_mb as i32,
+            policy.output_path.as_deref(),
+            Some(created_at),
+            Some(updated_at),
+        ).await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+
+        result.into_iter().next().map(|r| r.id)
+            .ok_or_else(|| AppError::Internal("Failed to insert recording policy".to_string()))
+    }
+
+    pub async fn update_recording_policy(&self, policy: &crate::domain::recording_policy::RecordingPolicy) -> Result<()> {
+        policy_update(
+            &self.rb,
+            policy.id,
+            Some(&policy.device_tag),
+            Some(&policy.channel_tag),
+            Some(&policy.policy_type.to_string()),
+            Some(policy.enabled),
+            policy.schedule_type.map(|s| s.to_string()).as_deref(),
+            policy.cron_expr.as_deref(),
+            policy.alarm_type.as_deref(),
+            Some(policy.pre_record_secs as i32),
+            Some(policy.post_record_secs as i32),
+            Some(&policy.format.to_string()),
+            Some(policy.max_duration_secs as i32),
+            Some(policy.max_file_size_mb as i32),
+            policy.output_path.as_deref(),
+        ).await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(())
+    }
+
+    pub async fn delete_recording_policy(&self, id: i64) -> Result<()> {
+        policy_delete_by_id(&self.rb, id)
+            .await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(())
+    }
+
+    pub async fn get_recording_policy(&self, id: i64) -> Result<Option<crate::domain::recording_policy::RecordingPolicy>> {
+        let rows = policy_select_by_id(&self.rb, id)
+            .await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(rows.into_iter().next().and_then(|r| crate::domain::recording_policy::RecordingPolicy::try_from(r).ok()))
+    }
+
+    pub async fn list_recording_policies(&self) -> Result<Vec<crate::domain::recording_policy::RecordingPolicy>> {
+        let rows = policy_select_all(&self.rb)
+            .await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(rows.into_iter().filter_map(|r| crate::domain::recording_policy::RecordingPolicy::try_from(r).ok()).collect())
+    }
+
+    pub async fn list_recording_policies_by_device_tag(&self, device_tag: &str) -> Result<Vec<crate::domain::recording_policy::RecordingPolicy>> {
+        let rows = policy_select_by_device_tag(&self.rb, device_tag)
+            .await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(rows.into_iter().filter_map(|r| crate::domain::recording_policy::RecordingPolicy::try_from(r).ok()).collect())
+    }
+
+    pub async fn list_alarm_triggered_policies(&self, alarm_type: &str) -> Result<Vec<crate::domain::recording_policy::RecordingPolicy>> {
+        let rows = policy_select_by_alarm_triggered(&self.rb, alarm_type)
+            .await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(rows.into_iter().filter_map(|r| crate::domain::recording_policy::RecordingPolicy::try_from(r).ok()).collect())
+    }
+
+    pub async fn create_recording_time_window(&self, window: &crate::domain::recording_policy::TimeWindow) -> Result<i64> {
+
+        let days_literal = format!(
+            "{{{}}}",
+            window.days.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(",")
+        );
+
+        let result = time_window_insert(
+            &self.rb,
+            window.policy_id,
+            &window.start_time,
+            &window.end_time,
+            &days_literal,
+        ).await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(result.last_insert_id.as_i64().unwrap_or(0))
+    }
+
+    pub async fn delete_recording_time_windows(&self, policy_id: i64) -> Result<()> {
+        time_window_delete_by_policy_id(&self.rb, policy_id)
+            .await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(())
+    }
+
+    pub async fn list_recording_time_windows(&self, policy_id: i64) -> Result<Vec<crate::domain::recording_policy::TimeWindow>> {
+        let rows = time_window_select_by_policy_id(&self.rb, policy_id)
+            .await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(rows.into_iter().filter_map(|r| crate::domain::recording_policy::TimeWindow::try_from(r).ok()).collect())
+    }
+
+    pub async fn create_recording_segment(&self, segment: &crate::domain::recording_policy::RecordingSegment) -> Result<i64> {
+        let start_time = RbatisDateTime::from_timestamp_millis(segment.start_time.timestamp_millis());
+        let end_time = RbatisDateTime::from_timestamp_millis(segment.end_time.timestamp_millis());
+
+        let result = segment_insert(
+            &self.rb,
+            segment.recording_id,
+            &segment.device_tag,
+            &segment.channel_tag,
+            start_time,
+            end_time,
+            segment.duration_secs as i64,
+            segment.file_size as i64,
+            &segment.file_path,
+            segment.server_tag.as_deref(),
+            &segment.segment_type.to_string(),
+            segment.alarm_id,
+            segment.play_url.as_deref(),
+        ).await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        result.into_iter().next().map(|r| r.id)
+            .ok_or_else(|| AppError::Internal("Failed to insert recording segment".to_string()))
+    }
+
+    pub async fn get_recording_segment(&self, id: i64) -> Result<Option<crate::domain::recording_policy::RecordingSegment>> {
+        let rows = segment_select_by_id(&self.rb, id)
+            .await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(rows.into_iter().next().and_then(|r| crate::domain::recording_policy::RecordingSegment::try_from(r).ok()))
+    }
+
+    pub async fn insert_recording_segment(
+        &self,
+        recording_id: Option<i64>,
+        device_tag: &str,
+        channel_tag: &str,
+        start_time: chrono::DateTime<Utc>,
+        end_time: chrono::DateTime<Utc>,
+        duration_secs: u64,
+        file_size: u64,
+        file_path: &str,
+        server_tag: Option<&str>,
+        segment_type: &str,
+        alarm_id: Option<i64>,
+        play_url: Option<&str>,
+    ) -> Result<i64> {
+        let start_rb = RbatisDateTime::from_timestamp_millis(start_time.timestamp_millis());
+        let end_rb = RbatisDateTime::from_timestamp_millis(end_time.timestamp_millis());
+
+        let result = segment_insert(
+            &self.rb,
+            recording_id,
+            device_tag,
+            channel_tag,
+            start_rb,
+            end_rb,
+            duration_secs as i64,
+            file_size as i64,
+            file_path,
+            server_tag,
+            segment_type,
+            alarm_id,
+            play_url,
+        )
+        .await
+        .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+
+        result.into_iter().next().map(|r| r.id)
+            .ok_or_else(|| AppError::Internal("Failed to insert recording segment".to_string()))
+    }
+
+    pub async fn list_recording_segments_paginated(
+        &self,
+        device_tag: &str,
+        channel_tag: Option<String>,
+        start_time: chrono::DateTime<Utc>,
+        end_time: chrono::DateTime<Utc>,
+        segment_type: Option<&str>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<crate::domain::recording_policy::RecordingSegment>> {
+        let start_rb = RbatisDateTime::from_timestamp_millis(start_time.timestamp_millis());
+        let end_rb = RbatisDateTime::from_timestamp_millis(end_time.timestamp_millis());
+
+        let rows = segment_select_paginated(
+            &self.rb,
+            device_tag,
+            channel_tag.as_deref(),
+            start_rb,
+            end_rb,
+            segment_type,
+            limit as i64,
+            offset as i64,
+        ).await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(rows.into_iter().filter_map(|r| crate::domain::recording_policy::RecordingSegment::try_from(r).ok()).collect())
+    }
+
+    pub async fn count_recording_segments(
+        &self,
+        device_tag: &str,
+        channel_tag: Option<String>,
+        start_time: chrono::DateTime<Utc>,
+        end_time: chrono::DateTime<Utc>,
+        segment_type: Option<&str>,
+    ) -> Result<i64> {
+        let start_rb = RbatisDateTime::from_timestamp_millis(start_time.timestamp_millis());
+        let end_rb = RbatisDateTime::from_timestamp_millis(end_time.timestamp_millis());
+
+        let count = segment_count_by_device_channel_time(
+            &self.rb,
+            device_tag,
+            channel_tag.as_deref(),
+            start_rb,
+            end_rb,
+            segment_type,
+        ).await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(count)
     }
 }

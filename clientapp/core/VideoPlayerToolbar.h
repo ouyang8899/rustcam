@@ -39,7 +39,6 @@ public:
     void setDeviceName(const QString& deviceName);
     void toggleFullscreen();
     void toggleAudio();
-    void handleWheelZoom(int x, int y, int delta);
 
 signals:
     void clicked();
@@ -102,7 +101,6 @@ private:
     QLabel* m_zoomLabel = nullptr;
 
     bool m_zoomEnabled = false;
-    float m_zoomScale = 1.0f;
     int m_rotationAngle = 0;
     bool m_mirrorH = false;
     bool m_mirrorV = false;

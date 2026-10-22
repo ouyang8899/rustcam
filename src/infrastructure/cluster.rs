@@ -48,14 +48,12 @@ impl ClusterManager {
         if let Some(adapter) = Self::create_adapter(&config) {
             self.servers.insert(config.server_tag.clone(), adapter);
             self.enabled.insert(config.server_tag.clone(), config.enabled);
-            tracing::info!("Registered media server: {} (tag={}, type={})", config.name, config.server_tag, config.server_type);
         }
     }
 
     pub fn unregister_server(&self, tag: &str) {
         self.servers.remove(tag);
         self.enabled.remove(tag);
-        tracing::info!("Unregistered media server: {}", tag);
     }
 
     pub async fn get_server_status(&self, tag: &str) -> Option<ServerStatus> {
@@ -66,18 +64,30 @@ impl ClusterManager {
                 return None;
             }
         };
-        match adapter.get_status().await {
-            Ok(status) => Some(status),
-            Err(e) => {
+
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            adapter.get_status(),
+        )
+        .await
+        {
+            Ok(Ok(status)) => Some(status),
+            Ok(Err(e)) => {
                 tracing::warn!("[ClusterManager] get_server_status: tag '{}' get_status failed: {}", tag, e);
+                None
+            }
+            Err(_) => {
+                tracing::warn!("[ClusterManager] get_server_status: tag '{}' timed out", tag);
                 None
             }
         }
     }
 
     pub async fn is_stream_online(&self, app: &str, stream_key: &str, server_tag: &str) -> bool {
-        if let Some(adapter) = self.servers.get(server_tag) {
-            match adapter.value().is_stream_online(app, stream_key).await {
+
+        let adapter = { self.servers.get(server_tag).map(|a| a.value().clone()) };
+        if let Some(adapter) = adapter {
+            match adapter.is_stream_online(app, stream_key).await {
                 Ok(online) => return online,
                 Err(e) => tracing::warn!("[ClusterManager] is_stream_online failed for {}: {}", stream_key, e),
             }
@@ -117,13 +127,19 @@ impl ClusterManager {
     }
 
     pub async fn select_server(&self) -> Option<Arc<dyn MediaServerAdapter>> {
-        let candidates: Vec<_> = futures::future::join_all(
-            self.servers.iter()
+
+        let servers: Vec<Arc<dyn MediaServerAdapter>> = {
+            self.servers
+                .iter()
                 .filter(|entry| self.enabled.get(entry.key()).map(|e| *e.value()).unwrap_or(false))
                 .map(|e| e.value().clone())
-                .map(|s| async move {
-                    if s.is_online().await { Some(s) } else { None }
-                })
+                .collect()
+        };
+
+        let candidates: Vec<Arc<dyn MediaServerAdapter>> = futures::future::join_all(
+            servers.into_iter().map(|s| async move {
+                if s.is_online().await { Some(s) } else { None }
+            })
         ).await.into_iter().flatten().collect();
 
         if candidates.is_empty() { return None; }
@@ -145,6 +161,10 @@ impl ClusterManager {
 
     pub fn get_server(&self, tag: &str) -> Option<Arc<dyn MediaServerAdapter>> {
         self.servers.get(tag).map(|s| s.value().clone())
+    }
+
+    pub fn get_server_http_base_url(&self, tag: &str) -> Option<String> {
+        self.servers.get(tag).map(|s| s.value().http_base_url())
     }
 
     pub fn set_server_enabled(&self, tag: &str, enabled: bool) -> bool {

@@ -1,10 +1,3 @@
-//! RTP 端口/服务器分配管理器
-//!
-//! 关键修复：
-//! - 端口释放后进入冷却期（`PORT_COOLDOWN_SECS`），冷却后才会被重新分配，
-//!   避免上层仍持有 socket 引用时的 bind 冲突。
-//! - 端口分配关键区加锁，消除并发分配竞态。
-//! - 超时清理按 `active_at` 而非 `allocated_at`。
 
 use crate::media::errors::{MediaError, Result};
 use crate::media::node::RtpPacketCallback;
@@ -51,14 +44,6 @@ pub struct RtpServerManager {
 impl RtpServerManager {
     pub fn new(port_range: RtpPortRange, bind_addr: String, timeout_secs: u64) -> Self {
         let start = port_range.start;
-        tracing::info!(
-            "[RtpServerManager] Created range {}-{}, bind {}, timeout {}s, cooldown {}s",
-            port_range.start,
-            port_range.end,
-            bind_addr,
-            timeout_secs,
-            PORT_COOLDOWN_SECS
-        );
         Self {
             port_range,
             bind_addr,
@@ -242,13 +227,6 @@ impl RtpServerManager {
             },
         );
 
-        tracing::info!(
-            "[RtpServerManager] Allocated UDP {} (SSRC {}) for {}/{}",
-            rtp_port,
-            ssrc,
-            device_tag,
-            channel_tag
-        );
         Ok((rtp_port, ssrc, server))
     }
 
@@ -293,13 +271,6 @@ impl RtpServerManager {
             },
         );
 
-        tracing::info!(
-            "[RtpServerManager] Allocated TCP {} (SSRC {}) for {}/{}",
-            port,
-            ssrc,
-            device_tag,
-            channel_tag
-        );
         Ok((port, ssrc, server))
     }
 
@@ -329,26 +300,13 @@ impl RtpServerManager {
             },
         );
 
-        tracing::info!(
-            "[RtpServerManager] Allocated TCP active {} (SSRC {})",
-            port,
-            ssrc
-        );
         Ok((port, ssrc, server))
     }
 
     pub async fn release(&self, port: u16, protocol: TransportType) {
         let key = PortKey(port, protocol);
 
-        if let Some(info) = self.ports.get(&key) {
-            tracing::info!(
-                "[RtpServerManager] Release {} ({:?}) for {}/{} SSRC={:?}",
-                port,
-                protocol,
-                info.device_tag,
-                info.channel_tag,
-                info.ssrc
-            );
+        if let Some(_info) = self.ports.get(&key) {
         }
         self.ports.remove(&key);
 
@@ -436,15 +394,22 @@ impl RtpServerManager {
         let mut to_release = Vec::new();
 
         for (port, proto) in snapshot {
+
             let session = match proto {
-                TransportType::Udp => match self.udp_servers.get(&port) {
-                    Some(server) => server.get_session().await,
-                    None => None,
-                },
-                TransportType::Tcp => match self.tcp_servers.get(&port) {
-                    Some(server) => server.get_session().await,
-                    None => None,
-                },
+                TransportType::Udp => {
+                    let server = { self.udp_servers.get(&port).map(|s| s.value().clone()) };
+                    match server {
+                        Some(s) => s.get_session().await,
+                        None => None,
+                    }
+                }
+                TransportType::Tcp => {
+                    let server = { self.tcp_servers.get(&port).map(|s| s.value().clone()) };
+                    match server {
+                        Some(s) => s.get_session().await,
+                        None => None,
+                    }
+                }
                 _ => None,
             };
 
@@ -481,7 +446,6 @@ pub fn init_rtp_server_manager(
     timeout_secs: u64,
 ) -> Result<()> {
     if RTP_SERVER_MANAGER.get().is_some() {
-        tracing::info!("[RtpServerManager] 已初始化，跳过重复调用");
         return Ok(());
     }
 
@@ -503,12 +467,6 @@ pub fn init_rtp_server_manager(
         }
     });
 
-    tracing::info!(
-        "[RtpServerManager] Initialized range {}-{} bind={}",
-        port_start,
-        port_end,
-        manager.bind_addr
-    );
     Ok(())
 }
 
