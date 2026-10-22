@@ -172,14 +172,16 @@ let audioSessionId = 0
 
 const currentSrc = computed(() => props.liveSrc || props.src)
 
-function detectProtocol(url) {
-  if (!url) return 'unknown'
-  if (url.includes('.m3u8')) return 'hls'
-  if (url.includes('.flv')) return 'flv'
-  if (url.includes('ws://') || url.includes('wss://')) return 'wsflv'
-  if (url.includes('webrtc')) return 'webrtc'
-  return 'unknown'
-}
+  function detectProtocol(url) {
+    if (!url) return 'unknown'
+    if (url.includes('.m3u8')) return 'hls'
+    if (url.includes('.flv')) return 'flv'
+    if (url.includes('ws://') || url.includes('wss://')) return 'wsflv'
+    if (url.includes('webrtc')) return 'webrtc'
+    if (/\.(mp4|m4v|mov)(\?|$)/i.test(url)) return 'mp4'
+    if (url.startsWith('http://') || url.startsWith('https://')) return 'http'
+    return 'unknown'
+  }
 
 async function initPlayer() {
   const url = currentSrc.value
@@ -210,6 +212,10 @@ async function initPlayer() {
       case 'webrtc':
         await initWebRTC(url)
         break
+      case 'mp4':
+      case 'http':
+        await initNativeVideo(url)
+        break
       default:
         error.value = 'Unsupported protocol'
         break
@@ -220,7 +226,49 @@ async function initPlayer() {
   }
 }
 
-async function initHls(url) {
+  /**
+   * 原生播放（MP4 / HTTP 直链）
+   *
+   * 录像回放的文件地址是媒体服务器上的 mp4 直链，浏览器 <video> 可直接播放，
+   * 不走 hls.js / flv.js。
+   */
+  async function initNativeVideo(url) {
+    const video = videoRef.value
+    if (!video) return
+
+    video.src = url
+    video.load()
+
+    await new Promise((resolve) => {
+      let settled = false
+      const done = () => {
+        if (settled) return
+        settled = true
+        video.removeEventListener('loadedmetadata', done)
+        video.removeEventListener('error', done)
+        resolve()
+      }
+      video.addEventListener('loadedmetadata', done)
+      video.addEventListener('error', done)
+      setTimeout(done, 10000)
+    })
+
+    if (video.error) {
+      error.value = `Video error: ${video.error.code}`
+      loading.value = false
+      emit('error', error.value)
+      return
+    }
+
+    loading.value = false
+    isVideoReady.value = true
+    applyPlaybackRate()
+    if (props.autoplay || props.isLive) {
+      video.play().catch(() => {})
+    }
+  }
+
+  async function initHls(url) {
   const video = videoRef.value
   if (Hls.isSupported()) {
     hlsInstance = new Hls({
