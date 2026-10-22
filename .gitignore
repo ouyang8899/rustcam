@@ -34,3 +34,46 @@ rustcam-plan.md
 /clientapp/3rd_party
 /docs
 /clientapp/copydll.bat
+
+# Playwright 测试脚本与产物（本地验证用，不纳入版本库）
+/frontend/tests/
+/frontend/playwright.config.js
+/frontend/test-results/
+/frontend/playwright-report/
+
+# CMake / MSBuild 生成物（clientapp 为 in-source 生成）
+/clientapp/ALL_BUILD.vcxproj
+/clientapp/ALL_BUILD.vcxproj.filters
+/clientapp/ZERO_CHECK.vcxproj
+/clientapp/ZERO_CHECK.vcxproj.filters
+/clientapp/*.vcxproj
+/clientapp/*.vcxproj.filters
+/clientapp/**/*.vcxproj
+/clientapp/**/*.vcxproj.filters
+/clientapp/**/cmake_install.cmake
+/clientapp/bin/
+/clientapp/build/
+
+# 运行时日志、抓包与临时产物
+/logs/
+*.pcapng
+/nul
+/ALL_messages.json
+
+# 临时脚本
+/compare_auth*.py
+/convert_doc.py
+/extract_doc.py
+/extract_full.py
+/extract_v2.py
+/query_db.py
+/recover.py
+/test_api.cs
+/test_api.ps1
+/test_api.py
+/test_tcp.py
+/test_tcp.rs
+/verify_digest.py
+/today_*.txt
+/examples/
+/webTest/
