@@ -5,6 +5,8 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum RecordingState {
+    /// 等待设备/流就绪，策略已经生效但暂时还不能录
+    Pending,
     Starting,
     Recording,
     Paused,
@@ -22,6 +24,7 @@ impl Default for RecordingState {
 impl fmt::Display for RecordingState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            RecordingState::Pending => write!(f, "pending"),
             RecordingState::Starting => write!(f, "starting"),
             RecordingState::Recording => write!(f, "recording"),
             RecordingState::Paused => write!(f, "paused"),
@@ -29,6 +32,63 @@ impl fmt::Display for RecordingState {
             RecordingState::Completed => write!(f, "completed"),
             RecordingState::Error => write!(f, "error"),
         }
+    }
+}
+
+/// 录像启动失败的原因分类，决定后续是等待重试还是直接放弃。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartFailureKind {
+    /// 流还没有在媒体服务器上就绪，等流就绪后即可开始
+    StreamNotReady,
+    /// 媒体服务器暂时不可用（超时、网络错误等），退避后重试
+    MediaServerUnavailable,
+    /// 参数、格式、权限等不可重试的问题
+    Permanent,
+}
+
+/// 根据媒体服务器返回的错误信息判断失败类型。
+pub fn classify_start_failure(message: &str) -> StartFailureKind {
+    let m = message.to_lowercase();
+    if m.contains("can not find the stream")
+        || m.contains("cannot find the stream")
+        || m.contains("not find the stream")
+        || m.contains("no such stream")
+    {
+        return StartFailureKind::StreamNotReady;
+    }
+    if m.contains("timeout")
+        || m.contains("timed out")
+        || m.contains("connection")
+        || m.contains("connect")
+        || m.contains("broken pipe")
+        || m.contains("refused")
+    {
+        return StartFailureKind::MediaServerUnavailable;
+    }
+    if m.contains("not support")
+        || m.contains("invalid")
+        || m.contains("permission")
+        || m.contains("denied")
+    {
+        return StartFailureKind::Permanent;
+    }
+    // 未知错误按可重试处理，避免因为错误分类不准而漏录
+    StartFailureKind::MediaServerUnavailable
+}
+
+/// 录像启动失败后的重试间隔（秒）。
+/// 流未就绪时用较短的间隔（流随时可能就绪，且有事件触发兜底），
+/// 其余情况随失败次数指数退避并封顶。
+pub fn retry_backoff_secs(kind: StartFailureKind, retry_count: i32) -> i64 {
+    if kind == StartFailureKind::StreamNotReady {
+        return 15;
+    }
+    match retry_count {
+        i32::MIN..=1 => 30,
+        2 => 60,
+        3 => 120,
+        4 => 300,
+        _ => 900,
     }
 }
 
@@ -72,6 +132,10 @@ pub struct Recording {
     pub pre_record_secs: Option<u32>,
 
     pub max_duration_secs: Option<u32>,
+    /// 启动失败的重试次数
+    pub retry_count: i32,
+    /// 下一次允许尝试启动的时间
+    pub next_retry_at: Option<DateTime<Utc>>,
 }
 
 impl Recording {
@@ -99,6 +163,8 @@ impl Recording {
             filename: None,
             pre_record_secs: None,
             max_duration_secs: None,
+            retry_count: 0,
+            next_retry_at: None,
         }
     }
 
@@ -143,6 +209,26 @@ impl Recording {
         self.error_message = Some(message);
     }
 
+    /// 标记为“等待设备/流就绪”，并安排下一次重试。
+    pub fn set_pending(&mut self, message: String, next_retry_at: DateTime<Utc>) {
+        self.state = RecordingState::Pending;
+        self.error_message = Some(message);
+        self.retry_count += 1;
+        self.next_retry_at = Some(next_retry_at);
+    }
+
+    pub fn is_pending(&self) -> bool {
+        self.state == RecordingState::Pending
+    }
+
+    /// 是否已经到了允许重试的时间点。
+    pub fn can_retry_at(&self, now: DateTime<Utc>) -> bool {
+        match self.next_retry_at {
+            Some(at) => now >= at,
+            None => true,
+        }
+    }
+
     pub fn set_output(&mut self, path: String, file_size: u64) {
         self.output_path = Some(path);
         self.file_size = file_size;
@@ -171,4 +257,79 @@ pub struct RecordingListQuery {
     pub state: Option<RecordingState>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn recording() -> Recording {
+        Recording::new(
+            "12010100001320000011".to_string(),
+            "12010100001320000011".to_string(),
+            "default".to_string(),
+            RecordingFormat::Mp4,
+        )
+    }
+
+    #[test]
+    fn test_pending_state_is_serialized_as_pending() {
+        assert_eq!(RecordingState::Pending.to_string(), "pending");
+        assert_eq!(RecordingState::Pending, RecordingState::Pending);
+    }
+
+    #[test]
+    fn test_set_pending_records_the_reason_and_schedules_the_retry() {
+        let mut r = recording();
+        let at = Utc::now() + chrono::TimeDelta::seconds(30);
+
+        r.set_pending("等待设备上线".to_string(), at);
+
+        assert_eq!(r.state, RecordingState::Pending);
+        assert!(r.is_pending());
+        assert_eq!(r.error_message.as_deref(), Some("等待设备上线"));
+        assert_eq!(r.retry_count, 1);
+        assert_eq!(r.next_retry_at, Some(at));
+    }
+
+    #[test]
+    fn test_can_retry_respects_the_scheduled_time() {
+        let mut r = recording();
+        assert!(r.can_retry_at(Utc::now()), "没有安排重试时间时应立即可重试");
+
+        r.next_retry_at = Some(Utc::now() + chrono::TimeDelta::seconds(60));
+        assert!(!r.can_retry_at(Utc::now()));
+        assert!(r.can_retry_at(Utc::now() + chrono::TimeDelta::seconds(61)));
+    }
+
+    #[test]
+    fn test_classify_start_failure() {
+        assert_eq!(
+            classify_start_failure("ZLMediaKit startRecord failed: can not find the stream"),
+            StartFailureKind::StreamNotReady
+        );
+        assert_eq!(
+            classify_start_failure("GET request timeout after 4s"),
+            StartFailureKind::MediaServerUnavailable
+        );
+        assert_eq!(
+            classify_start_failure("format not support"),
+            StartFailureKind::Permanent
+        );
+        assert_eq!(
+            classify_start_failure("something else entirely"),
+            StartFailureKind::MediaServerUnavailable,
+            "未知错误按可重试处理，避免漏录"
+        );
+    }
+
+    #[test]
+    fn test_retry_backoff_grows_and_is_capped() {
+        assert_eq!(retry_backoff_secs(StartFailureKind::StreamNotReady, 9), 15);
+        assert_eq!(retry_backoff_secs(StartFailureKind::MediaServerUnavailable, 1), 30);
+        assert_eq!(retry_backoff_secs(StartFailureKind::MediaServerUnavailable, 2), 60);
+        assert_eq!(retry_backoff_secs(StartFailureKind::MediaServerUnavailable, 3), 120);
+        assert_eq!(retry_backoff_secs(StartFailureKind::MediaServerUnavailable, 4), 300);
+        assert_eq!(retry_backoff_secs(StartFailureKind::MediaServerUnavailable, 50), 900);
+    }
 }

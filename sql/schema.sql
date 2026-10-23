@@ -165,11 +165,16 @@ CREATE TABLE IF NOT EXISTS recordings (
     stopped_at TIMESTAMPTZ,
     error_message TEXT,
     labels TEXT,
-    filename TEXT
+    filename TEXT,
+    -- 等待设备/流就绪的录像任务：重试次数与下一次允许重试的时间
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    next_retry_at TIMESTAMPTZ,
+    max_duration_secs INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_recordings_device_tag ON recordings(device_tag);
 CREATE INDEX IF NOT EXISTS idx_recordings_state ON recordings(state);
 CREATE INDEX IF NOT EXISTS idx_recordings_created_at ON recordings(created_at);
+CREATE INDEX IF NOT EXISTS idx_recordings_next_retry ON recordings(state, next_retry_at);
 
 -- ============================================
 -- Regions Table

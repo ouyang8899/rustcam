@@ -174,11 +174,14 @@ pub struct RecordingSegment {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingSegmentQuery {
-    pub device_tag: String,
+    /// 设备标识，为空时列出全部设备的录像文件
+    pub device_tag: Option<String>,
 
     pub channel_tag: Option<String>,
-    pub start_time: DateTime<Utc>,
-    pub end_time: DateTime<Utc>,
+    /// 录像开始时间，为空时不按时间过滤
+    pub start_time: Option<DateTime<Utc>>,
+    /// 录像结束时间，为空时不按时间过滤
+    pub end_time: Option<DateTime<Utc>>,
     pub segment_type: Option<SegmentType>,
     pub limit: Option<usize>,
     pub page: Option<usize>,

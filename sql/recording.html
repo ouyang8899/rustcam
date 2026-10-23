@@ -37,11 +37,59 @@ UPDATE recordings
 WHERE id = #{id}
 </update>
 
+<!--
+  一次“启动尝试”的结果写入。
+  与 recording_update 分开是因为这里必须能把 next_retry_at 置空
+  （<if test="x != null"> 无法写入 NULL）。
+-->
+<update id="recording_update_start_result">
+UPDATE recordings
+SET state = #{state},
+    error_message = #{error_message},
+    retry_count = #{retry_count},
+    next_retry_at = #{next_retry_at},
+    started_at = #{started_at},
+    stopped_at = #{stopped_at},
+    output_path = #{output_path},
+    file_size = #{file_size},
+    duration_secs = #{duration_secs}
+WHERE id = #{id}
+</update>
+
+<!-- 待启动的录像任务（等待设备/流就绪），按创建时间从旧到新 -->
+<select id="recording_select_pending">
+SELECT id, device_tag, channel_tag, server_tag, state, format,
+       output_path, file_size, duration_secs,
+       created_at, started_at, stopped_at,
+       error_message, labels, filename, max_duration_secs,
+       retry_count, next_retry_at
+FROM recordings
+WHERE state = 'pending'
+ORDER BY created_at ASC
+</select>
+
+<!-- 某个流上待启动的录像任务 -->
+<select id="recording_select_pending_by_stream">
+SELECT id, device_tag, channel_tag, server_tag, state, format,
+       output_path, file_size, duration_secs,
+       created_at, started_at, stopped_at,
+       error_message, labels, filename, max_duration_secs,
+       retry_count, next_retry_at
+FROM recordings
+WHERE state = 'pending'
+  and device_tag = #{device_tag}
+  and channel_tag = #{channel_tag}
+ORDER BY created_at ASC
+LIMIT 1
+</select>
+
+
 <select id="select_all">
 SELECT id, device_tag, channel_tag, server_tag, state, format,
        output_path, file_size, duration_secs,
        created_at, started_at, stopped_at,
-       error_message, labels, filename
+       error_message, labels, filename, max_duration_secs,
+       retry_count, next_retry_at
 FROM recordings
 ORDER BY created_at DESC
 </select>
@@ -50,7 +98,8 @@ ORDER BY created_at DESC
 SELECT id, device_tag, channel_tag, server_tag, state, format,
        output_path, file_size, duration_secs,
        created_at, started_at, stopped_at,
-       error_message, labels, filename
+       error_message, labels, filename, max_duration_secs,
+       retry_count, next_retry_at
 FROM recordings
 WHERE id = #{id}
 </select>
@@ -59,7 +108,8 @@ WHERE id = #{id}
 SELECT id, device_tag, channel_tag, server_tag, state, format,
        output_path, file_size, duration_secs,
        created_at, started_at, stopped_at,
-       error_message, labels, filename
+       error_message, labels, filename, max_duration_secs,
+       retry_count, next_retry_at
 FROM recordings
 WHERE device_tag = #{device_tag}
 ORDER BY created_at DESC
@@ -69,14 +119,61 @@ ORDER BY created_at DESC
 SELECT id, device_tag, channel_tag, server_tag, state, format,
        output_path, file_size, duration_secs,
        created_at, started_at, stopped_at,
-       error_message, labels, filename
+       error_message, labels, filename, max_duration_secs,
+       retry_count, next_retry_at
 FROM recordings
 WHERE state IN ('recording', 'starting')
 ORDER BY created_at DESC
 </select>
 
+<!-- 分页列表：过滤条件全部在 SQL 中完成，LIMIT/OFFSET 由数据库执行 -->
+<select id="recording_select_paginated">
+SELECT id, device_tag, channel_tag, server_tag, state, format,
+       output_path, file_size, duration_secs,
+       created_at, started_at, stopped_at,
+       error_message, labels, filename, max_duration_secs,
+       retry_count, next_retry_at
+FROM recordings
+<where>
+<if test="device_tag != null">
+and device_tag = #{device_tag}
+</if>
+<if test="channel_tag != null">
+and channel_tag = #{channel_tag}
+</if>
+<if test="state != null">
+and state = #{state}
+</if>
+<if test="search != null">
+(device_tag ILIKE '%' || #{search} || '%' OR channel_tag ILIKE '%' || #{search} || '%' OR filename ILIKE '%' || #{search} || '%')
+</if>
+</where>
+ORDER BY created_at DESC
+LIMIT #{limit} OFFSET #{offset}
+</select>
+
+<select id="recording_count">
+SELECT COUNT(*) as count
+FROM recordings
+<where>
+<if test="device_tag != null">
+and device_tag = #{device_tag}
+</if>
+<if test="channel_tag != null">
+and channel_tag = #{channel_tag}
+</if>
+<if test="state != null">
+and state = #{state}
+</if>
+<if test="search != null">
+(device_tag ILIKE '%' || #{search} || '%' OR channel_tag ILIKE '%' || #{search} || '%' OR filename ILIKE '%' || #{search} || '%')
+</if>
+</where>
+</select>
+
 <delete id="delete_by_id">
 DELETE FROM recordings WHERE id = #{id}
 </delete>
+
 
 </mapper>

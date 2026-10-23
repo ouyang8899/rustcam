@@ -168,14 +168,32 @@ impl HookEventHandler {
             return;
         }
 
+        let mut became_active = false;
         if let Some(mut s) = self.find_stream_by_stream_key(stream_id).await {
             s.update_keepalive();
             if s.state != StreamState::Active {
                 s.start();
+                became_active = true;
             }
             if let Err(e) = self.db.update_stream(&s).await {
                 tracing::warn!("[HookEventHandler] HookStreamUpdate: failed to update stream: {}", e);
             }
+        }
+
+        // 流在媒体服务器上真正跑起来了：通知订阅方（例如等待中的录像任务）
+        if became_active {
+            let device_tag = crate::domain::parse_stream_key(stream_id)
+                .map(|(device_tag, _)| device_tag)
+                .unwrap_or_else(|| stream_id.to_string());
+            let device_id = self
+                .db
+                .device_cached(&device_tag)
+                .map(|d| d.id)
+                .unwrap_or(0);
+            let _ = self.event_bus.publish(SignalEvent::StreamStart {
+                device_id,
+                stream_key: stream_id.to_string(),
+            }).await;
         }
 
         if let Some(device_id) = self.find_device_id_by_push_stream(stream_id).await {

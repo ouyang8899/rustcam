@@ -62,6 +62,16 @@
             </el-table-column>
           </el-table>
           <el-empty v-else description="暂无录制策略，点击上方按钮创建" :image-size="60" />
+          <el-pagination
+            class="pagination-bar"
+            layout="total, sizes, prev, pager, next, jumper"
+            :total="policyTotal"
+            :current-page="page"
+            :page-size="pageSize"
+            :page-sizes="[20, 50, 100, 200]"
+            @current-change="onPageChange"
+            @size-change="onPageSizeChange"
+          />
         </el-skeleton>
       </DataCard>
     </div>
@@ -219,6 +229,9 @@ const toast = useToast()
 
 const loading = computed(() => recStore.policyLoading)
 const policies = computed(() => recStore.policies)
+const policyTotal = computed(() => recStore.policyTotal)
+const page = ref(1)
+const pageSize = ref(50)
 
 const showDialog = ref(false)
 const isEditing = ref(false)
@@ -293,10 +306,24 @@ onMounted(() => {
 
 async function fetchPolicies() {
   try {
-    await recStore.fetchPolicies()
+    await recStore.fetchPolicies({
+      limit: pageSize.value,
+      offset: (page.value - 1) * pageSize.value,
+    })
   } catch (e) {
     toast.error('加载策略失败: ' + e.message)
   }
+}
+
+function onPageChange(p) {
+  page.value = p
+  fetchPolicies()
+}
+
+function onPageSizeChange(size) {
+  pageSize.value = size
+  page.value = 1
+  fetchPolicies()
 }
 
 async function searchDevices(query) {

@@ -57,6 +57,7 @@ use crate::protocol::gb28181::auth::{
     VerifyResult,
 };
 use crate::protocol::gb28181::sip::{SipMessage, SipMessageBuffer, SipMethod, SipNameAddr, SipUri};
+use crate::protocol::gb28181::sip_log;
 use crate::protocol::traits::ProtocolDeps;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -232,7 +233,41 @@ pub struct Gb28181Adapter {
         Arc<crate::media::GB28181BroadcastVoiceTransport>,
         Arc<dyn crate::media::MediaNode>
     )>>>,
+    /// Responses already sent for a SIP transaction, keyed by transaction id.
+    /// A retransmitted request must be answered with the very same response
+    /// instead of being re-authenticated (RFC 3261 鎼?8.2.1).
+    tx_cache: HashMap<String, CachedTx>,
+    tx_seq: u64,
+    /// Call-ID of the dialog the current To tag belongs to.
+    dialog_call_id: Option<String>,
 }
+
+/// Header values taken from the request that is being answered. A response has
+/// to echo them (RFC 3261 鎼?.2.6.2): the From/To URIs and tags, the Call-ID
+/// and the CSeq of the request.
+#[derive(Clone, Debug, Default)]
+struct RequestHeaders {
+    from_uri: String,
+    from_tag: Option<String>,
+    to_uri: String,
+    to_tag: String,
+    call_id: String,
+    cseq: String,
+    via_branch: String,
+}
+
+/// A response that was already sent for a given SIP transaction.
+#[derive(Debug, Clone)]
+struct CachedTx {
+    seq: u64,
+    created_at: chrono::DateTime<chrono::Utc>,
+    response: String,
+}
+
+/// How long a sent response stays eligible for retransmission answering.
+const TX_CACHE_TTL_SECS: i64 = 120;
+/// Upper bound of cached transactions (one device re-registers ~once a minute).
+const TX_CACHE_MAX_ENTRIES: usize = 512;
 
 #[derive(Debug, Clone)]
 pub struct Subscription {
@@ -305,6 +340,9 @@ impl Gb28181Adapter {
             adapter_entry: None,
             waiting_for_reregister: false,
             pending_tcp_active: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            tx_cache: HashMap::new(),
+            tx_seq: 0,
+            dialog_call_id: None,
         }
     }
 
@@ -1093,8 +1131,9 @@ impl Gb28181Adapter {
              CSeq: {}\r\n\
              Call-ID: {}\r\n\
              {}\
+             {}\
              {}User-Agent: {}\r\n\
-             {}{}",
+             {}\r\n",
             status_code,
             status_text,
             self.via_header(via_branch),
@@ -1107,23 +1146,31 @@ impl Gb28181Adapter {
             contact_line,
             expires_line,
             content_type_line,
+            GB28181_USER_AGENT,
             content_length_line,
-            user_agent = GB28181_USER_AGENT
         )
     }
 
-    fn build_401_response(&self, via_branch: &str, cseq_line: &str, realm: &str) -> String {
+    fn build_401_response(&self, req: &RequestHeaders, realm: &str) -> String {
         let nonce = generate_nonce();
-        let from_uri = self.from_uri.clone().unwrap_or_else(|| {
-            let device = self.device_tag_str();
-            if device.starts_with("sip:") || device.starts_with("SIP:") {
-                device
-            } else {
-                format!("sip:{}", device)
-            }
-        });
+        let from_uri = self.echoed_from_uri(req);
+        let to_uri = if req.to_uri.is_empty() {
+            from_uri.clone()
+        } else {
+            req.to_uri.clone()
+        };
+        let from_tag = req
+            .from_tag
+            .as_ref()
+            .map(|t| format!(";tag={}", t))
+            .unwrap_or_else(|| self.from_tag_param());
+        let to_tag = if req.to_tag.is_empty() {
+            self.to_tag_param()
+        } else {
+            format!(";tag={}", req.to_tag)
+        };
         let www_auth = format!(r#"Digest realm="{}", nonce="{}""#, realm, nonce);
-        let response = format!(
+        format!(
             "SIP/2.0 401 Unauthorized\r\n\
              Via: {}\r\n\
              From: <{}>{}\r\n\
@@ -1133,28 +1180,35 @@ impl Gb28181Adapter {
              User-Agent: {}\r\n\
              WWW-Authenticate: {}\r\n\
              Content-Length: 0\r\n\r\n",
-            self.via_header(via_branch),
+            self.via_header(&req.via_branch),
             from_uri,
-            self.from_tag_param(),
-            from_uri,
-            self.to_tag_param(),
-            cseq_line,
-            self.call_id_str(),
+            from_tag,
+            to_uri,
+            to_tag,
+            req.cseq,
+            req.call_id,
             GB28181_USER_AGENT,
             www_auth
-        );
-        response
+        )
     }
 
-    fn build_403_response(&self, via_branch: &str, cseq_line: &str) -> String {
-        let from_uri = self.from_uri.clone().unwrap_or_else(|| {
-            let device = self.device_tag_str();
-            if device.starts_with("sip:") || device.starts_with("SIP:") {
-                device
-            } else {
-                format!("sip:{}", device)
-            }
-        });
+    fn build_403_response(&self, req: &RequestHeaders) -> String {
+        let from_uri = self.echoed_from_uri(req);
+        let to_uri = if req.to_uri.is_empty() {
+            from_uri.clone()
+        } else {
+            req.to_uri.clone()
+        };
+        let from_tag = req
+            .from_tag
+            .as_ref()
+            .map(|t| format!(";tag={}", t))
+            .unwrap_or_else(|| self.from_tag_param());
+        let to_tag = if req.to_tag.is_empty() {
+            self.to_tag_param()
+        } else {
+            format!(";tag={}", req.to_tag)
+        };
         format!(
             "SIP/2.0 403 Forbidden\r\n\
              Via: {}\r\n\
@@ -1164,15 +1218,28 @@ impl Gb28181Adapter {
              Call-ID: {}\r\n\
              User-Agent: {}\r\n\
              Content-Length: 0\r\n\r\n",
-            self.via_header(via_branch),
+            self.via_header(&req.via_branch),
             from_uri,
-            self.from_tag_param(),
-            from_uri,
-            self.to_tag_param(),
-            cseq_line,
-            self.call_id_str(),
+            from_tag,
+            to_uri,
+            to_tag,
+            req.cseq,
+            req.call_id,
             GB28181_USER_AGENT
         )
+    }
+
+    /// From URI of the request being answered, falling back to the device.
+    fn echoed_from_uri(&self, req: &RequestHeaders) -> String {
+        if !req.from_uri.is_empty() {
+            return req.from_uri.clone();
+        }
+        let device = self.device_tag_str();
+        if device.starts_with("sip:") || device.starts_with("SIP:") {
+            device
+        } else {
+            format!("sip:{}", device)
+        }
     }
 
     fn build_403_response_with_headers(
@@ -1568,15 +1635,118 @@ impl Gb28181Adapter {
         }
     }
 
+    /// Collect the header values a response has to echo back.
+    fn build_request_headers(&mut self, headers: &[(String, String)]) -> RequestHeaders {
+        let from_hdr = Self::get_header(headers, "From").unwrap_or_default();
+        let to_hdr = Self::get_header(headers, "To").unwrap_or_default();
+        let (from_uri, from_tag) = Self::parse_from_to_uri_and_tag(&from_hdr);
+        let (to_uri, to_tag_hdr) = Self::parse_from_to_uri_and_tag(&to_hdr);
+        let call_id = Self::get_header(headers, "Call-ID")
+            .unwrap_or_else(|| self.call_id.clone().unwrap_or_default());
+        let to_tag = self.dialog_to_tag(&call_id, to_tag_hdr.as_deref());
+
+        RequestHeaders {
+            from_uri,
+            from_tag,
+            to_uri,
+            to_tag,
+            call_id,
+            cseq: Self::parse_cseq_line(headers),
+            via_branch: Self::parse_via_branch(headers),
+        }
+    }
+
+    /// To tag of the current dialog. A new Call-ID means a new dialog and
+    /// therefore a new tag; a retransmission reuses the cached response.
+    fn dialog_to_tag(&mut self, call_id: &str, request_to_tag: Option<&str>) -> String {
+        if let Some(tag) = request_to_tag {
+            return tag.to_string();
+        }
+        if self.dialog_call_id.as_deref() != Some(call_id) {
+            self.dialog_call_id = Some(call_id.to_string());
+            self.to_tag = Some(uuid::Uuid::new_v4().to_string().replace('-', ""));
+        }
+        self.to_tag.clone().unwrap_or_default()
+    }
+
+    /// SIP transaction identifier: Call-ID + CSeq + topmost Via branch.
+    /// RFC 3261 鎼?8.2.1 uses the Via branch to detect request retransmissions.
+    fn transaction_key(headers: &[(String, String)]) -> String {
+        let call_id = Self::get_header(headers, "Call-ID").unwrap_or_default();
+        let cseq = Self::parse_cseq_line(headers);
+        let branch = Self::parse_via_branch(headers);
+        format!("{}|{}|{}", call_id, cseq, branch)
+    }
+
+    fn get_cached_response(&self, key: &str) -> Option<String> {
+        let entry = self.tx_cache.get(key)?;
+        let age = chrono::Utc::now()
+            .signed_duration_since(entry.created_at)
+            .num_seconds();
+        if age > TX_CACHE_TTL_SECS {
+            return None;
+        }
+        Some(entry.response.clone())
+    }
+
+    fn cache_response(&mut self, key: &str, response: &str) {
+        let now = chrono::Utc::now();
+        self.tx_cache.retain(|_, v| {
+            now.signed_duration_since(v.created_at).num_seconds() <= TX_CACHE_TTL_SECS
+        });
+
+        if self.tx_cache.len() >= TX_CACHE_MAX_ENTRIES {
+            if let Some(oldest) = self
+                .tx_cache
+                .iter()
+                .min_by_key(|(_, v)| v.seq)
+                .map(|(k, _)| k.clone())
+            {
+                self.tx_cache.remove(&oldest);
+            }
+        }
+
+        self.tx_seq += 1;
+        self.tx_cache.insert(
+            key.to_string(),
+            CachedTx {
+                seq: self.tx_seq,
+                created_at: now,
+                response: response.to_string(),
+            },
+        );
+    }
+
     async fn handle_register(
         &mut self,
         headers: &[(String, String)],
         body: &str,
     ) -> (Option<SignalEvent>, Option<String>) {
-        self.version = Self::detect_version(body);
+        let tx_key = Self::transaction_key(headers);
 
-        let call_id = Self::get_header(headers, "Call-ID")
-            .unwrap_or_else(|| self.call_id.clone().unwrap_or_default());
+        if let Some(cached) = self.get_cached_response(&tx_key) {
+            tracing::debug!(
+                "[GB28181] REGISTER retransmission, re-sending the cached response (tx={})",
+                tx_key
+            );
+            return (None, Some(cached));
+        }
+
+        let (event, response) = self.handle_register_request(headers, body).await;
+
+        if let Some(ref resp) = response {
+            self.cache_response(&tx_key, resp);
+        }
+
+        (event, response)
+    }
+
+    async fn handle_register_request(
+        &mut self,
+        headers: &[(String, String)],
+        body: &str,
+    ) -> (Option<SignalEvent>, Option<String>) {
+        self.version = Self::detect_version(body);
 
         let device_id = Self::get_header(headers, "From")
             .or_else(|| Self::get_header(headers, "To"))
@@ -1608,22 +1778,8 @@ impl Gb28181Adapter {
                 }
             }
         }
-        if let Some(to_hdr) = Self::get_header(headers, "To") {
-            if let Some(tag) = Self::parse_tag_from_header(&to_hdr) {
-                if self.to_tag.is_none() {
-                    self.to_tag = Some(tag);
-                }
-            } else if self.to_tag.is_none() {
-                self.to_tag = Some(uuid::Uuid::new_v4().to_string().replace("-", ""));
-            }
-        }
 
-        let via_branch = Self::parse_via_branch(headers);
-        let cseq = Self::parse_cseq_line(headers);
-        let from_hdr = Self::get_header(headers, "From").unwrap_or_default();
-        let to_hdr = Self::get_header(headers, "To").unwrap_or_default();
-        let (request_from_uri, request_from_tag) = Self::parse_from_to_uri_and_tag(&from_hdr);
-        let (request_to_uri, _) = Self::parse_from_to_uri_and_tag(&to_hdr);
+        let req = self.build_request_headers(headers);
 
         let auth_header = headers
             .iter()
@@ -1635,10 +1791,7 @@ impl Gb28181Adapter {
                 .get()
                 .map(|c| c.1.clone())
                 .unwrap_or_else(|| device_id.clone());
-            return (
-                None,
-                Some(self.build_401_response(&via_branch, &cseq, &server_realm)),
-            );
+            return (None, Some(self.build_401_response(&req, &server_realm)));
         }
 
         let auth_params = match parse_sip_authorization(auth_header.unwrap()) {
@@ -1648,7 +1801,7 @@ impl Gb28181Adapter {
                     "[GB28181] Failed to parse Authorization header: {}",
                     auth_header.unwrap()
                 );
-                return (None, Some(self.build_403_response(&via_branch, &cseq)));
+                return (None, Some(self.build_403_response(&req)));
             }
         };
         if !verify_nonce(&auth_params.nonce) {
@@ -1660,10 +1813,7 @@ impl Gb28181Adapter {
                 "[GB28181] Invalid nonce from {}, sending 401 with new nonce",
                 device_id
             );
-            return (
-                None,
-                Some(self.build_401_response(&via_branch, &cseq, &server_realm)),
-            );
+            return (None, Some(self.build_401_response(&req, &server_realm)));
         }
 
         let device_opt = self.deps.device_lookup.find_by_tag(&device_id).await;
@@ -1680,7 +1830,7 @@ impl Gb28181Adapter {
                     .get()
                     .map(|c| c.1.clone())
                     .unwrap_or_else(|| device_id.clone());
-                return (None, Some(self.build_401_response(&via_branch, &cseq, &server_realm)));
+                return (None, Some(self.build_401_response(&req, &server_realm)));
             }
         };
         if auth_params.username != username {
@@ -1693,7 +1843,7 @@ impl Gb28181Adapter {
                 .get()
                 .map(|c| c.1.clone())
                 .unwrap_or_else(|| device_id.clone());
-            return (None, Some(self.build_401_response(&via_branch, &cseq, &server_realm)));
+            return (None, Some(self.build_401_response(&req, &server_realm)));
         }
 
         match verify_sip_digest(&auth_params, &password, "REGISTER") {
@@ -1748,14 +1898,14 @@ impl Gb28181Adapter {
                 (
                     Some(event),
                     Some(self.build_sip_response_only_headers_with_to(
-                        200, "OK", &via_branch, &cseq,
-                        Some(&request_from_uri), request_from_tag.as_deref(),
-                        Some(&request_to_uri), None,
-                        None, Some(&call_id), None,
+                        200, "OK", &req.via_branch, &req.cseq,
+                        Some(&req.from_uri), req.from_tag.as_deref(),
+                        Some(&req.to_uri), Some(&req.to_tag),
+                        None, Some(&req.call_id), None,
                     )),
                 )
             }
-            _ => (None, Some(self.build_403_response(&via_branch, &cseq))),
+            _ => (None, Some(self.build_403_response(&req))),
         }
     }
 
@@ -1776,6 +1926,7 @@ impl Gb28181Adapter {
         let to_hdr = Self::get_header(headers, "To").unwrap_or_default();
         let (request_from_uri, request_from_tag) = Self::parse_from_to_uri_and_tag(&from_hdr);
         let (request_to_uri, _) = Self::parse_from_to_uri_and_tag(&to_hdr);
+        let req = self.build_request_headers(headers);
 
         if self.registration_state == RegistrationState::Init {
             if !self.waiting_for_reregister {
@@ -2078,7 +2229,7 @@ impl Gb28181Adapter {
                     .get()
                     .map(|c| c.1.clone())
                     .unwrap_or_else(|| self.device_tag_str());
-                let resp = self.build_401_response(&via_branch, &cseq, &server_realm);
+                let resp = self.build_401_response(&req, &server_realm);
                 return (None, Some(resp));
             }
             RegistrationState::Registered => {
@@ -2110,10 +2261,11 @@ impl Gb28181Adapter {
         let to_hdr = Self::get_header(headers, "To").unwrap_or_default();
         let (request_from_uri, request_from_tag) = Self::parse_from_to_uri_and_tag(&from_hdr);
         let (request_to_uri, _) = Self::parse_from_to_uri_and_tag(&to_hdr);
+        let req = self.build_request_headers(headers);
 
         if self.registration_state == RegistrationState::Init {
             tracing::warn!("[GB28181] BYE: device not registered, rejecting");
-            return (None, Some(self.build_403_response(&via_branch, &cseq)));
+            return (None, Some(self.build_403_response(&req)));
         }
 
         let sub_session = {
@@ -2556,7 +2708,8 @@ impl Gb28181Adapter {
 
         if self.registration_state == RegistrationState::Init {
             tracing::warn!("[GB28181] SUBSCRIBE: device not registered, rejecting");
-            return (None, Some(self.build_403_response(&via_branch, &cseq)));
+            let req = self.build_request_headers(headers);
+            return (None, Some(self.build_403_response(&req)));
         }
 
         let event_type = if body.contains("Event") {
@@ -3163,10 +3316,12 @@ impl SignalAdapter for Gb28181Adapter {
         let mut events = Vec::new();
 
         loop {
-            let (sip_msg, _consumed) = match self.recv_buffer.next_message() {
-                Some((msg, len)) => (msg, len),
+            let (sip_msg, _consumed, raw_message) = match self.recv_buffer.next_message_with_raw() {
+                Some((msg, len, raw)) => (msg, len, raw),
                 None => break,
             };
+
+            sip_log::log_received(self.remote_addr, self.local_addr, &raw_message);
 
             self.last_message_at = Some(chrono::Utc::now());
 
@@ -3242,6 +3397,12 @@ impl SignalAdapter for Gb28181Adapter {
         Ok(())
     }
 
+    /// The local address of the transport, it is part of the SIP log.
+    async fn set_local_addr(&mut self, addr: SocketAddr) -> Result<()> {
+        self.local_addr = Some(addr);
+        Ok(())
+    }
+
     async fn on_disconnected(&mut self) -> Result<()> {
         let device_tag = self.device_tag_str();
         if !device_tag.is_empty() {
@@ -3289,9 +3450,10 @@ impl SignalAdapter for Gb28181Adapter {
     }
 
     async fn send(&mut self, data: &[u8]) -> Result<()> {
-        let _data_str = String::from_utf8_lossy(data);
+        let raw_message = String::from_utf8_lossy(data);
 
         if let Some(ref write_arc) = self.write {
+            sip_log::log_sent(self.remote_addr, &raw_message);
             let mut write = write_arc.write().await;
             write
                 .write_all(data)
@@ -3301,6 +3463,7 @@ impl SignalAdapter for Gb28181Adapter {
             return Ok(());
         }
         if let Some(ref addr) = self.udp_peer {
+            sip_log::log_sent(Some(*addr), &raw_message);
             if let Some(sender) = super::get_udp_sender() {
                 if let Err(e) = sender.send_to(data, *addr).await {
                     tracing::error!("[GB28181] UDP send failed to {}: {}", addr, e);
@@ -4582,6 +4745,7 @@ a=ssrc:{}
             match session.transport {
                 TransportType::Tcp => {
                     if let Some(ref write_arc) = self.write {
+                        sip_log::log_sent(self.remote_addr, &sip_msg);
                         let mut write = write_arc.write().await;
                         write
                             .write_all(sip_msg.as_bytes())
@@ -4593,6 +4757,7 @@ a=ssrc:{}
                 TransportType::Udp => {
                     if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
                         let addr = format!("{}:{}", session.device_host, session.device_port);
+                        sip_log::log_sent(addr.parse().ok(), &sip_msg);
                         sender
                             .send_to(sip_msg.as_bytes(), &addr)
                             .await
@@ -4665,6 +4830,7 @@ a=ssrc:{}
 
         if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
             let addr = format!("{}:{}", device_host, device_port);
+            sip_log::log_sent(addr.parse().ok(), &sip_msg);
             for attempt in 1..=3 {
                 if let Err(e) = sender.send_to(sip_msg.as_bytes(), &addr).await {
                     tracing::warn!("[GB28181] BYE clear attempt {} failed: {}", attempt, e);
@@ -5042,25 +5208,32 @@ mod tests {
     }
 
     #[test]
-    fn test_build_sdp_video_only() {
-
+    fn test_build_401_response() {
         let deps = ProtocolDeps::for_test();
         let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
         adapter.device_tag = Some("12010100001320000011".to_string());
-        adapter.from_tag = Some("from_tag_123".to_string());
-        adapter.to_tag = Some("to_tag_456".to_string());
-        adapter.call_id = Some("call_id_789".to_string());
         adapter.transport = TransportType::Udp;
 
-        let response = adapter.build_401_response("z9hG4bKbranch", "1 REGISTER", "realm123");
+        let req = RequestHeaders {
+            from_uri: "sip:12010100001320000011@3101150000".to_string(),
+            from_tag: Some("from_tag_123".to_string()),
+            to_uri: "sip:31011500001000000001@3101150000".to_string(),
+            to_tag: "to_tag_456".to_string(),
+            call_id: "call_id_789".to_string(),
+            cseq: "1 REGISTER".to_string(),
+            via_branch: "z9hG4bKbranch".to_string(),
+        };
+
+        let response = adapter.build_401_response(&req, "realm123");
 
         assert!(response.contains("SIP/2.0 401 Unauthorized"));
         assert!(response.contains("Via:"));
-        assert!(response.contains("From:"));
-        assert!(response.contains("To:"));
+        assert!(response.contains("From: <sip:12010100001320000011@3101150000>;tag=from_tag_123"));
+        assert!(response.contains("To: <sip:31011500001000000001@3101150000>;tag=to_tag_456"));
         assert!(response.contains("CSeq: 1 REGISTER"));
         assert!(response.contains("Call-ID: call_id_789"));
         assert!(response.contains("WWW-Authenticate: Digest realm=\"realm123\""));
+        assert!(response.ends_with("\r\n\r\n"));
     }
 
     #[test]
@@ -5068,12 +5241,19 @@ mod tests {
         let deps = ProtocolDeps::for_test();
         let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
         adapter.device_tag = Some("12010100001320000011".to_string());
-        adapter.from_tag = Some("from_tag_123".to_string());
-        adapter.to_tag = Some("to_tag_456".to_string());
-        adapter.call_id = Some("call_id_789".to_string());
         adapter.transport = TransportType::Udp;
 
-        let response = adapter.build_403_response("z9hG4bKbranch", "1 REGISTER");
+        let req = RequestHeaders {
+            from_uri: "sip:12010100001320000011@3101150000".to_string(),
+            from_tag: Some("from_tag_123".to_string()),
+            to_uri: "sip:31011500001000000001@3101150000".to_string(),
+            to_tag: "to_tag_456".to_string(),
+            call_id: "call_id_789".to_string(),
+            cseq: "1 REGISTER".to_string(),
+            via_branch: "z9hG4bKbranch".to_string(),
+        };
+
+        let response = adapter.build_403_response(&req);
 
         assert!(response.contains("SIP/2.0 403 Forbidden"));
         assert!(response.contains("Via:"));
@@ -5081,6 +5261,293 @@ mod tests {
         assert!(response.contains("To:"));
         assert!(response.contains("CSeq: 1 REGISTER"));
         assert!(response.contains("Call-ID: call_id_789"));
+        assert!(response.ends_with("\r\n\r\n"));
+    }
+
+    #[test]
+    fn test_sip_response_headers_are_well_formed() {
+        let deps = ProtocolDeps::for_test();
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+        adapter.device_tag = Some("12010100001320000011".to_string());
+        adapter.transport = TransportType::Udp;
+
+        let response = adapter.build_sip_response_only_headers_with_to(
+            200,
+            "OK",
+            "z9hG4bKbranch",
+            "2 REGISTER",
+            Some("sip:12010100001320000011@3101150000"),
+            Some("348752396"),
+            Some("sip:12010100001320000011@3101150000"),
+            None,
+            None,
+            Some("1391250603"),
+            None,
+        );
+
+        let (header_section, _body) = response
+            .split_once("\r\n\r\n")
+            .expect("SIP response must terminate its header section with CRLFCRLF");
+        assert!(
+            header_section.contains(&format!("User-Agent: {}", GB28181_USER_AGENT)),
+            "User-Agent header must be populated, got:\n{}",
+            header_section
+        );
+        assert!(
+            !header_section.contains("User-Agent: \r\n"),
+            "User-Agent header must not be empty, got:\n{}",
+            header_section
+        );
+    }
+
+    #[tokio::test]
+    async fn test_register_retransmission_gets_same_response() {
+        let deps = ProtocolDeps::for_test();
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+        adapter.device_tag = Some("12010100001320000011".to_string());
+        adapter.transport = TransportType::Udp;
+
+        let nonce = crate::protocol::gb28181::auth::generate_nonce();
+        let uri = "sip:31011500001000000001@3101150000";
+        let realm = "test_realm";
+        let username = "12010100001320000011";
+        let password = "test_password";
+
+        let ha1 = format!(
+            "{:x}",
+            md5::compute(format!("{}:{}:{}", username, realm, password))
+        );
+        let ha2 = format!("{:x}", md5::compute(format!("REGISTER:{}", uri)));
+        let digest = format!("{:x}", md5::compute(format!("{}:{}:{}", ha1, nonce, ha2)));
+
+        let headers = vec![
+            (
+                "Via".to_string(),
+                "SIP/2.0/UDP 192.168.1.211:5060;rport;branch=z9hG4bK1234".to_string(),
+            ),
+            (
+                "From".to_string(),
+                "<sip:12010100001320000011@3101150000>;tag=348752396".to_string(),
+            ),
+            (
+                "To".to_string(),
+                "<sip:12010100001320000011@3101150000>".to_string(),
+            ),
+            ("Call-ID".to_string(), "1391250603".to_string()),
+            ("CSeq".to_string(), "2 REGISTER".to_string()),
+            (
+                "Contact".to_string(),
+                "<sip:12010100001320000011@192.168.1.211:5060>".to_string(),
+            ),
+            (
+                "Authorization".to_string(),
+                format!(
+                    "Digest username=\"{}\", realm=\"{}\", nonce=\"{}\", uri=\"{}\", response=\"{}\", algorithm=MD5",
+                    username, realm, nonce, uri, digest
+                ),
+            ),
+            ("Expires".to_string(), "3600".to_string()),
+        ];
+
+        let (_event, first) = adapter.handle_register(&headers, "").await;
+        let first = first.expect("first REGISTER must produce a response");
+        assert!(
+            first.starts_with("SIP/2.0 200 OK"),
+            "first REGISTER should be accepted, got: {}",
+            first
+        );
+
+        let (_event, second) = adapter.handle_register(&headers, "").await;
+        let second = second.expect("retransmission must produce a response");
+        assert_eq!(
+            second, first,
+            "a retransmitted REGISTER must be answered with the very same response, not a new challenge"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_register_challenge_is_stable_across_retransmissions() {
+        let deps = ProtocolDeps::for_test();
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+        adapter.device_tag = Some("12010100001320000011".to_string());
+        adapter.transport = TransportType::Udp;
+
+        let headers = vec![
+            (
+                "Via".to_string(),
+                "SIP/2.0/UDP 192.168.1.211:5060;rport;branch=z9hG4bK777".to_string(),
+            ),
+            (
+                "From".to_string(),
+                "<sip:12010100001320000011@3101150000>;tag=348752396".to_string(),
+            ),
+            (
+                "To".to_string(),
+                "<sip:12010100001320000011@3101150000>".to_string(),
+            ),
+            ("Call-ID".to_string(), "1984514002".to_string()),
+            ("CSeq".to_string(), "1 REGISTER".to_string()),
+            ("Expires".to_string(), "3600".to_string()),
+        ];
+
+        let (_event, first) = adapter.handle_register(&headers, "").await;
+        let first = first.expect("unauthenticated REGISTER must produce a challenge");
+        assert!(
+            first.starts_with("SIP/2.0 401 Unauthorized"),
+            "unauthenticated REGISTER must be challenged, got: {}",
+            first
+        );
+
+        let (_event, second) = adapter.handle_register(&headers, "").await;
+        let second = second.expect("retransmission must produce a response");
+        assert_eq!(
+            second, first,
+            "a retransmitted challenge must reuse the same nonce"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_401_response_echoes_request_headers() {
+        let deps = ProtocolDeps::for_test();
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+        adapter.device_tag = Some("12010100001320000011".to_string());
+        adapter.transport = TransportType::Udp;
+
+        // Stale state left over from a previous transaction.
+        adapter.from_uri = Some("sip:12010100001320000011@3101150000".to_string());
+        adapter.from_tag = Some("60801440".to_string());
+        adapter.call_id = Some("1984514002".to_string());
+        adapter.to_tag = Some("stale_to_tag".to_string());
+
+        let headers = vec![
+            (
+                "Via".to_string(),
+                "SIP/2.0/UDP 192.168.1.211:5060;rport;branch=z9hG4bK999".to_string(),
+            ),
+            (
+                "From".to_string(),
+                "<sip:12010100001320000011@3101150000>;tag=348752396".to_string(),
+            ),
+            (
+                "To".to_string(),
+                "<sip:31011500001000000001@3101150000>".to_string(),
+            ),
+            ("Call-ID".to_string(), "1391250603".to_string()),
+            ("CSeq".to_string(), "2 REGISTER".to_string()),
+        ];
+
+        let (_event, response) = adapter.handle_register(&headers, "").await;
+        let response = response.expect("challenge expected");
+
+        assert!(
+            response.contains("From: <sip:12010100001320000011@3101150000>;tag=348752396"),
+            "401 must echo the From header of the request, got: {}",
+            response
+        );
+        assert!(
+            response.contains("To: <sip:31011500001000000001@3101150000>"),
+            "401 must echo the To header of the request, got: {}",
+            response
+        );
+        assert!(
+            response.contains("Call-ID: 1391250603"),
+            "401 must echo the Call-ID of the request, got: {}",
+            response
+        );
+        assert!(
+            !response.contains("60801440") && !response.contains("1984514002"),
+            "401 must not reuse state of a previous transaction, got: {}",
+            response
+        );
+    }
+
+    #[tokio::test]
+    async fn test_trait_set_local_addr_stores_the_address() {
+        let deps = ProtocolDeps::for_test();
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+        let addr: SocketAddr = "192.168.1.7:5061".parse().unwrap();
+
+        // The transport servers call it through the trait, so the trait
+        // implementation has to store the address.
+        <Gb28181Adapter as SignalAdapter>::set_local_addr(&mut adapter, addr)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            adapter.local_addr,
+            Some(addr),
+            "the local address must be known, it is part of the SIP log"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_received_message_is_logged_with_both_addresses() {
+        let raw = "REGISTER sip:31011500001000000001@3101150000 SIP/2.0\r\n\
+                   Via: SIP/2.0/UDP 192.168.1.211:5060;rport;branch=z9hG4bK1\r\n\
+                   From: <sip:12010100001320000011@3101150000>;tag=348752396\r\n\
+                   To: <sip:12010100001320000011@3101150000>\r\n\
+                   Call-ID: 1391250603\r\n\
+                   CSeq: 1 REGISTER\r\n\
+                   Content-Length: 0\r\n\r\n";
+
+        let deps = ProtocolDeps::for_test();
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+        adapter.transport = TransportType::Udp;
+        adapter.remote_addr = Some("192.168.1.211:5060".parse().unwrap());
+        adapter.local_addr = Some("192.168.1.7:5061".parse().unwrap());
+
+        let buffer = crate::protocol::gb28181::sip_log::log_capture();
+        let _guard = crate::protocol::gb28181::sip_log::log_capture_guard();
+        crate::protocol::gb28181::sip_log::set_enabled(true);
+        buffer.lock().unwrap().clear();
+
+        adapter.parse(raw.as_bytes()).await.unwrap();
+
+        let logs = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+        crate::protocol::gb28181::sip_log::set_enabled(false);
+        assert!(
+            logs.contains(
+                "sip: receive from 192.168.1.211:5060 -> to 192.168.1.7:5061: full receive message"
+            ),
+            "the received message must be logged with both addresses, got:\n{}",
+            logs
+        );
+        assert!(
+            logs.contains("CSeq: 1 REGISTER") && logs.contains("Call-ID: 1391250603"),
+            "the full message must be part of the log, got:\n{}",
+            logs
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sent_message_is_logged_with_the_destination() {
+        let deps = ProtocolDeps::for_test();
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+        adapter.transport = TransportType::Udp;
+        adapter.remote_addr = Some("192.168.1.211:5060".parse().unwrap());
+        adapter.udp_peer = Some("192.168.1.211:5060".parse().unwrap());
+
+        let buffer = crate::protocol::gb28181::sip_log::log_capture();
+        let _guard = crate::protocol::gb28181::sip_log::log_capture_guard();
+        crate::protocol::gb28181::sip_log::set_enabled(true);
+        buffer.lock().unwrap().clear();
+
+        // No socket is needed: the adapter has no writer, the log happens
+        // before the transport is used.
+        let _ = adapter.send(b"SIP/2.0 200 OK\r\nCSeq: 1 REGISTER\r\n\r\n").await;
+
+        let logs = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+        crate::protocol::gb28181::sip_log::set_enabled(false);
+        assert!(
+            logs.contains("sip: send to 192.168.1.211:5060: full send message"),
+            "the sent message must be logged with its destination, got:\n{}",
+            logs
+        );
+        assert!(
+            logs.contains("SIP/2.0 200 OK"),
+            "the full message must be part of the log, got:\n{}",
+            logs
+        );
     }
 
     #[test]

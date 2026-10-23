@@ -19,7 +19,7 @@ FROM sessions
 (device_tag ILIKE '%' || #{search} || '%' OR user_id ILIKE '%' || #{search} || '%' OR client_ip ILIKE '%' || #{search} || '%')
 </if>
 <if test="state != null">
-AND state = #{state}
+and state = #{state}
 </if>
 </where>
 ORDER BY id DESC
@@ -34,7 +34,7 @@ FROM sessions
 (device_tag ILIKE '%' || #{search} || '%' OR user_id ILIKE '%' || #{search} || '%' OR client_ip ILIKE '%' || #{search} || '%')
 </if>
 <if test="state != null">
-AND state = #{state}
+and state = #{state}
 </if>
 </where>
 </select>

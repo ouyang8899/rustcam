@@ -48,8 +48,10 @@
             <el-icon><VideoPlay /></el-icon>
             <span>录像管理</span>
           </template>
-          <el-menu-item index="/recordings">录像任务</el-menu-item>
+          <el-menu-item index="/recordings">录像管理</el-menu-item>
           <el-menu-item index="/recordings/files">录像文件</el-menu-item>
+          <el-menu-item index="/recording-policies">录制策略</el-menu-item>
+          <el-menu-item index="/recording-playback">录像回放</el-menu-item>
         </el-sub-menu>
 
         <el-menu-item index="/servers">

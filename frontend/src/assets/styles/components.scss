@@ -310,6 +310,13 @@ html, body {
   }
 }
 
+// 列表底部的分页栏
+.pagination-bar {
+  margin-top: var(--space-4);
+  display: flex;
+  justify-content: flex-end;
+}
+
 // ── ElTag ───────────────────────────────────────────────────
 .el-tag {
   border-radius: var(--radius-sm) !important;

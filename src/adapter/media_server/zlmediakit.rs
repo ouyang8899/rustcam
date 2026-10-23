@@ -10,6 +10,55 @@ pub struct ZlMediaKitAdapter {
     client: MediaServerClient,
 }
 
+/// 从 getMediaList 的返回里判断目标流是否真的存在。
+/// 只有 app 与流名都匹配才算就绪——媒体服务器上存在别的流不代表目标流可用。
+pub fn media_list_contains_stream(
+    data: &[serde_json::Value],
+    app: &str,
+    stream_key: &str,
+) -> bool {
+    data.iter().any(|item| {
+        let item_stream = item.get("stream").and_then(|v| v.as_str());
+        let item_app = item.get("app").and_then(|v| v.as_str());
+        item_stream == Some(stream_key) && item_app.map(|a| a == app).unwrap_or(true)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::media_list_contains_stream;
+    use serde_json::json;
+
+    #[test]
+    fn test_media_list_contains_the_exact_stream() {
+        let data = vec![json!({"app": "live", "stream": "device_channel"})];
+        assert!(media_list_contains_stream(&data, "live", "device_channel"));
+    }
+
+    #[test]
+    fn test_media_list_does_not_match_another_stream() {
+        let data = vec![json!({"app": "live", "stream": "other_stream"})];
+        assert!(
+            !media_list_contains_stream(&data, "live", "device_channel"),
+            "媒体服务器上有别的流时，目标流不能算就绪"
+        );
+    }
+
+    #[test]
+    fn test_media_list_does_not_match_another_app() {
+        let data = vec![json!({"app": "record", "stream": "device_channel"})];
+        assert!(
+            !media_list_contains_stream(&data, "live", "device_channel"),
+            "app 不一致时不能算就绪"
+        );
+    }
+
+    #[test]
+    fn test_empty_media_list_is_not_ready() {
+        assert!(!media_list_contains_stream(&[], "live", "device_channel"));
+    }
+}
+
 impl ZlMediaKitAdapter {
     pub fn new(config: MediaServerConfig) -> Self {
         let client = MediaServerClient::new(&config.url, &config.api_key);
@@ -170,13 +219,11 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
         let resp: Resp = self.client.get_with_params("/index/api/getMediaList", &params).await?;
 
         if let Some(data) = &resp.data {
-            for item in data {
-                if let Some(_item_stream) = item.get("stream").and_then(|v| v.as_str()) {
-                }
-            }
+            // 必须按 app + 流名精确匹配：媒体服务器上存在其它流不代表目标流就绪
+            return Ok(media_list_contains_stream(data, app, stream_key));
         }
 
-        Ok(resp.code == 0 && resp.data.as_ref().map(|d| !d.is_empty()).unwrap_or(false))
+        Ok(false)
     }
 
     async fn ptz_control(&self, _stream_key: &str, _command: &str, _channel: u8) -> anyhow::Result<()> { Ok(()) }

@@ -33,7 +33,7 @@ const routeNames = {
   '/devices': '设备列表',
   '/streams': '流列表',
   '/sessions': '实时会话',
-  '/recordings': '录像任务',
+  '/recordings': '录像管理',
   '/recordings/files': '录像文件',
   '/recording-policies': '录制策略',
   '/recording-playback': '录像回放',

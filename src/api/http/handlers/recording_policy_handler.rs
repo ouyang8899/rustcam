@@ -5,6 +5,7 @@ use axum::{
 };
 use serde::Deserialize;
 use crate::api::response::ApiResponse;
+use crate::api::http::handlers::device_handler::PaginatedResponse;
 use crate::api::state::FullState;
 use crate::error::AppError;
 use crate::domain::recording_policy::{
@@ -16,6 +17,17 @@ use crate::domain::recording_policy::{
 pub struct PolicyQuery {
     pub device_tag: Option<String>,
     pub policy_type: Option<String>,
+    /// 分页大小
+    pub limit: Option<usize>,
+    /// 分页偏移
+    pub offset: Option<usize>,
+}
+
+impl PolicyQuery {
+    pub fn limit(&self) -> usize { self.limit.unwrap_or(50).min(500) }
+    pub fn offset(&self) -> usize { self.offset.unwrap_or(0) }
+    pub fn device_tag(&self) -> Option<&str> { self.device_tag.as_deref().filter(|s| !s.is_empty()) }
+    pub fn policy_type(&self) -> Option<&str> { self.policy_type.as_deref().filter(|s| !s.is_empty()) }
 }
 
 #[derive(Debug, Deserialize)]
@@ -26,24 +38,31 @@ pub struct PolicyPath {
 pub async fn list_policies_handler(
     State(state): State<Arc<FullState>>,
     Query(q): Query<PolicyQuery>,
-) -> Result<Json<ApiResponse<Vec<RecordingPolicy>>>, AppError> {
+) -> Result<Json<ApiResponse<PaginatedResponse<RecordingPolicy>>>, AppError> {
     let registry = &state.app.registry;
 
-    let policies = if let Some(ref device_tag) = q.device_tag {
-        registry.recording_policy_service.find_policies_by_device(device_tag).await?
-    } else {
-        registry.recording_policy_service.list_policies().await?
-    };
-
-    let filtered: Vec<RecordingPolicy> = if let Some(ref pt) = q.policy_type {
-        let policy_type = PolicyType::from_str(pt)
+    // 过滤条件在 SQL 中执行，分页由数据库完成
+    let policy_type = q.policy_type();
+    if let Some(pt) = policy_type {
+        PolicyType::from_str(pt)
             .ok_or_else(|| AppError::BadRequest(format!("Invalid policy type: {}", pt)))?;
-        policies.into_iter().filter(|p| p.policy_type == policy_type).collect()
-    } else {
-        policies
-    };
+    }
 
-    Ok(Json(ApiResponse::success(filtered)))
+    let policies = registry
+        .recording_policy_service
+        .list_policies_paginated(q.device_tag(), policy_type, q.limit(), q.offset())
+        .await?;
+    let total = registry
+        .recording_policy_service
+        .count_policies(q.device_tag(), policy_type)
+        .await?;
+
+    Ok(Json(ApiResponse::success(PaginatedResponse {
+        items: policies,
+        total: total as usize,
+        limit: q.limit(),
+        offset: q.offset(),
+    })))
 }
 
 pub async fn get_policy_handler(

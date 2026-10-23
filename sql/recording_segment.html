@@ -70,4 +70,56 @@ WHERE device_tag = #{device_tag}
   AND (#{segment_type}::text IS NULL OR segment_type = #{segment_type}::text)
 </select>
 
+<!--
+  分页列表：所有过滤条件都是可选的。没有设备/时间范围时列出全部录像文件，
+  过滤条件与 LIMIT/OFFSET 全部由数据库执行。
+-->
+<select id="segment_select_filtered_paginated">
+SELECT id, recording_id, device_tag, channel_tag, start_time, end_time,
+       duration_secs, file_size, file_path, server_tag,
+       segment_type, alarm_id, play_url
+FROM recording_segments
+<where>
+<if test="device_tag != null">
+and device_tag = #{device_tag}
+</if>
+<if test="channel_tag != null">
+and channel_tag = #{channel_tag}
+</if>
+<if test="segment_type != null">
+and segment_type = #{segment_type}
+</if>
+<if test="start_time != null">
+and end_time &gt;= #{start_time}
+</if>
+<if test="end_time != null">
+and start_time &lt;= #{end_time}
+</if>
+</where>
+ORDER BY start_time DESC
+LIMIT #{limit} OFFSET #{offset}
+</select>
+
+<select id="segment_count_filtered">
+SELECT COUNT(*) as count
+FROM recording_segments
+<where>
+<if test="device_tag != null">
+and device_tag = #{device_tag}
+</if>
+<if test="channel_tag != null">
+and channel_tag = #{channel_tag}
+</if>
+<if test="segment_type != null">
+and segment_type = #{segment_type}
+</if>
+<if test="start_time != null">
+and end_time &gt;= #{start_time}
+</if>
+<if test="end_time != null">
+and start_time &lt;= #{end_time}
+</if>
+</where>
+</select>
+
 </mapper>

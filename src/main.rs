@@ -107,6 +107,7 @@ async fn main() -> anyhow::Result<()> {
     let config = AppConfig::load()?;
 
     init_tracing(&config.log.level, &config.log.dir);
+    rustcam_media::protocol::gb28181::sip_log::set_enabled(config.log.sip);
 
     rustcam_media::infrastructure::watchdog::spawn_watchdog(&config.log.dir);
     rustcam_media::infrastructure::watchdog::spawn_heartbeat();

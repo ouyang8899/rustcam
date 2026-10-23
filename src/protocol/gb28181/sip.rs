@@ -1033,6 +1033,13 @@ impl SipMessageBuffer {
     }
 
     pub fn next_message(&mut self) -> Option<(SipMessage, usize)> {
+        self.next_message_with_raw()
+            .map(|(msg, len, _raw)| (msg, len))
+    }
+
+    /// Same as [`SipMessageBuffer::next_message`], but also returns the raw
+    /// text of the message, so it can be logged exactly as it arrived.
+    pub fn next_message_with_raw(&mut self) -> Option<(SipMessage, usize, String)> {
         loop {
             if self.buffer.len() < 4 {
                 return None;
@@ -1104,13 +1111,13 @@ impl SipMessageBuffer {
             match rsip::SipMessage::try_from(single_msg.as_str()) {
                 Ok(rsip_msg) => {
                     match SipMessage::from_rsip_message(&rsip_msg) {
-                        Some(sip_msg) => return Some((sip_msg, total_len)),
+                        Some(sip_msg) => return Some((sip_msg, total_len, single_msg)),
                         None => {
                             let uri_preview = format!("{:?}", rsip_msg);
                             tracing::warn!("[SIP] Failed to convert rsip message: rsip_msg={}", &uri_preview[..uri_preview.len().min(200)]);
 
                             match SipMessage::parse(&single_msg) {
-                                Some(msg) => return Some((msg, total_len)),
+                                Some(msg) => return Some((msg, total_len, single_msg)),
                                 None => {
                                     tracing::warn!("[SIP] Fallback parse also failed for INVITE");
                                     continue;
@@ -1123,7 +1130,7 @@ impl SipMessageBuffer {
                     tracing::warn!("[SIP] rsip parse failed: {:?}", e);
 
                     match SipMessage::parse(&single_msg) {
-                        Some(msg) => return Some((msg, total_len)),
+                        Some(msg) => return Some((msg, total_len, single_msg)),
                         None => {
                             tracing::warn!("[SIP] Fallback parse also failed");
                             continue;
@@ -1277,5 +1284,44 @@ mod tests {
         assert!(s.contains("SIP/2.0"));
         assert!(s.contains("Content-Type: application/sdp"));
         assert!(s.contains("Content-Length: 5"));
+    }
+
+    #[test]
+    fn test_next_message_returns_the_raw_message_text() {
+        let raw = "REGISTER sip:31011500001000000001@3101150000 SIP/2.0\r\n\
+                   Via: SIP/2.0/UDP 192.168.1.211:5060;rport;branch=z9hG4bK1\r\n\
+                   CSeq: 1 REGISTER\r\n\
+                   Content-Length: 0\r\n\r\n";
+        let mut buffer = SipMessageBuffer::new();
+        buffer.append(raw.as_bytes());
+
+        let (_msg, len, raw_text) = buffer
+            .next_message_with_raw()
+            .expect("a complete message is expected");
+
+        assert_eq!(raw_text, raw, "the raw message text must be returned as is");
+        assert_eq!(len, raw.len());
+    }
+
+    #[test]
+    fn test_next_message_returns_the_raw_text_of_a_split_message() {
+        let raw = "OPTIONS sip:34020000002000000001@192.168.1.100:5060 SIP/2.0\r\n\
+                   CSeq: 2 OPTIONS\r\n\
+                   Content-Length: 0\r\n\r\n";
+        let mut buffer = SipMessageBuffer::new();
+        // The message arrives in two TCP segments.
+        buffer.append(&raw.as_bytes()[..30]);
+        assert!(
+            buffer.next_message_with_raw().is_none(),
+            "an incomplete message must not be returned"
+        );
+
+        buffer.append(&raw.as_bytes()[30..]);
+        let (_msg, len, raw_text) = buffer
+            .next_message_with_raw()
+            .expect("the complete message is expected");
+
+        assert_eq!(raw_text, raw);
+        assert_eq!(len, raw.len());
     }
 }

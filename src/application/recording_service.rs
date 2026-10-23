@@ -4,7 +4,8 @@ use chrono::Utc;
 
 use crate::domain::device::RecordingConfig;
 use crate::domain::recording::{
-    CreateRecordingRequest, Recording, RecordingFormat, RecordingState,
+    classify_start_failure, retry_backoff_secs, CreateRecordingRequest, Recording, RecordingFormat,
+    RecordingState, StartFailureKind,
 };
 use crate::error::{AppError, Result};
 
@@ -142,15 +143,33 @@ impl RecordingService {
                     Some(info)
                 }
                 Err(e) => {
-                    tracing::error!(
-                        "[RecordingService] Failed to start recording on media server {}: {}",
-                        recording.server_tag, e
-                    );
-                    recording.set_error(e.to_string());
-                    if let Err(e) = self.repo.update_recording(&recording.clone()).await {
-                        tracing::error!("[RecordingService] Failed to persist error state: {}", e);
+                    let message = e.to_string();
+                    let kind = classify_start_failure(&message);
+
+                    match kind {
+                        StartFailureKind::Permanent => {
+                            tracing::error!(
+                                "[RecordingService] Failed to start recording on media server {}: {}",
+                                recording.server_tag, message
+                            );
+                            recording.set_error(message.clone());
+                        }
+                        _ => {
+                            // 设备或流还没就绪：任务保持“等待”状态，稍后重试
+                            let backoff = retry_backoff_secs(kind, recording.retry_count);
+                            let next_retry_at = Utc::now() + chrono::TimeDelta::seconds(backoff);
+                            tracing::info!(
+                                "[RecordingService] Recording {} is waiting for the stream (retry in {}s): {}",
+                                recording.id, backoff, message
+                            );
+                            recording.set_pending(message.clone(), next_retry_at);
+                        }
                     }
-                    return Err(AppError::Internal(format!("Media server error: {}", e)));
+
+                    if let Err(e) = self.repo.update_recording_start_result(&recording).await {
+                        tracing::error!("[RecordingService] Failed to persist start result: {}", e);
+                    }
+                    return Err(AppError::Internal(format!("Media server error: {}", message)));
                 }
             }
         } else {
@@ -174,7 +193,10 @@ impl RecordingService {
                 recording.set_output(info.output_path.clone(), 0);
             }
         }
-        if let Err(e) = self.repo.update_recording(&recording.clone()).await {
+        // 启动成功：清掉重试信息
+        recording.retry_count = 0;
+        recording.next_retry_at = None;
+        if let Err(e) = self.repo.update_recording_start_result(&recording).await {
             tracing::error!("[RecordingService] Failed to persist: {}", e);
         }
 
@@ -298,8 +320,36 @@ impl RecordingService {
         self.repo.list_recordings_paginated(limit, offset).await
     }
 
+    /// 分页查询录像任务，过滤条件全部下推到 SQL。
+    pub async fn list_recordings_filtered(
+        &self,
+        device_tag: Option<&str>,
+        channel_tag: Option<&str>,
+        state: Option<&str>,
+        search: Option<&str>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<Recording>> {
+        self.repo
+            .list_recordings_filtered(device_tag, channel_tag, state, search, limit, offset)
+            .await
+    }
+
     pub async fn count_recordings(&self) -> Result<usize> {
         self.repo.count_recordings().await
+    }
+
+    /// 录像任务总数（与分页查询使用相同的过滤条件）。
+    pub async fn count_recordings_filtered(
+        &self,
+        device_tag: Option<&str>,
+        channel_tag: Option<&str>,
+        state: Option<&str>,
+        search: Option<&str>,
+    ) -> Result<usize> {
+        self.repo
+            .count_recordings_filtered(device_tag, channel_tag, state, search)
+            .await
     }
 
     pub async fn list_recorded_files(&self, id: i64) -> Result<Vec<crate::adapter::media_server::RecordingFile>> {

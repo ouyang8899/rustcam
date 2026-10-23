@@ -86,6 +86,39 @@ WHERE device_tag = #{device_tag} AND channel_tag = #{channel_tag}
 ORDER BY created_at DESC
 </select>
 
+<!-- 分页列表：过滤条件全部在 SQL 中完成，LIMIT/OFFSET 由数据库执行 -->
+<select id="policy_select_paginated">
+SELECT id, device_tag, channel_tag, policy_type, enabled,
+       schedule_type, cron_expr,
+       alarm_type, pre_record_secs, post_record_secs,
+       format, max_duration_secs, max_file_size_mb, output_path,
+       created_at, updated_at
+FROM recording_policies
+<where>
+<if test="device_tag != null">
+and device_tag = #{device_tag}
+</if>
+<if test="policy_type != null">
+and policy_type = #{policy_type}
+</if>
+</where>
+ORDER BY created_at DESC
+LIMIT #{limit} OFFSET #{offset}
+</select>
+
+<select id="policy_count">
+SELECT COUNT(*) as count
+FROM recording_policies
+<where>
+<if test="device_tag != null">
+and device_tag = #{device_tag}
+</if>
+<if test="policy_type != null">
+and policy_type = #{policy_type}
+</if>
+</where>
+</select>
+
 <select id="policy_select_by_alarm_triggered">
 SELECT id, device_tag, channel_tag, policy_type, enabled,
        schedule_type, cron_expr,

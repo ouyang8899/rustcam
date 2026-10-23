@@ -19,7 +19,7 @@ FROM streams
 (device_tag ILIKE '%' || #{search} || '%' OR channel_tag ILIKE '%' || #{search} || '%' OR app ILIKE '%' || #{search} || '%')
 </if>
 <if test="state != null">
-AND state = #{state}
+and state = #{state}
 </if>
 </where>
 ORDER BY id DESC
@@ -33,7 +33,7 @@ SELECT COUNT(*) FROM streams
 (device_tag ILIKE '%' || #{search} || '%' OR channel_tag ILIKE '%' || #{search} || '%' OR app ILIKE '%' || #{search} || '%')
 </if>
 <if test="state != null">
-AND state = #{state}
+and state = #{state}
 </if>
 </where>
 </select>

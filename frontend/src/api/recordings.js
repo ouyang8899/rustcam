@@ -1,7 +1,7 @@
 import { request } from '../utils/request'
 
-export async function getRecordings() {
-  const res = await request.get('/recordings')
+export async function getRecordings(params = {}) {
+  const res = await request.get('/recordings', { params })
   return res.data.data
 }
 

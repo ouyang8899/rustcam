@@ -25,13 +25,13 @@
             <el-option value="Completed" label="已完成" />
             <el-option value="Error" label="错误" />
           </el-select>
-          <el-text type="info" style="margin-left: 12px">{{ filteredRecordings.length }} / {{ recordings.length }}</el-text>
+          <el-text type="info" style="margin-left: 12px">{{ recordings.length }} / {{ total }}</el-text>
         </el-col>
       </el-row>
 
       <DataCard>
         <el-skeleton animated :loading="loading" :rows="5">
-            <el-table :data="filteredRecordings" style="margin-top: 0">
+          <el-table :data="recordings" style="margin-top: 0">
               <el-table-column label="状态" prop="state" width="100">
                 <template #default="{ row }">
                   <el-tag :type="stateTagType(row.state)" size="small">{{ stateLabel(row.state) }}</el-tag>
@@ -71,6 +71,17 @@
               </el-table-column>
             </el-table>
         </el-skeleton>
+
+        <el-pagination
+          class="pagination-bar"
+          layout="total, sizes, prev, pager, next, jumper"
+          :total="total"
+          :current-page="page"
+          :page-size="pageSize"
+          :page-sizes="[20, 50, 100, 200]"
+          @current-change="onPageChange"
+          @size-change="onPageSizeChange"
+        />
       </DataCard>
     </div>
 
@@ -154,7 +165,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, shallowRef } from 'vue'
+import { ref, computed, onMounted, shallowRef, watch } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { Search, Refresh, Plus } from '@element-plus/icons-vue'
 import VideoPlayer from '../components/VideoPlayer.vue'
@@ -194,14 +205,12 @@ const statCards = computed(() => [
   { label: '存储占用', value: formatSize(stats.value?.total_size_bytes || 0) },
 ])
 
-const filteredRecordings = computed(() => {
-  const q = searchQuery.value.toLowerCase()
-  return recordings.value.filter(r => {
-    const matchSearch = !q || (r.device_tag || '').toLowerCase().includes(q) || (r.channel_tag || '').toLowerCase().includes(q)
-    const matchState = !stateFilter.value || r.state === stateFilter.value
-    return matchSearch && matchState
-  })
-})
+const filteredRecordings = computed(() => recordings.value)
+
+const total = computed(() => recStore.total)
+const page = ref(1)
+const pageSize = ref(50)
+let searchTimer = null
 
 const form = ref({ device_id: '', format: 'Mp4', duration_secs: 0, max_file_size_mb: 0, labels: '' })
 
@@ -210,10 +219,42 @@ onMounted(async () => {
   await searchDevices('')
 })
 
+watch(searchQuery, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    page.value = 1
+    fetchAll()
+  }, 300)
+})
+
+watch(stateFilter, () => {
+  page.value = 1
+  fetchAll()
+})
+
+function onPageChange(p) {
+  page.value = p
+  fetchAll()
+}
+
+function onPageSizeChange(size) {
+  pageSize.value = size
+  page.value = 1
+  fetchAll()
+}
+
 async function fetchAll() {
   loading.value = true
   try {
-    await Promise.all([recStore.fetchRecordings(), recStore.fetchStats()])
+    await Promise.all([
+      recStore.fetchRecordings({
+        limit: pageSize.value,
+        offset: (page.value - 1) * pageSize.value,
+        search: searchQuery.value || undefined,
+        state: stateFilter.value || undefined,
+      }),
+      recStore.fetchStats(),
+    ])
     recordings.value = recStore.recordings
     stats.value = recStore.stats
   } finally {
@@ -321,12 +362,12 @@ async function downloadFile(rec) {
 }
 
 function stateTagType(state) {
-  const map = { Starting: 'warning', Recording: 'success', Paused: 'warning', Stopping: 'danger', Completed: 'info', Error: 'danger' }
+  const map = { Pending: 'info', Starting: 'warning', Recording: 'success', Paused: 'warning', Stopping: 'danger', Completed: 'info', Error: 'danger' }
   return map[state] || 'info'
 }
 
 function stateLabel(state) {
-  const map = { Starting: '启动中', Recording: '录制中', Paused: '已暂停', Stopping: '停止中', Completed: '已完成', Error: '错误' }
+  const map = { Pending: '等待设备上线', Starting: '启动中', Recording: '录制中', Paused: '已暂停', Stopping: '停止中', Completed: '已完成', Error: '错误' }
   return map[state] || state
 }
 

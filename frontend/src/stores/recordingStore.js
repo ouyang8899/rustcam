@@ -20,13 +20,14 @@ export const useRecordingStore = defineStore('recordings', {
   }),
 
   actions: {
-    async fetchRecordings() {
+    async fetchRecordings(params = {}) {
       this.loading = true
       this.error = null
       try {
-        const data = await api.getRecordings()
+        const data = await api.getRecordings(params)
         this.recordings = data.items || data
-        this.total = data.total || this.recordings.length
+        this.total = data.total ?? this.recordings.length
+        return data
       } catch (e) {
         this.error = e.message
         throw e
@@ -117,7 +118,7 @@ export const useRecordingStore = defineStore('recordings', {
       try {
         const data = await api.getRecordingPolicies(params)
         this.policies = data.items || data
-        this.policyTotal = data.total || this.policies.length
+        this.policyTotal = data.total ?? this.policies.length
         return data
       } finally {
         this.policyLoading = false

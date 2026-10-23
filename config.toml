@@ -94,3 +94,5 @@ level = "info"
 sql = false
 http = false
 media_server = false
+# Dump every SIP message (full content) into the log
+sip = true

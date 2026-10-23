@@ -168,7 +168,12 @@ impl SessionService {
 
         let mut session = session;
         session.terminate();
-        self.infra.db.sessions_cache().insert(id, session);
+        self.infra.db.sessions_cache().insert(id, session.clone());
+        // The state has to be persisted, the database would keep the old
+        // state and the session would show up as running forever.
+        if let Err(e) = self.infra.db.update_session_state(&session).await {
+            tracing::error!("[SessionService] Failed to persist session state: {}", e);
+        }
         Ok(())
     }
 
@@ -179,6 +184,13 @@ impl SessionService {
     pub fn get_active_count(&self) -> usize {
         self.infra.db.sessions_cache().iter()
             .filter(|s| s.state == SessionState::Active)
+            .count()
+    }
+
+    /// Number of sessions that are not terminated yet.
+    pub fn get_live_count(&self) -> usize {
+        self.infra.db.sessions_cache().iter()
+            .filter(|s| s.state != SessionState::Terminated)
             .count()
     }
 
@@ -194,18 +206,18 @@ impl SessionService {
         repo: &Arc<crate::infrastructure::DbRepository>,
         redis: &Arc<crate::infrastructure::RedisStore>,
         cluster: &Arc<crate::infrastructure::cluster::ClusterManager>,
-        _expiration_secs: i64,
+        expiration_secs: i64,
     ) {
         let mut to_delete = Vec::new();
 
         let expired: Vec<(i64, String, Option<String>)> = {
             let cache = repo.sessions_cache();
+            let sessions: Vec<Session> = cache.iter().map(|e| e.value().clone()).collect();
+            let expired_ids = select_expired_sessions(&sessions, expiration_secs);
+
             cache
                 .iter()
-                .filter(|e| {
-                    let s = e.value();
-                    s.state != SessionState::Terminated && s.is_expired()
-                })
+                .filter(|e| expired_ids.contains(&e.value().id))
                 .map(|e| {
                     let s = e.value();
                     (s.id, s.stream_key(), s.media_server_tag.clone())
@@ -251,5 +263,97 @@ impl Clone for SessionService {
             media: self.media.clone(),
             shutdown_tx: Arc::new(RwLock::new(None)),
         }
+    }
+}
+
+/// A session is expired when its expiry time passed. Sessions that never got
+/// an expiry time - they were created but never activated - expire when they
+/// did not see any activity for longer than the configured window. Without
+/// this fallback those sessions are never reaped and pile up in the database.
+pub fn is_session_expired(session: &Session, expiration_secs: i64) -> bool {
+    if session.expires_at.is_some() {
+        return session.is_expired();
+    }
+    let idle = chrono::Utc::now() - session.last_activity;
+    idle.num_seconds() > expiration_secs
+}
+
+/// Selects the sessions that have to be reaped: expired ones and sessions
+/// that are not terminated yet but did not see any activity for longer than
+/// the configured window.
+pub fn select_expired_sessions(sessions: &[Session], expiration_secs: i64) -> Vec<i64> {
+    sessions
+        .iter()
+        .filter(|s| s.state != SessionState::Terminated && is_session_expired(s, expiration_secs))
+        .map(|s| s.id)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::SessionType;
+
+    fn zombie() -> Session {
+        // A session that was created but never activated: no expiry time.
+        let mut session = Session::new(SessionType::Play, 0);
+        session.id = 128;
+        session.last_activity = chrono::Utc::now() - chrono::TimeDelta::seconds(600);
+        session
+    }
+
+    #[test]
+    fn test_fresh_session_without_expiry_is_not_expired() {
+        let session = Session::new(SessionType::Play, 0);
+        assert!(
+            !is_session_expired(&session, 300),
+            "a session that was just created must not be expired"
+        );
+    }
+
+    #[test]
+    fn test_session_without_expiry_expires_after_the_configured_window() {
+        let mut session = Session::new(SessionType::Play, 0);
+        session.last_activity = chrono::Utc::now() - chrono::TimeDelta::seconds(600);
+
+        assert!(
+            is_session_expired(&session, 300),
+            "a session that never got an expiry must expire after the idle window"
+        );
+        assert!(
+            !is_session_expired(&session, 3600),
+            "the idle window must be respected"
+        );
+    }
+
+    #[test]
+    fn test_session_with_expiry_uses_its_expiry_time() {
+        let mut session = Session::new(SessionType::Play, 0);
+        session.expires_at = Some(chrono::Utc::now() - chrono::TimeDelta::seconds(10));
+        assert!(is_session_expired(&session, 300));
+
+        let mut session = Session::new(SessionType::Play, 0);
+        session.expires_at = Some(chrono::Utc::now() + chrono::TimeDelta::seconds(600));
+        assert!(!is_session_expired(&session, 300));
+    }
+
+    #[test]
+    fn test_zombie_sessions_are_selected_for_cleanup() {
+        let mut fresh = Session::new(SessionType::Play, 0);
+        fresh.id = 1;
+
+        let mut terminated = zombie();
+        terminated.id = 2;
+        terminated.mark_terminated();
+
+        let sessions = vec![fresh, zombie(), terminated];
+
+        let expired = select_expired_sessions(&sessions, 300);
+
+        assert_eq!(
+            expired,
+            vec![128],
+            "only the zombie session must be reaped, terminated and fresh ones stay"
+        );
     }
 }

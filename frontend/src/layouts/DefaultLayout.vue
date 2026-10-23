@@ -38,10 +38,12 @@
           <el-sub-menu index="/recordings-group">
             <template #title>
               <el-icon><VideoPlay /></el-icon>
-              <span>录像</span>
+              <span>录像管理</span>
             </template>
-            <el-menu-item index="/recordings">录像任务</el-menu-item>
+            <el-menu-item index="/recordings">录像管理</el-menu-item>
             <el-menu-item index="/recordings/files">录像文件</el-menu-item>
+            <el-menu-item index="/recording-policies">录制策略</el-menu-item>
+            <el-menu-item index="/recording-playback">录像回放</el-menu-item>
           </el-sub-menu>
           <el-menu-item index="/servers">
             <el-icon><Cpu /></el-icon>
@@ -145,7 +147,8 @@ let ws = null
 
 const routeMap = {
   '/': '监控台', '/devices': '设备管理', '/devices/': '设备详情',
-  '/streams': '视频流', '/sessions': '直播会话',   '/recordings': '录像任务', '/recordings/files': '录像文件', '/servers': '服务器',
+  '/streams': '视频流', '/sessions': '直播会话',   '/recordings': '录像管理', '/recordings/files': '录像文件', '/servers': '服务器',
+  '/recording-policies': '录制策略', '/recording-playback': '录像回放',
   '/public': '公开', '/video-wall': '视频墙', '/video-wall/designer': '布局设计',
   '/users': '用户管理', '/settings': '设置',
 }

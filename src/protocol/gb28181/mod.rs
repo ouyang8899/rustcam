@@ -2,6 +2,7 @@ mod adapter;
 pub mod auth;
 mod ptz;
 pub mod sip;
+pub mod sip_log;
 
 pub use adapter::Gb28181Adapter;
 pub use sip::{SipMessage, SipUri, SipMethod, SipNameAddr};

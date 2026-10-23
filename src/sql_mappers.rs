@@ -662,6 +662,53 @@ pub async fn session_delete_by_id(
     impled!()
 }
 
+#[sql("UPDATE sessions SET state = $1, updated_at = NOW(), last_activity = $2 WHERE id = $3")]
+pub async fn session_update_state(
+    rb: &dyn rbatis::Executor,
+    state: &str,
+    last_activity: RbatisDateTime,
+    id: i64,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
+
+/// Removes the duplicated stream rows: only the newest row of a stream is
+/// kept, the rows of the previous runs are dropped.
+#[sql("DELETE FROM streams WHERE id NOT IN (SELECT MAX(id) FROM streams GROUP BY device_tag, channel_tag)")]
+pub async fn stream_delete_duplicates(
+    rb: &dyn rbatis::Executor,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
+
+/// Resets the runtime state of the streams: the state of the previous process
+/// is gone, the recovery service starts them again.
+#[sql("UPDATE streams SET state = 'Idle' WHERE state <> 'Idle'")]
+pub async fn stream_reset_state(
+    rb: &dyn rbatis::Executor,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
+
+/// Removes the sessions of the previous process that never ended.
+#[sql("DELETE FROM sessions WHERE state <> 'terminated'")]
+pub async fn session_delete_unfinished(
+    rb: &dyn rbatis::Executor,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
+
+/// Removes the rows of a stream that was replaced by a newer one.
+#[sql("DELETE FROM streams WHERE device_tag = $1 AND channel_tag = $2 AND id <> $3")]
+pub async fn stream_delete_others(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+    channel_tag: &str,
+    keep_id: i64,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct RecordingRow {
     pub id: i64,
@@ -680,6 +727,8 @@ pub struct RecordingRow {
     pub labels: Option<String>,
     pub filename: Option<String>,
     pub max_duration_secs: Option<i32>,
+    pub retry_count: Option<i32>,
+    pub next_retry_at: Option<RbatisDateTime>,
 }
 
 impl TryFrom<RecordingRow> for Recording {
@@ -687,6 +736,7 @@ impl TryFrom<RecordingRow> for Recording {
 
     fn try_from(row: RecordingRow) -> Result<Self, Self::Error> {
         let state = match row.state.to_lowercase().as_str() {
+            "pending" => RecordingState::Pending,
             "starting" => RecordingState::Starting,
             "recording" => RecordingState::Recording,
             "paused" => RecordingState::Paused,
@@ -734,6 +784,10 @@ impl TryFrom<RecordingRow> for Recording {
             filename: row.filename,
             pre_record_secs: None,
             max_duration_secs: row.max_duration_secs.map(|v| v as u32),
+            retry_count: row.retry_count.unwrap_or(0),
+            next_retry_at: row
+                .next_retry_at
+                .and_then(|s| chrono::DateTime::from_timestamp(s.unix_timestamp(), 0)),
         })
     }
 }
@@ -761,34 +815,46 @@ impl Recording {
             labels: labels_json,
             filename: self.filename.clone(),
             max_duration_secs: self.max_duration_secs.map(|v| v as i32),
+            retry_count: Some(self.retry_count),
+            next_retry_at: self
+                .next_retry_at
+                .map(|dt| RbatisDateTime::from_timestamp_millis(dt.timestamp_millis())),
         }
     }
 }
 
-#[sql("SELECT id, device_tag, channel_tag, server_tag, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename, max_duration_secs FROM recordings ORDER BY created_at DESC")]
+#[sql("SELECT id, device_tag, channel_tag, server_tag, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename, max_duration_secs, retry_count, next_retry_at FROM recordings ORDER BY created_at DESC")]
 pub async fn recording_select_all(
     rb: &dyn rbatis::Executor,
 ) -> rbatis::Result<Vec<RecordingRow>> {
     impled!()
 }
 
-#[sql("SELECT id, device_tag, channel_tag, server_tag, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename, max_duration_secs FROM recordings ORDER BY created_at DESC LIMIT $1 OFFSET $2")]
+#[html_sql("sql/recording.html")]
 pub async fn recording_select_paginated(
     rb: &dyn rbatis::Executor,
+    device_tag: Option<&str>,
+    channel_tag: Option<&str>,
+    state: Option<&str>,
+    search: Option<&str>,
     limit: i64,
     offset: i64,
 ) -> rbatis::Result<Vec<RecordingRow>> {
     impled!()
 }
 
-#[sql("SELECT COUNT(*) FROM recordings")]
-pub async fn recording_count_all(
+#[html_sql("sql/recording.html")]
+pub async fn recording_count(
     rb: &dyn rbatis::Executor,
+    device_tag: Option<&str>,
+    channel_tag: Option<&str>,
+    state: Option<&str>,
+    search: Option<&str>,
 ) -> rbatis::Result<i64> {
     impled!()
 }
 
-#[sql("SELECT id, device_tag, channel_tag, server_tag, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename, max_duration_secs FROM recordings WHERE id = $1")]
+#[sql("SELECT id, device_tag, channel_tag, server_tag, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename, max_duration_secs, retry_count, next_retry_at FROM recordings WHERE id = $1")]
 pub async fn recording_select_by_id(
     rb: &dyn rbatis::Executor,
     id: i64,
@@ -796,14 +862,14 @@ pub async fn recording_select_by_id(
     impled!()
 }
 
-#[sql("SELECT id, device_tag, channel_tag, server_tag, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename, max_duration_secs FROM recordings WHERE state IN ('recording', 'starting') ORDER BY created_at DESC")]
+#[sql("SELECT id, device_tag, channel_tag, server_tag, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename, max_duration_secs, retry_count, next_retry_at FROM recordings WHERE state IN ('recording', 'starting') ORDER BY created_at DESC")]
 pub async fn recording_select_active(
     rb: &dyn rbatis::Executor,
 ) -> rbatis::Result<Vec<RecordingRow>> {
     impled!()
 }
 
-#[sql("SELECT id, device_tag, channel_tag, server_tag, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename, max_duration_secs FROM recordings WHERE device_tag = $1 ORDER BY created_at DESC")]
+#[sql("SELECT id, device_tag, channel_tag, server_tag, state, format, output_path, file_size, duration_secs, created_at, started_at, stopped_at, error_message, labels, filename, max_duration_secs, retry_count, next_retry_at FROM recordings WHERE device_tag = $1 ORDER BY created_at DESC")]
 pub async fn recording_select_by_device_tag(
     rb: &dyn rbatis::Executor,
     device_tag: &str,
@@ -859,10 +925,54 @@ pub async fn recording_update(
     impled!()
 }
 
+/// 写入一次“启动尝试”的结果（状态、重试信息、输出路径等）。
+#[html_sql("sql/recording.html")]
+pub async fn recording_update_start_result(
+    rb: &dyn rbatis::Executor,
+    state: &str,
+    error_message: Option<&str>,
+    retry_count: i32,
+    next_retry_at: Option<RbatisDateTime>,
+    started_at: Option<RbatisDateTime>,
+    stopped_at: Option<RbatisDateTime>,
+    output_path: Option<&str>,
+    file_size: i64,
+    duration_secs: i64,
+    id: i64,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
+
+/// 待启动（等待设备/流就绪）的录像任务。
+#[html_sql("sql/recording.html")]
+pub async fn recording_select_pending(
+    rb: &dyn rbatis::Executor,
+) -> rbatis::Result<Vec<RecordingRow>> {
+    impled!()
+}
+
+/// 某个流上待启动的录像任务。
+#[html_sql("sql/recording.html")]
+pub async fn recording_select_pending_by_stream(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+    channel_tag: &str,
+) -> rbatis::Result<Vec<RecordingRow>> {
+    impled!()
+}
+
 #[sql("DELETE FROM recordings WHERE id = $1")]
 pub async fn recording_delete_by_id(
     rb: &dyn rbatis::Executor,
     id: i64,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
+
+/// 清理很久以前失败、且没有产出文件的录像任务（历史遗留噪声）。
+#[sql("DELETE FROM recordings WHERE state = 'error' AND created_at < NOW() - INTERVAL '1 day' AND COALESCE(output_path, '') = ''")]
+pub async fn recording_delete_stale_errors(
+    rb: &dyn rbatis::Executor,
 ) -> rbatis::Result<rbatis::rbdc::ExecResult> {
     impled!()
 }
@@ -1800,6 +1910,24 @@ pub async fn policy_select_by_alarm_triggered(
     alarm_type: &str,
 ) -> rbatis::Result<Vec<RecordingPolicyRow>> { impled!() }
 
+/// 分页查询录制策略，过滤条件在 SQL 中执行。
+#[html_sql("sql/recording_policy.html")]
+pub async fn policy_select_paginated(
+    rb: &dyn rbatis::Executor,
+    device_tag: Option<&str>,
+    policy_type: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> rbatis::Result<Vec<RecordingPolicyRow>> { impled!() }
+
+/// 录制策略总数（与分页查询使用相同的过滤条件）。
+#[html_sql("sql/recording_policy.html")]
+pub async fn policy_count(
+    rb: &dyn rbatis::Executor,
+    device_tag: Option<&str>,
+    policy_type: Option<&str>,
+) -> rbatis::Result<i64> { impled!() }
+
 #[html_sql("sql/recording_time_window.html")]
 pub async fn time_window_insert(
     rb: &dyn rbatis::Executor,
@@ -1889,4 +2017,28 @@ pub async fn segment_count_by_device_channel_time(
     start_time: RbatisDateTime,
     end_time: RbatisDateTime,
     segment_type: Option<&str>,
+) -> rbatis::Result<i64> { impled!() }
+
+/// 分页查询录像文件，所有过滤条件都是可选的。
+#[html_sql("sql/recording_segment.html")]
+pub async fn segment_select_filtered_paginated(
+    rb: &dyn rbatis::Executor,
+    device_tag: Option<&str>,
+    channel_tag: Option<&str>,
+    segment_type: Option<&str>,
+    start_time: Option<RbatisDateTime>,
+    end_time: Option<RbatisDateTime>,
+    limit: i64,
+    offset: i64,
+) -> rbatis::Result<Vec<RecordingSegmentRow>> { impled!() }
+
+/// 录像文件总数（与分页查询使用相同的过滤条件）。
+#[html_sql("sql/recording_segment.html")]
+pub async fn segment_count_filtered(
+    rb: &dyn rbatis::Executor,
+    device_tag: Option<&str>,
+    channel_tag: Option<&str>,
+    segment_type: Option<&str>,
+    start_time: Option<RbatisDateTime>,
+    end_time: Option<RbatisDateTime>,
 ) -> rbatis::Result<i64> { impled!() }

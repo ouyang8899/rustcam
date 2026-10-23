@@ -308,6 +308,7 @@ impl SipTcpServer {
 
         adapter.on_connected(addr).await?;
 
+        let local_addr = stream.local_addr().ok();
         let (reader, write_half) = stream.into_split();
         adapter.set_tcp_write(write_half);
 
@@ -315,6 +316,9 @@ impl SipTcpServer {
         {
             let mut guard = adapter_arc.lock().await;
             guard.set_adapter_entry(adapter_arc.clone());
+            if let Some(local) = local_addr {
+                let _ = guard.set_local_addr(local).await;
+            }
         }
         let entry = Arc::new(TcpConnectionEntry::new(adapter_arc.clone(), addr));
 

@@ -20,10 +20,10 @@ FROM channels
 <where>
 <if test="device_tag != null">device_tag = #{device_tag}</if>
 <if test="search != null">
-AND (name ILIKE '%' || #{search} || '%' OR device_tag ILIKE '%' || #{search} || '%' OR channel_tag ILIKE '%' || #{search} || '%')
+and (name ILIKE '%' || #{search} || '%' OR device_tag ILIKE '%' || #{search} || '%' OR channel_tag ILIKE '%' || #{search} || '%')
 </if>
 <if test="status != null">
-AND status = #{status}
+and status = #{status}
 </if>
 </where>
 ORDER BY created_at DESC
@@ -35,10 +35,10 @@ SELECT COUNT(*) FROM channels
 <where>
 <if test="device_tag != null">device_tag = #{device_tag}</if>
 <if test="search != null">
-AND (name ILIKE '%' || #{search} || '%' OR device_tag ILIKE '%' || #{search} || '%' OR channel_tag ILIKE '%' || #{search} || '%')
+and (name ILIKE '%' || #{search} || '%' OR device_tag ILIKE '%' || #{search} || '%' OR channel_tag ILIKE '%' || #{search} || '%')
 </if>
 <if test="status != null">
-AND status = #{status}
+and status = #{status}
 </if>
 </where>
 </select>

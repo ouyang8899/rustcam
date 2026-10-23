@@ -53,7 +53,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
-import maplibregl from 'maplibre-gl'
+import { Map as MapLibreMap } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { TerraDraw, TerraDrawPolygonMode, TerraDrawLineStringMode, TerraDrawPointMode, TerraDrawSelectMode } from 'terra-draw'
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter'
@@ -369,7 +369,7 @@ watch([searchText, filterStatus], () => {
 onMounted(() => {
   if (!mapContainer.value) return
 
-  map = new maplibregl.Map({
+  map = new MapLibreMap({
     container: 'device-map',
     center: [121.47, 31.23],
     zoom: 10,

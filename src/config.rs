@@ -15,6 +15,9 @@ pub struct LogConfig {
     pub http: bool,
     #[serde(default)]
     pub media_server: bool,
+    /// Dump every SIP message with its full content.
+    #[serde(default)]
+    pub sip: bool,
 }
 
 fn default_log_dir() -> String {
@@ -29,6 +32,7 @@ impl Default for LogConfig {
             sql: false,
             http: false,
             media_server: false,
+            sip: false,
         }
     }
 }

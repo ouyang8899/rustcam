@@ -14,12 +14,23 @@ use crate::domain::recording::{Recording, RecordingFormat, CreateRecordingReques
 pub struct PaginationQuery {
     pub limit: Option<usize>,
     pub offset: Option<usize>,
+    /// 设备过滤，条件在 SQL 中执行
+    pub device_tag: Option<String>,
+    /// 通道过滤，条件在 SQL 中执行
+    pub channel_tag: Option<String>,
+    /// 状态过滤，条件在 SQL 中执行
+    pub state: Option<String>,
+    /// 关键字过滤（设备/通道/文件名），条件在 SQL 中执行
+    pub search: Option<String>,
 }
 
 impl PaginationQuery {
     pub fn limit(&self) -> usize { self.limit.unwrap_or(50).min(500) }
     pub fn offset(&self) -> usize { self.offset.unwrap_or(0) }
-}
+    pub fn device_tag(&self) -> Option<&str> { self.device_tag.as_deref().filter(|s| !s.is_empty()) }
+    pub fn channel_tag(&self) -> Option<&str> { self.channel_tag.as_deref().filter(|s| !s.is_empty()) }
+    pub fn state(&self) -> Option<&str> { self.state.as_deref().filter(|s| !s.is_empty()) }
+    pub fn search(&self) -> Option<&str> { self.search.as_deref().filter(|s| !s.is_empty()) }}
 
 #[derive(Debug, Deserialize)]
 pub struct CreateRecordingReq {
@@ -38,8 +49,28 @@ pub async fn list_recordings_handler(
     Query(q): Query<PaginationQuery>,
 ) -> Result<Json<ApiResponse<PaginatedResponse<Recording>>>, AppError> {
     let registry = &state.app.registry;
-    let recordings = registry.recording_service.list_recordings_paginated(q.limit(), q.offset()).await?;
-    let total = registry.recording_service.count_recordings().await?;
+    // 数据库里状态是小写的，前端传的是 PascalCase
+    let state_filter = q.state().map(|s| s.to_lowercase());
+    let recordings = registry
+        .recording_service
+        .list_recordings_filtered(
+            q.device_tag(),
+            q.channel_tag(),
+            state_filter.as_deref(),
+            q.search(),
+            q.limit(),
+            q.offset(),
+        )
+        .await?;
+    let total = registry
+        .recording_service
+        .count_recordings_filtered(
+            q.device_tag(),
+            q.channel_tag(),
+            state_filter.as_deref(),
+            q.search(),
+        )
+        .await?;
 
     Ok(Json(ApiResponse::success(PaginatedResponse {
         items: recordings,

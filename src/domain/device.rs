@@ -312,7 +312,11 @@ impl Device {
     }
 
     pub fn set_online(&mut self) {
-        self.status = DeviceStatus::Online;
+        // 维护模式是运维设置：设备重新注册/上线不能把它覆盖掉，
+        // 否则维护中的设备会被自动拉流、告警等流程重新接管。
+        if self.status != DeviceStatus::Maintaining {
+            self.status = DeviceStatus::Online;
+        }
         self.is_online = true;
     }
 
@@ -465,5 +469,36 @@ pub struct UpdateDeviceRequest {
 pub struct DeviceWithChildren {
     #[serde(flatten)]
     pub device: Device,
-    pub children: Vec<DeviceWithChildren>,
+    pub children: Vec<Device>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_set_online_keeps_the_maintaining_status() {
+        let mut device = Device::new("Test".to_string(), Protocol::Rtsp);
+        device.status = DeviceStatus::Maintaining;
+
+        device.set_online();
+
+        assert_eq!(
+            device.status,
+            DeviceStatus::Maintaining,
+            "维护模式是运维设置，设备上线不能覆盖它"
+        );
+        assert!(device.is_online, "设备本身仍然是可达的");
+    }
+
+    #[test]
+    fn test_set_online_restores_the_online_status() {
+        let mut device = Device::new("Test".to_string(), Protocol::Rtsp);
+        device.set_offline();
+
+        device.set_online();
+
+        assert_eq!(device.status, DeviceStatus::Online);
+        assert!(device.is_online);
+    }
 }

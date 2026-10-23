@@ -141,6 +141,7 @@ impl ServiceRegistry {
 
         let recording_scheduler_service = Arc::new(RecordingSchedulerService::new(
             infra.clone(),
+            media.cluster.clone(),
             recording_policy_service.clone(),
             recording_service.clone(),
         ));
@@ -308,6 +309,7 @@ impl ServiceRegistry {
 
         let mut server_statuses = Vec::new();
         let mut online_count = 0usize;
+        let mut statuses: Vec<crate::adapter::media_server::ServerStatus> = Vec::new();
 
         for server in &servers {
 
@@ -323,6 +325,9 @@ impl ServiceRegistry {
 
             if online { online_count += 1; }
 
+            let cpu_usage = status.as_ref().map(|s| s.cpu_usage).unwrap_or(0.0);
+            let memory_usage = status.as_ref().map(|s| s.memory_usage).unwrap_or(0.0);
+
             server_statuses.push(serde_json::json!({
                 "id": server.id,
                 "name": server.name,
@@ -331,11 +336,31 @@ impl ServiceRegistry {
                 "online": online,
                 "enabled": server.enabled,
                 "session_count": sessions,
+                "cpu_usage": cpu_usage,
+                "memory_usage": memory_usage,
             }));
+
+            statuses.push(crate::adapter::media_server::ServerStatus {
+                name: server.name.clone(),
+                server_type: server.server_type.to_string(),
+                online,
+                session_count: sessions,
+                cpu_usage,
+                memory_usage,
+                bandwidth_in: 0,
+                bandwidth_out: 0,
+                last_heartbeat: None,
+            });
         }
 
         let server_count = servers.len();
         let health_score = if server_count == 0 { 0.0 } else { (online_count as f64 / server_count as f64) * 100.0 };
+
+        let aggregate = ServerAggregate::build(
+            &statuses,
+            self.session_service.get_active_count(),
+            self.session_service.get_live_count(),
+        );
 
         serde_json::json!({
             "timestamp": chrono::Utc::now().to_rfc3339(),
@@ -346,11 +371,99 @@ impl ServiceRegistry {
                 "online": online_count,
                 "offline": server_count.saturating_sub(online_count),
                 "servers": server_statuses,
+                "aggregate": {
+                    "active_sessions": aggregate.active_sessions,
+                    "total_sessions": aggregate.total_sessions,
+                    "avg_cpu": aggregate.avg_cpu,
+                    "avg_memory": aggregate.avg_memory,
+                },
             },
             "health": {
                 "score": health_score,
                 "level": if health_score >= 80.0 { "healthy" } else if health_score >= 50.0 { "degraded" } else { "critical" },
             }
         })
+    }
+}
+
+/// Aggregated metrics of all media servers, shown in the dashboard.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ServerAggregate {
+    pub active_sessions: usize,
+    pub total_sessions: usize,
+    pub avg_cpu: f64,
+    pub avg_memory: f64,
+}
+
+impl ServerAggregate {
+    /// Builds the aggregate from the status of every server and the session
+    /// counters. The averages are calculated over the online servers only.
+    pub fn build(
+        statuses: &[crate::adapter::media_server::ServerStatus],
+        active_sessions: usize,
+        total_sessions: usize,
+    ) -> Self {
+        let online: Vec<&crate::adapter::media_server::ServerStatus> =
+            statuses.iter().filter(|s| s.online).collect();
+
+        let average = |value: fn(&crate::adapter::media_server::ServerStatus) -> f64| -> f64 {
+            if online.is_empty() {
+                return 0.0;
+            }
+            online.iter().map(|s| value(s)).sum::<f64>() / online.len() as f64
+        };
+
+        Self {
+            active_sessions,
+            total_sessions,
+            avg_cpu: average(|s| s.cpu_usage),
+            avg_memory: average(|s| s.memory_usage),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adapter::media_server::ServerStatus;
+
+    fn status(name: &str, online: bool, cpu: f64, memory: f64) -> ServerStatus {
+        ServerStatus {
+            name: name.to_string(),
+            server_type: "zlmediakit".to_string(),
+            online,
+            session_count: 0,
+            cpu_usage: cpu,
+            memory_usage: memory,
+            bandwidth_in: 0,
+            bandwidth_out: 0,
+            last_heartbeat: None,
+        }
+    }
+
+    #[test]
+    fn test_aggregate_counts_sessions_and_averages_the_online_servers() {
+        let statuses = vec![
+            status("a", true, 10.0, 100.0),
+            status("b", true, 30.0, 300.0),
+            status("c", false, 90.0, 900.0),
+        ];
+
+        let aggregate = ServerAggregate::build(&statuses, 3, 7);
+
+        assert_eq!(aggregate.active_sessions, 3);
+        assert_eq!(aggregate.total_sessions, 7);
+        assert_eq!(aggregate.avg_cpu, 20.0, "only the online servers count");
+        assert_eq!(aggregate.avg_memory, 200.0, "only the online servers count");
+    }
+
+    #[test]
+    fn test_aggregate_without_online_server_has_no_averages() {
+        let statuses = vec![status("a", false, 50.0, 500.0)];
+
+        let aggregate = ServerAggregate::build(&statuses, 0, 0);
+
+        assert_eq!(aggregate.avg_cpu, 0.0);
+        assert_eq!(aggregate.avg_memory, 0.0);
     }
 }

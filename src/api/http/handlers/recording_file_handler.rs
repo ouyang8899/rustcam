@@ -14,11 +14,14 @@ use crate::domain::recording_policy::{
 
 #[derive(Debug, Deserialize)]
 pub struct RecordingFilesQuery {
-    pub device_tag: String,
+    /// 设备标识，为空时列出全部设备的录像文件
+    pub device_tag: Option<String>,
 
     pub channel_tag: Option<String>,
-    pub start_time: DateTime<Utc>,
-    pub end_time: DateTime<Utc>,
+    /// 录像开始时间，为空时不按时间过滤
+    pub start_time: Option<DateTime<Utc>>,
+    /// 录像结束时间，为空时不按时间过滤
+    pub end_time: Option<DateTime<Utc>>,
     pub segment_type: Option<String>,
     pub limit: Option<usize>,
     pub page: Option<usize>,
@@ -30,6 +33,10 @@ impl RecordingFilesQuery {
         self.channel_tag.as_deref().filter(|s| !s.is_empty())
     }
 
+    pub fn device_tag(&self) -> Option<&str> {
+        self.device_tag.as_deref().filter(|s| !s.is_empty())
+    }
+
     pub fn segment_type(&self) -> Option<SegmentType> {
         self.segment_type.as_ref().and_then(|s| {
             SegmentType::from_str(s)
@@ -37,8 +44,10 @@ impl RecordingFilesQuery {
     }
 
     pub fn validate(&self) -> Result<(), AppError> {
-        if self.start_time >= self.end_time {
-            return Err(AppError::BadRequest("start_time must be before end_time".to_string()));
+        if let (Some(start), Some(end)) = (self.start_time, self.end_time) {
+            if start >= end {
+                return Err(AppError::BadRequest("start_time must be before end_time".to_string()));
+            }
         }
         if let Some(p) = self.page {
             if p < 1 {
@@ -46,14 +55,12 @@ impl RecordingFilesQuery {
             }
         }
         if let Some(l) = self.limit {
-            if l < 1 || l > 100 {
-                return Err(AppError::BadRequest("limit must be 1-100".to_string()));
+            if l < 1 || l > 500 {
+                return Err(AppError::BadRequest("limit must be 1-500".to_string()));
             }
         }
-        if let Some(ref st) = self.segment_type {
-            if SegmentType::from_str(st).is_none() {
-                return Err(AppError::BadRequest("invalid segment_type".to_string()));
-            }
+        if self.segment_type.is_some() && self.segment_type().is_none() {
+            return Err(AppError::BadRequest("invalid segment_type".to_string()));
         }
         Ok(())
     }
@@ -65,15 +72,10 @@ pub async fn list_recording_files_handler(
 ) -> Result<Json<ApiResponse<PaginatedRecordingFiles>>, AppError> {
     let registry = &state.app.registry;
 
-    if q.device_tag.is_empty() {
-        return Err(AppError::BadRequest("device_tag is required".to_string()));
-    }
-
     q.validate()?;
 
-    let device_tag = q.device_tag.clone();
     let query = RecordingSegmentQuery {
-        device_tag,
+        device_tag: q.device_tag().map(|s| s.to_string()),
         channel_tag: q.channel_tag().map(|s| s.to_string()),
         start_time: q.start_time,
         end_time: q.end_time,

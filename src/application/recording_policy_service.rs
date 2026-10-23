@@ -170,6 +170,33 @@ impl RecordingPolicyService {
         Ok(policies)
     }
 
+    /// 分页查询录制策略，过滤条件在 SQL 中执行。
+    pub async fn list_policies_paginated(
+        &self,
+        device_tag: Option<&str>,
+        policy_type: Option<&str>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<RecordingPolicy>> {
+        let mut policies = self
+            .repo
+            .list_recording_policies_paginated(device_tag, policy_type, limit, offset)
+            .await?;
+        for policy in &mut policies {
+            policy.time_windows = self.repo.list_recording_time_windows(policy.id).await?;
+        }
+        Ok(policies)
+    }
+
+    /// 录制策略总数（与分页查询使用相同的过滤条件）。
+    pub async fn count_policies(
+        &self,
+        device_tag: Option<&str>,
+        policy_type: Option<&str>,
+    ) -> Result<i64> {
+        self.repo.count_recording_policies(device_tag, policy_type).await
+    }
+
     pub async fn find_policies_by_device(&self, device_tag: &str) -> Result<Vec<RecordingPolicy>> {
         let mut policies = self.repo.list_recording_policies_by_device_tag(device_tag).await?;
         for policy in &mut policies {
@@ -188,20 +215,23 @@ impl RecordingPolicyService {
 
     pub async fn list_recording_segments(&self, query: RecordingSegmentQuery) -> Result<PaginatedRecordingFiles> {
         let segment_type_str = query.segment_type.map(|st| st.to_string());
-        let total = self.repo.count_recording_segments(
-            &query.device_tag,
-            query.channel_tag.clone(),
+        let device_tag = query.device_tag.clone();
+        let channel_tag = query.channel_tag.clone();
+
+        let total = self.repo.count_recording_segments_filtered(
+            device_tag.as_deref(),
+            channel_tag.as_deref(),
+            segment_type_str.as_deref(),
             query.start_time,
             query.end_time,
-            segment_type_str.as_deref(),
         ).await?;
 
-        let segments = self.repo.list_recording_segments_paginated(
-            &query.device_tag,
-            query.channel_tag.clone(),
+        let segments = self.repo.list_recording_segments_filtered_paginated(
+            device_tag.as_deref(),
+            channel_tag.as_deref(),
+            segment_type_str.as_deref(),
             query.start_time,
             query.end_time,
-            query.segment_type.as_ref().map(|s| s.to_string()).as_deref(),
             query.page_limit(),
             query.page_offset(),
         ).await?;
