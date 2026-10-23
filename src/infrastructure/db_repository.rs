@@ -100,6 +100,22 @@ impl DbRepository {
         Ok(())
     }
 
+    /// 幂等的表结构迁移：新版本需要的列/索引不存在时自动补上。
+    /// 部署时不需要手工执行迁移脚本（sql/migrate_*.py 仅作为备份）。
+    async fn ensure_schema(&self) {
+        let statements = [
+            "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ",
+            "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS max_duration_secs INTEGER",
+            "CREATE INDEX IF NOT EXISTS idx_recordings_next_retry ON recordings(state, next_retry_at)",
+        ];
+        for sql in statements {
+            if let Err(e) = self.rb.exec(sql, vec![]).await {
+                tracing::warn!("[DbRepository] ensure_schema warning: {} ({})", e, sql);
+            }
+        }
+    }
+
     pub async fn new(url: &str, debug_sql: bool) -> anyhow::Result<Self> {
         Self::new_with_pool(url, debug_sql, DEFAULT_MAX_CONNECTIONS).await
     }
@@ -123,6 +139,7 @@ impl DbRepository {
             groups_cache: Arc::new(DashMap::new()),
             regions_cache: Arc::new(DashMap::new()),
         };
+        repo.ensure_schema().await;
         repo.load_caches().await?;
         Ok(repo)
     }
@@ -150,6 +167,7 @@ impl DbRepository {
             groups_cache: Arc::new(DashMap::new()),
             regions_cache: Arc::new(DashMap::new()),
         };
+        repo.ensure_schema().await;
         Ok(repo)
     }
 

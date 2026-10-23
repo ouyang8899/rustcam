@@ -308,6 +308,15 @@ impl RecordingService {
         self.repo.find_active_recording_by_stream_key(stream_key).await
     }
 
+    /// 该流上“等待设备/流就绪”的录像任务
+    pub async fn get_pending_recording_by_stream(
+        &self,
+        device_tag: &str,
+        channel_tag: &str,
+    ) -> Result<Option<Recording>> {
+        self.repo.find_pending_recording_by_stream(device_tag, channel_tag).await
+    }
+
     pub async fn list_device_recordings(&self, device_tag: &str) -> Result<Vec<Recording>> {
         self.repo.list_recordings_by_device(device_tag).await
     }

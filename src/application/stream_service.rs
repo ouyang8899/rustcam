@@ -127,6 +127,7 @@ impl StreamService {
             }
             self.infra.db.update_stream(&updated_stream).await?;
             if updated_stream.state == crate::domain::StreamState::Active {
+                self.publish_stream_started(device_tag, &stream_key).await;
                 self.start_recording_for_channel(device_tag, channel_tag, &server_tag, &app, &stream_key).await;
             }
         } else {
@@ -693,7 +694,27 @@ impl StreamService {
         Ok(stream_info)
     }
 
-    async fn start_recording_for_channel(&self, device_tag: &str, _channel_tag: &str, media_server: &str, _app: &str, stream_key: &str) {
+    /// 流已经可以在媒体服务器上使用了：通知订阅方
+    /// （录像调度器据此启动“等待中”的录像任务）。
+    async fn publish_stream_started(&self, device_tag: &str, stream_key: &str) {
+        let device_id = self
+            .infra
+            .db
+            .devices_cache()
+            .get(device_tag)
+            .map(|d| d.value().id)
+            .unwrap_or(0);
+        let _ = self
+            .infra
+            .event_bus
+            .publish(crate::protocol::event::SignalEvent::StreamStart {
+                device_id,
+                stream_key: stream_key.to_string(),
+            })
+            .await;
+    }
+
+    async fn start_recording_for_channel(&self, device_tag: &str, channel_tag: &str, media_server: &str, _app: &str, stream_key: &str) {
         let device = match self.infra.db.devices_cache()
             .get(device_tag)
             .map(|r| r.value().clone()) {
@@ -714,6 +735,16 @@ impl StreamService {
             Err(e) => {
                 tracing::warn!("[StreamService] Failed to check active recording: {}", e);
             }
+        }
+
+        // 已经有“等待设备/流就绪”的录像任务时不要重复创建：
+        // 那条任务由录像调度器负责在流就绪后启动。
+        if let Ok(Some(_)) = self
+            .recording_service
+            .get_pending_recording_by_stream(device_tag, channel_tag)
+            .await
+        {
+            return;
         }
 
         match self.recording_service

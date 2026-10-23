@@ -77,7 +77,7 @@
             </div>
           </div>
 
-          <div v-if="files.length > 1" class="files-list">
+          <div v-if="files.length > 0" class="files-list">
             <div class="files-list-header">
               <span>录像片段 ({{ files.length }}个)</span>
             </div>
