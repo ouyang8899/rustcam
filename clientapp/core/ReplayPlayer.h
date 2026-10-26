@@ -1,9 +1,9 @@
 #pragma once
 
 #include <QWidget>
-#include <QMutex>
 #include <QLabel>
 #include <QString>
+#include <atomic>
 #include <functional>
 #include "CoreExport.h"
 #include "manager/player_manager.h"
@@ -32,7 +32,7 @@ public:
     explicit ReplayPlayer(QWidget* parent = nullptr);
     ~ReplayPlayer();
 
-    void loadFile(const QString& url);
+    void loadFile(const QString& url, int64_t startPositionMs = 0);
     void play();
     void pause();
     void stop();
@@ -46,7 +46,7 @@ public:
     int64_t durationMs() const { return m_durationMs; }
     bool isPlaying() const { return m_state == State::Playing; }
     QString currentUrl() const { return m_url; }
-    uint64_t playerId() const { return m_playerId; }
+    uint64_t playerId() const { return m_playerId.load(); }
 
     using ProgressCallback = std::function<void(int64_t currentMs, int64_t durationMs)>;
     using StateChangeCallback = std::function<void(State oldState, State newState)>;
@@ -74,26 +74,37 @@ protected:
 
 private:
     void setState(State state);
+    void reportError(const QString& message);
+    void pollPosition();
+    void updateMediaInfo();
+    void applyPendingStartPosition();
+    void handlePlaybackFinished();
     void onPlayerStatus(int code);
     void onMediaPlayerEvent(BridgePlayer::MediaPlayerEvent event, const BridgePlayer::MediaPlayerStatus& status);
     void updatePlaceholder();
 
-    uint64_t m_playerId = 0;
+    std::atomic<uint64_t> m_playerId{0};
     uint64_t m_targetId = 0;
     State m_state = State::Idle;
     QString m_url;
 
     BridgePlayer::MediaPlayer::Ptr m_player;
-    mutable QMutex m_mutex;
 
     int64_t m_currentTimeMs = 0;
     int64_t m_durationMs = -1;
+    int64_t m_pendingStartMs = 0;
+    int64_t m_lastPositionMs = -1;
+    int m_stallTicks = 0;
+    bool m_completionSignalled = false;
+    /// 播放倍速（新建 bridge 播放器后需要重新应用）
+    double m_speed = 1.0;
 
     ProgressCallback m_progressCallback;
     StateChangeCallback m_stateChangeCallback;
     ErrorCallback m_errorCallback;
     CompletedCallback m_completedCallback;
     QLabel* m_placeholderLabel;
+    class QTimer* m_positionTimer = nullptr;
 };
 
 }

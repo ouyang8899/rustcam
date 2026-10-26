@@ -236,7 +236,26 @@ impl RecordingPolicyService {
             query.page_offset(),
         ).await?;
 
+        // 每个文件属于哪个录像任务：外部应用按任务类型分别处理
+        let task_ids: Vec<i64> = segments.iter().filter_map(|s| s.recording_id).collect();
+        let task_infos = self.repo.recording_task_infos(&task_ids).await?;
+
         let files: Vec<RecordingFileResponse> = segments.into_iter().map(|seg| {
+            // play_url 多数情况下没有落库，这里按媒体服务器上的实际路径补齐，
+            // 客户端就不需要为每个分段再请求一次 play-url。
+            let play_url = match seg.play_url.clone() {
+                Some(url) if !url.is_empty() => Some(url),
+                _ => {
+                    let server_tag = seg.server_tag.clone().unwrap_or_else(|| "default".to_string());
+                    Some(self.build_play_url(
+                        &server_tag,
+                        &seg.device_tag,
+                        &seg.channel_tag,
+                        &seg.start_time,
+                    ))
+                }
+            };
+
             RecordingFileResponse {
                 id: format!("seg_{}", seg.id),
                 device_tag: seg.device_tag.clone(),
@@ -246,10 +265,11 @@ impl RecordingPolicyService {
                 duration_secs: seg.duration_secs,
                 file_path: seg.file_path.clone(),
                 server_tag: seg.server_tag.clone(),
-                play_url: seg.play_url.clone(),
+                play_url,
                 file_size: seg.file_size,
                 segment_type: seg.segment_type,
                 alarm_id: seg.alarm_id,
+                task: seg.recording_id.and_then(|id| task_infos.get(&id).cloned()),
             }
         }).collect();
 

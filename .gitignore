@@ -77,3 +77,4 @@ rustcam-plan.md
 /today_*.txt
 /examples/
 /webTest/
+/clientapp/build-test/

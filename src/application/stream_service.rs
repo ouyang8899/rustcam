@@ -63,7 +63,7 @@ impl StreamService {
         let app = device.app.clone().unwrap_or_else(|| "live".to_string());
 
         let cache_key = format!("{}/{}", device_tag, channel_tag);
-        let stream_key = crate::domain::make_stream_key(device_tag, channel_tag);
+        let stream_key = crate::common::device_utils::format_stream_key(device_tag, channel_tag);
 
         let existing_in_cache = {
             let cache = self.infra.db.streams_cache();
@@ -189,7 +189,7 @@ impl StreamService {
 
     async fn sync_stream_to_active(&self, device_tag: &str, channel_tag: &str, server_tag: &str, _stream_key: &str, app: &str) -> Result<()> {
         let cache_key = format!("{}/{}", device_tag, channel_tag);
-        let stream_key = crate::domain::make_stream_key(device_tag, channel_tag);
+        let stream_key = crate::common::device_utils::format_stream_key(device_tag, channel_tag);
         let cache = self.infra.db.streams_cache();
 
         let stream_to_update = {
@@ -260,7 +260,7 @@ impl StreamService {
         };
 
         let token = Uuid::new_v4().to_string();
-        let media_server_stream_key = crate::domain::make_stream_key(device_tag, channel_tag);
+        let media_server_stream_key = crate::common::device_utils::format_stream_key(device_tag, channel_tag);
         let stream = Stream::new(server_tag.clone(), device_tag.to_string(), channel_tag.to_string(), app.clone(), token.clone());
         self.infra.db.create_stream(&stream).await?;
 
@@ -338,7 +338,7 @@ impl StreamService {
 
         let tag = stream.media_server_tag.clone();
         let app = stream.app.clone();
-        let stream_key = crate::domain::stream::make_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
+        let stream_key = crate::common::device_utils::format_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
 
         let adapter = self.media.cluster.get_server(&tag)
             .ok_or_else(|| AppError::MediaServerError(
@@ -436,7 +436,7 @@ impl StreamService {
             .collect();
 
         for stream in streams {
-            let stream_key = crate::domain::stream::make_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
+            let stream_key = crate::common::device_utils::format_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
             if let Err(e) = self.stop_stream(&stream.app, &stream_key).await {
                 tracing::warn!("[StreamService] stop_streams_by_device: failed to stop {}: {}", stream_key, e);
             }
@@ -454,7 +454,7 @@ impl StreamService {
             .collect();
 
         for stream in streams {
-            let stream_key = crate::domain::stream::make_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
+            let stream_key = crate::common::device_utils::format_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
             if let Err(e) = self.stop_stream(&stream.app, &stream_key).await {
                 tracing::warn!("[StreamService] stop_streams_by_channel: failed to stop {}: {}", stream_key, e);
             }
@@ -729,9 +729,13 @@ impl StreamService {
             return;
         }
 
-        match self.recording_service.get_active_recording_by_stream_key(stream_key).await {
-            Ok(Some(_)) => return,
-            Ok(None) => {}
+        // 已经有定时录像任务时不再重复创建：报警录像任务可以并存
+        match self.recording_service.get_active_recordings_by_stream_key(stream_key).await {
+            Ok(list) => {
+                if list.iter().any(|r| r.recording_type == crate::domain::recording::RecordingType::Timed) {
+                    return;
+                }
+            }
             Err(e) => {
                 tracing::warn!("[StreamService] Failed to check active recording: {}", e);
             }
@@ -741,7 +745,7 @@ impl StreamService {
         // 那条任务由录像调度器负责在流就绪后启动。
         if let Ok(Some(_)) = self
             .recording_service
-            .get_pending_recording_by_stream(device_tag, channel_tag)
+            .get_pending_recording_by_stream(device_tag, channel_tag, crate::domain::recording::RecordingType::Timed)
             .await
         {
             return;

@@ -22,6 +22,10 @@ public:
     void clearCells();
 
     void syncTo(int64_t baseTimeMs);
+    void setBaseTime(int64_t baseTimeMs) { m_baseTimeMs = baseTimeMs; }
+    int64_t baseTimeMs() const { return m_baseTimeMs; }
+    /// 组内所有窗口定位到指定时间（不论播放/暂停态），越界时停播
+    void seekTo(int64_t baseTimeMs);
     void play();
     void pause();
     void stop();
@@ -33,6 +37,7 @@ signals:
 private:
     int m_groupId;
     QList<StreamSource*> m_cells;
+    int64_t m_baseTimeMs = 0;
 };
 
 class RUSTCAM_CORE_API PlaybackController : public QObject {
@@ -54,6 +59,9 @@ public:
     SyncState syncState() const { return m_syncState; }
 
     void setBaseTime(int64_t timeMs);
+    /// 只同步指定通道的播放组（各通道播放位置互相独立）
+    void setGroupBaseTime(PlaybackGroup* group, int64_t timeMs);
+    int64_t groupBaseTime(PlaybackGroup* group) const;
     void addGroup(PlaybackGroup* group);
     void removeGroup(PlaybackGroup* group);
     void removeGroup(int groupId);

@@ -81,9 +81,14 @@ impl SessionService {
                 let mut session = Session::new(*session_type, 0i64);
                 session.device_tag = device_tag.clone();
                 session.channel_tag = channel_id.clone();
-                infra.db.sessions_cache().insert(session.id, session.clone());
-                if let Err(e) = infra.db.create_session(&session).await {
-                    tracing::error!("[SessionService] Failed to persist session: {}", e);
+                match infra.db.create_session(&session).await {
+                    Ok(id) => {
+                        session.id = id;
+                        infra.db.sessions_cache().insert(session.id, session);
+                    }
+                    Err(e) => {
+                        tracing::error!("[SessionService] Failed to persist session: {}", e);
+                    }
                 }
             }
 
@@ -112,10 +117,15 @@ impl SessionService {
     }
 
     pub async fn create_session(&self, session_type: SessionType, user_id: i64) -> Result<Session> {
-        let session = Session::new(session_type, user_id);
-        self.infra.db.sessions_cache().insert(session.id, session.clone());
-        if let Err(e) = self.infra.db.create_session(&session).await {
-            tracing::error!("[SessionService] Failed to persist session: {}", e);
+        let mut session = Session::new(session_type, user_id);
+        match self.infra.db.create_session(&session).await {
+            Ok(id) => {
+                session.id = id;
+                self.infra.db.sessions_cache().insert(session.id, session.clone());
+            }
+            Err(e) => {
+                tracing::error!("[SessionService] Failed to persist session: {}", e);
+            }
         }
         Ok(session)
     }
@@ -133,7 +143,7 @@ impl SessionService {
             .ok_or_else(|| AppError::NotFound(format!("Device with tag {} not found", device_tag)))?;
         let app = device.app.unwrap_or_else(|| "live".to_string());
 
-        let stream_key = crate::domain::stream::make_stream_key(
+        let stream_key = crate::common::device_utils::format_stream_key(
             session.device_tag.as_deref().unwrap_or(""),
             session.channel_tag.as_deref().unwrap_or("")
         );

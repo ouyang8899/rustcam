@@ -46,6 +46,15 @@ WHERE device_tag = #{device_tag}
 ORDER BY start_time ASC
 </select>
 
+<select id="segment_select_by_recording_id">
+SELECT id, recording_id, device_tag, channel_tag, start_time, end_time,
+       duration_secs, file_size, file_path, server_tag,
+       segment_type, alarm_id, play_url
+FROM recording_segments
+WHERE recording_id = #{recording_id}
+ORDER BY start_time ASC
+</select>
+
 <select id="segment_select_paginated">
 SELECT id, recording_id, device_tag, channel_tag, start_time, end_time,
        duration_secs, file_size, file_path, server_tag,

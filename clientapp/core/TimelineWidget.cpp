@@ -35,6 +35,16 @@ void TimelineWidget::setPeriods(const QList<RecordingPeriod>& periods) {
     update();
 }
 
+void TimelineWidget::setEvents(const QList<TimelineEvent>& events) {
+    m_events = events;
+    update();
+}
+
+void TimelineWidget::setBookmarks(const QList<TimelineEvent>& bookmarks) {
+    m_bookmarks = bookmarks;
+    update();
+}
+
 void TimelineWidget::addPlayhead(const QString& windowId, const QColor& color) {
     m_playheads[windowId] = {m_mainPlayheadMs, color};
     update();
@@ -134,13 +144,39 @@ void TimelineWidget::paintEvent(QPaintEvent* event) {
 
         const RecordingPeriod& period = m_periods[i];
 
-        if (!mergedRects.isEmpty() && mergedRects.last().type == period.segmentType) {
+        // 只有真正相邻/重叠的同类型段落才合并，
+        // united() 会把两段之间的空档也填上，导致看不到无录像的时间
+        if (!mergedRects.isEmpty() && mergedRects.last().type == period.segmentType
+            && mergedRects.last().rect.right() + 1 >= r.left()) {
             MergedRect& last = mergedRects.last();
-            QRect combined = last.rect.united(r);
-            last.rect = combined;
+            last.rect = last.rect.united(r);
         } else {
             mergedRects.append({period.segmentType, r});
         }
+    }
+
+    // 书签标记：黄色小旗，画在时间轴顶部
+    for (const TimelineEvent& e : m_bookmarks) {
+        const int x = timeToX(e.timeMs);
+        if (x < visibleLeft - 6 || x > visibleRight + 6) {
+            continue;
+        }
+        p.setPen(QPen(e.color, 1));
+        p.setBrush(e.color);
+        p.drawLine(x, 2, x, 12);
+        p.drawRect(QRect(x, 2, 4, 4));
+    }
+
+    // 事件标记（报警等）：画在时间轴底部
+    for (const TimelineEvent& e : m_events) {
+        const int x = timeToX(e.timeMs);
+        if (x < visibleLeft - 4 || x > visibleRight + 4) {
+            continue;
+        }
+        p.setPen(QPen(e.color, 1));
+        p.drawLine(x, height() - 10, x, height() - 2);
+        p.setBrush(e.color);
+        p.drawRect(QRect(x - 2, height() - 12, 5, 5));
     }
 
     QPainterPath pathNormal;
@@ -215,17 +251,29 @@ void TimelineWidget::mousePressEvent(QMouseEvent* event) {
         m_isDragging = true;
         m_dragStartX = event->x();
         m_dragStartOffset = m_scrollOffset;
+        return;
+    }
+
+    if (event->button() == Qt::LeftButton) {
+        // 左键按在播放头上：直接进入拖拽，不用先双击
+        for (auto it = m_playheads.begin(); it != m_playheads.end(); ++it) {
+            if (qAbs(event->x() - timeToX(it.value().timeMs)) <= 8) {
+                m_draggingPlayheadId = it.key();
+                m_isDraggingPlayhead = true;
+                return;
+            }
+        }
+        // 否则记录为一次「单击定位」，松开时若没有拖动就跳转
+        m_pressPos = event->pos();
+        m_pendingSeek = true;
     }
 }
 
 void TimelineWidget::mouseDoubleClickEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
         for (auto it = m_playheads.begin(); it != m_playheads.end(); ++it) {
-            int playheadX = timeToX(it.value().timeMs);
-            if (qAbs(event->x() - playheadX) < 15) {
-                m_draggingPlayheadId = it.key();
-                m_isDraggingPlayhead = true;
-                return;
+            if (qAbs(event->x() - timeToX(it.value().timeMs)) < 15) {
+                return;   // 播放头拖拽由 press/move 处理
             }
         }
 
@@ -234,6 +282,7 @@ void TimelineWidget::mouseDoubleClickEvent(QMouseEvent* event) {
         if (clickedTime < m_startTimeMs) clickedTime = m_startTimeMs;
         if (clickedTime > m_endTimeMs) clickedTime = m_endTimeMs;
 
+        setCurrentTime(clickedTime);
         emit timeSelected(clickedTime);
 
         if (!m_selectedWindowId.isEmpty() && m_playheads.contains(m_selectedWindowId)) {
@@ -271,6 +320,11 @@ void TimelineWidget::mouseMoveEvent(QMouseEvent* event) {
         return;
     }
 
+    // 按下后移动超过阈值就当作拖拽，不再触发单击定位
+    if (m_pendingSeek && (event->pos() - m_pressPos).manhattanLength() > 3) {
+        m_pendingSeek = false;
+    }
+
     for (const RecordingPeriod& period : m_periods) {
         int xFrom = timeToX(period.startTimeMs);
         int xTo = timeToX(period.endTimeMs);
@@ -304,8 +358,20 @@ void TimelineWidget::mouseReleaseEvent(QMouseEvent* event) {
     }
 
     if (event->button() == Qt::LeftButton) {
-        m_isDraggingPlayhead = false;
-        m_draggingPlayheadId.clear();
+        if (m_isDraggingPlayhead) {
+            const QString releasedId = m_draggingPlayheadId;
+            m_isDraggingPlayhead = false;
+            m_draggingPlayheadId.clear();
+            if (!releasedId.isEmpty() && m_playheads.contains(releasedId)) {
+                emit playheadReleased(releasedId, m_playheads[releasedId].timeMs);
+            }
+        } else if (m_pendingSeek) {
+            // 单击定位：移动主播放头并通知外部 seek
+            const int64_t time = xToTime(event->x());
+            setCurrentTime(time);
+            emit timeSelected(time);
+        }
+        m_pendingSeek = false;
     }
 }
 

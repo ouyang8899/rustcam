@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="alarm">
+
+<insert id="alarm_insert">
+INSERT INTO alarms (
+    device_id, device_tag, channel_tag, alarm_type, alarm_time,
+    alarm_method, alarm_priority, description
+) VALUES (
+    #{device_id}, #{device_tag}, #{channel_tag}, #{alarm_type}, #{alarm_time},
+    #{alarm_method}, #{alarm_priority}, #{description}
+)
+RETURNING id, device_id, device_tag, channel_tag, alarm_type, alarm_time,
+          alarm_method, alarm_priority, description, processed, created_at
+</insert>
+
+<select id="alarm_select_by_device">
+SELECT id, device_id, device_tag, channel_tag, alarm_type, alarm_time,
+       alarm_method, alarm_priority, description, processed, created_at
+FROM alarms
+WHERE device_id = #{device_id}
+ORDER BY alarm_time DESC
+LIMIT #{limit} OFFSET #{offset}
+</select>
+
+<select id="alarm_select_all">
+SELECT id, device_id, device_tag, channel_tag, alarm_type, alarm_time,
+       alarm_method, alarm_priority, description, processed, created_at
+FROM alarms
+ORDER BY alarm_time DESC
+LIMIT #{limit} OFFSET #{offset}
+</select>
+
+<!--
+  报警查询：支持按设备标识、报警类型与时间范围过滤，
+  与录像分段的查询口径保持一致（过滤条件全部在 SQL 中完成）。
+-->
+<select id="alarm_select_filtered">
+SELECT id, device_id, device_tag, channel_tag, alarm_type, alarm_time, alarm_method,
+       alarm_priority, description, processed, created_at
+FROM alarms
+<where>
+<if test="device_tag != null">
+AND device_tag = #{device_tag}
+</if>
+<if test="channel_tag != null">
+AND channel_tag = #{channel_tag}
+</if>
+<if test="alarm_type != null">
+AND alarm_type = #{alarm_type}
+</if>
+<if test="start_time != null">
+AND alarm_time &gt;= #{start_time}
+</if>
+<if test="end_time != null">
+AND alarm_time &lt;= #{end_time}
+</if>
+</where>
+ORDER BY alarm_time DESC
+LIMIT #{limit} OFFSET #{offset}
+</select>
+
+<select id="alarm_count_filtered">
+SELECT COUNT(*) as count
+FROM alarms
+<where>
+<if test="device_tag != null">
+AND device_tag = #{device_tag}
+</if>
+<if test="channel_tag != null">
+AND channel_tag = #{channel_tag}
+</if>
+<if test="alarm_type != null">
+AND alarm_type = #{alarm_type}
+</if>
+<if test="start_time != null">
+AND alarm_time &gt;= #{start_time}
+</if>
+<if test="end_time != null">
+AND alarm_time &lt;= #{end_time}
+</if>
+</where>
+</select>
+
+</mapper>

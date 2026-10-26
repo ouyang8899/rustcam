@@ -3,7 +3,6 @@
 #include <QObject>
 #include <QString>
 #include <QList>
-#include <QMutex>
 #include <functional>
 #include "CoreExport.h"
 #include "ReplayPlayer.h"
@@ -75,10 +74,9 @@ private:
     void setState(State newState);
     int findClipAt(int64_t absoluteTimeMs) const;
     int findNearestClip(int64_t absoluteTimeMs) const;
-    void switchToClip(int clipIndex);
+    void switchToClip(int clipIndex, int64_t startOffsetMs = 0);
     void onPlayerStateChanged(ReplayPlayer::State oldState, ReplayPlayer::State newState);
     void onPlayerProgress(int64_t currentMs, int64_t durationMs);
-    void onPlayerCompleted();
 
     QString m_deviceId;
     QList<Clip> m_clips;
@@ -86,7 +84,6 @@ private:
     int64_t m_baseTimeMs = 0;
     State m_state = State::Stopped;
     ReplayPlayer* m_player = nullptr;
-    QMutex m_mutex;
 
     StateChangeCallback m_stateChangeCallback;
     NoRecordingCallback m_noRecordingCallback;

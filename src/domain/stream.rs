@@ -50,21 +50,7 @@ impl StreamState {
     }
 }
 
-pub fn make_stream_key(device_tag: &str, channel_tag: &str) -> String {
-    format!("{}_{}", device_tag, channel_tag)
-}
 
-pub fn parse_stream_key(stream_key: &str) -> Option<(String, String)> {
-    let parts: Vec<&str> = stream_key.split('_').collect();
-    if parts.len() >= 2 {
-        let channel_tag = parts.last().unwrap();
-        let device_tag = &stream_key[..stream_key.len() - channel_tag.len() - 1];
-        if !device_tag.is_empty() && !channel_tag.is_empty() {
-            return Some((device_tag.to_string(), channel_tag.to_string()));
-        }
-    }
-    None
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Stream {

@@ -3,12 +3,12 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use crate::context::{InfraContext, MediaContext};
 use crate::domain::{Stream, StreamState, Device, DeviceStatus, Protocol};
-use crate::domain::stream::make_stream_key;
+use crate::common::device_utils::format_stream_key;
 use crate::protocol::event::SignalEvent;
 use crate::application::StreamService;
 
 fn compute_stream_key(stream: &Stream) -> String {
-    make_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""))
+    format_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""))
 }
 
 fn embed_rtsp_auth(rtsp_url: &str, username: &str, password: &str) -> String {

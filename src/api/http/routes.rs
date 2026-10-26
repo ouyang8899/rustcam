@@ -321,7 +321,7 @@ async fn alarm_hook_handler(
     Json(payload): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
 
-    let (device_tag, _channel_tag) = crate::domain::parse_stream_key(&stream_key)
+    let (device_tag, _channel_tag) = crate::common::device_utils::parse_stream_key(&stream_key)
         .unwrap_or_else(|| (stream_key.clone(), stream_key.clone()));
 
     let device_id = state.app.registry.infra.db.devices_cache()
@@ -342,6 +342,9 @@ async fn alarm_hook_handler(
     let create_req = crate::domain::alarm::CreateAlarmRequest {
         device_id,
         device_tag: device_tag.clone(),
+        channel_tag: payload.get("channel_tag")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
         alarm_type: alarm_type.clone(),
         alarm_time: chrono::Utc::now(),
         alarm_method: Some(2),

@@ -2062,9 +2062,12 @@ impl Gb28181Adapter {
                 Self::parse_xml_field(body, "AlarmType").unwrap_or_else(|| "unknown".to_string());
             let alarm_msg = Self::parse_xml_field(body, "AlarmDescription").unwrap_or_default();
             let device_id_val = self.device_id_i64();
+            let channel_tag = Self::parse_channel_id(body);
             return (
                 Some(SignalEvent::Alarm {
                     device_id: device_id_val.to_string(),
+                    device_tag: self.device_tag.clone(),
+                    channel_tag,
                     alarm_type,
                     message: alarm_msg,
                     timestamp: chrono::Utc::now(),

@@ -19,14 +19,18 @@ StreamSource::~StreamSource() {
 }
 
 void StreamSource::setClips(const QList<Clip>& clips) {
-    QMutexLocker locker(&m_mutex);
+    if (m_player && (m_state == State::Playing || m_state == State::Paused)) {
+        m_player->stop();
+    }
     m_clips = clips;
     m_currentClipIndex = -1;
+    if (m_state != State::Stopped) {
+        setState(State::Stopped);
+    }
     LOG_INFO("StreamSource", QString("setClips: deviceId=%1, clipCount=%2").arg(m_deviceId).arg(clips.size()));
 }
 
 void StreamSource::setPlayer(ReplayPlayer* player) {
-    QMutexLocker locker(&m_mutex);
     if (m_player) {
         disconnect(m_player, nullptr, this, nullptr);
     }
@@ -39,14 +43,10 @@ void StreamSource::setPlayer(ReplayPlayer* player) {
         connect(m_player, &ReplayPlayer::progressChanged, this, [this](int64_t currentMs, int64_t durationMs) {
             onPlayerProgress(currentMs, durationMs);
         });
-        connect(m_player, &ReplayPlayer::completed, this, [this]() {
-            onPlayerCompleted();
-        });
     }
 }
 
 void StreamSource::play() {
-    QMutexLocker locker(&m_mutex);
     if (m_clips.isEmpty()) {
         setState(State::NoRecording);
         return;
@@ -54,21 +54,17 @@ void StreamSource::play() {
 
     if (m_currentClipIndex < 0) {
         m_currentClipIndex = 0;
-        const Clip& clip = m_clips[m_currentClipIndex];
         emit clipChanged(-1, m_currentClipIndex);
         if (m_player) {
-            m_player->loadFile(clip.url);
+            m_player->loadFile(m_clips[0].url, 0);
         }
-    }
-
-    if (m_player) {
+    } else if (m_player) {
         m_player->play();
     }
     setState(State::Playing);
 }
 
 void StreamSource::pause() {
-    QMutexLocker locker(&m_mutex);
     if (m_player) {
         m_player->pause();
     }
@@ -76,7 +72,6 @@ void StreamSource::pause() {
 }
 
 void StreamSource::stop() {
-    QMutexLocker locker(&m_mutex);
     if (m_player) {
         m_player->stop();
     }
@@ -86,8 +81,6 @@ void StreamSource::stop() {
 }
 
 void StreamSource::seekTo(int64_t absoluteTimeMs) {
-    QMutexLocker locker(&m_mutex);
-
     int clipIdx = findClipAt(absoluteTimeMs);
     if (clipIdx < 0) {
         int nearestIdx = findNearestClip(absoluteTimeMs);
@@ -110,12 +103,10 @@ void StreamSource::seekTo(int64_t absoluteTimeMs) {
     }
 
     if (clipIdx != m_currentClipIndex) {
-        switchToClip(clipIdx);
-    }
-
-    if (m_player && m_currentClipIndex >= 0 && m_currentClipIndex < m_clips.size()) {
-        const Clip& clip = m_clips[m_currentClipIndex];
-        int64_t clipOffsetMs = absoluteTimeMs - clip.startTimeMs;
+        const int64_t clipOffsetMs = absoluteTimeMs - m_clips[clipIdx].startTimeMs;
+        switchToClip(clipIdx, clipOffsetMs);
+    } else if (m_player) {
+        const int64_t clipOffsetMs = absoluteTimeMs - m_clips[clipIdx].startTimeMs;
         m_player->seek(clipOffsetMs);
     }
 
@@ -123,7 +114,6 @@ void StreamSource::seekTo(int64_t absoluteTimeMs) {
 }
 
 void StreamSource::setSpeed(double speed) {
-    QMutexLocker locker(&m_mutex);
     if (m_player) {
         m_player->setSpeed(speed);
     }
@@ -163,41 +153,38 @@ int StreamSource::findNearestClip(int64_t absoluteTimeMs) const {
     return nearestIdx;
 }
 
-void StreamSource::switchToClip(int clipIndex) {
+void StreamSource::switchToClip(int clipIndex, int64_t startOffsetMs) {
     if (clipIndex < 0 || clipIndex >= m_clips.size()) return;
 
     int oldIndex = m_currentClipIndex;
     m_currentClipIndex = clipIndex;
 
     const Clip& clip = m_clips[clipIndex];
-    LOG_INFO("StreamSource", QString("switchToClip: deviceId=%1, clipIndex=%2, url=%3, start=%4, end=%5")
-        .arg(m_deviceId).arg(clipIndex).arg(clip.url).arg(clip.startTimeMs).arg(clip.endTimeMs));
+    LOG_INFO("StreamSource", QString("switchToClip: deviceId=%1, clipIndex=%2, url=%3, start=%4, end=%5, offset=%6")
+        .arg(m_deviceId).arg(clipIndex).arg(clip.url).arg(clip.startTimeMs).arg(clip.endTimeMs).arg(startOffsetMs));
 
     emit clipChanged(oldIndex, clipIndex);
 
     if (m_player) {
-        m_player->stop();
-        m_player->loadFile(clip.url);
+        m_player->loadFile(clip.url, startOffsetMs > 0 ? startOffsetMs : 0);
     }
 }
 
 void StreamSource::onPlayerStateChanged(ReplayPlayer::State oldState, ReplayPlayer::State newState) {
-    QMutexLocker locker(&m_mutex);
+    Q_UNUSED(oldState)
 
     switch (newState) {
         case ReplayPlayer::State::Playing:
             setState(State::Playing);
+            break;
+        case ReplayPlayer::State::Ready:
             break;
         case ReplayPlayer::State::Paused:
             setState(State::Paused);
             break;
         case ReplayPlayer::State::Completed:
             if (m_currentClipIndex >= 0 && m_currentClipIndex < m_clips.size() - 1) {
-                int oldIndex = m_currentClipIndex;
-                switchToClip(m_currentClipIndex + 1);
-                if (m_player) {
-                    m_player->play();
-                }
+                switchToClip(m_currentClipIndex + 1, 0);
             } else {
                 setState(State::Stopped);
                 if (m_clipFinishedCallback) {
@@ -215,28 +202,12 @@ void StreamSource::onPlayerStateChanged(ReplayPlayer::State oldState, ReplayPlay
 }
 
 void StreamSource::onPlayerProgress(int64_t currentMs, int64_t durationMs) {
-    QMutexLocker locker(&m_mutex);
+    Q_UNUSED(durationMs)
     if (m_currentClipIndex >= 0 && m_currentClipIndex < m_clips.size()) {
         const Clip& clip = m_clips[m_currentClipIndex];
         m_baseTimeMs = clip.startTimeMs + currentMs;
         m_lastProgressMs = currentMs;
         emit playbackProgressChanged(m_baseTimeMs);
-    }
-}
-
-void StreamSource::onPlayerCompleted() {
-    QMutexLocker locker(&m_mutex);
-    if (m_currentClipIndex >= 0 && m_currentClipIndex < m_clips.size() - 1) {
-        int oldIndex = m_currentClipIndex;
-        switchToClip(m_currentClipIndex + 1);
-        if (m_player) {
-            m_player->play();
-        }
-    } else {
-        setState(State::Stopped);
-        if (m_clipFinishedCallback) {
-            m_clipFinishedCallback();
-        }
     }
 }
 

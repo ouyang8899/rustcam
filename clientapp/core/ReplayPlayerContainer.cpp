@@ -5,9 +5,14 @@
 #include "ServerApi.h"
 #include "common/Logger.h"
 #include <QVBoxLayout>
+#include <QStackedWidget>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QJsonDocument>
 #include <QDateTime>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QtConcurrent>
 #include <QFutureWatcher>
 #include <QMessageBox>
@@ -18,7 +23,7 @@ ReplayPlayerContainer::ReplayPlayerContainer(QWidget* parent)
     : QWidget(parent)
     , m_videoArea(nullptr)
     , m_navBar(nullptr)
-    , m_timeline(nullptr)
+    , m_timelineStack(nullptr)
     , m_controller(nullptr)
     , m_totalRecords(0)
     , m_page(1)
@@ -37,8 +42,9 @@ ReplayPlayerContainer::ReplayPlayerContainer(QWidget* parent)
         }
     )");
 
-    m_timeline = new TimelineWidget(this);
-    m_timeline->setObjectName("timeline");
+    // 每个通道一条时间轴，按当前通道切换显示
+    m_timelineStack = new QStackedWidget(this);
+    m_timelineStack->setObjectName("timelineStack");
 
     m_navBar = new ReplayNavBar(this);
     m_navBar->setObjectName("navBar");
@@ -46,11 +52,10 @@ ReplayPlayerContainer::ReplayPlayerContainer(QWidget* parent)
     m_controller = new PlaybackController(this);
 
     layout->addWidget(m_videoArea, 1);
-    layout->addWidget(m_timeline, 0);
+    layout->addWidget(m_timelineStack, 0);
     layout->addWidget(m_navBar, 0);
 
     connect(m_navBar, &ReplayNavBar::layoutSelected, this, &ReplayPlayerContainer::onLayoutSelected);
-    connect(m_timeline, &TimelineWidget::timeSelected, this, &ReplayPlayerContainer::onTimeSelected);
 }
 
 ReplayPlayerContainer::~ReplayPlayerContainer() {
@@ -90,110 +95,6 @@ void ReplayPlayerContainer::onLayoutSelected(int index) {
     calculateLayout(m_currentLayout);
 }
 
-void ReplayPlayerContainer::loadRecordings(const QString& deviceId, int64_t startTimeMs, int64_t endTimeMs) {
-    LOG_INFO("ReplayPlayerContainer", QString("loadRecordings: deviceId=%1, startTimeMs=%2, endTimeMs=%3").arg(deviceId).arg(startTimeMs).arg(endTimeMs));
-
-    QDateTime startDt = QDateTime::fromMSecsSinceEpoch(startTimeMs);
-    QDateTime endDt = QDateTime::fromMSecsSinceEpoch(endTimeMs);
-
-    QString endpoint = QString("/api/v1/recordings/files?device_tag=%1&start_time=%2&end_time=%3&limit=50&page=1")
-        .arg(deviceId)
-        .arg(startDt.toString(Qt::ISODate))
-        .arg(endDt.toString(Qt::ISODate));
-
-    QFuture<QPair<bool, QJsonObject>> future = QtConcurrent::run([endpoint]() {
-        QJsonObject response;
-        QString error;
-        bool success = ServerApi::instance()->getSync(endpoint, response, error);
-        Q_UNUSED(error)
-        return QPair<bool, QJsonObject>(success, response);
-    });
-
-    qint64 loadStartTimeMs = QDateTime::currentMSecsSinceEpoch();
-    QFutureWatcher<QPair<bool, QJsonObject>>* watcher = new QFutureWatcher<QPair<bool, QJsonObject>>(this);
-    connect(watcher, &QFutureWatcher<QPair<bool, QJsonObject>>::finished, [this, watcher, deviceId, loadStartTimeMs]() {
-        QPair<bool, QJsonObject> result = watcher->result();
-        onRecordingsReceived(result.first, result.second, QString(), deviceId, loadStartTimeMs);
-        watcher->deleteLater();
-    });
-    watcher->setFuture(future);
-}
-
-void ReplayPlayerContainer::onRecordingsReceived(bool success, const QJsonObject& response, const QString& error, const QString& deviceId, qint64 loadStartTimeMs) {
-    if (!success) {
-        LOG_ERROR("ReplayPlayerContainer", QString("onRecordingsReceived failed: deviceId=%1, error=%2").arg(deviceId).arg(error));
-
-        QMessageBox::warning(this, tr("加载失败"),
-            tr("无法加载录像文件：%1").arg(error));
-        return;
-    }
-
-    QList<Clip> clips;
-    QJsonObject dataObj = response["data"].toObject();
-    QJsonArray clipsArray = dataObj["files"].toArray();
-
-    m_totalRecords = dataObj["total"].toInt(0);
-    m_page = dataObj["page"].toInt(1);
-    m_limit = dataObj["limit"].toInt(50);
-    m_hasMore = dataObj["has_more"].toBool(false);
-
-    for (const QJsonValue& v : clipsArray) {
-        QJsonObject obj = v.toObject();
-
-        QString startTimeStr = obj["start_time"].toString();
-        QString endTimeStr = obj["end_time"].toString();
-        QDateTime startDt = QDateTime::fromString(startTimeStr, Qt::ISODate);
-        QDateTime endDt = QDateTime::fromString(endTimeStr, Qt::ISODate);
-        int64_t startTimeMs = startDt.toMSecsSinceEpoch();
-        int64_t endTimeMs = endDt.toMSecsSinceEpoch();
-
-        Clip clip;
-        clip.url = obj["play_url"].toString();
-        clip.startTimeMs = startTimeMs;
-        clip.endTimeMs = endTimeMs;
-        clip.durationMs = obj["duration_secs"].toVariant().toLongLong() * 1000;
-
-        QString segmentTypeStr = obj["segment_type"].toString().toLower();
-        if (segmentTypeStr == "alarm") {
-            clip.segmentType = SegmentType::Alarm;
-        } else if (segmentTypeStr == "prebuffer" || segmentTypeStr == "pre-buffer") {
-            clip.segmentType = SegmentType::PreBuffer;
-        } else {
-            clip.segmentType = SegmentType::Normal;
-        }
-
-        clip.alarmId = obj["alarm_id"].toVariant().toLongLong();
-
-        clips.append(clip);
-    }
-
-    LOG_INFO("ReplayPlayerContainer", QString("onRecordingsReceived: deviceId=%1, fileCount=%2, hasMore=%3").arg(deviceId).arg(clips.size()).arg(m_hasMore));
-
-    qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - loadStartTimeMs;
-    LOG_INFO("ReplayPlayerContainer",
-        QString("loadRecordings completed in %1ms, fileCount=%2")
-            .arg(elapsed)
-            .arg(clips.size()));
-
-    if (elapsed > 1000) {
-        LOG_WARNING("ReplayPlayerContainer", "Load time > 1s, consider optimization");
-    }
-
-    if (clips.isEmpty()) {
-        LOG_INFO("ReplayPlayerContainer", QString("onRecordingsReceived: no clips found for device %1").arg(deviceId));
-        return;
-    }
-
-    QString targetCellId = selectTargetCell();
-    PlaybackCell* cell = m_cells.value(targetCellId);
-    if (cell) {
-        cell->bindDevice(deviceId);
-        cell->loadClips(clips);
-        cell->setController(m_controller);
-        cell->setGroup(m_controller->defaultGroup());
-    }
-}
-
 void ReplayPlayerContainer::calculateLayout(const PlayerLayout& layout) {
     const int margin = 2;
     const int spacing = 2;
@@ -214,6 +115,8 @@ void ReplayPlayerContainer::calculateLayout(const PlayerLayout& layout) {
     int reusedCount = 0;
     int newCount = 0;
 
+    // 布局切换：窗口按 index 复用。通道绑定跟着播放器走（cell 自己记住播哪个通道），
+    // 窗口换位置/被删除都不影响绑定关系。
     for (const LayoutItem& item : layout.layoutJson) {
         int x = margin + item.col * (cw + spacing);
         int y = margin + item.row * (ch + spacing);
@@ -227,19 +130,44 @@ void ReplayPlayerContainer::calculateLayout(const PlayerLayout& layout) {
         } else {
             cell = new PlaybackCell(m_videoArea);
             connect(cell, &PlaybackCell::clicked, this, &ReplayPlayerContainer::onCellClicked);
+            connect(cell, &PlaybackCell::playerDropped, this,
+                    [this, cell](const QString& sourceUid) {
+                        onPlayerDropped(cell, sourceUid);
+                    });
+            connect(cell, &PlaybackCell::recordingDropped, this,
+                    [this, cell](const QString& channelKey, int64_t startTimeMs) {
+                        emit recordingDropped(channelKey, startTimeMs, cell->layoutItemId());
+                    });
+            cell->setPlayerWidget(new PlaybackPlayerWidget(cell));
             newCount++;
         }
 
         cell->setCellId(cellIndex);
         cell->setObjectName(QString("PlaybackCell_%1").arg(item.id));
+        // 格子在布局中的位置标识
+        cell->setLayoutItemId(item.id);
         cell->setGeometry(x, y, w, h);
         cell->show();
         cellsToKeep.append(cell);
         cellIndex++;
     }
 
+    // 被删掉的格子：清掉播放器的通道绑定与时间轴播放头
     for (int i = cellsToKeep.size(); i < oldCells.size(); ++i) {
-        delete oldCells[i];
+        PlaybackCell* dead = oldCells[i];
+        PlaybackPlayerWidget* player = dead->playerWidget();
+        if (player) {
+            const QString channelKey = player->channelKey();
+            if (!channelKey.isEmpty()) {
+                TimelineWidget* timeline = channelTimeline(channelKey);
+                if (timeline) {
+                    timeline->removePlayhead(player->uid());
+                }
+                m_playheads.remove(player->uid());
+            }
+            delete player;
+        }
+        delete dead;
     }
 
     m_cells.clear();
@@ -253,16 +181,39 @@ void ReplayPlayerContainer::calculateLayout(const PlayerLayout& layout) {
         .arg(reusedCount).arg(newCount).arg(oldCells.size() - reusedCount));
 }
 
+void ReplayPlayerContainer::onPlayerDropped(PlaybackCell* target, const QString& sourceUid) {
+    PlaybackCell* source = findCellByUid(sourceUid);
+    if (!source || !target || source == target) {
+        return;
+    }
+    // 两个格子里的播放器对调：通道绑定跟着播放器走，不用重新绑定
+    PlaybackPlayerWidget* sourcePlayer = source->takePlayerWidget();
+    PlaybackPlayerWidget* targetPlayer = target->takePlayerWidget();
+    source->setPlayerWidget(targetPlayer);
+    target->setPlayerWidget(sourcePlayer);
+    // 播放器换了格子，进度上报要按新格子来
+    setupTimelineConnections();
+    LOG_INFO("ReplayPlayerContainer", QString("swap players: %1 <-> %2")
+        .arg(source->layoutItemId(), target->layoutItemId()));
+}
+
+PlaybackCell* ReplayPlayerContainer::findCellByUid(const QString& uid) const {
+    for (auto it = m_cells.constBegin(); it != m_cells.constEnd(); ++it) {
+        PlaybackPlayerWidget* player = it.value()->playerWidget();
+        if (player && player->uid() == uid) {
+            return it.value();
+        }
+    }
+    return nullptr;
+}
+
 PlaybackCell* ReplayPlayerContainer::getCell(const QString& cellId) const {
     return m_cells.value(cellId, nullptr);
 }
 
-QString ReplayPlayerContainer::selectTargetCell() {
-    if (!m_selectedCellId.isEmpty()) {
-        PlaybackCell* selected = m_cells.value(m_selectedCellId);
-        if (selected) {
-            return m_selectedCellId;
-        }
+QString ReplayPlayerContainer::selectTargetCell() const {
+    if (!m_selectedCellId.isEmpty() && m_cells.contains(m_selectedCellId)) {
+        return m_selectedCellId;
     }
 
     if (!m_cells.isEmpty()) {
@@ -274,9 +225,9 @@ QString ReplayPlayerContainer::selectTargetCell() {
 
 void ReplayPlayerContainer::onCellClicked() {
     PlaybackCell* cell = qobject_cast<PlaybackCell*>(sender());
+    QString oldSelected = m_selectedCellId;
     if (cell) {
-        QString oldSelected = m_selectedCellId;
-        m_selectedCellId = cell->objectName();
+        m_selectedCellId = cell->layoutItemId();
 
         if (!oldSelected.isEmpty()) {
             PlaybackCell* oldCell = m_cells.value(oldSelected);
@@ -284,17 +235,28 @@ void ReplayPlayerContainer::onCellClicked() {
         }
 
         cell->setSelected(true);
-        emit cellClicked(cell->cellId(), cell->deviceId());
+        PlaybackPlayerWidget* player = cell->playerWidget();
+        emit cellClicked(cell->cellId(), player ? player->deviceId() : QString());
+    }
+
+    if (m_selectedCellId != oldSelected) {
+        emit targetCellChanged(m_selectedCellId);
     }
 }
 
-void ReplayPlayerContainer::onTimeSelected(int64_t timeMs) {
-    setBaseTime(timeMs);
-}
-
-void ReplayPlayerContainer::onCellProgressChanged(const QString& cellId, int64_t timeMs) {
-    if (m_timeline) {
-        m_timeline->updatePlayhead(cellId, timeMs);
+void ReplayPlayerContainer::onCellProgressChanged(const QString& cellId, int64_t timeMs)
+{
+    emit playbackProgress(timeMs);
+    // 播放头画在播放器所属通道的时间轴上
+    PlaybackCell* cell = m_cells.value(cellId, nullptr);
+    PlaybackPlayerWidget* player = cell ? cell->playerWidget() : nullptr;
+    const QString channelKey = player ? player->channelKey() : QString();
+    if (!channelKey.isEmpty()) {
+        emit channelPlaybackProgress(channelKey, timeMs);
+    }
+    TimelineWidget* timeline = channelKey.isEmpty() ? activeTimeline() : channelTimeline(channelKey);
+    if (timeline && player) {
+        timeline->updatePlayhead(player->uid(), timeMs);
     }
 }
 
@@ -302,12 +264,18 @@ void ReplayPlayerContainer::setupTimelineConnections() {
     for (auto it = m_cells.begin(); it != m_cells.end(); ++it) {
         QString cellId = it.key();
         PlaybackCell* cell = it.value();
-        if (cell && m_timeline) {
-            m_timeline->addPlayhead(cellId, QColor("#4a9eff"));
-            connect(cell, &PlaybackCell::playbackProgressChanged, this, [this, cellId](int64_t timeMs) {
-                onCellProgressChanged(cellId, timeMs);
-            });
+        if (!cell || !m_controller) {
+            continue;
         }
+        PlaybackPlayerWidget* player = cell->playerWidget();
+        if (!player) {
+            continue;
+        }
+        // 布局重算会重复调用这里，先断开旧连接，避免一次进度触发多次回调
+        disconnect(player, &PlaybackPlayerWidget::playbackProgressChanged, this, nullptr);
+        connect(player, &PlaybackPlayerWidget::playbackProgressChanged, this, [this, cellId](int64_t timeMs) {
+            onCellProgressChanged(cellId, timeMs);
+        });
     }
 }
 
@@ -316,6 +284,231 @@ void ReplayPlayerContainer::setBaseTime(int64_t timeMs) {
     if (m_controller) {
         m_controller->setBaseTime(timeMs);
     }
+    TimelineWidget* timeline = activeTimeline();
+    if (timeline) {
+        timeline->setCurrentTime(timeMs);
+    }
+}
+
+// ── 通道时间轴 ──────────────────────────────────────────────────────
+
+void ReplayPlayerContainer::attachChannelTimeline(const QString& channelKey, TimelineWidget* timeline) {
+    if (!timeline || m_channelTimelines.contains(channelKey)) {
+        return;
+    }
+    m_channelTimelines.insert(channelKey, timeline);
+    m_timelineStack->addWidget(timeline);
+
+    // 时间轴上的定位、分段点击由通道自己转发（PlaybackChannel -> seekRequested）
+    // 这里只处理拖拽播放头：松手后才 seek，避免拖动过程中反复重建播放器
+    connect(timeline, &TimelineWidget::playheadReleased, this,
+            [this, channelKey](const QString& windowId, int64_t timeMs) {
+                Q_UNUSED(windowId)
+                seekChannel(channelKey, timeMs);
+            });
+
+    if (m_activeChannelKey.isEmpty()) {
+        setActiveChannelTimeline(channelKey);
+    }
+}
+
+void ReplayPlayerContainer::removeChannelTimeline(const QString& channelKey) {
+    TimelineWidget* timeline = m_channelTimelines.take(channelKey);
+    if (!timeline) {
+        return;
+    }
+    if (m_activeChannelKey == channelKey) {
+        m_activeChannelKey.clear();
+    }
+    m_timelineStack->removeWidget(timeline);
+    timeline->deleteLater();
+}
+
+void ReplayPlayerContainer::setActiveChannelTimeline(const QString& channelKey) {
+    TimelineWidget* timeline = m_channelTimelines.value(channelKey, nullptr);
+    if (!timeline) {
+        return;
+    }
+    m_activeChannelKey = channelKey;
+    m_timelineStack->setCurrentWidget(timeline);
+}
+
+TimelineWidget* ReplayPlayerContainer::channelTimeline(const QString& channelKey) const {
+    return m_channelTimelines.value(channelKey, nullptr);
+}
+
+TimelineWidget* ReplayPlayerContainer::activeTimeline() const {
+    return m_channelTimelines.value(m_activeChannelKey, nullptr);
+}
+
+// ── 窗口 ↔ 通道 ─────────────────────────────────────────────────────
+
+QString ReplayPlayerContainer::selectedCellId() const {
+    if (!m_selectedCellId.isEmpty() && m_cells.contains(m_selectedCellId)) {
+        return m_selectedCellId;
+    }
+    return QString();
+}
+
+PlaybackGroup* ReplayPlayerContainer::channelGroup(const QString& channelKey) {
+    PlaybackGroup* group = m_channelGroups.value(channelKey, nullptr);
+    if (!group) {
+        group = m_controller->createGroup();
+        m_channelGroups.insert(channelKey, group);
+    }
+    return group;
+}
+
+bool ReplayPlayerContainer::bindChannelToCell(const QString& channelKey, const QString& cellId) {
+    PlaybackCell* cell = m_cells.value(cellId, nullptr);
+    PlaybackPlayerWidget* player = cell ? cell->playerWidget() : nullptr;
+    if (!player) {
+        return false;
+    }
+    const QString oldKey = player->channelKey();
+    if (!oldKey.isEmpty() && oldKey != channelKey) {
+        // 原来播的是别的通道：先解绑
+        unbindCell(cellId);
+    }
+    // 绑定记在播放器自己身上：播放器在格子之间切换也不用重新绑定
+    player->setChannelKey(channelKey);
+    LOG_INFO("ReplayPlayerContainer", QString("bindChannelToCell: cell=%1 channel=%2").arg(cellId, channelKey));
+    emit cellChannelChanged(cellId, channelKey);
+    return true;
+}
+
+void ReplayPlayerContainer::unbindCell(const QString& cellId) {
+    PlaybackCell* cell = m_cells.value(cellId, nullptr);
+    PlaybackPlayerWidget* player = cell ? cell->playerWidget() : nullptr;
+    if (!player) {
+        return;
+    }
+    const QString channelKey = player->channelKey();
+    player->setChannelKey(QString());
+    player->loadClips(QList<Clip>());
+    if (channelKey.isEmpty()) {
+        return;
+    }
+    TimelineWidget* timeline = channelTimeline(channelKey);
+    if (timeline) {
+        timeline->removePlayhead(player->uid());
+    }
+    m_playheads.remove(player->uid());
+}
+
+QString ReplayPlayerContainer::channelOfCell(const QString& cellId) const {
+    PlaybackCell* cell = m_cells.value(cellId, nullptr);
+    PlaybackPlayerWidget* player = cell ? cell->playerWidget() : nullptr;
+    return player ? player->channelKey() : QString();
+}
+
+QStringList ReplayPlayerContainer::cellsOfChannel(const QString& channelKey) const {
+    QStringList ids;
+    for (auto it = m_cells.constBegin(); it != m_cells.constEnd(); ++it) {
+        PlaybackPlayerWidget* player = it.value()->playerWidget();
+        if (player && player->channelKey() == channelKey) {
+            ids.append(it.key());
+        }
+    }
+    return ids;
+}
+
+void ReplayPlayerContainer::applyChannelClips(const QString& channelKey, const QList<Clip>& clips,
+                                              int64_t rangeStartMs, int64_t rangeEndMs) {
+    PlaybackGroup* group = channelGroup(channelKey);
+    const QStringList cellIds = cellsOfChannel(channelKey);
+    if (cellIds.isEmpty()) {
+        return;
+    }
+    TimelineWidget* timeline = channelTimeline(channelKey);
+    for (const QString& cellId : cellIds) {
+        PlaybackCell* cell = m_cells.value(cellId, nullptr);
+        PlaybackPlayerWidget* player = cell ? cell->playerWidget() : nullptr;
+        if (!player) {
+            continue;
+        }
+        player->bindDevice(channelKey);
+        player->loadClips(clips);
+        player->setController(m_controller);
+        player->setGroup(group);
+        if (timeline && !timeline->playheads().contains(player->uid())) {
+            timeline->addPlayhead(player->uid(), QColor("#4a9eff"));
+            m_playheads.insert(player->uid());
+        }
+    }
+
+    // 播放位置不在范围内时回到第一段
+    int64_t base = m_controller->groupBaseTime(group);
+    if (base <= 0 || (rangeEndMs > rangeStartMs && (base < rangeStartMs || base > rangeEndMs))) {
+        if (!clips.isEmpty()) {
+            m_controller->setGroupBaseTime(group, clips.first().startTimeMs);
+        }
+    }
+}
+
+void ReplayPlayerContainer::seekChannel(const QString& channelKey, int64_t timeMs) {
+    PlaybackGroup* group = m_channelGroups.value(channelKey, nullptr);
+    if (!group) {
+        return;
+    }
+    m_controller->setGroupBaseTime(group, timeMs);
+    TimelineWidget* timeline = channelTimeline(channelKey);
+    if (timeline) {
+        timeline->setCurrentTime(timeMs);
+    }
+}
+
+void ReplayPlayerContainer::playChannel(const QString& channelKey, int64_t timeMs) {
+    PlaybackGroup* group = m_channelGroups.value(channelKey, nullptr);
+    if (!group) {
+        return;
+    }
+    if (timeMs > 0) {
+        m_controller->setGroupBaseTime(group, timeMs);
+    }
+    group->play();
+}
+
+// ── 拖放：录像文件拖到播放窗口 ──────────────────────────────────────
+
+void ReplayPlayerContainer::dragEnterEvent(QDragEnterEvent* event) {
+    if (event->mimeData()->hasFormat("application/x-rustcam-recording")) {
+        event->acceptProposedAction();
+    }
+}
+
+void ReplayPlayerContainer::dragMoveEvent(QDragMoveEvent* event) {
+    if (event->mimeData()->hasFormat("application/x-rustcam-recording")) {
+        event->acceptProposedAction();
+    }
+}
+
+void ReplayPlayerContainer::dropEvent(QDropEvent* event) {
+    if (!event->mimeData()->hasFormat("application/x-rustcam-recording")) {
+        return;
+    }
+    const QJsonObject obj = QJsonDocument::fromJson(
+        event->mimeData()->data("application/x-rustcam-recording")).object();
+    const QString channelKey = obj["channel_key"].toString();
+    const int64_t startTimeMs = static_cast<int64_t>(obj["start_time_ms"].toDouble());
+    if (channelKey.isEmpty()) {
+        return;
+    }
+
+    // 找到落点所在的播放窗口
+    const QPoint pos = event->pos();
+    QString cellId;
+    for (auto it = m_cells.constBegin(); it != m_cells.constEnd(); ++it) {
+        if (it.value()->geometry().contains(pos)) {
+            cellId = it.key();
+            break;
+        }
+    }
+    if (cellId.isEmpty()) {
+        return;   // 落在窗口外：忽略
+    }
+    emit recordingDropped(channelKey, startTimeMs, cellId);
+    event->acceptProposedAction();
 }
 
 void ReplayPlayerContainer::play() {

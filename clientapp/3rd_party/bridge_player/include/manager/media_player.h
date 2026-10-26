@@ -65,7 +65,11 @@ namespace BridgePlayer {
         const Stats& get_stats()  override;
      //   void capture_video_image(const std::string& fullPath) override;
     public:
-
+        Result<bool> play(const std::string& url, int64_t position_ms = 0);
+        Result<bool> is_ready();
+        Result<int64_t> position_ms();
+        Result<void> seek_when_ready(int64_t position_ms);
+        Result<void> resume();
         Result<void> pause();
         Result<void> seek(int64_t position_ms);
         Result<void> seek_relative(int64_t delta_ms);
@@ -87,6 +91,8 @@ namespace BridgePlayer {
         //void set_video_frame_callback(MediaFrameCallback callback);
         //void set_audio_frame_callback(MediaFrameCallback callback);
         const std::unique_ptr<SDLAudioPlayer>& get_audio_player() { return this->audio_player_; };
+    public:
+
     private:
         class Impl;
         std::unique_ptr<Impl> impl_;

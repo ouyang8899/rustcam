@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 
 use crate::domain::device::RecordingConfig;
 use crate::domain::recording::{
     classify_start_failure, retry_backoff_secs, CreateRecordingRequest, Recording, RecordingFormat,
-    RecordingState, StartFailureKind,
+    RecordingState, RecordingType, StartFailureKind,
 };
 use crate::error::{AppError, Result};
 
@@ -103,6 +103,10 @@ impl RecordingService {
 
         recording.output_path = req.output_path;
 
+        recording.recording_type = req.recording_type.unwrap_or(RecordingType::Timed);
+
+        recording.alarm_id = req.alarm_id;
+
         match self.repo.create_recording(&recording).await {
             Ok(id) => {
                 recording.id = id;
@@ -129,6 +133,28 @@ impl RecordingService {
         let app = self.repo.streams_cache().get(&cache_key)
             .map(|s| s.app.clone())
             .unwrap_or_else(|| "live".to_string());
+
+        let stream_key = recording.stream_key();
+
+        // 同一个流上可能已经有别的任务在录：媒体服务器只能录一份，
+        // 新任务直接共享那份录制，不能再调 startRecord
+        let shared_with = self.repo.find_active_recordings_by_stream_key(&stream_key).await?
+            .into_iter()
+            .find(|r| r.id != recording.id && r.state != RecordingState::Pending);
+
+        if let Some(existing) = shared_with {
+            tracing::info!(
+                "[RecordingService] Recording task {} shares the recording of task {} on {}",
+                recording.id, existing.id, stream_key
+            );
+            recording.start();
+            recording.retry_count = 0;
+            recording.next_retry_at = None;
+            if let Err(e) = self.repo.update_recording_start_result(&recording).await {
+                tracing::error!("[RecordingService] Failed to persist: {}", e);
+            }
+            return Ok(recording);
+        }
 
         let rec_info = if let Some(adapter) = self.cluster.get_server(&recording.server_tag) {
             match adapter.start_recording(
@@ -214,13 +240,28 @@ impl RecordingService {
             .map(|s| s.app.clone())
             .unwrap_or_else(|| "live".to_string());
 
-        if let Some(adapter) = self.cluster.get_server(&recording.server_tag) {
-            if let Err(e) = adapter.stop_recording(&app, &recording.stream_key(), format_str).await {
-                tracing::warn!("[RecordingService] Failed to stop recording on media server: {}", e);
+        let stream_key = recording.stream_key();
+
+        // 还有别的任务在用这份录制时不能停媒体服务器，否则把别人的录像也停了
+        let others = self.repo.find_active_recordings_by_stream_key(&stream_key).await?
+            .into_iter()
+            .filter(|r| r.id != recording.id && r.state != RecordingState::Pending)
+            .count();
+
+        if others == 0 {
+            if let Some(adapter) = self.cluster.get_server(&recording.server_tag) {
+                if let Err(e) = adapter.stop_recording(&app, &stream_key, format_str).await {
+                    tracing::warn!("[RecordingService] Failed to stop recording on media server: {}", e);
+                }
             }
+        } else {
+            tracing::info!(
+                "[RecordingService] Recording task {} stopped, {} other task(s) still use the recording of {}",
+                recording.id, others, stream_key
+            );
         }
 
-        recording.stop();
+        recording.complete();
         if let Err(e) = self.repo.update_recording(&recording.clone()).await {
             tracing::error!("[RecordingService] Failed to persist: {}", e);
         }
@@ -265,7 +306,7 @@ impl RecordingService {
     }
 
     pub async fn stop_recording_by_stream_key(&self, stream_key: &str) -> Result<()> {
-        if let Some(recording) = self.get_active_recording_by_stream_key(stream_key).await? {
+        for recording in self.get_active_recordings_by_stream_key(stream_key).await? {
             self.stop_recording(recording.id).await?;
         }
         Ok(())
@@ -282,7 +323,7 @@ impl RecordingService {
             return Ok(None);
         }
 
-        let channel_tag = crate::domain::stream::parse_stream_key(stream_key)
+        let channel_tag = crate::common::device_utils::parse_stream_key(stream_key)
             .map(|(_, ch)| ch)
             .unwrap_or_else(|| "recording".to_string());
 
@@ -296,6 +337,8 @@ impl RecordingService {
             output_path: None,
             labels: config.labels.clone(),
             pre_record_secs: None,
+            recording_type: Some(RecordingType::Timed),
+            alarm_id: None,
         };
 
         let recording = self.create_recording(req, channel_tag, media_server.to_string()).await;
@@ -308,13 +351,21 @@ impl RecordingService {
         self.repo.find_active_recording_by_stream_key(stream_key).await
     }
 
+    /// 同一个流上并行的所有录像任务
+    pub async fn get_active_recordings_by_stream_key(&self, stream_key: &str) -> Result<Vec<Recording>> {
+        self.repo.find_active_recordings_by_stream_key(stream_key).await
+    }
+
     /// 该流上“等待设备/流就绪”的录像任务
     pub async fn get_pending_recording_by_stream(
         &self,
         device_tag: &str,
         channel_tag: &str,
+        recording_type: RecordingType,
     ) -> Result<Option<Recording>> {
-        self.repo.find_pending_recording_by_stream(device_tag, channel_tag).await
+        self.repo
+            .find_pending_recording_by_stream(device_tag, channel_tag, &recording_type.to_string())
+            .await
     }
 
     pub async fn list_device_recordings(&self, device_tag: &str) -> Result<Vec<Recording>> {
@@ -361,23 +412,42 @@ impl RecordingService {
             .await
     }
 
-    pub async fn list_recorded_files(&self, id: i64) -> Result<Vec<crate::adapter::media_server::RecordingFile>> {
+    /// 一个录像任务下的文件列表：录像文件以数据库里的分段为准，
+    /// 媒体服务器上的目录只是文件的存放位置。
+    /// 每个文件都带上它所属的任务，外部应用可以按任务类型分别处理。
+    pub async fn list_recorded_files(&self, id: i64) -> Result<Vec<crate::domain::recording_policy::RecordingFileWithTask>> {
         let recording = self.repo.get_recording(id).await?
             .ok_or_else(|| AppError::NotFound(format!("Recording {} not found", id)))?;
 
-        let cache_key = format!("{}/{}", recording.device_tag.as_deref().unwrap_or(""), recording.channel_tag.as_deref().unwrap_or(""));
-        let app = self.repo.streams_cache().get(&cache_key)
-            .map(|s| s.app.clone())
-            .unwrap_or_else(|| "live".to_string());
+        let segments = self.repo.list_recording_segments_by_recording_id(id).await?;
 
-        if let Some(adapter) = self.cluster.get_server(&recording.server_tag) {
-            match adapter.list_recordings(&app, &recording.stream_key()).await {
-                Ok(files) => return Ok(files),
-                Err(e) => tracing::warn!("[RecordingService] Failed to list recordings: {}", e),
+        let mut task_info = recording.task_info();
+        if let Some(alarm_id) = recording.alarm_id {
+            if let Ok(Some(alarm)) = self.repo.get_alarm(alarm_id).await {
+                task_info.alarm_type = Some(alarm.alarm_type);
+                task_info.alarm_time = Some(alarm.alarm_time);
             }
         }
 
-        Ok(vec![])
+        Ok(segments.into_iter().map(|s| {
+            let filename = std::path::Path::new(&s.file_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&s.file_path)
+                .to_string();
+            crate::domain::recording_policy::RecordingFileWithTask {
+                file: crate::adapter::media_server::RecordingFile {
+                    filename,
+                    path: s.file_path,
+                    size: s.file_size,
+                    duration_secs: s.duration_secs,
+                    created_at: s.start_time.timestamp(),
+                    stream_key: Some(recording.stream_key()),
+                    media_server_name: s.server_tag.clone(),
+                },
+                task: Some(task_info.clone()),
+            }
+        }).collect())
     }
 
     pub async fn get_stats(&self) -> Result<serde_json::Value> {
@@ -400,15 +470,24 @@ impl RecordingService {
         }))
     }
 
+    /// 媒体服务器每录完一个文件就通知一次。
+    /// 这个文件属于该流上的所有录像任务：每个任务各记一条分段，任务类型不同。
     pub async fn finalize_recording(
         &self,
         stream_key: &str,
         source_path: Option<String>,
         file_size: u64,
         duration_secs: u64,
+        file_start_time: Option<u64>,
     ) -> Result<()> {
-        if let Some(mut recording) = self.repo.find_active_recording_by_stream_key(stream_key).await? {
+        let recordings = self.repo.find_active_recordings_by_stream_key(stream_key).await?;
 
+        if recordings.is_empty() {
+            tracing::warn!("[RecordingService] No active recording found for stream={}", stream_key);
+            return Ok(());
+        }
+
+        for mut recording in recordings {
             recording.filename = source_path
                 .as_ref()
                 .and_then(|p| std::path::Path::new(p).file_name())
@@ -416,16 +495,21 @@ impl RecordingService {
                 .map(String::from);
             recording.file_size = file_size;
             recording.duration_secs = duration_secs;
-            recording.complete();
             if let Err(e) = self.repo.update_recording(&recording.clone()).await {
-                tracing::error!("[RecordingService] Failed to finalize recording {}: {}", recording.id, e);
-            } else {
+                tracing::error!("[RecordingService] Failed to update recording {}: {}", recording.id, e);
             }
 
-            let indexed_path = source_path.unwrap_or_else(|| recording.stream_key());
+            let indexed_path = source_path.clone().unwrap_or_else(|| recording.stream_key());
             let play_url = self.build_segment_play_url(&recording, &indexed_path);
             if let Err(e) = self
-                .index_recording_segment(&recording, &indexed_path, play_url.as_deref(), file_size, duration_secs)
+                .index_recording_segment(
+                    &recording,
+                    &indexed_path,
+                    play_url.as_deref(),
+                    file_size,
+                    duration_secs,
+                    file_start_time,
+                )
                 .await
             {
                 tracing::error!(
@@ -434,9 +518,8 @@ impl RecordingService {
                     e
                 );
             }
-        } else {
-            tracing::warn!("[RecordingService] No active recording found for stream={}", stream_key);
         }
+
         Ok(())
     }
 
@@ -467,25 +550,23 @@ impl RecordingService {
         play_url: Option<&str>,
         file_size: u64,
         duration_secs: u64,
+        file_start_time: Option<u64>,
     ) -> Result<()> {
         let device_tag = recording.device_tag.clone().unwrap_or_default();
         let channel_tag = recording.channel_tag.clone().unwrap_or_default();
 
-        let start_time = recording.started_at.unwrap_or_else(Utc::now);
-        let end_time = recording.stopped_at.unwrap_or_else(Utc::now);
+        // 文件自己的时间范围：媒体服务器给的文件开始时间，没有就用任务开始时间
+        let start_time = file_start_time
+            .and_then(|ts| DateTime::from_timestamp(ts as i64, 0))
+            .or(recording.started_at)
+            .unwrap_or_else(Utc::now);
+        let end_time = start_time + chrono::TimeDelta::seconds(duration_secs as i64);
 
-        let mut segment_type = "normal".to_string();
-        let mut alarm_id: Option<i64> = None;
-        for label in &recording.labels {
-            if label == "alarm" {
-                segment_type = "alarm".to_string();
-            } else if label == "timed" {
-                segment_type = "normal".to_string();
-            } else if let Some(id) = label.strip_prefix("alarm:") {
-                segment_type = "alarm".to_string();
-                alarm_id = id.parse().ok();
-            }
-        }
+        let segment_type = match recording.recording_type {
+            RecordingType::Alarm => "alarm".to_string(),
+            _ => "normal".to_string(),
+        };
+        let alarm_id = recording.alarm_id;
 
         self.repo
             .insert_recording_segment(

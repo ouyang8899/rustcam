@@ -5,7 +5,7 @@ use crate::infrastructure::cluster::ClusterManager;
 use crate::infrastructure::db_repository::DbRepository;
 use crate::application::{
     DeviceService, StreamService, SessionService, RecordingService,
-    MediaServerService, HookService, PlayerLayoutService,
+    MediaServerService,PlayerLayoutService,
     PlayService, WsBroadcaster, StreamRecoveryService,
     zlmediakit_hook::ZlMediaKitHookHandler, ChannelService,
     RecordingPolicyService, RecordingSchedulerService,
@@ -42,7 +42,7 @@ pub struct ServiceRegistry {
 
     pub media_server_service: Arc<MediaServerService>,
 
-    pub hook_service: Arc<HookService>,
+    // pub hook_service: Arc<HookService>,
 
     pub zlmediakit_hook_handler: Arc<ZlMediaKitHookHandler>,
 
@@ -169,21 +169,20 @@ impl ServiceRegistry {
             media.clone(),
         ));
 
-        let hook_service = Arc::new(HookService::new(
-            infra.db.clone(),
-            infra.redis.clone(),
-            media.cluster.clone(),
-            infra.event_bus.clone(),
-            infra.config().session.expiration_secs,
-            recording_service.clone(),
-            stream_service.clone(),
-        ));
+        // let hook_service = Arc::new(HookService::new(
+        //     infra.db.clone(),
+        //     infra.redis.clone(),
+        //     media.cluster.clone(),
+        //     infra.event_bus.clone(),
+        //     infra.config().session.expiration_secs,
+        //     recording_service.clone(),
+        //     stream_service.clone(),
+        // ));
 
         let zlmediakit_hook_handler = Arc::new(
             ZlMediaKitHookHandler::from_context(
                 &infra,
                 &media,
-                recording_service.clone(),
             ).with_stream_recovery_service(stream_recovery_service.clone())
         );
 
@@ -226,7 +225,7 @@ impl ServiceRegistry {
             recording_policy_service,
             recording_scheduler_service,
             media_server_service,
-            hook_service,
+            // hook_service,
             zlmediakit_hook_handler,
             player_layout_service,
             channel_service,

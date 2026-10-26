@@ -431,24 +431,38 @@ impl DeviceService {
                 }
             }
 
-            SignalEvent::Alarm { device_id, alarm_type, message, timestamp } => {
-                tracing::warn!("[DeviceService] Alarm: device={} type={} msg={}", device_id, alarm_type, message);
+            SignalEvent::Alarm { device_id, device_tag: event_device_tag, channel_tag, alarm_type, message, timestamp } => {
+                tracing::warn!("[DeviceService] Alarm: device={} channel={:?} type={} msg={}", device_id, channel_tag, alarm_type, message);
                 let device_id_num: i64 = device_id.parse().unwrap_or(0);
                 let device_tag = match infra.db.get_device_by_id(device_id_num).await {
                     Ok(Some(d)) => d.device_tag.unwrap_or_default(),
-                    _ => String::new(),
+                    _ => event_device_tag.clone().unwrap_or_default(),
                 };
                 let create_req = CreateAlarmRequest {
                     device_id: device_id_num,
                     device_tag,
+                    channel_tag: channel_tag.clone(),
                     alarm_type: alarm_type.clone(),
                     alarm_time: *timestamp,
                     alarm_method: Some(1),
                     alarm_priority: Some(0),
                     description: Some(message.clone()),
                 };
-                if let Err(e) = infra.db.save_alarm(&create_req).await {
-                    tracing::error!("[DeviceService] Save alarm failed: {}", e);
+                match infra.db.save_alarm(&create_req).await {
+                    Ok(alarm) => {
+                        // 告警已经落库，订阅者(录像调度器)需要真实的告警 id
+                        let _ = infra.event_bus.publish(SignalEvent::AlarmRaised {
+                            alarm_id: alarm.id,
+                            device_id: device_id.clone(),
+                            device_tag: event_device_tag.clone(),
+                            channel_tag: channel_tag.clone(),
+                            alarm_type: alarm_type.clone(),
+                            timestamp: *timestamp,
+                        }).await;
+                    }
+                    Err(e) => {
+                        tracing::error!("[DeviceService] Save alarm failed: {}", e);
+                    }
                 }
                 let _ = infra.redis.publish_event("alarm", &serde_json::json!({
                     "device_id": device_id, "alarm_type": alarm_type, "message": message,
@@ -1165,7 +1179,7 @@ impl DeviceService {
                             tracing::warn!("[DeviceService] Failed to update ONVIF channel {}: {}", channel.channel_tag, e);
                         }
 
-                        let stream_key = crate::domain::make_stream_key(device_tag, &channel.channel_tag);
+                        let stream_key = crate::common::device_utils::format_stream_key(device_tag, &channel.channel_tag);
                         let streams = self.stream_service.get_streams_by_channel(device_tag, &channel.channel_tag).await;
                         for stream in streams {
                             if matches!(stream.state, crate::domain::StreamState::Active | crate::domain::StreamState::Starting | crate::domain::StreamState::Recovering) {

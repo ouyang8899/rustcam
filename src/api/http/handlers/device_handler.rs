@@ -157,7 +157,7 @@ pub async fn delete_device_handler(
         .collect::<Vec<_>>();
 
     for stream in streams {
-        let stream_key = crate::domain::stream::make_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
+        let stream_key = crate::common::device_utils::format_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
         let _ = registry.stream_service.stop_stream(&stream.app, &stream_key).await;
     }
 
@@ -251,9 +251,9 @@ pub async fn get_play_links_handler(
         .ok_or_else(|| AppError::BadRequest("Device has no stream source configured".to_string()))?;
 
     let stream_id = if device.parent_device_tag.is_some() {
-        crate::domain::stream::make_stream_key(&device_tag, &device_tag)
+        crate::common::device_utils::format_stream_key(&device_tag, &device_tag)
     } else {
-        crate::domain::stream::make_stream_key(&device_tag, "main")
+         crate::common::device_utils::format_stream_key(&device_tag, "main")
     };
 
     let token = registry.play_service.generate_token(&device.id.to_string()).await?;

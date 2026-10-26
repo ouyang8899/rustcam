@@ -1,26 +1,18 @@
 #include "PlaybackSidePanel.h"
-#include "ServerApi.h"
+#include "PlaybackChannel.h"
 #include "common/Logger.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QComboBox>
+#include <QStackedWidget>
 #include <QLabel>
-#include <QDateEdit>
-#include <QCalendarWidget>
-#include <QJsonArray>
-#include <QJsonObject>
-#include <QFileInfo>
-#include <QtConcurrent>
-#include <QFutureWatcher>
 #include <QPushButton>
-#include <QMessageBox>
+#include <QMap>
 
 namespace rustcam {
 
 PlaybackSidePanel::PlaybackSidePanel(QWidget* parent)
     : QWidget(parent)
-    , m_selectedDate(QDate::currentDate())
-    , m_hasMore(false)
-    , m_currentPage(1)
 {
     setMinimumWidth(280);
     setMaximumWidth(350);
@@ -66,96 +58,145 @@ PlaybackSidePanel::PlaybackSidePanel(QWidget* parent)
 
     mainLayout->addWidget(m_tabWidget, 1);
 
-    QLabel* timelineLabel = new QLabel(tr("Recording Timeline"), this);
-    timelineLabel->setStyleSheet("color: #e0e0e0; font-weight: bold; padding: 4px;");
-    mainLayout->addWidget(timelineLabel);
+    // 通道切换：视频窗口不变，只切换侧栏与时间轴
+    QHBoxLayout* switcherLayout = new QHBoxLayout();
+    switcherLayout->setSpacing(4);
+    QLabel* switcherLabel = new QLabel(tr("查看通道:"), this);
+    switcherLabel->setStyleSheet("color: #e0e0e0;");
+    switcherLayout->addWidget(switcherLabel);
 
-    QFrame* timelineFrame = new QFrame(this);
-    timelineFrame->setStyleSheet("border: 1px solid #3e3e3e;");
-    QVBoxLayout* timelineLayout = new QVBoxLayout(timelineFrame);
-    timelineLayout->setContentsMargins(4, 4, 4, 4);
-    timelineLayout->setSpacing(4);
-
-    QHBoxLayout* dateLayout = new QHBoxLayout();
-    QLabel* dateLabel = new QLabel(tr("Date:"), timelineFrame);
-    dateLabel->setStyleSheet("color: #aaa;");
-    QDateEdit* dateEdit = new QDateEdit(m_selectedDate, timelineFrame);
-    dateEdit->setCalendarPopup(true);
-    dateEdit->setStyleSheet(R"(
-        QDateEdit {
-            background-color: #2a2a2a;
-            border: 1px solid #3e3e3e;
-            border-radius: 4px;
-            padding: 4px;
-            color: #e0e0e0;
+    m_channelCombo = new QComboBox(this);
+    m_channelCombo->setToolTip(tr("切换正在查看录像的通道"));
+    connect(m_channelCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        if (m_switchingChannel || index < 0) {
+            return;
         }
-    )");
-    connect(dateEdit, &QDateEdit::dateChanged, this, [this](const QDate& date) {
-        onDateChanged(date);
+        setActiveChannel(m_channelCombo->itemData(index).toString());
     });
-    dateLayout->addWidget(dateLabel);
-    dateLayout->addWidget(dateEdit);
-    dateLayout->addStretch();
-    timelineLayout->addLayout(dateLayout);
+    switcherLayout->addWidget(m_channelCombo, 1);
 
-    m_timeline = new TimelineWidget(timelineFrame);
-    timelineLayout->addWidget(m_timeline);
-    mainLayout->addWidget(timelineFrame, 0);
-
-    QLabel* fileListLabel = new QLabel(tr("Recording Files"), this);
-    fileListLabel->setStyleSheet("color: #e0e0e0; font-weight: bold; padding: 4px;");
-    mainLayout->addWidget(fileListLabel);
-
-    QFrame* fileListFrame = new QFrame(this);
-    fileListFrame->setStyleSheet("border: 1px solid #3e3e3e;");
-    QVBoxLayout* fileListLayout = new QVBoxLayout(fileListFrame);
-    fileListLayout->setContentsMargins(0, 0, 0, 0);
-    m_fileList = new RecordingFileListWidget(fileListFrame);
-    fileListLayout->addWidget(m_fileList);
-
-    m_loadMoreBtn = new QPushButton(tr("加载更多"), fileListFrame);
-    m_loadMoreBtn->setStyleSheet(R"(
-        QPushButton {
-            background-color: #3e3e3e;
-            color: #e0e0e0;
-            border: none;
-            padding: 8px;
-            border-radius: 4px;
+    QPushButton* closeBtn = new QPushButton(tr("关闭"), this);
+    closeBtn->setFixedWidth(48);
+    closeBtn->setToolTip(tr("从列表中移除当前通道（播放窗口解绑）"));
+    connect(closeBtn, &QPushButton::clicked, this, [this]() {
+        if (!m_activeChannelKey.isEmpty()) {
+            emit channelClosed(m_activeChannelKey);
         }
-        QPushButton:hover {
-            background-color: #4e4e4e;
-        }
-    )");
-    m_loadMoreBtn->hide();
-    fileListLayout->addWidget(m_loadMoreBtn);
+    });
+    switcherLayout->addWidget(closeBtn);
+    mainLayout->addLayout(switcherLayout);
 
-    mainLayout->addWidget(fileListFrame, 1);
+    m_channelStack = new QStackedWidget(this);
+    mainLayout->addWidget(m_channelStack, 1);
 
     connect(m_regionTree, &DeviceTree::itemDoubleClicked, this, &PlaybackSidePanel::onDeviceItemDoubleClicked);
     connect(m_groupTree, &DeviceTree::itemDoubleClicked, this, &PlaybackSidePanel::onDeviceItemDoubleClicked);
     connect(m_deviceTree, &DeviceTree::itemDoubleClicked, this, &PlaybackSidePanel::onDeviceItemDoubleClicked);
-    connect(m_timeline, &TimelineWidget::timeSelected, this, &PlaybackSidePanel::onTimeSelected);
-    connect(m_timeline, &TimelineWidget::periodClicked, this, &PlaybackSidePanel::onPeriodClicked);
-    connect(m_fileList, &RecordingFileListWidget::fileDoubleClicked, this, &PlaybackSidePanel::onFileDoubleClicked);
-    connect(m_loadMoreBtn, &QPushButton::clicked, this, &PlaybackSidePanel::onLoadMoreClicked);
-
-    int dayStartMs = QDateTime(m_selectedDate, QTime(0, 0, 0)).toMSecsSinceEpoch();
-    int dayEndMs = QDateTime(m_selectedDate, QTime(23, 59, 59)).toMSecsSinceEpoch();
-    m_timeline->setTimeRange(dayStartMs, dayEndMs);
 }
 
 PlaybackSidePanel::~PlaybackSidePanel() {
 }
 
-void PlaybackSidePanel::setSelectedDate(const QDate& date) {
-    m_selectedDate = date;
-    int dayStartMs = QDateTime(date, QTime(0, 0, 0)).toMSecsSinceEpoch();
-    int dayEndMs = QDateTime(date, QTime(23, 59, 59)).toMSecsSinceEpoch();
-    m_timeline->setTimeRange(dayStartMs, dayEndMs);
+// ── 通道管理 ────────────────────────────────────────────────────────
 
-    if (!m_currentDeviceId.isEmpty()) {
-        loadRecordingsForDate(m_currentDeviceId, date);
+PlaybackChannel* PlaybackSidePanel::registerChannel(const QString& deviceTag,
+                                                    const QString& channelTag,
+                                                    const QString& displayName) {
+    const QString key = deviceTag + "/" + channelTag;
+    if (m_channels.contains(key)) {
+        setActiveChannel(key);
+        return m_channels.value(key);
     }
+
+    PlaybackChannel* channel = new PlaybackChannel(deviceTag, channelTag, displayName, this);
+    addChannelPage(key, channel);
+    m_channels.insert(key, channel);
+
+    m_channelCombo->addItem(displayName.isEmpty() ? channelTag : displayName, key);
+    setActiveChannel(key);
+    return channel;
+}
+
+void PlaybackSidePanel::addChannelPage(const QString& key, PlaybackChannel* channel) {
+    QWidget* page = channel->createSidePanelPage(m_channelStack);
+    m_channelStack->addWidget(page);
+    m_channelPages.insert(key, page);
+}
+
+void PlaybackSidePanel::unregisterChannel(const QString& key) {
+    PlaybackChannel* channel = m_channels.take(key);
+    if (!channel) {
+        return;
+    }
+    QWidget* page = m_channelPages.take(key);
+    if (page) {
+        m_channelStack->removeWidget(page);
+        page->deleteLater();
+    }
+    const int index = m_channelCombo->findData(key);
+    if (index >= 0) {
+        m_channelCombo->removeItem(index);
+    }
+    if (m_activeChannelKey == key) {
+        m_activeChannelKey.clear();
+        if (m_channelCombo->count() > 0) {
+            setActiveChannel(m_channelCombo->itemData(0).toString());
+        }
+    }
+    channel->deleteLater();
+}
+
+bool PlaybackSidePanel::hasChannel(const QString& key) const {
+    return m_channels.contains(key);
+}
+
+PlaybackChannel* PlaybackSidePanel::channel(const QString& key) const {
+    return m_channels.value(key, nullptr);
+}
+
+QList<PlaybackChannel*> PlaybackSidePanel::channels() const {
+    return m_channels.values();
+}
+
+PlaybackChannel* PlaybackSidePanel::activeChannel() const {
+    return m_channels.value(m_activeChannelKey, nullptr);
+}
+
+QString PlaybackSidePanel::activeChannelKey() const {
+    return m_activeChannelKey;
+}
+
+void PlaybackSidePanel::setActiveChannel(const QString& key) {
+    if (key.isEmpty() || !m_channels.contains(key)) {
+        return;
+    }
+    m_activeChannelKey = key;
+    QWidget* page = m_channelPages.value(key, nullptr);
+    if (page) {
+        m_channelStack->setCurrentWidget(page);
+    }
+    const int index = m_channelCombo->findData(key);
+    if (index >= 0 && index != m_channelCombo->currentIndex()) {
+        m_switchingChannel = true;
+        m_channelCombo->setCurrentIndex(index);
+        m_switchingChannel = false;
+    }
+    emit activeChannelChanged(key);
+}
+
+// ── 设备树 ──────────────────────────────────────────────────────────
+
+void PlaybackSidePanel::onDeviceItemDoubleClicked(QVariantMap meta) {
+    const QString type = meta["type"].toString();
+    if (type != "channel" && type != "device") {
+        return;
+    }
+    const QString deviceTag = meta["device_tag"].toString();
+    const QString channelTag = meta["channel_tag"].toString();
+    if (deviceTag.isEmpty() && channelTag.isEmpty()) {
+        return;
+    }
+    emit channelRequested(deviceTag, channelTag, meta["name"].toString());
 }
 
 void PlaybackSidePanel::setRegionTreeNodes(const QList<DeviceTreeNode::Ptr>& nodes) {
@@ -168,223 +209,6 @@ void PlaybackSidePanel::setGroupTreeNodes(const QList<DeviceTreeNode::Ptr>& node
 
 void PlaybackSidePanel::setDeviceTreeNodes(const QList<DeviceTreeNode::Ptr>& nodes) {
     m_deviceTree->setNodes(nodes);
-}
-
-void PlaybackSidePanel::onDeviceItemDoubleClicked(QVariantMap meta) {
-    QString type = meta["type"].toString();
-    if (type == "channel" || type == "device") {
-        QString deviceTag = meta["device_tag"].toString();
-        QString channelTag = meta["channel_tag"].toString();
-        QString name = meta["name"].toString();
-
-        QString deviceId = deviceTag.isEmpty() ? channelTag : deviceTag + "/" + channelTag;
-        m_currentDeviceId = deviceId;
-
-        emit deviceSelected(deviceId, name);
-        loadRecordingsForDate(deviceId, m_selectedDate);
-    }
-}
-
-void PlaybackSidePanel::onDateChanged(const QDate& date) {
-    m_selectedDate = date;
-    emit dateChanged(date);
-
-    int dayStartMs = QDateTime(date, QTime(0, 0, 0)).toMSecsSinceEpoch();
-    int dayEndMs = QDateTime(date, QTime(23, 59, 59)).toMSecsSinceEpoch();
-    m_timeline->setTimeRange(dayStartMs, dayEndMs);
-
-    if (!m_currentDeviceId.isEmpty()) {
-        loadRecordingsForDate(m_currentDeviceId, date);
-    }
-}
-
-void PlaybackSidePanel::onTimeSelected(int64_t timeMs) {
-    emit timeSelected(timeMs);
-}
-
-void PlaybackSidePanel::onPeriodClicked(const RecordingPeriod& period) {
-    emit periodClicked(period);
-}
-
-void PlaybackSidePanel::onFileDoubleClicked(const RecordingFile& file) {
-    emit fileDoubleClicked(file);
-}
-
-void PlaybackSidePanel::loadRecordingsForDate(const QString& deviceId, const QDate& date) {
-    QDateTime startDt = QDateTime(date, QTime(0, 0, 0));
-    QDateTime endDt = QDateTime(date, QTime(23, 59, 59));
-
-    QString endpoint = QString("/api/v1/recordings/files?device_tag=%1&start_time=%2&end_time=%3&limit=50&page=1")
-        .arg(deviceId).arg(startDt.toString(Qt::ISODate)).arg(endDt.toString(Qt::ISODate));
-
-    QFuture<QPair<bool, QJsonObject>> future = QtConcurrent::run([endpoint]() {
-        QJsonObject response;
-        QString error;
-        bool success = ServerApi::instance()->getSync(endpoint, response, error);
-        return QPair<bool, QJsonObject>(success, response);
-    });
-
-    QFutureWatcher<QPair<bool, QJsonObject>>* watcher = new QFutureWatcher<QPair<bool, QJsonObject>>(this);
-    connect(watcher, &QFutureWatcher<QPair<bool, QJsonObject>>::finished, this, [this, watcher, deviceId, date]() {
-        QPair<bool, QJsonObject> result = watcher->result();
-        watcher->deleteLater();
-
-        if (!result.first) {
-            LOG_ERROR("PlaybackSidePanel", QString("loadRecordingsForDate failed"));
-            QMessageBox::warning(this, tr("加载失败"),
-                tr("无法加载录像文件，请检查网络连接。"));
-            return;
-        }
-
-        QList<RecordingPeriod> periods;
-        QList<RecordingFile> files;
-
-        QJsonObject dataObj = result.second["data"].toObject();
-        QJsonArray clipsArray = dataObj["files"].toArray();
-        for (const QJsonValue& v : clipsArray) {
-            QJsonObject obj = v.toObject();
-
-            QString startTimeStr = obj["start_time"].toString();
-            QString endTimeStr = obj["end_time"].toString();
-            QDateTime startDt = QDateTime::fromString(startTimeStr, Qt::ISODate);
-            QDateTime endDt = QDateTime::fromString(endTimeStr, Qt::ISODate);
-            int64_t startTimeMs = startDt.toMSecsSinceEpoch();
-            int64_t endTimeMs = endDt.toMSecsSinceEpoch();
-
-            RecordingPeriod period;
-            period.startTimeMs = startTimeMs;
-            period.endTimeMs = endTimeMs;
-            period.url = obj["play_url"].toString();
-            period.fileId = obj["id"].toString();
-            periods.append(period);
-
-            RecordingFile file;
-            file.id = period.fileId;
-            file.url = period.url;
-            file.startTimeMs = startTimeMs;
-            file.endTimeMs = endTimeMs;
-            file.durationMs = obj["duration_secs"].toVariant().toLongLong() * 1000;
-            QString filePath = obj["file_path"].toString();
-            file.path = filePath;
-            file.filename = QFileInfo(filePath).fileName();
-            file.size = obj["file_size"].toVariant().toLongLong();
-            file.serverTag = obj["server_tag"].toString();
-
-            QString segType = obj["segment_type"].toString();
-            if (segType == "alarm") {
-                file.segmentType = SegmentType::Alarm;
-            } else if (segType == "prebuffer") {
-                file.segmentType = SegmentType::PreBuffer;
-            } else {
-                file.segmentType = SegmentType::Normal;
-            }
-
-            if (obj.contains("alarm_id") && !obj["alarm_id"].isNull()) {
-                file.alarmId = obj["alarm_id"].toVariant().toLongLong();
-            }
-
-            files.append(file);
-        }
-
-        m_timeline->setPeriods(periods);
-        m_fileList->setFiles(files);
-
-        m_hasMore = dataObj["has_more"].toBool();
-        m_currentPage = 1;
-        m_loadMoreBtn->setVisible(m_hasMore);
-
-        LOG_INFO("PlaybackSidePanel", QString("loadRecordingsForDate: deviceId=%1, date=%2, periods=%3, files=%4")
-            .arg(deviceId).arg(date.toString("yyyy-MM-dd")).arg(periods.size()).arg(files.size()));
-    });
-    watcher->setFuture(future);
-}
-
-void PlaybackSidePanel::onLoadRecordingsForDevice(const QString& deviceId) {
-    m_currentDeviceId = deviceId;
-    loadRecordingsForDate(deviceId, m_selectedDate);
-}
-
-void PlaybackSidePanel::onLoadMoreClicked() {
-    if (m_currentDeviceId.isEmpty()) return;
-    int nextPage = m_currentPage + 1;
-    QDateTime startDt = QDateTime(m_selectedDate, QTime(0, 0, 0));
-    QDateTime endDt = QDateTime(m_selectedDate, QTime(23, 59, 59));
-
-    QString endpoint = QString("/api/v1/recordings/files?device_tag=%1&start_time=%2&end_time=%3&limit=50&page=%4")
-        .arg(m_currentDeviceId).arg(startDt.toString(Qt::ISODate)).arg(endDt.toString(Qt::ISODate)).arg(nextPage);
-
-    QFuture<QPair<bool, QJsonObject>> future = QtConcurrent::run([endpoint]() {
-        QJsonObject response;
-        QString error;
-        bool success = ServerApi::instance()->getSync(endpoint, response, error);
-        return QPair<bool, QJsonObject>(success, response);
-    });
-
-    QFutureWatcher<QPair<bool, QJsonObject>>* watcher = new QFutureWatcher<QPair<bool, QJsonObject>>(this);
-    connect(watcher, &QFutureWatcher<QPair<bool, QJsonObject>>::finished, this, [this, watcher, nextPage]() {
-        QPair<bool, QJsonObject> result = watcher->result();
-        watcher->deleteLater();
-
-        if (!result.first) {
-            LOG_ERROR("PlaybackSidePanel", QString("onLoadMoreClicked failed"));
-            QMessageBox::warning(this, tr("加载失败"),
-                tr("无法加载更多录像文件，请检查网络连接。"));
-            return;
-        }
-
-        QJsonObject dataObj = result.second["data"].toObject();
-        bool hasMore = dataObj["has_more"].toBool();
-        m_hasMore = hasMore;
-        m_currentPage = nextPage;
-
-        QJsonArray clipsArray = dataObj["files"].toArray();
-        for (const QJsonValue& v : clipsArray) {
-            QJsonObject obj = v.toObject();
-
-            QString startTimeStr = obj["start_time"].toString();
-            QString endTimeStr = obj["end_time"].toString();
-            QDateTime startDt = QDateTime::fromString(startTimeStr, Qt::ISODate);
-            QDateTime endDt = QDateTime::fromString(endTimeStr, Qt::ISODate);
-            int64_t startTimeMs = startDt.toMSecsSinceEpoch();
-            int64_t endTimeMs = endDt.toMSecsSinceEpoch();
-
-            RecordingPeriod period;
-            period.startTimeMs = startTimeMs;
-            period.endTimeMs = endTimeMs;
-            period.url = obj["play_url"].toString();
-            period.fileId = obj["id"].toString();
-
-            RecordingFile file;
-            file.id = period.fileId;
-            file.url = period.url;
-            file.startTimeMs = startTimeMs;
-            file.endTimeMs = endTimeMs;
-            file.durationMs = obj["duration_secs"].toVariant().toLongLong() * 1000;
-            QString filePath = obj["file_path"].toString();
-            file.path = filePath;
-            file.filename = QFileInfo(filePath).fileName();
-            file.size = obj["file_size"].toVariant().toLongLong();
-            file.serverTag = obj["server_tag"].toString();
-
-            QString segType = obj["segment_type"].toString();
-            if (segType == "alarm") {
-                file.segmentType = SegmentType::Alarm;
-            } else if (segType == "prebuffer") {
-                file.segmentType = SegmentType::PreBuffer;
-            } else {
-                file.segmentType = SegmentType::Normal;
-            }
-
-            if (obj.contains("alarm_id") && !obj["alarm_id"].isNull()) {
-                file.alarmId = obj["alarm_id"].toVariant().toLongLong();
-            }
-
-            m_fileList->addFile(file);
-        }
-
-        m_loadMoreBtn->setVisible(m_hasMore);
-    });
-    watcher->setFuture(future);
 }
 
 }

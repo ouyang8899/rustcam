@@ -3,7 +3,7 @@ use reqwest::Client;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
 use tokio::time::{timeout, Duration as TokioDuration};
-
+use serde::{Deserialize, Serialize};
 /// Timeout of a single API call against a media server.
 pub const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 4;
 

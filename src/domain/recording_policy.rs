@@ -210,6 +210,16 @@ pub struct RecordingFileResponse {
     pub file_size: u64,
     pub segment_type: SegmentType,
     pub alarm_id: Option<i64>,
+    /// 这个文件属于哪个录像任务
+    pub task: Option<crate::domain::recording::RecordingTaskInfo>,
+}
+
+/// 录像文件加上它所属的任务
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordingFileWithTask {
+    #[serde(flatten)]
+    pub file: crate::adapter::media_server::RecordingFile,
+    pub task: Option<crate::domain::recording::RecordingTaskInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

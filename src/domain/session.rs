@@ -58,6 +58,8 @@ pub struct Session {
 
     pub client_ip: Option<String>,
     pub client_type: Option<String>,
+    /// 媒体服务器上的 TCP 连接唯一 ID
+    pub tcp_id: Option<String>,
 
     pub media_server_tag: Option<String>,
     pub protocol: Option<Protocol>,
@@ -82,6 +84,7 @@ impl Session {
             state: SessionState::Initializing,
             client_ip: None,
             client_type: None,
+            tcp_id: None,
             media_server_tag: None,
             protocol: None,
             created_at: now,

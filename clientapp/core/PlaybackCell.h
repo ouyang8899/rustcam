@@ -1,62 +1,60 @@
 #pragma once
 
 #include <QWidget>
-#include <QLabel>
 #include <QString>
-#include <QList>
 #include <QResizeEvent>
 #include "CoreExport.h"
-#include "StreamSource.h"
+
+class QDragEnterEvent;
+class QDragMoveEvent;
+class QDropEvent;
 
 namespace rustcam {
 
-class ReplayPlayer;
-class PlaybackController;
-class PlaybackGroup;
+class PlaybackPlayerWidget;
 
+/// 播放格子：布局里的一个位置，里面放一个可移动的播放器
 class RUSTCAM_CORE_API PlaybackCell : public QWidget {
     Q_OBJECT
 public:
     explicit PlaybackCell(QWidget* parent = nullptr);
-    ~PlaybackCell();
+    ~PlaybackCell() override;
 
     int cellId() const { return m_cellId; }
     void setCellId(int id) { m_cellId = id; }
 
-    const QString& deviceId() const { return m_deviceId; }
+    /// 布局项 id（格子在布局中的位置标识）
+    QString layoutItemId() const { return m_layoutItemId; }
+    void setLayoutItemId(const QString& id) { m_layoutItemId = id; }
 
-    void bindDevice(const QString& deviceId);
-    void loadClips(const QList<Clip>& clips);
-    void setController(PlaybackController* controller);
-    void setGroup(PlaybackGroup* group);
-
-    PlaybackController* controller() const { return m_controller; }
-    PlaybackGroup* group() const { return m_group; }
-    StreamSource* source() const { return m_source; }
+    /// 格子里放的播放器
+    PlaybackPlayerWidget* playerWidget() const { return m_playerWidget; }
+    /// 换播放器（把旧的那个摘下来返回）
+    PlaybackPlayerWidget* takePlayerWidget();
+    void setPlayerWidget(PlaybackPlayerWidget* widget);
 
     void setSelected(bool selected);
 
-    void showNoRecording(int64_t timeMs);
-
 signals:
     void clicked();
-    void cellIdChanged(int oldId, int newId);
-    void deviceBound(const QString& deviceId);
+    /// 播放进度（绝对时间，毫秒），由格子里的播放器转发
     void playbackProgressChanged(int64_t absoluteTimeMs);
+    /// 有播放器被拖到了本格子上（sourceUid 为被拖动播放器的 uid）
+    void playerDropped(const QString& sourceUid);
+    /// 录像文件被拖到了本格子上
+    void recordingDropped(const QString& channelKey, int64_t startTimeMs);
 
 protected:
-    void mousePressEvent(QMouseEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dragMoveEvent(QDragMoveEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
 
 private:
     int m_cellId = -1;
-    QString m_deviceId;
-    ReplayPlayer* m_player;
-    StreamSource* m_source;
-    PlaybackController* m_controller;
-    PlaybackGroup* m_group;
-    QLabel* m_noRecordingLabel;
+    QString m_layoutItemId;
+    PlaybackPlayerWidget* m_playerWidget = nullptr;
     bool m_selected = false;
 };
 

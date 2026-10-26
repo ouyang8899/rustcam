@@ -33,6 +33,7 @@ void PlaybackGroup::clearCells() {
 }
 
 void PlaybackGroup::syncTo(int64_t baseTimeMs) {
+    m_baseTimeMs = baseTimeMs;
     for (StreamSource* cell : m_cells) {
         if (cell->state() != StreamSource::State::Playing) {
             continue;
@@ -49,9 +50,33 @@ void PlaybackGroup::syncTo(int64_t baseTimeMs) {
     }
 }
 
+void PlaybackGroup::seekTo(int64_t baseTimeMs) {
+    m_baseTimeMs = baseTimeMs;
+    for (StreamSource* cell : m_cells) {
+        if (cell->clips().isEmpty()) {
+            continue;
+        }
+        // 越界时 StreamSource::seekTo 会停播并给出「无录像」提示
+        cell->seekTo(baseTimeMs);
+    }
+}
+
 void PlaybackGroup::play() {
     for (StreamSource* cell : m_cells) {
+        if (cell->clips().isEmpty()) {
+            continue;
+        }
+
         if (cell->state() == StreamSource::State::Paused) {
+            cell->play();
+            continue;
+        }
+
+        if (cell->state() == StreamSource::State::Stopped ||
+            cell->state() == StreamSource::State::NoRecording) {
+            if (cell->isInRange(m_baseTimeMs)) {
+                cell->seekTo(m_baseTimeMs);
+            }
             cell->play();
         }
     }
@@ -88,6 +113,9 @@ PlaybackController::~PlaybackController() {
 
 void PlaybackController::setBaseTime(int64_t timeMs) {
     if (m_baseTimeMs == timeMs) {
+        for (PlaybackGroup* group : m_groups) {
+            group->setBaseTime(timeMs);
+        }
         return;
     }
 
@@ -121,6 +149,20 @@ void PlaybackController::onBatchSync() {
         m_syncState = SyncState::Synced;
         emit syncStateChanged(m_syncState);
     }
+}
+
+void PlaybackController::setGroupBaseTime(PlaybackGroup* group, int64_t timeMs) {
+    if (!group) {
+        return;
+    }
+    // 通道之间播放位置互相独立：只同步目标组
+    m_baseTimeMs = timeMs;
+    group->seekTo(timeMs);
+    emit baseTimeChanged(timeMs);
+}
+
+int64_t PlaybackController::groupBaseTime(PlaybackGroup* group) const {
+    return group ? group->baseTimeMs() : 0;
 }
 
 void PlaybackController::addGroup(PlaybackGroup* group) {

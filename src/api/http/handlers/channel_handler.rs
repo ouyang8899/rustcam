@@ -106,7 +106,7 @@ pub async fn get_channel_play_links_handler(
         channel.as_ref().map(|c| c.channel_tag.clone()).unwrap_or_else(|| channel_tag.clone())
     });
 
-    let stream_id = crate::domain::stream::make_stream_key(&device_tag, stream_key.as_str());
+    let stream_id = crate::common::device_utils::format_stream_key(&device_tag, stream_key.as_str());
     let token = state.app.registry.play_service.generate_token(&device.id.to_string()).await?;
     let play_links = state.app.registry.play_service.build_play_links(&device, &token, &stream_id).await;
 

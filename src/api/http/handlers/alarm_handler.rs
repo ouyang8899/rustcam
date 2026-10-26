@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use chrono::{DateTime, Utc};
 use axum::{
     extract::{Path, State, Query},
     Json,
@@ -12,6 +13,15 @@ use crate::domain::alarm::{ Alarm };
 #[derive(Debug, Deserialize)]
 pub struct AlarmQuery {
     pub device_id: Option<i64>,
+    /// 设备标识过滤（客户端回放用，与录像查询口径一致）
+    pub device_tag: Option<String>,
+    /// 通道标识过滤
+    pub channel_tag: Option<String>,
+    /// 报警类型过滤
+    pub alarm_type: Option<String>,
+    /// 时间范围（RFC3339）
+    pub start_time: Option<DateTime<Utc>>,
+    pub end_time: Option<DateTime<Utc>>,
     pub page: Option<usize>,
     pub page_size: Option<usize>,
 }
@@ -19,6 +29,13 @@ pub struct AlarmQuery {
 impl AlarmQuery {
     pub fn limit(&self) -> usize { self.page_size.unwrap_or(20).min(100) }
     pub fn offset(&self) -> usize { self.page.unwrap_or(1).saturating_sub(1) * self.limit() }
+    pub fn device_tag(&self) -> Option<&str> { self.device_tag.as_deref().filter(|s| !s.is_empty()) }
+    pub fn channel_tag(&self) -> Option<&str> { self.channel_tag.as_deref().filter(|s| !s.is_empty()) }
+    pub fn alarm_type(&self) -> Option<&str> { self.alarm_type.as_deref().filter(|s| !s.is_empty()) }
+    pub fn has_filter(&self) -> bool {
+        self.device_tag().is_some() || self.channel_tag().is_some() || self.alarm_type().is_some()
+            || self.start_time.is_some() || self.end_time.is_some()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -39,10 +56,31 @@ pub async fn list_alarms_handler(
     Query(q): Query<AlarmQuery>,
 ) -> Result<Json<ApiResponse<PaginatedAlarms>>, AppError> {
     let registry = &state.app.registry;
-    let alarms = registry.infra.db.list_alarms(q.device_id, q.limit(), q.offset()).await
-        .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
-    let total = registry.infra.db.count_alarms(q.device_id).await
-        .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+    let (alarms, total) = if q.has_filter() {
+        let alarms = registry.infra.db.list_alarms_filtered(
+            q.device_tag(),
+            q.channel_tag(),
+            q.alarm_type(),
+            q.start_time,
+            q.end_time,
+            q.limit(),
+            q.offset(),
+        ).await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        let total = registry.infra.db.count_alarms_filtered(
+            q.device_tag(),
+            q.channel_tag(),
+            q.alarm_type(),
+            q.start_time,
+            q.end_time,
+        ).await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        (alarms, total)
+    } else {
+        let alarms = registry.infra.db.list_alarms(q.device_id, q.limit(), q.offset()).await
+            .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        let total = registry.infra.db.count_alarms(q.device_id).await
+            .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        (alarms, total)
+    };
 
     Ok(Json(ApiResponse::success(PaginatedAlarms {
         items: alarms,

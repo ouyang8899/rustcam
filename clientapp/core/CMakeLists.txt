@@ -25,10 +25,17 @@ set(CORE_LIB_SOURCES
     StreamSource.cpp
     PlaybackController.cpp
     PlaybackCell.cpp
+    PlaybackPlayerWidget.cpp
     ReplayPlayerContainer.cpp
     ReplayNavBar.cpp
     TimelineWidget.cpp
     RecordingFileListWidget.cpp
+    FileDownloader.cpp
+    BookmarkStore.cpp
+    ClipExporter.cpp
+    ClipExportDialog.cpp
+    RecordingApi.cpp
+    PlaybackChannel.cpp
     PlaybackSidePanel.cpp
     MapView.cpp
     MapSidePanel.cpp
@@ -66,10 +73,18 @@ set(CORE_LIB_HEADERS
     StreamSource.h
     PlaybackController.h
     PlaybackCell.h
+    PlaybackPlayerWidget.h
     ReplayPlayerContainer.h
     ReplayNavBar.h
     TimelineWidget.h
     RecordingFileListWidget.h
+    FileDownloader.h
+    BookmarkStore.h
+    ClipExporter.h
+    ClipExportDialog.h
+    RecordingTypes.h
+    RecordingApi.h
+    PlaybackChannel.h
     PlaybackSidePanel.h
     MapView.h
     MapSidePanel.h
@@ -158,6 +173,10 @@ target_include_directories(rustcam-core PRIVATE
 
 target_link_libraries(rustcam-core PRIVATE
     ${CURL_LIBRARY}
+    ${FFMPEG_LIB_DIR}/avformat.lib
+    ${FFMPEG_LIB_DIR}/avcodec.lib
+    ${FFMPEG_LIB_DIR}/avutil.lib
+    ${FFMPEG_LIB_DIR}/swscale.lib
     ${OPENSSL_SSL_LIBRARY}
     ${OPENSSL_CRYPTO_LIBRARY}
     ${SQLITE3_LIBRARY}

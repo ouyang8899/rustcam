@@ -335,56 +335,89 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
 
         Ok(resp.data.map(|d| d.status == Some(1)).unwrap_or(false))
     }
+    /// 列出媒体服务器上的录像文件。
+    ///
+    /// ZLMediaKit 没有一次列全的接口，只能按“月份 -> 日期目录 -> 文件”两级展开：
+    /// `period` 传 `2026-10` 返回日期目录，传 `2026-10-25` 返回这一天的 mp4 文件名。
     async fn list_recordings(&self, app: &str, stream_key: &str) -> anyhow::Result<Vec<RecordingFile>> {
         #[derive(Deserialize)]
         struct Resp {
             code: i32,
-            data: Option<Vec<FileEntry>>,
+            data: Option<RecordDir>,
         }
         #[derive(Deserialize)]
-        struct FileEntry {
-            start_time: Option<f64>,
-            file_path: Option<String>,
-            file_size: Option<u64>,
-            time_len: Option<f64>,
+        struct RecordDir {
+            #[serde(rename = "rootPath")]
+            root_path: Option<String>,
+            paths: Option<Vec<String>>,
         }
 
-        let zero = "0".to_string();
-        let max_time = "9999999999".to_string();
+        let vhost = "__defaultVhost__".to_string();
         let app_str = app.to_string();
         let stream_str = stream_key.to_string();
-        let vhost = "__defaultVhost__".to_string();
+
+        // let query = |period: String| {
+        //     //let period = period.to_string().clone();
+        //     let params: Vec<(&str, &String)> = vec![
+        //         ("vhost", &vhost),
+        //         ("app", &app_str),
+        //         ("stream", &stream_str),
+        //         ("period", &period),
+        //     ];
+        //     self.client.get_with_params("/index/api/getMP4RecordFile", &params)
+        // };
+
+        // 当前月份（媒体服务器本地时间）
+        let month = chrono::Local::now().format("%Y-%m").to_string();
+        //let resp: Resp = query(month).await?;
+
         let params: Vec<(&str, &String)> = vec![
             ("vhost", &vhost),
             ("app", &app_str),
             ("stream", &stream_str),
-            ("start_time", &zero),
-            ("end_time", &max_time),
+            ("period", &month),
         ];
-        let resp: Resp = self.client.get_with_params("/index/api/getRecordFileList", &params).await?;
+        let resp: Resp = self.client.get_with_params("/index/api/getMP4RecordFile", &params).await?;
+
         if resp.code != 0 {
             return Ok(vec![]);
         }
-        let files = resp.data.unwrap_or_default();
-        Ok(files
-            .into_iter()
-            .filter_map(|f| {
-                let path = f.file_path?;
-                let filename = std::path::Path::new(&path)
-                    .file_name()?
-                    .to_str()?
-                    .to_string();
-                Some(RecordingFile {
-                    filename,
-                    path,
-                    size: f.file_size.unwrap_or(0),
-                    duration_secs: f.time_len.unwrap_or(0.0) as u64,
-                    created_at: f.start_time.unwrap_or(0.0) as i64,
+        let Some(root) = resp.data else {
+            return Ok(vec![]);
+        };
+
+        let mut files = Vec::new();
+        for day in root.paths.unwrap_or_default() {
+            let params: Vec<(&str, &String)> = vec![
+                ("vhost", &vhost),
+                ("app", &app_str),
+                ("stream", &stream_str),
+                ("period", &day),
+            ];
+            let resp: Resp = self.client.get_with_params("/index/api/getMP4RecordFile", &params).await?;
+            if resp.code != 0 {
+                continue;
+            }
+            let Some(day_dir) = resp.data else {
+                continue;
+            };
+            let dir = day_dir.root_path.unwrap_or_default();
+            for name in day_dir.paths.unwrap_or_default() {
+                let created_at = chrono::Local::now().timestamp();
+
+                files.push(RecordingFile {
+                    filename: name.clone(),
+                    path: format!("{}{}", dir, name),
+                    size: 0,
+                    duration_secs: 0,
+                    created_at,
                     stream_key: Some(stream_key.to_string()),
                     media_server_name: Some(self.config.name.clone()),
-                })
-            })
-            .collect())
+                });
+            }
+        }
+
+        Ok(files)
     }
 
     async fn open_rtp_server(&self, stream_id: &str, port: u16, transport: RtpTransport) -> anyhow::Result<(u16, String)> {

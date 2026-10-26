@@ -8,7 +8,7 @@ use crate::api::response::ApiResponse;
 use crate::api::http::handlers::device_handler::PaginatedResponse;
 use crate::api::state::FullState;
 use crate::error::AppError;
-use crate::domain::recording::{Recording, RecordingFormat, CreateRecordingRequest};
+use crate::domain::recording::{Recording, RecordingFormat, RecordingType, CreateRecordingRequest};
 
 #[derive(Debug, Deserialize)]
 pub struct PaginationQuery {
@@ -112,6 +112,8 @@ pub async fn create_recording_handler(
         output_path: req.output_path,
         labels: req.labels,
         pre_record_secs: req.pre_record_secs,
+        recording_type: Some(RecordingType::Manual),
+        alarm_id: None,
     };
 
     let media_server = device.media_server_tag.clone().unwrap_or_else(|| "auto".to_string());
@@ -182,14 +184,14 @@ pub async fn recording_stats_handler(
 pub async fn recording_files_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
-) -> Result<Json<ApiResponse<Vec<crate::adapter::media_server::RecordingFile>>>, AppError> {
+) -> Result<Json<ApiResponse<Vec<crate::domain::recording_policy::RecordingFileWithTask>>>, AppError> {
     let files = state.app.registry.recording_service.list_recorded_files(id).await?;
     Ok(Json(ApiResponse::success(files)))
 }
 
 pub async fn all_recording_files_handler(
     State(state): State<Arc<FullState>>,
-) -> Result<Json<ApiResponse<Vec<crate::adapter::media_server::RecordingFile>>>, AppError> {
+) -> Result<Json<ApiResponse<Vec<crate::domain::recording_policy::RecordingFileWithTask>>>, AppError> {
     let registry = &state.app.registry;
     let all_recordings = registry.recording_service.list_recordings_paginated(1000, 0).await?;
     let mut all_files = Vec::new();
@@ -198,6 +200,6 @@ pub async fn all_recording_files_handler(
             all_files.extend(files);
         }
     }
-    all_files.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    all_files.sort_by(|a, b| b.file.created_at.cmp(&a.file.created_at));
     Ok(Json(ApiResponse::success(all_files)))
 }

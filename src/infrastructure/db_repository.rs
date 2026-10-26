@@ -6,7 +6,7 @@ pub const DEFAULT_MAX_CONNECTIONS: u64 = 50;
   use rbatis::rbdc::db::Driver as RbdcDriver;
   use rbatis::RBatis;
 use chrono::Utc;
-
+use crate::common::device_utils::{stream_key_to_cache_key,format_cache_key,format_cache_key_opt};
 use crate::domain::server::Server;
 use crate::domain::{Alarm, CreateAlarmRequest, Channel, Device, DeviceStatus, Protocol, Recording, Session, Stream};
 use crate::domain::device_group::{CreateGroupRequest, DeviceGroup, DeviceGroupNode, UpdateGroupRequest};
@@ -17,18 +17,19 @@ use crate::error::AppError;
 use crate::error::Result;
 use crate::sql_mappers::{
     device_select_all, server_select_all, session_select_all, session_select_paginated, session_count, stream_select_all, stream_select_paginated, stream_count,
-    recording_select_paginated, recording_count, recording_select_by_id, recording_select_by_device_tag, recording_select_active, device_insert, device_update,
+    recording_select_paginated, recording_count, recording_select_by_id, recording_select_by_device_tag, recording_select_active, recording_select_active_by_stream, device_insert, device_update,
     device_delete_by_device_tag, device_select_by_parent_device_tag,
     device_select_paginated, device_count,
     group_select_all, group_insert, group_update, group_delete,
     region_select_all,
     server_insert, server_update, server_delete_by_id, server_select_by_tag,
-    session_insert, session_delete_by_id, session_update_state, session_delete_unfinished,
+    session_insert, session_delete_by_id, session_update_state, session_update_states_by_stream, session_delete_unfinished,
     stream_insert, stream_update, stream_select_by_token, stream_delete_duplicates,
     stream_reset_state, stream_delete_others,
     recording_insert, recording_update, recording_delete_by_id, recording_delete_stale_errors, recording_update_start_result,
     recording_select_pending, recording_select_pending_by_stream,
     alarm_insert, alarm_select_by_device, alarm_select_all, alarm_select_by_id,
+    alarm_select_filtered, alarm_count_filtered,
     alarm_count_by_device, alarm_count_all, alarm_mark_processed,
     channel_insert, channel_update, channel_select_all, channel_select_paginated, channel_count,
     channel_select_by_device_tag, channel_select_by_device_tag_and_channel_tag,
@@ -40,7 +41,7 @@ use crate::sql_mappers::{
     policy_select_by_device_tag, policy_select_by_alarm_triggered,
     policy_select_paginated, policy_count,
     time_window_insert, time_window_delete_by_policy_id, time_window_select_by_policy_id,
-    segment_insert,  segment_select_by_id, segment_select_paginated,
+    segment_insert,  segment_select_by_id, segment_select_paginated, segment_select_by_recording_id,
     segment_count_by_device_channel_time, segment_select_filtered_paginated,
     segment_count_filtered,
 };
@@ -61,21 +62,7 @@ pub struct DbRepository {
     pub regions_cache: Arc<DashMap<String, Region>>,
 }
 
-fn stream_key_to_cache_key(stream_key: &str) -> String {
-    stream_key.replace('_', "/")
-}
 
-fn cache_key_to_stream_key(cache_key: &str) -> String {
-    cache_key.replace('/', "_")
-}
-
-fn format_cache_key(device_tag: Option<&str>, channel_tag: Option<&str>) -> String {
-    format!(
-        "{}/{}",
-        device_tag.unwrap_or_default(),
-        channel_tag.unwrap_or_default()
-    )
-}
 
 impl DbRepository {
 
@@ -100,14 +87,18 @@ impl DbRepository {
         Ok(())
     }
 
-    /// 幂等的表结构迁移：新版本需要的列/索引不存在时自动补上。
-    /// 部署时不需要手工执行迁移脚本（sql/migrate_*.py 仅作为备份）。
     async fn ensure_schema(&self) {
         let statements = [
             "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ",
             "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS max_duration_secs INTEGER",
+            "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS recording_type VARCHAR(32) NOT NULL DEFAULT 'timed'",
+            "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS alarm_id BIGINT",
+            "ALTER TABLE alarms ADD COLUMN IF NOT EXISTS channel_tag VARCHAR(64)",
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS tcp_id VARCHAR(64)",
             "CREATE INDEX IF NOT EXISTS idx_recordings_next_retry ON recordings(state, next_retry_at)",
+            "CREATE INDEX IF NOT EXISTS idx_recordings_recording_type ON recordings(device_tag, channel_tag, recording_type)",
+            "CREATE INDEX IF NOT EXISTS idx_alarms_channel_time ON alarms(channel_tag, alarm_time DESC)",
         ];
         for sql in statements {
             if let Err(e) = self.rb.exec(sql, vec![]).await {
@@ -172,9 +163,6 @@ impl DbRepository {
     }
 
     pub async fn load_caches(&self) -> anyhow::Result<()> {
-        // The rows of the previous process describe a runtime state that does
-        // not exist anymore. They have to be cleaned up before the caches are
-        // filled, otherwise the dashboard shows stale streams and sessions.
         self.cleanup_stale_runtime_state().await;
 
         let devices = device_select_all(&self.rb)
@@ -193,7 +181,7 @@ impl DbRepository {
             .map_err(|e| anyhow::anyhow!("load channels: {}", e))?;
         for row in channels {
             if let Ok(channel) = Channel::try_from(row) {
-                let key = format_cache_key(Some(&channel.device_tag), Some(&channel.channel_tag));
+                let key = format_cache_key(&channel.device_tag, &channel.channel_tag);
                 self.channels_cache.insert(key, channel);
             }
         }
@@ -219,7 +207,7 @@ impl DbRepository {
             .map_err(|e| anyhow::anyhow!("load streams: {}", e))?;
         for row in streams {
             if let Ok(stream) = Stream::try_from(row) {
-                let key = format_cache_key(stream.device_tag.as_deref(), stream.channel_tag.as_deref());
+                let key = format_cache_key_opt(stream.device_tag.as_deref(), stream.channel_tag.as_deref());
                 self.streams_cache.insert(key, stream);
             }
         }
@@ -231,10 +219,6 @@ impl DbRepository {
         Ok(())
     }
 
-    /// Removes the runtime state the previous process left behind: duplicated
-    /// stream rows, stream states of a process that is gone and sessions that
-    /// never ended. Without this the dashboard counts and lists streams and
-    /// sessions that do not exist anymore.
     async fn cleanup_stale_runtime_state(&self) {
         if let Err(e) = stream_delete_duplicates(&self.rb).await {
             tracing::error!("cleanup stale streams: {}", e);
@@ -654,7 +638,7 @@ impl DbRepository {
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
 
         let id = result.last_insert_id.as_i64().unwrap_or(0);
-        let key = format_cache_key(device_tag.as_deref(), channel_tag.as_deref());
+        let key = format_cache_key_opt(device_tag.as_deref(), channel_tag.as_deref());
         let cache = self.channels_cache.clone();
         tokio::spawn(async move {
             cache.insert(key, channel_clone);
@@ -697,7 +681,7 @@ impl DbRepository {
             Some(RbatisDateTime::from_timestamp_millis(chrono::Utc::now().timestamp_millis())),
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
 
-        let key = format_cache_key(Some(&device_tag), Some(&channel_tag));
+        let key = format_cache_key(&device_tag, &channel_tag);
         let cache = self.channels_cache.clone();
         tokio::spawn(async move {
             cache.insert(key, channel_clone);
@@ -786,7 +770,7 @@ impl DbRepository {
     pub async fn delete_channel(&self, device_tag: &str, channel_tag: &str) -> Result<()> {
         channel_delete_by_device_tag_and_channel_tag(&self.rb, device_tag, channel_tag)
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
-        let key = format_cache_key(Some(device_tag), Some(channel_tag));
+        let key = format_cache_key(device_tag, channel_tag);
         self.channels_cache.remove(&key);
         Ok(())
     }
@@ -991,14 +975,14 @@ impl DbRepository {
         &self.sessions_cache
     }
 
-pub async fn create_session(&self, session: &Session) -> Result<()> {
+    pub async fn create_session(&self, session: &Session) -> Result<i64> {
         let session_type_str = session.session_type.to_string();
         let state_str = session.state.to_string();
         let protocol_str = session.protocol.as_ref().map(|p| p.to_string());
         let expires_rb = session.expires_at.map(|dt| RbatisDateTime::from_timestamp_millis(dt.timestamp_millis()));
         let created_at_rb = RbatisDateTime::from_timestamp_millis(session.created_at.timestamp_millis());
         let last_activity_rb = RbatisDateTime::from_timestamp_millis(session.last_activity.timestamp_millis());
-        session_insert(
+        let id = session_insert(
             &self.rb,
             Some(&session_type_str),
             session.device_tag.as_deref(),
@@ -1007,6 +991,7 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
             Some(&state_str),
             session.client_ip.as_deref(),
             session.client_type.as_deref(),
+            session.tcp_id.as_deref(),
             session.media_server_tag.as_deref(),
             protocol_str.as_deref(),
             Some(created_at_rb),
@@ -1015,7 +1000,7 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
             Some(session.bytes_sent as i64),
             Some(session.bytes_received as i64),
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
-        Ok(())
+        id.ok_or_else(|| AppError::Internal("session insert returned no id".to_string()))
     }
 
     pub async fn list_sessions_paginated(&self, search: Option<&str>, state: Option<&str>, limit: usize, offset: usize) -> Vec<Session> {
@@ -1089,8 +1074,6 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
         stream.device_tag = device_tag;
         stream.channel_tag = channel_tag;
 
-        // A stream is described by exactly one row: the rows of the previous
-        // runs of the same stream are removed.
         if let (Some(dt), Some(ct)) = (
             stream.device_tag.as_deref(),
             stream.channel_tag.as_deref(),
@@ -1100,19 +1083,35 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
             }
         }
 
-        let cache_key = format_cache_key(stream.device_tag.as_deref(), stream.channel_tag.as_deref());
+        let cache_key = format_cache_key_opt(stream.device_tag.as_deref(), stream.channel_tag.as_deref());
         self.streams_cache.insert(cache_key, stream);
         Ok(())
     }
 
-    /// Persists the state of a session, the cache alone would lose it on the
-    /// next restart.
     pub async fn update_session_state(&self, session: &Session) -> Result<()> {
         session_update_state(
             &self.rb,
             &session.state.to_string(),
             RbatisDateTime::from_timestamp_millis(session.last_activity.timestamp_millis()),
             session.id,
+        )
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+        Ok(())
+    }
+
+    pub async fn update_session_states_by_stream(
+        &self,
+        device_tag: &str,
+        channel_tag: &str,
+        state: crate::domain::SessionState,
+    ) -> Result<()> {
+        session_update_states_by_stream(
+            &self.rb,
+            &state.to_string(),
+            RbatisDateTime::from_timestamp_millis(chrono::Utc::now().timestamp_millis()),
+            device_tag,
+            channel_tag,
         )
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -1137,7 +1136,7 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
     pub async fn update_stream(&self, stream: &Stream) -> Result<()> {
         let device_tag = stream.device_tag.as_ref().filter(|s| !s.is_empty()).map(|s| s.to_lowercase());
         let channel_tag = stream.channel_tag.as_ref().filter(|s| !s.is_empty()).map(|s| s.to_lowercase());
-        let cache_key = format_cache_key(device_tag.as_deref(), channel_tag.as_deref());
+        let cache_key = format_cache_key_opt(device_tag.as_deref(), channel_tag.as_deref());
 
         stream_update(
             &self.rb,
@@ -1197,7 +1196,7 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
         let cache = self.streams_cache.clone();
         rows.into_iter().filter_map(|row| {
             let mut stream = Stream::try_from(row).ok()?;
-            let cache_key = format_cache_key(stream.device_tag.as_deref(), stream.channel_tag.as_deref());
+            let cache_key = format_cache_key_opt(stream.device_tag.as_deref(), stream.channel_tag.as_deref());
             if let Some(cached) = cache.get(&cache_key) {
                 stream.state = cached.state;
                 stream.last_keepalive_at = cached.last_keepalive_at;
@@ -1242,6 +1241,8 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
             serde_json::to_string(&recording.labels).ok(),
             recording.filename.clone(),
             recording.max_duration_secs.map(|v| v as i32),
+            &recording.recording_type.to_string(),
+            recording.alarm_id,
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
 
         result.into_iter().next().map(|r| r.id)
@@ -1264,12 +1265,12 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
             recording.error_message.clone(),
             serde_json::to_string(&recording.labels).ok(),
             recording.filename.clone(),
+            Some(recording.recording_type.to_string()),
             recording.id,
         ).await.map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(())
     }
 
-    /// 写入一次“启动尝试”的结果（状态、重试信息、输出路径等）。
     pub async fn update_recording_start_result(&self, recording: &Recording) -> Result<()> {
         recording_update_start_result(
             &self.rb,
@@ -1293,7 +1294,6 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
         Ok(())
     }
 
-    /// 所有待启动（等待设备/流就绪）的录像任务。
     pub async fn list_pending_recordings(&self) -> Result<Vec<Recording>> {
         let rows = recording_select_pending(&self.rb)
             .await
@@ -1301,13 +1301,13 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
         Ok(rows.into_iter().filter_map(|r| Recording::try_from(r).ok()).collect())
     }
 
-    /// 某个流上待启动的录像任务。
     pub async fn find_pending_recording_by_stream(
         &self,
         device_tag: &str,
         channel_tag: &str,
+        recording_type: &str,
     ) -> Result<Option<Recording>> {
-        let rows = recording_select_pending_by_stream(&self.rb, device_tag, channel_tag)
+        let rows = recording_select_pending_by_stream(&self.rb, device_tag, channel_tag, recording_type)
             .await
             .map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(rows.into_iter().find_map(|r| Recording::try_from(r).ok()))
@@ -1317,7 +1317,6 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
         self.list_recordings_filtered(None, None, None, None, limit, offset).await
     }
 
-    /// 分页查询录像任务，过滤条件全部下推到 SQL。
     pub async fn list_recordings_filtered(
         &self,
         device_tag: Option<&str>,
@@ -1346,7 +1345,6 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
         self.count_recordings_filtered(None, None, None, None).await
     }
 
-    /// 录像任务总数（与分页查询使用相同的过滤条件）。
     pub async fn count_recordings_filtered(
         &self,
         device_tag: Option<&str>,
@@ -1361,15 +1359,19 @@ pub async fn create_session(&self, session: &Session) -> Result<()> {
     }
 
   pub async fn find_active_recording_by_stream_key(&self, stream_key: &str) -> Result<Option<Recording>> {
-      let rows = recording_select_active(&self.rb)
-          .await.map_err(|e| AppError::Internal(e.to_string()))?;
-      let recording = rows.into_iter()
-          .filter_map(|r| Recording::try_from(r).ok())
-          .find(|r| r.stream_key() == stream_key);
-      Ok(recording)
+      Ok(self.find_active_recordings_by_stream_key(stream_key).await?.into_iter().next())
   }
 
-  /// 列出所有处于活动状态（starting/recording）的录制任务
+  /// 同一个流上可能有多个并行的录像任务(定时/报警)，它们共享媒体服务器上的同一份录制。
+  pub async fn find_active_recordings_by_stream_key(&self, stream_key: &str) -> Result<Vec<Recording>> {
+      let Some((device_tag, channel_tag)) = crate::common::device_utils::parse_stream_key_loose(stream_key) else {
+          return Ok(Vec::new());
+      };
+      let rows = recording_select_active_by_stream(&self.rb, &device_tag, &channel_tag)
+          .await.map_err(|e| AppError::Internal(e.to_string()))?;
+      Ok(rows.into_iter().filter_map(|r| Recording::try_from(r).ok()).collect())
+  }
+
   pub async fn list_active_recordings(&self) -> Result<Vec<Recording>> {
       let rows = recording_select_active(&self.rb)
           .await.map_err(|e| AppError::Internal(e.to_string()))?;
@@ -1671,6 +1673,7 @@ impl TryFrom<SessionRow> for Session {
             state,
             client_ip: row.client_ip,
             client_type: row.client_type,
+            tcp_id: row.tcp_id,
             media_server_tag: row.media_server_tag,
             protocol,
             created_at,
@@ -1689,6 +1692,7 @@ impl DbRepository {
             &self.rb,
             alarm.device_id,
             &alarm.device_tag,
+            alarm.channel_tag.as_deref(),
             &alarm.alarm_type,
             alarm_time,
             alarm.alarm_method.unwrap_or(1),
@@ -1711,6 +1715,49 @@ impl DbRepository {
                 .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?
         };
         Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
+    pub async fn list_alarms_filtered(
+        &self,
+        device_tag: Option<&str>,
+        channel_tag: Option<&str>,
+        alarm_type: Option<&str>,
+        start_time: Option<chrono::DateTime<Utc>>,
+        end_time: Option<chrono::DateTime<Utc>>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<Alarm>> {
+        let start_rb = start_time.map(|t| RbatisDateTime::from_timestamp_millis(t.timestamp_millis()));
+        let end_rb = end_time.map(|t| RbatisDateTime::from_timestamp_millis(t.timestamp_millis()));
+        let rows = alarm_select_filtered(
+            &self.rb,
+            device_tag,
+            channel_tag,
+            alarm_type,
+            start_rb,
+            end_rb,
+            limit as i64,
+            offset as i64,
+        )
+        .await
+        .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
+    pub async fn count_alarms_filtered(
+        &self,
+        device_tag: Option<&str>,
+        channel_tag: Option<&str>,
+        alarm_type: Option<&str>,
+        start_time: Option<chrono::DateTime<Utc>>,
+        end_time: Option<chrono::DateTime<Utc>>,
+    ) -> Result<i64> {
+        let start_rb = start_time.map(|t| RbatisDateTime::from_timestamp_millis(t.timestamp_millis()));
+        let end_rb = end_time.map(|t| RbatisDateTime::from_timestamp_millis(t.timestamp_millis()));
+        let count = alarm_count_filtered(&self.rb, device_tag, channel_tag, alarm_type, start_rb, end_rb)
+            .await
+            .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(count)
     }
 
     pub async fn count_alarms(&self, device_id: Option<i64>) -> Result<i64> {
@@ -1916,6 +1963,42 @@ impl DbRepository {
             .ok_or_else(|| AppError::Internal("Failed to insert recording segment".to_string()))
     }
 
+    /// 录像任务的信息：外部应用拿到录像文件时需要知道它属于哪个任务
+    pub async fn recording_task_infos(
+        &self,
+        ids: &[i64],
+    ) -> Result<std::collections::HashMap<i64, crate::domain::recording::RecordingTaskInfo>> {
+        let mut out = std::collections::HashMap::new();
+        for id in ids {
+            if out.contains_key(id) {
+                continue;
+            }
+            let Some(recording) = self.get_recording(*id).await? else {
+                continue;
+            };
+            let mut info = recording.task_info();
+            if let Some(alarm_id) = recording.alarm_id {
+                if let Ok(Some(alarm)) = self.get_alarm(alarm_id).await {
+                    info.alarm_type = Some(alarm.alarm_type);
+                    info.alarm_time = Some(alarm.alarm_time);
+                }
+            }
+            out.insert(*id, info);
+        }
+        Ok(out)
+    }
+
+    /// 一个录像任务下的所有文件分段
+    pub async fn list_recording_segments_by_recording_id(
+        &self,
+        recording_id: i64,
+    ) -> Result<Vec<crate::domain::recording_policy::RecordingSegment>> {
+        let rows = segment_select_by_recording_id(&self.rb, recording_id)
+            .await
+            .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+        Ok(rows.into_iter().filter_map(|r| crate::domain::recording_policy::RecordingSegment::try_from(r).ok()).collect())
+    }
+
     pub async fn list_recording_segments_paginated(
         &self,
         device_tag: &str,
@@ -1964,7 +2047,6 @@ impl DbRepository {
         Ok(count)
     }
 
-    /// 分页查询录像文件，所有过滤条件都是可选的。
     #[allow(clippy::too_many_arguments)]
     pub async fn list_recording_segments_filtered_paginated(
         &self,
@@ -1993,7 +2075,6 @@ impl DbRepository {
         Ok(rows.into_iter().filter_map(|r| crate::domain::recording_policy::RecordingSegment::try_from(r).ok()).collect())
     }
 
-    /// 录像文件总数（与分页查询使用相同的过滤条件）。
     #[allow(clippy::too_many_arguments)]
     pub async fn count_recording_segments_filtered(
         &self,
@@ -2018,7 +2099,6 @@ impl DbRepository {
         Ok(count)
     }
 
-    /// 分页查询录制策略，过滤条件全部下推到 SQL。
     pub async fn list_recording_policies_paginated(
         &self,
         device_tag: Option<&str>,
@@ -2036,7 +2116,6 @@ impl DbRepository {
         Ok(rows.into_iter().filter_map(|r| crate::domain::recording_policy::RecordingPolicy::try_from(r).ok()).collect())
     }
 
-    /// 录制策略总数（与分页查询使用相同的过滤条件）。
     pub async fn count_recording_policies(
         &self,
         device_tag: Option<&str>,

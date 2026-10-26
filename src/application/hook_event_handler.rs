@@ -41,7 +41,8 @@ impl HookEventHandler {
                             SignalEvent::HookPublish { .. } |
                             SignalEvent::HookUnpublish { .. } |
                             SignalEvent::HookStreamUpdate { .. } |
-                            SignalEvent::HookStreamChanged { .. }) {
+                            SignalEvent::HookStreamChanged { .. } |
+                            SignalEvent::HookRecordDone { .. }) {
                             self.handle_event(&event).await;
                         }
                     }
@@ -58,14 +59,14 @@ impl HookEventHandler {
 
     async fn handle_event(&self, event: &SignalEvent) {
         match event {
-            SignalEvent::HookPlay { media_server_tag, stream_id, client_ip } => {
-                self.handle_hook_play(media_server_tag, stream_id, client_ip.clone()).await;
+            SignalEvent::HookPlay { media_server_tag, stream_id, client_ip, app, tcp_id } => {
+                self.handle_hook_play(media_server_tag, stream_id, client_ip.clone(), app.as_deref(), tcp_id.as_deref()).await;
             }
             SignalEvent::HookPublish { media_server_tag, stream_id, client_ip, device_tag, channel_tag } => {
                 self.handle_hook_publish(media_server_tag, stream_id, client_ip.clone(), device_tag.clone(), channel_tag.clone()).await;
             }
-            SignalEvent::HookUnpublish { media_server_tag, stream_id } => {
-                self.handle_hook_unpublish(media_server_tag, stream_id).await;
+            SignalEvent::HookUnpublish { media_server_tag, stream_id, app, tcp_id } => {
+                self.handle_hook_unpublish(media_server_tag, stream_id, app.as_deref(), tcp_id.as_deref()).await;
             }
             SignalEvent::HookStreamUpdate { media_server_tag, stream_id, regist, reader_count, total_reader_count, bytes_speed } => {
                 self.handle_hook_stream_update(media_server_tag, stream_id, *regist, *reader_count, *total_reader_count, *bytes_speed).await;
@@ -73,14 +74,45 @@ impl HookEventHandler {
             SignalEvent::HookStreamChanged { media_server_tag, app: _, stream_id, regist } => {
                 self.handle_hook_stream_changed(media_server_tag, stream_id, *regist).await;
             }
+            SignalEvent::HookRecordDone { media_server_tag, stream_id, app, file_path, file_size, time_len, url, start_time, file_name } => {
+                self.handle_hook_record_done(
+                    media_server_tag,
+                    stream_id,
+                    app,
+                    file_path.as_deref(),
+                    *file_size,
+                    *time_len,
+                    url.as_deref(),
+                    *start_time,
+                    file_name.as_deref(),
+                ).await;
+            }
             _ => {}
         }
     }
 
-    async fn handle_hook_play(&self, media_server_tag: &str, stream_id: &str, client_ip: Option<String>) {
+    async fn handle_hook_play(&self, media_server_tag: &str, stream_id: &str, client_ip: Option<String>, app: Option<&str>, tcp_id: Option<&str>) {
 
         let stream_key = stream_id;
-        if let Some(mut s) = self.find_stream_by_stream_key(stream_key).await {
+        let stream = self.find_stream_by_app_and_key(stream_key, app).await;
+
+        // 同一条 TCP 连接只会有一条播放会话：RTSP 走专属鉴权(on_rtsp_auth)时
+        // 不会触发 on_play，两处都要能建会话，但不能重复建
+        if let Some(tcp_id) = tcp_id {
+            let existing = self.db.sessions_cache()
+                .iter()
+                .find(|s| s.tcp_id.as_deref() == Some(tcp_id) && s.state != SessionState::Terminated)
+                .map(|s| s.value().id);
+            if let Some(existing_id) = existing {
+                tracing::debug!(
+                    "[HookEventHandler] HookPlay: session {} already tracks connection {}",
+                    existing_id, tcp_id
+                );
+                return;
+            }
+        }
+
+        if let Some(mut s) = stream.clone() {
             s.increment_viewers();
             if let Err(e) = self.db.update_stream(&s).await {
                 tracing::warn!("[HookEventHandler] HookPlay: failed to update stream viewers: {}", e);
@@ -90,20 +122,28 @@ impl HookEventHandler {
         let mut session = Session::new(SessionType::Play, 0);
         session.state = SessionState::Active;
         session.client_ip = client_ip;
+        session.tcp_id = tcp_id.map(|s| s.to_string());
         session.media_server_tag = Some(media_server_tag.to_string());
 
-        if let Some(stream) = self.find_stream_by_stream_key(stream_key).await {
+        if let Some(ref stream) = stream {
             session.device_tag = stream.device_tag.clone();
             session.channel_tag = stream.channel_tag.clone();
         }
         session.refresh_expiry(self.session_expiry_secs);
 
-        if let Err(e) = self.db.create_session(&session).await {
-            tracing::error!("[HookEventHandler] HookPlay: failed to create session: {}", e);
-            return;
+        match self.db.create_session(&session).await {
+            Ok(id) => {
+                session.id = id;
+            }
+            Err(e) => {
+                tracing::error!("[HookEventHandler] HookPlay: failed to create session: {}", e);
+                return;
+            }
         }
 
         self.db.sessions_cache().insert(session.id, session);
+
+        tracing::debug!("[HookEventHandler] HookPlay: app={:?} stream={} tcp_id={:?}", app, stream_key, tcp_id);
     }
 
     async fn handle_hook_publish(&self, media_server_tag: &str, stream_id: &str, _client_ip: Option<String>, device_tag_from_params: Option<String>, channel_tag_from_params: Option<String>) {
@@ -111,7 +151,7 @@ impl HookEventHandler {
         let (device_tag, channel_tag) = if let (Some(dt), Some(ct)) = (&device_tag_from_params, &channel_tag_from_params) {
             (dt.clone(), ct.clone())
         } else {
-            crate::domain::parse_stream_key(stream_id)
+            crate::common::device_utils::parse_stream_key(stream_id)
                 .unwrap_or_else(|| (stream_id.to_string(), stream_id.to_string()))
         };
 
@@ -132,7 +172,7 @@ impl HookEventHandler {
             .map(|d| d.app.clone().unwrap_or_else(|| "live".to_string()))
             .unwrap_or_else(|| "live".to_string());
 
-        let stream_key = format!("{}/{}", device_tag, channel_tag);
+        let stream_key = crate::common::device_utils::format_stream_key(&device_tag, &channel_tag);
         self.start_recording_if_enabled(&device_tag, &channel_tag, media_server_tag, &app, &stream_key).await;
 
         let mut stream = Stream::new(
@@ -151,7 +191,9 @@ impl HookEventHandler {
 
     }
 
-    async fn handle_hook_unpublish(&self, _media_server_tag: &str, stream_id: &str) {
+    async fn handle_hook_unpublish(&self, _media_server_tag: &str, stream_id: &str, app: Option<&str>, tcp_id: Option<&str>) {
+
+        tracing::info!("[HookEventHandler] HookUnpublish: app={:?} stream={} tcp_id={:?}", app, stream_id, tcp_id);
 
         if let Some(mut s) = self.find_stream_by_stream_key(stream_id).await {
             s.stopped();
@@ -159,12 +201,124 @@ impl HookEventHandler {
                 tracing::warn!("[HookEventHandler] HookUnpublish: failed to update stream: {}", e);
             }
         }
+
+        self.terminate_sessions_of_stream(stream_id, app).await;
+
+        self.decrement_stream_viewers(stream_id).await;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_hook_record_done(
+        &self,
+        media_server_tag: &str,
+        stream_id: &str,
+        app: &str,
+        file_path: Option<&str>,
+        file_size: Option<u64>,
+        time_len: Option<f64>,
+        url: Option<&str>,
+        start_time: Option<u64>,
+        file_name: Option<&str>,
+    ) {
+
+        let size = file_size.unwrap_or(0);
+        let duration = time_len.map(|t| t as u64).unwrap_or(0);
+
+        let source_path = file_path
+            .or(url)
+            .map(|s| s.to_string())
+            .or_else(|| Some(media_server_tag.to_string()));
+
+        tracing::debug!(
+            "[HookEventHandler] HookRecordDone: app={} stream={} file={:?} size={} duration={} start_time={:?} file_name={:?}",
+            app, stream_id, source_path, size, duration, start_time, file_name
+        );
+
+        if let Err(e) = self
+            .recording_service
+            .finalize_recording(stream_id, source_path, size, duration, start_time)
+            .await
+        {
+            tracing::error!("[HookEventHandler] HookRecordDone: failed to record segment: {}", e);
+        }
+    }
+
+    async fn terminate_sessions_of_stream(&self, stream_id: &str, app: Option<&str>) {
+        let (device_tag, channel_tag) = self.resolve_stream_identity(stream_id, app).await;
+
+        let cached: Vec<Session> = self.db.sessions_cache()
+            .iter()
+            .filter(|s| s.stream_key() == stream_id && s.state != SessionState::Terminated)
+            .map(|s| s.value().clone())
+            .collect();
+
+        for mut s in cached {
+            s.mark_terminated();
+            if let Err(e) = self.db.update_session_state(&s).await {
+                tracing::warn!("[HookEventHandler] terminate_sessions_of_stream: failed to persist session {}: {}", s.id, e);
+            }
+            self.db.sessions_cache().insert(s.id, s);
+        }
+
+        if let (Some(dt), Some(ct)) = (&device_tag, &channel_tag) {
+            if let Err(e) = self.db.update_session_states_by_stream(dt, ct, SessionState::Terminated).await {
+                tracing::warn!("[HookEventHandler] terminate_sessions_of_stream: failed to update sessions of {}/{}: {}", dt, ct, e);
+            }
+        }
+    }
+
+    async fn resolve_stream_identity(&self, stream_id: &str, app: Option<&str>) -> (Option<String>, Option<String>) {
+        if let Some(s) = self.find_stream_by_app_and_key(stream_id, app).await {
+            return (s.device_tag.clone(), s.channel_tag.clone());
+        }
+
+        crate::common::device_utils::parse_stream_key(stream_id)
+            .map(|(dt, ct)| (Some(dt), Some(ct)))
+            .unwrap_or((None, None))
+    }
+
+    async fn find_stream_by_app_and_key(&self, stream_key: &str, app: Option<&str>) -> Option<Stream> {
+        if let Some(s) = self.find_stream_by_stream_key(stream_key).await {
+            let app_matches = app.map(|a| a == s.app).unwrap_or(true);
+            if app_matches {
+                return Some(s);
+            }
+        }
+
+        self.db.streams_cache()
+            .iter()
+            .find_map(|entry| {
+                let s = entry.value();
+                if let Some(app) = app {
+                    if s.app != app {
+                        return None;
+                    }
+                }
+                let key = crate::common::device_utils::format_stream_key(
+                    s.device_tag.as_deref().unwrap_or(""),
+                    s.channel_tag.as_deref().unwrap_or(""),
+                );
+                if key == stream_key {
+                    Some(s.clone())
+                } else {
+                    None
+                }
+            })
+    }
+
+    async fn decrement_stream_viewers(&self, stream_key: &str) {
+        if let Some(mut s) = self.find_stream_by_stream_key(stream_key).await {
+            s.decrement_viewers();
+            if let Err(e) = self.db.update_stream(&s).await {
+                tracing::warn!("[HookEventHandler] decrement_stream_viewers: failed to update stream: {}", e);
+            }
+        }
     }
 
     async fn handle_hook_stream_update(&self, media_server_tag: &str, stream_id: &str, regist: bool, _reader_count: Option<u32>, _total_reader_count: Option<u32>, _bytes_speed: Option<u64>) {
 
         if !regist {
-            self.handle_hook_unpublish(media_server_tag, stream_id).await;
+            self.handle_hook_unpublish(media_server_tag, stream_id, None, None).await;
             return;
         }
 
@@ -180,9 +334,8 @@ impl HookEventHandler {
             }
         }
 
-        // 流在媒体服务器上真正跑起来了：通知订阅方（例如等待中的录像任务）
         if became_active {
-            let device_tag = crate::domain::parse_stream_key(stream_id)
+            let device_tag = crate::common::device_utils::parse_stream_key(stream_id)
                 .map(|(device_tag, _)| device_tag)
                 .unwrap_or_else(|| stream_id.to_string());
             let device_id = self
@@ -209,7 +362,7 @@ impl HookEventHandler {
     }
 
     async fn find_stream_by_stream_key(&self, stream_key: &str) -> Option<Stream> {
-        if let Some((device_tag, channel_tag)) = crate::domain::parse_stream_key(stream_key) {
+        if let Some((device_tag, channel_tag)) = crate::common::device_utils::parse_stream_key(stream_key) {
             let cache_key = format!("{}/{}", device_tag, channel_tag);
             if let Some(s) = self.db.streams_cache().get(&cache_key) {
                 return Some(s.clone());
@@ -226,7 +379,7 @@ impl HookEventHandler {
     }
 
     async fn find_device_id_by_push_stream(&self, stream_id: &str) -> Option<String> {
-        let (device_tag, _) = crate::domain::parse_stream_key(stream_id)
+        let (device_tag, _) = crate::common::device_utils::parse_stream_key(stream_id)
             .unwrap_or_else(|| (stream_id.to_string(), stream_id.to_string()));
         Some(device_tag)
     }
@@ -244,9 +397,13 @@ impl HookEventHandler {
             return;
         }
 
-        match self.recording_service.get_active_recording_by_stream_key(stream_key).await {
-            Ok(Some(_)) => return,
-            Ok(None) => {}
+        // 已经有定时录像任务时不再重复创建：报警录像任务可以并存
+        match self.recording_service.get_active_recordings_by_stream_key(stream_key).await {
+            Ok(list) => {
+                if list.iter().any(|r| r.recording_type == crate::domain::recording::RecordingType::Timed) {
+                    return;
+                }
+            }
             Err(e) => {
                 tracing::warn!("[HookEventHandler] Failed to check active recording: {}", e);
             }

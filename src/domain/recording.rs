@@ -112,6 +112,35 @@ impl fmt::Display for RecordingFormat {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordingType {
+    Timed,
+    Alarm,
+    Manual,
+}
+
+impl fmt::Display for RecordingType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RecordingType::Timed => write!(f, "timed"),
+            RecordingType::Alarm => write!(f, "alarm"),
+            RecordingType::Manual => write!(f, "manual"),
+        }
+    }
+}
+
+impl RecordingType {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "timed" => Some(RecordingType::Timed),
+            "alarm" => Some(RecordingType::Alarm),
+            "manual" => Some(RecordingType::Manual),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Recording {
     pub id: i64,
@@ -130,6 +159,10 @@ pub struct Recording {
     pub labels: Vec<String>,
     pub filename: Option<String>,
     pub pre_record_secs: Option<u32>,
+    /// 录像任务类型：定时/报警/手动
+    pub recording_type: RecordingType,
+    /// 触发该任务的告警（报警录像才有）
+    pub alarm_id: Option<i64>,
 
     pub max_duration_secs: Option<u32>,
     /// 启动失败的重试次数
@@ -162,6 +195,8 @@ impl Recording {
             labels: Vec::new(),
             filename: None,
             pre_record_secs: None,
+            recording_type: RecordingType::Timed,
+            alarm_id: None,
             max_duration_secs: None,
             retry_count: 0,
             next_retry_at: None,
@@ -171,7 +206,7 @@ impl Recording {
     pub fn stream_key(&self) -> String {
         let device = self.device_tag.as_deref().unwrap_or("");
         let channel = self.channel_tag.as_deref().unwrap_or("");
-        crate::domain::stream::make_stream_key(device, channel)
+        crate::common::device_utils::format_stream_key(device, channel)
     }
 
     pub fn start(&mut self) {
@@ -240,6 +275,35 @@ impl Recording {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordingTaskInfo {
+    pub recording_id: i64,
+    pub recording_type: RecordingType,
+    pub state: RecordingState,
+    pub started_at: Option<DateTime<Utc>>,
+    pub stopped_at: Option<DateTime<Utc>>,
+    pub labels: Vec<String>,
+    pub alarm_id: Option<i64>,
+    pub alarm_type: Option<String>,
+    pub alarm_time: Option<DateTime<Utc>>,
+}
+
+impl Recording {
+    pub fn task_info(&self) -> RecordingTaskInfo {
+        RecordingTaskInfo {
+            recording_id: self.id,
+            recording_type: self.recording_type,
+            state: self.state,
+            started_at: self.started_at,
+            stopped_at: self.stopped_at,
+            labels: self.labels.clone(),
+            alarm_id: self.alarm_id,
+            alarm_type: None,
+            alarm_time: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateRecordingRequest {
     pub device_tag: String,
     pub channel_tag: String,
@@ -249,6 +313,8 @@ pub struct CreateRecordingRequest {
     pub output_path: Option<String>,
     pub labels: Option<Vec<String>>,
     pub pre_record_secs: Option<u32>,
+    pub recording_type: Option<RecordingType>,
+    pub alarm_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

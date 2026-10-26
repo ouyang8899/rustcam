@@ -116,8 +116,19 @@ pub enum SignalEvent {
     },
     Alarm {
         device_id: String,
+        device_tag: Option<String>,
+        channel_tag: Option<String>,
         alarm_type: String,
         message: String,
+        timestamp: DateTime<Utc>,
+    },
+    /// 告警已经落库，携带真实的告警 id
+    AlarmRaised {
+        alarm_id: i64,
+        device_id: String,
+        device_tag: Option<String>,
+        channel_tag: Option<String>,
+        alarm_type: String,
         timestamp: DateTime<Utc>,
     },
     AlarmRecovered {
@@ -257,6 +268,8 @@ pub enum SignalEvent {
         media_server_tag: String,
         stream_id: String,
         client_ip: Option<String>,
+        app: Option<String>,
+        tcp_id: Option<String>,
     },
     HookPublish {
         media_server_tag: String,
@@ -268,6 +281,8 @@ pub enum SignalEvent {
     HookUnpublish {
         media_server_tag: String,
         stream_id: String,
+        app: Option<String>,
+        tcp_id: Option<String>,
     },
     HookStreamUpdate {
         media_server_tag: String,
@@ -282,6 +297,17 @@ pub enum SignalEvent {
         app: String,
         stream_id: String,
         regist: bool,
+    },
+    HookRecordDone {
+        media_server_tag: String,
+        stream_id: String,
+        app: String,
+        file_path: Option<String>,
+        file_size: Option<u64>,
+        time_len: Option<f64>,
+        url: Option<String>,
+        start_time: Option<u64>,
+        file_name: Option<String>,
     },
 }
 impl SignalEvent {
@@ -303,6 +329,7 @@ impl SignalEvent {
             SignalEvent::PlaybackResult { .. } => "playback_result".to_string(),
             SignalEvent::PtzControl { .. } => "ptz_control".to_string(),
             SignalEvent::Alarm { .. } => "alarm".to_string(),
+            SignalEvent::AlarmRaised { .. } => "alarm_raised".to_string(),
             SignalEvent::AlarmRecovered { .. } => "alarm_recovered".to_string(),
             SignalEvent::QueryDeviceInfo { .. } => "query_device_info".to_string(),
             SignalEvent::QueryDeviceStatus { .. } => "query_device_status".to_string(),
@@ -336,6 +363,7 @@ impl SignalEvent {
             SignalEvent::HookUnpublish { .. } => "hook_unpublish".to_string(),
             SignalEvent::HookStreamUpdate { .. } => "hook_stream_update".to_string(),
             SignalEvent::HookStreamChanged { .. } => "hook_stream_changed".to_string(),
+            SignalEvent::HookRecordDone { .. } => "hook_record_done".to_string(),
         }
     }
 

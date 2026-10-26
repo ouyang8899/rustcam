@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS alarms (
     id bigint DEFAULT nextval('alarms_id_seq'::regclass) NOT NULL,
     device_id bigint NOT NULL,
     device_tag varchar(64) NOT NULL,
+    channel_tag varchar(64),
     alarm_type varchar(64) DEFAULT 'Alarm'::character varying NOT NULL,
     alarm_time timestamp NOT NULL,
     alarm_method integer DEFAULT 1,
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS alarms (
     CONSTRAINT alarms_pkey PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_alarms_device_time ON alarms USING btree (device_id, alarm_time DESC);
+CREATE INDEX IF NOT EXISTS idx_alarms_channel_time ON alarms USING btree (channel_tag, alarm_time DESC);
 CREATE INDEX IF NOT EXISTS idx_alarms_processed ON alarms USING btree (processed) WHERE (NOT processed);
 
 -- ============================================
@@ -366,11 +368,14 @@ CREATE TABLE IF NOT EXISTS recordings (
     max_duration_secs integer DEFAULT 0,
     retry_count integer DEFAULT 0 NOT NULL,
     next_retry_at timestamptz,
+    recording_type varchar(32) DEFAULT 'timed'::character varying NOT NULL,
+    alarm_id bigint,
     CONSTRAINT recordings_pkey PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_recordings_channel_tag ON recordings USING btree (channel_tag);
 CREATE INDEX IF NOT EXISTS idx_recordings_device_tag ON recordings USING btree (device_tag);
 CREATE INDEX IF NOT EXISTS idx_recordings_next_retry ON recordings USING btree (state, next_retry_at);
+CREATE INDEX IF NOT EXISTS idx_recordings_recording_type ON recordings USING btree (device_tag, channel_tag, recording_type);
 CREATE INDEX IF NOT EXISTS idx_recordings_state ON recordings USING btree (state);
 
 -- ============================================
@@ -430,6 +435,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     client_ip varchar(45),
     state varchar(50) DEFAULT 'active'::character varying NOT NULL,
     client_type varchar(100),
+    tcp_id varchar(64),
     protocol varchar(50),
     updated_at timestamptz DEFAULT now() NOT NULL,
     last_activity timestamptz DEFAULT now() NOT NULL,

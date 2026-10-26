@@ -31,6 +31,7 @@ void ReplayNavBar::setLayouts(const QList<PlayerLayout>& layouts) {
         btn->deleteLater();
     }
     m_buttons.clear();
+    m_selectedIndex = -1;
 
     const int thumbW = 50;
     const int thumbH = 36;
@@ -38,6 +39,8 @@ void ReplayNavBar::setLayouts(const QList<PlayerLayout>& layouts) {
     for (int i = 0; i < layouts.size(); ++i) {
         QPushButton* btn = new QPushButton(this);
         btn->setFixedSize(60, 44);
+        btn->setCheckable(true);
+        btn->setAutoExclusive(true);
         btn->setToolTip(layouts[i].name);
 
         QString svg = generateLayoutSvg(layouts[i], thumbW, thumbH);
@@ -58,6 +61,12 @@ void ReplayNavBar::setLayouts(const QList<PlayerLayout>& layouts) {
         connect(btn, &QPushButton::clicked, this, &ReplayNavBar::onButtonClicked);
         btn->setProperty("index", i);
         m_buttons.append(btn);
+    }
+
+    // 默认选中第一个布局（容器本身也会用第一个布局初始化）
+    if (!m_buttons.isEmpty()) {
+        m_selectedIndex = 0;
+        m_buttons[0]->setChecked(true);
     }
 
     updateButtonPositions();

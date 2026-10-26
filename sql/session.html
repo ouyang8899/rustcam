@@ -1,18 +1,18 @@
 <mapper>
 <select id="session_select_all">
-SELECT id, session_type, device_tag, channel_tag, user_id, state, client_ip, client_type, media_server_tag, protocol, created_at, last_activity, expires_at, bytes_sent, bytes_received
+SELECT id, session_type, device_tag, channel_tag, user_id, state, client_ip, client_type, tcp_id, media_server_tag, protocol, created_at, last_activity, expires_at, bytes_sent, bytes_received
 FROM sessions
 ORDER BY created_at DESC
 </select>
 
 <select id="session_select_by_id">
-SELECT id, session_type, device_tag, channel_tag, user_id, state, client_ip, client_type, media_server_tag, protocol, created_at, last_activity, expires_at, bytes_sent, bytes_received
+SELECT id, session_type, device_tag, channel_tag, user_id, state, client_ip, client_type, tcp_id, media_server_tag, protocol, created_at, last_activity, expires_at, bytes_sent, bytes_received
 FROM sessions
 WHERE id = #{id}
 </select>
 
 <select id="session_select_paginated">
-SELECT id, session_type, device_tag, channel_tag, user_id, state, client_ip, client_type, media_server_tag, protocol, created_at, last_activity, expires_at, bytes_sent, bytes_received
+SELECT id, session_type, device_tag, channel_tag, user_id, state, client_ip, client_type, tcp_id, media_server_tag, protocol, created_at, last_activity, expires_at, bytes_sent, bytes_received
 FROM sessions
 <where>
 <if test="search != null">
@@ -40,7 +40,7 @@ and state = #{state}
 </select>
 
 <select id="session_select_active_paginated">
-SELECT id, session_type, device_tag, channel_tag, user_id, state, client_ip, client_type, media_server_tag, protocol, created_at, last_activity, expires_at, bytes_sent, bytes_received
+SELECT id, session_type, device_tag, channel_tag, user_id, state, client_ip, client_type, tcp_id, media_server_tag, protocol, created_at, last_activity, expires_at, bytes_sent, bytes_received
 FROM sessions
 WHERE state IN ('active', 'initializing')
 ORDER BY created_at DESC
@@ -63,6 +63,7 @@ INSERT INTO sessions
 <if test="state != null">, state</if>
 <if test="client_ip != null">, client_ip</if>
 <if test="client_type != null">, client_type</if>
+<if test="tcp_id != null">, tcp_id</if>
 <if test="media_server_tag != null">, media_server_tag</if>
 <if test="protocol != null">, protocol</if>
 <if test="created_at != null">, created_at</if>
@@ -80,6 +81,7 @@ VALUES
 <if test="state != null">, #{state}</if>
 <if test="client_ip != null">, #{client_ip}</if>
 <if test="client_type != null">, #{client_type}</if>
+<if test="tcp_id != null">, #{tcp_id}</if>
 <if test="media_server_tag != null">, #{media_server_tag}</if>
 <if test="protocol != null">, #{protocol}</if>
 <if test="created_at != null">, #{created_at}</if>
@@ -101,6 +103,7 @@ UPDATE sessions
 <if test="state != null">state = #{state},</if>
 <if test="client_ip != null">client_ip = #{client_ip},</if>
 <if test="client_type != null">client_type = #{client_type},</if>
+<if test="tcp_id != null">tcp_id = #{tcp_id},</if>
 <if test="media_server_tag != null">media_server_tag = #{media_server_tag},</if>
 <if test="protocol != null">protocol = #{protocol},</if>
 <if test="created_at != null">created_at = #{created_at},</if>
@@ -110,6 +113,18 @@ UPDATE sessions
 <if test="bytes_received != null">bytes_received = #{bytes_received},</if>
 </set>
 WHERE id = #{id}
+</update>
+
+<update id="session_update_state">
+UPDATE sessions SET state = #{state}, updated_at = NOW(), last_activity = #{last_activity} WHERE id = #{id}
+</update>
+
+<update id="session_update_states_by_stream">
+UPDATE sessions
+SET state = #{state}, updated_at = NOW(), last_activity = #{last_activity}
+WHERE device_tag = #{device_tag}
+  and channel_tag = #{channel_tag}
+  and state &lt;&gt; #{state}
 </update>
 
 <delete id="session_delete_by_id">

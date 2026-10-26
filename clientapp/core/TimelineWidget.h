@@ -23,6 +23,13 @@ struct RecordingPeriod {
     int64_t alarmId = 0;
 };
 
+/// 时间轴上的事件标记（例如报警）
+struct TimelineEvent {
+    int64_t timeMs = 0;
+    QColor color = QColor("#ff6b6b");
+    QString label;
+};
+
 class RUSTCAM_CORE_API TimelineWidget : public QWidget {
     Q_OBJECT
 public:
@@ -36,11 +43,19 @@ public:
 
     void setTimeRange(int64_t startMs, int64_t endMs);
     void setPeriods(const QList<RecordingPeriod>& periods);
+    /// 事件标记（报警等），画在录像段下方
+    void setEvents(const QList<TimelineEvent>& events);
+    const QList<TimelineEvent>& events() const { return m_events; }
+
+    /// 书签标记
+    void setBookmarks(const QList<TimelineEvent>& bookmarks);
+    const QList<TimelineEvent>& bookmarks() const { return m_bookmarks; }
 
     void addPlayhead(const QString& windowId, const QColor& color);
     void removePlayhead(const QString& windowId);
     void updatePlayhead(const QString& windowId, int64_t timeMs);
     void clearAllPlayheads();
+    const QMap<QString, Playhead>& playheads() const { return m_playheads; }
 
     void setCurrentTime(int64_t timeMs);
     int64_t currentTime() const { return m_mainPlayheadMs; }
@@ -55,6 +70,8 @@ public:
 
     signals:
         void playheadMoved(const QString& windowId, int64_t timeMs);
+        /// 拖拽播放头结束（拖动过程中只移动标记，松手才 seek，避免连续切换片源）
+        void playheadReleased(const QString& windowId, int64_t timeMs);
         void selectedWindowPlayheadMoved(const QString& windowId, int64_t timeMs);
         void timeSelected(int64_t timeMs);
         void periodClicked(const RecordingPeriod& period);
@@ -82,6 +99,8 @@ private:
     int64_t m_mainPlayheadMs = 0;
     QList<RecordingPeriod> m_periods;
     QList<QRect> m_periodRects;
+    QList<TimelineEvent> m_events;
+    QList<TimelineEvent> m_bookmarks;
     static const int margin = 4;
 
     QMap<QString, Playhead> m_playheads;
@@ -97,6 +116,9 @@ private:
     QString m_selectedWindowId;
     QString m_draggingPlayheadId;
     bool m_isDraggingPlayhead = false;
+    /// 左键按下后等待松开时定位
+    QPoint m_pressPos;
+    bool m_pendingSeek = false;
 };
 
 }
