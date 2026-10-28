@@ -14,39 +14,20 @@ namespace rustcam {
 PlaybackSidePanel::PlaybackSidePanel(QWidget* parent)
     : QWidget(parent)
 {
+    setObjectName("PlaybackSidePanel");
+    setAttribute(Qt::WA_StyledBackground, true);
     setMinimumWidth(280);
     setMaximumWidth(350);
-    setStyleSheet("background-color: #2b2b2b;");
 
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(4, 4, 4, 4);
     mainLayout->setSpacing(4);
 
     QLabel* deviceLabel = new QLabel(tr("Device List"), this);
-    deviceLabel->setStyleSheet("color: #e0e0e0; font-weight: bold; padding: 4px;");
+    deviceLabel->setObjectName("PlaybackSectionTitle");
     mainLayout->addWidget(deviceLabel);
 
     m_tabWidget = new QTabWidget(this);
-    m_tabWidget->setStyleSheet(R"(
-        QTabWidget::pane {
-            border: 1px solid #3e3e3e;
-            background-color: #2a2a2a;
-        }
-        QTabBar::tab {
-            background-color: #1e1e1e;
-            color: #aaa;
-            padding: 6px 12px;
-            border: 1px solid #3e3e3e;
-            border-bottom: none;
-        }
-        QTabBar::tab:selected {
-            background-color: #2a2a2a;
-            color: #fff;
-        }
-        QTabBar::tab:hover {
-            background-color: #333;
-        }
-    )");
 
     m_regionTree = new DeviceTree(m_tabWidget);
     m_groupTree = new DeviceTree(m_tabWidget);
@@ -62,27 +43,19 @@ PlaybackSidePanel::PlaybackSidePanel(QWidget* parent)
     QHBoxLayout* switcherLayout = new QHBoxLayout();
     switcherLayout->setSpacing(4);
     QLabel* switcherLabel = new QLabel(tr("查看通道:"), this);
-    switcherLabel->setStyleSheet("color: #e0e0e0;");
+    switcherLabel->setObjectName("PlaybackPanelLabel");
     switcherLayout->addWidget(switcherLabel);
 
     m_channelCombo = new QComboBox(this);
     m_channelCombo->setToolTip(tr("切换正在查看录像的通道"));
-    connect(m_channelCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
-        if (m_switchingChannel || index < 0) {
-            return;
-        }
-        setActiveChannel(m_channelCombo->itemData(index).toString());
-    });
+    connect(m_channelCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &PlaybackSidePanel::onChannelComboChanged);
     switcherLayout->addWidget(m_channelCombo, 1);
 
     QPushButton* closeBtn = new QPushButton(tr("关闭"), this);
     closeBtn->setFixedWidth(48);
     closeBtn->setToolTip(tr("从列表中移除当前通道（播放窗口解绑）"));
-    connect(closeBtn, &QPushButton::clicked, this, [this]() {
-        if (!m_activeChannelKey.isEmpty()) {
-            emit channelClosed(m_activeChannelKey);
-        }
-    });
+    connect(closeBtn, &QPushButton::clicked, this, &PlaybackSidePanel::onCloseChannelClicked);
     switcherLayout->addWidget(closeBtn);
     mainLayout->addLayout(switcherLayout);
 
@@ -109,6 +82,12 @@ PlaybackChannel* PlaybackSidePanel::registerChannel(const QString& deviceTag,
     }
 
     PlaybackChannel* channel = new PlaybackChannel(deviceTag, channelTag, displayName, this);
+    // 通道由侧栏拥有：连接在这里一次建立，之后不再变动
+    connect(channel, &PlaybackChannel::filesLoaded, this, &PlaybackSidePanel::channelFilesLoaded);
+    connect(channel, &PlaybackChannel::rangeChanged, this, &PlaybackSidePanel::channelRangeChanged);
+    connect(channel, &PlaybackChannel::alarmsLoaded, this, &PlaybackSidePanel::channelAlarmsLoaded);
+    connect(channel, &PlaybackChannel::bookmarksChanged, this, &PlaybackSidePanel::channelBookmarksChanged);
+    connect(channel, &PlaybackChannel::playFileRequested, this, &PlaybackSidePanel::channelPlayFileRequested);
     addChannelPage(key, channel);
     m_channels.insert(key, channel);
 
@@ -185,6 +164,19 @@ void PlaybackSidePanel::setActiveChannel(const QString& key) {
 }
 
 // ── 设备树 ──────────────────────────────────────────────────────────
+
+void PlaybackSidePanel::onChannelComboChanged(int index) {
+    if (m_switchingChannel || index < 0) {
+        return;
+    }
+    setActiveChannel(m_channelCombo->itemData(index).toString());
+}
+
+void PlaybackSidePanel::onCloseChannelClicked() {
+    if (!m_activeChannelKey.isEmpty()) {
+        emit channelClosed(m_activeChannelKey);
+    }
+}
 
 void PlaybackSidePanel::onDeviceItemDoubleClicked(QVariantMap meta) {
     const QString type = meta["type"].toString();

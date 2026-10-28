@@ -1,4 +1,5 @@
 #include "AlarmSidePanel.h"
+#include "DataManager.h"
 #include "DeviceTreeModel.h"
 #include "core/ServerApi.h"
 #include "common/Logger.h"
@@ -27,26 +28,6 @@ AlarmSidePanel::AlarmSidePanel(QWidget* parent)
     mainLayout->setSpacing(8);
 
     m_tabWidget = new QTabWidget(this);
-    m_tabWidget->setStyleSheet(R"(
-        QTabWidget::pane {
-            border: 1px solid #3e3e3e;
-            background-color: #1a1a1a;
-        }
-        QTabBar::tab {
-            background-color: #2b2b2b;
-            color: #aaa;
-            padding: 6px 12px;
-            border: 1px solid #3e3e3e;
-            border-bottom: none;
-        }
-        QTabBar::tab:selected {
-            background-color: #2a2a2a;
-            color: #fff;
-        }
-        QTabBar::tab:hover {
-            background-color: #333;
-        }
-    )");
     m_tabWidget->setMinimumWidth(200);
     m_tabWidget->setMaximumWidth(300);
 
@@ -66,23 +47,11 @@ AlarmSidePanel::AlarmSidePanel(QWidget* parent)
     rightLayout->setSpacing(8);
 
     QLabel* alarmLabel = new QLabel(tr("Alarm List"), rightPanel);
-    alarmLabel->setStyleSheet(R"(
-        QLabel {
-            color: #e0e0e0;
-            font-size: 14px;
-            font-weight: bold;
-        }
-    )");
+    alarmLabel->setObjectName("sectionTitle");
     rightLayout->addWidget(alarmLabel);
 
     QFrame* alarmFrame = new QFrame(rightPanel);
-    alarmFrame->setStyleSheet(R"(
-        QFrame {
-            border: 1px solid #3e3e3e;
-            border-radius: 4px;
-            background-color: #1a1a1a;
-        }
-    )");
+    alarmFrame->setObjectName("cardFrame");
     QVBoxLayout* alarmLayout = new QVBoxLayout(alarmFrame);
     alarmLayout->setContentsMargins(8, 8, 8, 8);
     alarmLayout->setSpacing(4);
@@ -92,35 +61,10 @@ AlarmSidePanel::AlarmSidePanel(QWidget* parent)
 
     m_alarmTable = new QTableView(alarmFrame);
     m_alarmTable->setModel(m_alarmModel);
-    m_alarmTable->setStyleSheet(R"(
-        QTableView {
-            background-color: #1a1a1a;
-            border: none;
-            color: #e0e0e0;
-            gridline-color: #2e2e2e;
-        }
-        QTableView::item {
-            padding: 6px;
-        }
-        QTableView::item:selected {
-            background-color: rgba(0, 120, 212, 0.3);
-        }
-        QHeaderView::section {
-            background-color: #1e1e1e;
-            color: #aaa;
-            padding: 6px;
-            border: none;
-            border-bottom: 1px solid #3e3e3e;
-        }
-    )");
     m_alarmTable->setAlternatingRowColors(true);
     m_alarmTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_alarmTable->verticalHeader()->hide();
-    m_alarmTable->setColumnWidth(0, 140);
-    m_alarmTable->setColumnWidth(1, 100);
-    m_alarmTable->setColumnWidth(2, 80);
-    m_alarmTable->setColumnWidth(3, 60);
-    m_alarmTable->setColumnWidth(4, 60);
+    m_alarmTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     connect(m_alarmTable, &QTableView::clicked, this, &AlarmSidePanel::onAlarmClicked);
     alarmLayout->addWidget(m_alarmTable, 1);
 
@@ -128,71 +72,27 @@ AlarmSidePanel::AlarmSidePanel(QWidget* parent)
     pagingLayout->setSpacing(8);
 
     m_prevBtn = new QPushButton(tr("Previous Page"), alarmFrame);
-    m_prevBtn->setStyleSheet(R"(
-        QPushButton {
-            background-color: #2b2b2b;
-            color: #e0e0e0;
-            border: 1px solid #3e3e3e;
-            border-radius: 4px;
-            padding: 4px 12px;
-            min-width: 60px;
-        }
-        QPushButton:hover {
-            background-color: #3e3e3e;
-        }
-        QPushButton:disabled {
-            background-color: #1a1a1a;
-            color: #666;
-        }
-    )");
     connect(m_prevBtn, &QPushButton::clicked, this, &AlarmSidePanel::onPrevPage);
     pagingLayout->addWidget(m_prevBtn);
 
     m_pageLabel = new QLabel(tr("Page 1 / 1 (Total 0)"), alarmFrame);
-    m_pageLabel->setStyleSheet("color: #aaa;");
+    m_pageLabel->setObjectName("secondaryText");
     pagingLayout->addWidget(m_pageLabel);
     pagingLayout->addStretch();
 
     m_pageSizeCombo = new QComboBox(alarmFrame);
     m_pageSizeCombo->addItems({"10", "20", "50", "100"});
     m_pageSizeCombo->setCurrentText("20");
-    m_pageSizeCombo->setStyleSheet(R"(
-        QComboBox {
-            background-color: #2b2b2b;
-            color: #e0e0e0;
-            border: 1px solid #3e3e3e;
-            border-radius: 4px;
-            padding: 4px 8px;
-            min-width: 60px;
-        }
-    )");
     connect(m_pageSizeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &AlarmSidePanel::onPageSizeChanged);
     pagingLayout->addWidget(m_pageSizeCombo);
 
     m_nextBtn = new QPushButton(tr("Next Page"), alarmFrame);
-    m_nextBtn->setStyleSheet(R"(
-        QPushButton {
-            background-color: #2b2b2b;
-            color: #e0e0e0;
-            border: 1px solid #3e3e3e;
-            border-radius: 4px;
-            padding: 4px 12px;
-            min-width: 60px;
-        }
-        QPushButton:hover {
-            background-color: #3e3e3e;
-        }
-        QPushButton:disabled {
-            background-color: #1a1a1a;
-            color: #666;
-        }
-    )");
     connect(m_nextBtn, &QPushButton::clicked, this, &AlarmSidePanel::onNextPage);
     pagingLayout->addWidget(m_nextBtn);
 
     alarmLayout->addLayout(pagingLayout);
-    rightLayout->addWidget(alarmFrame);
+    rightLayout->addWidget(alarmFrame, 1);
     mainLayout->addWidget(rightPanel, 1);
 
     connect(m_regionTree, &DeviceTree::itemDoubleClicked, this, &AlarmSidePanel::onDeviceItemDoubleClicked);
@@ -236,19 +136,49 @@ void AlarmSidePanel::loadAlarms(int page, int pageSize) {
 
         QJsonObject data = resp["data"].toObject();
         m_totalCount = data["total"].toInt();
-        m_totalPages = data["pages"].toInt();
-        if (m_totalPages == 0) m_totalPages = 1;
+        const int pageSize = data["page_size"].toInt(m_pageSize > 0 ? m_pageSize : 20);
+        m_totalPages = pageSize > 0 ? (m_totalCount + pageSize - 1) / pageSize : 1;
+        if (m_totalPages < 1) m_totalPages = 1;
 
         QJsonArray alarms = data["items"].toArray();
         m_alarmModel->removeRows(0, m_alarmModel->rowCount());
 
+        const QJsonArray devices = DataManager::instance()->devicesData();
+        auto resolveDevice = [&devices](const QString& tag) {
+            for (const QJsonValue& v : devices) {
+                const QJsonObject device = v.toObject();
+                if (device.value("device_tag").toString() == tag) {
+                    const QString name = device.value("name").toString();
+                    if (!name.isEmpty()) return name;
+                }
+            }
+            return tag;
+        };
+        auto formatTime = [](const QString& iso) {
+            QDateTime dt = QDateTime::fromString(iso, Qt::ISODate);
+            return dt.isValid() ? dt.toLocalTime().toString("yyyy-MM-dd HH:mm:ss") : iso;
+        };
+        auto levelText = [this](int priority) {
+            switch (priority) {
+            case 1: return tr("Critical");
+            case 2: return tr("Major");
+            case 3: return tr("Warning");
+            case 4: return tr("Info");
+            default: return tr("Normal");
+            }
+        };
+
         for (const QJsonValue& v : alarms) {
-            QJsonObject alarm = v.toObject();
-            QString time = alarm["time"].toString();
-            QString device = alarm["deviceName"].toString();
-            QString type = alarm["type"].toString();
-            QString level = alarm["level"].toString();
-            QString status = alarm["status"].toString();
+            const QJsonObject alarm = v.toObject();
+            const QString time = formatTime(alarm["alarm_time"].toString());
+            const QString deviceTag = alarm["device_tag"].toString();
+            const QString device = resolveDevice(deviceTag);
+            const QString type = alarm["alarm_type"].toString();
+            const int priority = alarm["alarm_priority"].toInt();
+            const QString level = levelText(priority);
+            const bool processed = alarm["processed"].toBool();
+            const QString status = processed ? tr("Processed") : tr("Unprocessed");
+            const QString alarmId = QString::number(alarm["id"].toVariant().toLongLong());
 
             QList<QStandardItem*> row;
             row.append(new QStandardItem(time));
@@ -258,13 +188,9 @@ void AlarmSidePanel::loadAlarms(int page, int pageSize) {
             row.append(new QStandardItem(status));
 
             for (auto item : row) {
-                item->setData(alarm["id"].toString(), Qt::UserRole);
-                if (status == "未处理") {
-                    if (level == "严重") {
-                        item->setForeground(QColor("#f44336"));
-                    } else if (level == "警告") {
-                        item->setForeground(QColor("#ff9800"));
-                    }
+                item->setData(alarmId, Qt::UserRole);
+                if (!processed && priority <= 2) {
+                    item->setForeground(QColor(priority <= 1 ? "#f44336" : "#ff9800"));
                 }
             }
 

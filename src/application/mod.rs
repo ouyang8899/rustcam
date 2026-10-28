@@ -13,6 +13,7 @@ pub mod recording_service;
 pub mod recording_policy_service;
 pub mod recording_scheduler_service;
 pub mod player_layout_service;
+pub mod map_settings_service;
 pub mod channel_service;
 pub mod cron_parser;
 
@@ -30,5 +31,6 @@ pub use recording_service::RecordingService;
 pub use recording_policy_service::RecordingPolicyService;
 pub use recording_scheduler_service::RecordingSchedulerService;
 pub use player_layout_service::PlayerLayoutService;
+pub use map_settings_service::MapSettingsService;
 pub use channel_service::ChannelService;
 pub use cron_parser::{CronExpr, CronError};

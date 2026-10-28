@@ -57,8 +57,17 @@ signals:
     /// 用户请求移除当前通道
     void channelClosed(const QString& key);
 
+    // ── 通道事件的转发（通道由侧栏拥有，连接在登记通道时建立）─────
+    void channelFilesLoaded(const QString& channelKey, const QList<RecordingFile>& files);
+    void channelRangeChanged(const QString& channelKey, int64_t startMs, int64_t endMs);
+    void channelAlarmsLoaded(const QString& channelKey, const QList<TimelineEvent>& events);
+    void channelBookmarksChanged(const QString& channelKey, const QList<TimelineEvent>& bookmarks);
+    void channelPlayFileRequested(const QString& channelKey, const RecordingFile& file);
+
 private slots:
     void onDeviceItemDoubleClicked(QVariantMap meta);
+    void onChannelComboChanged(int index);
+    void onCloseChannelClicked();
 
 private:
     void addChannelPage(const QString& key, PlaybackChannel* channel);

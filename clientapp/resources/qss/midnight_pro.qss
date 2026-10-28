@@ -1,4 +1,4 @@
-@primary_bg: #1e1e1e;
+﻿@primary_bg: #1e1e1e;
 @secondary_bg: #2b2b2b;
 @tertiary_bg: #1a1a1a;
 @accent: #0078D4;
@@ -14,6 +14,7 @@
 @hover_bg: rgba(255, 255, 255, 0.08);
 @selected_bg: rgba(0, 120, 212, 0.3);
 @selected_bg_active: rgba(0, 120, 212, 0.5);
+@video_area_bg: #2a2a2a;
 
 QMainWindow, QDialog, QWidget {
     background-color: @primary_bg;
@@ -337,6 +338,8 @@ QTreeView {
     color: @text_primary;
     gridline-color: @border;
     outline: 0;
+    /* branch 缩进背景由 DeviceTreeView::drawBranches 绘制，避免系统高亮盖住 */
+    show-decoration-selected: 0;
 }
 
 QTreeView::item {
@@ -360,7 +363,76 @@ QHeaderView::section {
     border-right: 1px solid @border;
 }
 
+QTableView {
+    background-color: @tertiary_bg;
+    alternate-background-color: rgba(255, 255, 255, 0.02);
+    border: 1px solid @border;
+    border-radius: 4px;
+    color: @text_primary;
+    gridline-color: @border;
+    outline: 0;
+}
+
+QTableView::item {
+    padding: 4px 6px;
+}
+
+QTableView::item:hover {
+    background-color: @hover_bg;
+}
+
+QTableView::item:selected,
+QTableView::item:selected:!active {
+    background-color: @selected_bg;
+    color: @text_primary;
+}
+
+QFrame#cardFrame {
+    background-color: @tertiary_bg;
+    border: 1px solid @border;
+    border-radius: 4px;
+}
+
+QLabel#sectionTitle {
+    color: @text_primary;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 0 8px;
+}
+
+QLabel#alarmCount {
+    color: @error;
+    font-size: 12px;
+    padding: 0 8px;
+}
+
+QPushButton#primaryButton {
+    background-color: @accent;
+    color: white;
+    border: 1px solid @accent;
+    border-radius: 4px;
+    padding: 6px 16px;
+    min-width: 70px;
+}
+
+QPushButton#primaryButton:hover {
+    background-color: @accent_hover;
+    border-color: @accent_hover;
+}
+
+QPushButton#primaryButton:pressed {
+    background-color: @accent_pressed;
+    border-color: @accent_pressed;
+}
+
+QPushButton#primaryButton:disabled {
+    background-color: @secondary_bg;
+    border-color: @border;
+    color: @text_disabled;
+}
+
 QToolTip {
+
     background-color: @primary_bg;
     color: @text_primary;
     border: 1px solid @border;
@@ -632,6 +704,7 @@ QToolBar#VideoToolbar QComboBox {
     background-color: #1a1a1a;
 }
 
+
 #VideoPlayer #NoSignalIcon{
     background-color: transparent;
 }
@@ -666,7 +739,7 @@ QToolBar#VideoToolbar QComboBox {
     background-color: transparent;
 }
 #videoArea {
-    background-color: #2a2a2a;
+    background-color: @video_area_bg;
 }
 
 LayoutNavButton {
@@ -830,4 +903,224 @@ QGroupBox::title {
 
 SettingsWidget QLabel {
     font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+}
+
+/* ── Playback / Recording ──────────────────────────────────────── */
+
+#playbackWorkspace,
+#playbackRightPanel,
+#PlaybackSidePanel {
+    background-color: @primary_bg;
+}
+
+#playbackWorkspace QLabel {
+    color: @text_primary;
+}
+
+#playbackToolbar {
+    background-color: @primary_bg;
+    border: none;
+    border-bottom: 1px solid @border;
+    spacing: 8px;
+    padding: 4px;
+}
+
+QLabel#PlaybackSectionTitle {
+    color: @text_primary;
+    font-weight: bold;
+    padding: 4px;
+}
+
+QLabel#PlaybackPanelLabel {
+    color: @text_primary;
+}
+
+QLabel#PlaybackTargetLabel {
+    color: @text_secondary;
+}
+
+QLabel#currentTimeLabel {
+    color: @text_primary;
+    font-family: monospace;
+    min-width: 150px;
+}
+
+#PlaybackFilterFrame,
+#PlaybackFileListFrame {
+    border: 1px solid @border;
+    border-radius: 4px;
+}
+
+#PlaybackFilterScroll {
+    background-color: @primary_bg;
+    border: none;
+}
+
+#PlaybackFilterScroll > QWidget > QWidget {
+    background-color: @primary_bg;
+}
+
+QDateEdit#PlaybackFilterInput,
+QDateTimeEdit#PlaybackFilterInput {
+    background-color: @secondary_bg;
+    border: 1px solid @border;
+    border-radius: 4px;
+    padding: 4px;
+    color: @text_primary;
+}
+
+QDateEdit#PlaybackFilterInput:focus,
+QDateTimeEdit#PlaybackFilterInput:focus {
+    border-color: @accent;
+}
+
+QDateTimeEdit#PlaybackFilterInput {
+    font-size: 11px;
+}
+
+QLabel#PlaybackFilterFieldLabel {
+    color: @text_secondary;
+}
+
+QLabel#PlaybackStatusLabel {
+    color: @text_secondary;
+    font-size: 11px;
+    padding: 0 4px;
+}
+
+QPushButton#LoadMoreButton {
+    background-color: @secondary_bg;
+    color: @text_primary;
+    border: 1px solid @border;
+    border-radius: 4px;
+    padding: 6px;
+}
+
+QPushButton#LoadMoreButton:hover {
+    background-color: @hover_bg;
+}
+
+QPushButton#LoadMoreButton:disabled {
+    color: @text_disabled;
+}
+
+QListWidget#PlaybackBookmarkList {
+    background-color: @secondary_bg;
+    border: 1px solid @border;
+    border-radius: 4px;
+    color: @text_primary;
+    font-size: 12px;
+}
+
+QListWidget#PlaybackBookmarkList::item:selected {
+    background-color: @selected_bg_active;
+    color: @text_primary;
+}
+
+QLabel#RecordingCountLabel {
+    color: @text_secondary;
+    font-size: 12px;
+    padding: 2px;
+}
+
+QComboBox#RecordingPageSizeCombo {
+    font-size: 12px;
+}
+
+#RecordingFileListView {
+    background-color: @secondary_bg;
+    border: none;
+    outline: none;
+}
+
+#RecordingFileListView::item {
+    padding: 4px;
+    border-bottom: 1px solid @border;
+    color: @text_primary;
+}
+
+#RecordingFileListView::item:hover {
+    background-color: @hover_bg;
+}
+
+#RecordingFileListView::item:selected {
+    background-color: @selected_bg;
+    color: @text_primary;
+}
+
+#TimelineWidget {
+    background-color: @tertiary_bg;
+    border: 1px solid @border;
+}
+
+#PlaybackCell {
+    border: 2px solid @video_area_bg;
+    background-color: @video_area_bg;
+}
+
+#PlaybackCell[selected="true"] {
+    border-color: @accent;
+}
+#NoRecordingLabel {
+    color: #e0e0e0;
+    font-size: 14px;
+    background-color: rgba(0, 0, 0, 180);
+    border-radius: 4px;
+    padding: 8px 16px;
+}
+/* 日期选择下拉日历 */
+QCalendarWidget {
+    background-color: @secondary_bg;
+}
+
+QCalendarWidget QWidget#qt_calendar_navigationbar {
+    background-color: @primary_bg;
+    border-bottom: 1px solid @border;
+}
+
+QCalendarWidget QToolButton {
+    color: @text_primary;
+    background-color: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+}
+
+QCalendarWidget QToolButton:hover {
+    background-color: @hover_bg;
+}
+
+
+QCalendarWidget QMenu {
+    background-color: @secondary_bg;
+    color: @text_primary;
+    border: 1px solid @border;
+}
+
+QCalendarWidget QMenu::item:selected {
+    background-color: @accent;
+    color: #ffffff;
+}
+
+QCalendarWidget QSpinBox {
+    background-color: @secondary_bg;
+    color: @text_primary;
+    border: 1px solid @border;
+    selection-background-color: @accent;
+    selection-color: #ffffff;
+}
+
+QCalendarWidget QAbstractItemView {
+    background-color: @secondary_bg;
+    color: @text_primary;
+    selection-background-color: @accent;
+    selection-color: #ffffff;
+    outline: none;
+}
+
+QCalendarWidget QHeaderView::section {
+    background-color: @primary_bg;
+    color: @text_secondary;
+    padding: 2px;
+    border: none;
 }

@@ -220,7 +220,7 @@ typedef struct VideoMediaRateDisplay {
     using Ptr = std::shared_ptr<VideoMediaRateDisplay>;
     VideoMediaRateData::Ptr data{ nullptr };
     bool visible{ false };
-};
+} VideoMediaRateDisplay;
 typedef struct PlayerData
 {
     std::uint64_t id_{0};

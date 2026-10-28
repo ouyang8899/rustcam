@@ -66,12 +66,12 @@ void VideoWidgetManager::stopAll() {
     }
 }
 
-void VideoWidgetManager::switchTarget(const QString& itemId, quint64 targetId) {
-    VideoPlayer* player = m_players.value(itemId);
-    if (player) {
-        player->switchTarget(targetId);
-    }
-}
+//void VideoWidgetManager::switchTarget(const QString& itemId, quint64 targetId) {
+//    VideoPlayer* player = m_players.value(itemId);
+//    if (player) {
+//        player->switchTarget(targetId);
+//    }
+//}
 
 void VideoWidgetManager::applyLayout(const PlayerLayout& layout, QWidget* parent) {
     Q_UNUSED(parent);
@@ -81,7 +81,7 @@ void VideoWidgetManager::applyLayout(const PlayerLayout& layout, QWidget* parent
         if (player) {
             quint64 targetId = allocateTarget(player);
             m_itemTargetMap[m_playerItemMap[player]] = targetId;
-            player->switchTarget(targetId);
+         //   player->switchTarget(targetId);
         }
     }
 

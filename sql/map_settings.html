@@ -1,0 +1,25 @@
+<mapper>
+<select id="map_settings_select">
+SELECT id, browser_tms_url, client_tms_url, wfs_url,
+       browser_min_zoom, browser_max_zoom, client_min_zoom, client_max_zoom,
+       updated_at
+FROM map_settings
+WHERE id = 1
+</select>
+
+<insert id="map_settings_upsert">
+INSERT INTO map_settings (id, browser_tms_url, client_tms_url, wfs_url,
+                          browser_min_zoom, browser_max_zoom, client_min_zoom, client_max_zoom)
+VALUES (1, #{browser_tms_url}, #{client_tms_url}, #{wfs_url},
+        #{browser_min_zoom}, #{browser_max_zoom}, #{client_min_zoom}, #{client_max_zoom})
+ON CONFLICT (id) DO UPDATE SET
+browser_tms_url = #{browser_tms_url},
+client_tms_url = #{client_tms_url},
+wfs_url = #{wfs_url},
+browser_min_zoom = #{browser_min_zoom},
+browser_max_zoom = #{browser_max_zoom},
+client_min_zoom = #{client_min_zoom},
+client_max_zoom = #{client_max_zoom},
+updated_at = now()
+</insert>
+</mapper>

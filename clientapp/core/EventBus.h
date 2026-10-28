@@ -18,6 +18,7 @@
 #define TOPIC_ALARM_ACKNOWLEDGED "alarm/acknowledged"
 #define TOPIC_MAP_FOCUS "map/focus"
 #define TOPIC_MAP_MARKER_ADD "map/marker/add"
+#define TOPIC_MAP_TILES_URL "map/tiles/url"
 #define TOPIC_NOTIFICATION_SHOW "notification/show"
 
 namespace rustcam {

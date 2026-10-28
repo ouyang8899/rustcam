@@ -1,10 +1,40 @@
 #include "DeviceTree.h"
+#include "ThemeManager.h"
 #include <QHeaderView>
 #include <QMimeData>
 #include <QDrag>
 #include <QApplication>
+#include <QPainter>
+#include <QPalette>
 
 namespace rustcam {
+
+namespace {
+
+/// QTreeView 的 branch（缩进/展开箭头）区域由 drawBranches 单独绘制，
+/// 原生 QSS 的 branch:selected 在 Qt5 下不可靠，这里手动补齐整行选中背景。
+class DeviceTreeView : public QTreeView {
+public:
+    explicit DeviceTreeView(QWidget* parent = nullptr) : QTreeView(parent) {}
+
+protected:
+    void drawBranches(QPainter* painter, const QRect& rect,
+                      const QModelIndex& index) const override {
+        if (selectionModel() && selectionModel()->isSelected(index)) {
+            const bool active = isActiveWindow();
+            const QColor bg = ThemeManager::instance()->getColor(
+                active ? "selected_bg_active" : "selected_bg",
+                palette().color(active ? QPalette::Active : QPalette::Inactive,
+                                 QPalette::Highlight));
+            if (bg.isValid()) {
+                painter->fillRect(rect, bg);
+            }
+        }
+        QTreeView::drawBranches(painter, rect, index);
+    }
+};
+
+} // namespace
 
 DeviceTree::DeviceTree(QWidget* parent)
     : QWidget(parent)
@@ -32,7 +62,7 @@ void DeviceTree::setupUi()
 
     mainLayout->addLayout(toolbarLayout);
 
-    m_tree = new QTreeView();
+    m_tree = new DeviceTreeView();
     m_tree->setObjectName("deviceTreeView");
     m_model = new DeviceTreeModel(this);
     m_tree->setModel(m_model);
@@ -40,7 +70,8 @@ void DeviceTree::setupUi()
     m_tree->setEditTriggers(QTreeView::NoEditTriggers);
     m_tree->setDragEnabled(true);
     m_tree->setAcceptDrops(false);
-    m_tree->setSelectionBehavior(QTreeView::SelectRows);
+    // 单列树：item 选中即可，branch 背景由 DeviceTreeView 补齐
+    m_tree->setSelectionBehavior(QTreeView::SelectItems);
     m_tree->setItemDelegate(new FullRowSelectDelegate(m_tree));
 
     connect(m_tree, &QTreeView::doubleClicked, this, &DeviceTree::onItemDoubleClicked);

@@ -16,6 +16,11 @@ public:
     QVariant getValue(const QString& key, const QVariant& defaultValue = QVariant()) const;
     void setValue(const QString& key, const QVariant& value);
 
+    /// 截图保存目录：已配置则用配置值，否则回退到工作目录下的 screenshot
+    static QString screenshotDirectory();
+    /// 截图目录不可写时的回退目录（工作目录/screenshot）
+    static QString fallbackScreenshotDirectory();
+
     template<typename T>
     T getValue(const QString& key, const T& defaultValue) const {
         QVariant v = getValue(key);

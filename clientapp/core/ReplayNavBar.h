@@ -5,6 +5,8 @@
 #include <QPushButton>
 #include "PlayerLayout.h"
 
+class QSignalMapper;
+
 namespace rustcam {
 
 class RUSTCAM_CORE_API ReplayNavBar : public QWidget {
@@ -23,11 +25,14 @@ protected:
     void resizeEvent(QResizeEvent* event) override;
 
 private slots:
-    void onButtonClicked();
+    /// 某个布局按钮被点击（序号由按钮自己带过来，不用 sender() 反查）
+    void onButtonClicked(int index);
 
 private:
     void updateButtonPositions();
 
+    /// 按钮 -> 布局序号
+    QSignalMapper* m_indexMapper = nullptr;
     QList<QPushButton*> m_buttons;
     QList<PlayerLayout> m_layouts;
     int m_selectedIndex = -1;

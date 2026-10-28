@@ -30,6 +30,18 @@ SystemConfig* SystemConfig::instance() {
     return &inst;
 }
 
+QString SystemConfig::fallbackScreenshotDirectory() {
+    return QDir::current().filePath("screenshot");
+}
+
+QString SystemConfig::screenshotDirectory() {
+    const QString path = instance()->getValue(CFG_SCREENSHOT_PATH).toString().trimmed();
+    if (!path.isEmpty()) {
+        return path;
+    }
+    return fallbackScreenshotDirectory();
+}
+
 QVariant SystemConfig::getValue(const QString& key, const QVariant& defaultValue) const {
     return m_config.value(key, defaultValue);
 }
@@ -172,6 +184,10 @@ bool SystemConfig::load() {
             {CFG_OSD_FONT_COLOR, "#FFFFFFFF"},
             {CFG_OSD_BG_ALPHA, 100},
             {CFG_PLUGIN_ORDER, QStringList({"live_video", "alarm", "playback", "map", "settings"})},
+            {CFG_MAP_TMS_URL, ""},
+            {CFG_MAP_WFS_URL, ""},
+            {CFG_MAP_MIN_ZOOM, 0},
+            {CFG_MAP_MAX_ZOOM, 19},
         };
 
         for (auto it = defaults.constBegin(); it != defaults.constEnd(); ++it) {

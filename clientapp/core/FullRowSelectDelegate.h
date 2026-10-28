@@ -1,9 +1,11 @@
 #pragma once
 
+#include "ThemeManager.h"
 #include <QStyledItemDelegate>
 #include <QStyleOptionViewItem>
 #include <QPainter>
 #include <QModelIndex>
+#include <QPalette>
 
 namespace rustcam {
 
@@ -15,9 +17,13 @@ public:
         QStyleOptionViewItem opt = option;
 
         if (opt.state & QStyle::State_Selected) {
-            QPalette::ColorGroup cg = (opt.state & QStyle::State_Active)
-                ? QPalette::Normal : QPalette::Inactive;
-            painter->fillRect(opt.rect, opt.palette.color(cg, QPalette::Highlight));
+            // 选中背景跟随主题（含窗口失焦态），不要用系统调色板的灰色高亮
+            const bool active = opt.state & QStyle::State_Active;
+            const QPalette::ColorGroup cg = active ? QPalette::Active : QPalette::Inactive;
+            const QColor highlight = ThemeManager::instance()->getColor(
+                active ? "selected_bg_active" : "selected_bg",
+                opt.palette.color(cg, QPalette::Highlight));
+            painter->fillRect(opt.rect, highlight);
             opt.state &= ~QStyle::State_Selected;
             opt.text = QString();
             QStyledItemDelegate::paint(painter, opt, index);

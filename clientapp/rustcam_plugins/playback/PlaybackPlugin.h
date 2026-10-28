@@ -6,6 +6,7 @@
 #include <QList>
 #include <QMap>
 #include <QPair>
+#include <QSet>
 #include <QtConcurrent>
 #include <QFutureWatcher>
 #include <QJsonObject>
@@ -42,9 +43,10 @@ private slots:
     void onPlay();
     void onPause();
     void onStop();
-    void onSpeedChanged(double speed);
+    void onSpeedTextChanged(const QString& text);
+    void onTimeEditChanged(const QDateTime& dt);
     void onSeek(int64_t timeMs);
-    void onCellClicked(int cellId, const QString& deviceId);
+    void onCellClicked(const QString& layoutItemId, const QString& deviceId);
     void onDeviceSelected(const QString& deviceTag, const QString& channelTag, const QString& deviceName);
 
     void onChannelRequested(const QString& deviceTag, const QString& channelTag,
@@ -55,10 +57,15 @@ private slots:
     void onChannelRangeChanged(const QString& key, int64_t startMs, int64_t endMs);
     void onChannelAlarmsLoaded(const QString& key, const QList<TimelineEvent>& events);
     void onChannelBookmarksChanged(const QString& key, const QList<TimelineEvent>& bookmarks);
-    void onChannelSeekRequested(const QString& key, int64_t timeMs);
     void onChannelPlayFileRequested(const QString& key, const RecordingFile& file);
 
-    void onFileDoubleClicked(const RecordingFile& file);
+    void onChannelPlaybackProgress(const QString& channelKey, int64_t timeMs);
+    void onTargetCellChanged(const QString& layoutItemId);
+    void onRecordingDropped(const QString& layoutItemId, const QString& channelKey, int64_t startTimeMs);
+    void onChannelDropped(const QString& layoutItemId, const QString& deviceTag,
+                          const QString& channelTag, const QString& displayName);
+    void onUpdateTimer();
+
     void onExportClip();
     void onLoadDeviceTree();
     void onDataManagerLoaded();
@@ -67,12 +74,15 @@ private:
     /// 取得或创建通道（并把它的控件接到播放器上）
     PlaybackChannel* ensureChannel(const QString& deviceTag, const QString& channelTag,
                                    const QString& displayName);
-    void attachChannelSignals(const QString& key, PlaybackChannel* channel);
     /// 把通道绑到窗口并激活（cellId 为空时用当前选中的窗口）
     void activateChannel(const QString& key, const QString& cellId);
     /// 用通道的录像文件装载并播放
     void playChannelFrom(const QString& key, int64_t startTimeMs);
+    /// 把通道显示名称写到格子里的播放器（截图文件名用）
+    void applyChannelNameToCell(PlaybackChannel* channel, const QString& cellId);
     void updateTimeEdit(int64_t timeMs);
+    /// 当前激活通道（侧栏正在查看的通道）；工具栏动作只作用它
+    QString activeChannelKey() const;
 
 private:
     PlaybackSidePanel* m_sidePanel;
@@ -86,14 +96,16 @@ private:
     QString m_currentChannelTag;
     /// 当前目标回放窗口（双击录像文件播到这里）
     QString m_targetCellId;
-    /// 当前播放位置
-    int64_t m_currentPositionMs = 0;
     QLabel* m_targetLabel = nullptr;
+    /// 工具栏的当前时间显示
+    QLabel* m_currentTimeLabel = nullptr;
     /// 工具栏的时间输入框
     QDateTimeEdit* m_timeEdit = nullptr;
     QString m_playbackRequestToken;
     /// 通道 key -> 时间范围（该通道当前列出录像的总跨度）
     QMap<QString, QPair<int64_t, int64_t>> m_channelRanges;
+    /// 拖拽通道后等录像加载完再自动播放
+    QSet<QString> m_autoPlayChannels;
 };
 
 }

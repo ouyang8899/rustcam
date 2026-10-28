@@ -24,13 +24,6 @@ app.use(pinia)
 app.use(router)
 app.use(ElementPlus, { size: 'small', locale: zhCn })
 
-if (window.ClientApp) {
-  const wsUrl = `ws://${window.location.hostname}:8080`
-  window.clientApp = new window.ClientApp(wsUrl)
-  console.log('[main] ClientApp initialized, wsUrl:', wsUrl)
-} else {
-  console.warn('[main] ClientApp not available (rtsp-player not loaded)')
-}
 for (const [key, component] of Object.entries(ElementPlusIcons)) {
   app.component(key, component)
 }

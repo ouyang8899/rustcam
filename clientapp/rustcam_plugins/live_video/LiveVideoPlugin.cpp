@@ -478,41 +478,24 @@ void LiveVideoPlugin::onStreamStop(const QString& topic, EventDataPtr)
     Q_UNUSED(topic)
 }
 
-void LiveVideoPlugin::onChannelClicked(int deviceId, int channelId, const QString& channelName)
-{
-    Q_UNUSED(channelId)
-    QString url = QString("rtsp://localhost/live/%1").arg(deviceId);
-    QString cellId;
-
-    for (auto cell : m_cells.values()) {
-        if (!cell->isPlaying()) {
-            cellId = cell->cellId();
-            break;
-        }
-    }
-
-    if (cellId.isEmpty()) {
-        cellId = "cell-0";
-    }
-
-    playStream(cellId, url, channelName);
-}
-
 void LiveVideoPlugin::onDeviceTreeItemClicked(const QVariantMap& meta)
 {
     QString type = meta["type"].toString();
     if (type == "device") {
         QString deviceTag = meta["device_tag"].toString();
-        QString host = meta["host"].toString();
-        int port = meta["port"].toInt();
         if (!deviceTag.isEmpty() && m_videoContainer) {
-            QString url;
-            if (!host.isEmpty() && port > 0) {
-                url = QString("rtsp://%1:%2/live/%3").arg(host).arg(port).arg(deviceTag);
-            } else {
-                url = QString("rtsp://localhost/live/%1").arg(deviceTag);
-            }
-            m_videoContainer->playStream(QString(), url, meta["name"].toString());
+            QString title = meta["name"].toString();
+            QString itemId = QString("%1/%1").arg(deviceTag);
+            QtConcurrent::run([this, deviceTag, title, itemId]() {
+                // 设备级播放也交给后端生成地址（以 device_tag 作为默认通道）
+                QString endpoint = QString("/api/v1/channels/%1/%1/play-links").arg(deviceTag);
+                QJsonObject response;
+                QString error;
+                bool success = ServerApi::instance()->getSync(endpoint, response, error);
+                QMetaObject::invokeMethod(this, [this, success, response, error, title, itemId]() {
+                    onChannelPlayLinksReceived(success, response, error, title, itemId);
+                }, Qt::QueuedConnection);
+            });
         }
     } else if (type == "channel") {
         QString deviceTag = meta["device_tag"].toString();

@@ -112,7 +112,8 @@ private:
     RecordingFileListModel* m_model;
     QLabel* m_countLabel;
     QComboBox* m_pageSizeCombo;
-    int m_pageSize = 50;
+    /// 每次向服务端请求的条数（服务端上限 500）
+    int m_pageSize = 500;
     int m_total = 0;
 };
 

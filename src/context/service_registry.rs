@@ -5,7 +5,7 @@ use crate::infrastructure::cluster::ClusterManager;
 use crate::infrastructure::db_repository::DbRepository;
 use crate::application::{
     DeviceService, StreamService, SessionService, RecordingService,
-    MediaServerService,PlayerLayoutService,
+    MediaServerService,PlayerLayoutService, MapSettingsService,
     PlayService, WsBroadcaster, StreamRecoveryService,
     zlmediakit_hook::ZlMediaKitHookHandler, ChannelService,
     RecordingPolicyService, RecordingSchedulerService,
@@ -47,6 +47,8 @@ pub struct ServiceRegistry {
     pub zlmediakit_hook_handler: Arc<ZlMediaKitHookHandler>,
 
     pub player_layout_service: Arc<PlayerLayoutService>,
+
+    pub map_settings_service: Arc<MapSettingsService>,
 
     pub channel_service: Arc<ChannelService>,
 
@@ -190,6 +192,10 @@ impl ServiceRegistry {
             infra.db.clone(),
         ));
 
+        let map_settings_service = Arc::new(MapSettingsService::new(
+            infra.db.clone(),
+        ));
+
         let channel_service = Arc::new(ChannelService::new(
             infra.db.clone(),
         ));
@@ -228,6 +234,7 @@ impl ServiceRegistry {
             // hook_service,
             zlmediakit_hook_handler,
             player_layout_service,
+            map_settings_service,
             channel_service,
             play_service,
             ws_broadcaster,

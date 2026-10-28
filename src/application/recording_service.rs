@@ -300,6 +300,7 @@ impl RecordingService {
 
         if let Err(e) = self.repo.delete_recording(id).await {
             tracing::error!("[RecordingService] Failed to delete from DB: {}", e);
+            return Err(AppError::Internal(format!("Failed to delete recording: {}", e)));
         }
 
         Ok(())

@@ -76,9 +76,10 @@
                 <span v-else>-</span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="180" align="center">
+            <el-table-column label="操作" width="240" align="center">
               <template #default="{ row }">
                 <el-button size="small" type="primary" @click="$router.push(`/channels/${row.device_tag}/${row.channel_tag}`)">详情</el-button>
+                <el-button size="small" @click="locateOnMap(row)">定位</el-button>
                 <el-button size="small" @click="startChannelStream(row)">播放</el-button>
               </template>
             </el-table-column>
@@ -154,6 +155,17 @@ function onPageChange(page) {
 
 function clearDeviceFilter() {
   router.push('/channels')
+}
+
+// 精确定位到地图上的摄像头点
+function locateOnMap(channel) {
+  router.push({
+    path: '/device-map',
+    query: {
+      device_tag: channel.device_tag,
+      channel_tag: channel.channel_tag,
+    },
+  })
 }
 
 async function startChannelStream(channel) {

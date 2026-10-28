@@ -70,6 +70,8 @@ public:
     void pause();
     void stop();
     void setSpeed(double speed);
+    /// 只设置指定通道的倍速（工具栏只作用于当前激活通道）
+    void setGroupSpeed(PlaybackGroup* group, double speed);
 
     PlaybackGroup* createGroup();
     void destroyGroup(int groupId);

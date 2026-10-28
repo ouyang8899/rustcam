@@ -8,6 +8,8 @@
 #include "core/AlarmSidePanel.h"
 #include "core/DataManager.h"
 
+class QLabel;
+
 namespace rustcam {
 
 class AlarmPlugin : public IPlugin {
@@ -35,6 +37,9 @@ private slots:
     void onDataManagerLoaded();
     void onDeviceSelected(const QString& deviceId, const QString& deviceName);
     void onAlarmSelected(const QString& alarmId);
+    void onRefreshClicked();
+    void onFilterChanged(const QString& text);
+    void onAlarmCountChanged(int count);
 
 private:
     void loadAlarms();
@@ -42,6 +47,8 @@ private:
 
     QWidget* m_workspace;
     AlarmSidePanel* m_sidePanel;
+    /// 工具栏上的未处理计数标签
+    QLabel* m_countLabel = nullptr;
     int m_unreadCount = 0;
     QString m_currentDeviceId;
 };

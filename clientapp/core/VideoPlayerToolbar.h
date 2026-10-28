@@ -16,7 +16,7 @@
 #include "CoreExport.h"
 
 namespace rustcam {
-class VideoPlayer;
+class IVideoControls;
 }
 
 namespace rustcam {
@@ -27,10 +27,11 @@ public:
     explicit VideoPlayerToolbar(QWidget* parent = nullptr);
     ~VideoPlayerToolbar();
 
-    void setVideoPlayer(VideoPlayer* player);
-    VideoPlayer* videoPlayer() const { return m_videoPlayer; }
+    void setControls(IVideoControls* controls);
+    IVideoControls* controls() const { return m_controls; }
+    /// Disable capability buttons (screenshot/audio/fullscreen/media rate).
+    void setCapabilities(bool screenshot, bool audio, bool fullscreen, bool mediaRate);
 
-    void play(const QString& url);
     void stop();
     bool isPlaying() const;
 
@@ -74,8 +75,9 @@ private:
     void refreshIcons();
     QPoint mapToVideoPlayer(const QPoint& pos);
     int calculateButtonsWidth() const;
+    void applyCapabilities();
 
-    VideoPlayer* m_videoPlayer = nullptr;
+    IVideoControls* m_controls = nullptr;
     QWidget* m_toolbarWidget = nullptr;
     QHBoxLayout* m_toolbarLayout = nullptr;
 
@@ -92,6 +94,13 @@ private:
     QToolButton* m_mediaRateBtn = nullptr;
     QToolButton* m_moreBtn = nullptr;
     QMenu* m_collapseMenu = nullptr;
+    /// 折叠菜单里的动作：构造时创建并连接一次，菜单重建时只重新挂回
+    QAction* m_collapseRotateAction = nullptr;
+    QAction* m_collapseMirrorAction = nullptr;
+    QAction* m_collapseZoomAction = nullptr;
+    QAction* m_collapseAudioAction = nullptr;
+    QAction* m_collapseMediaRateAction = nullptr;
+    QList<QAction*> m_collapseActions;
 
     QList<QWidget*> m_primaryButtons;
     QList<QWidget*> m_secondaryButtons;
@@ -106,6 +115,10 @@ private:
     bool m_mirrorV = false;
     bool m_audioEnabled = true;
     bool m_mediaRateEnabled = true;
+    bool m_capScreenshot = true;
+    bool m_capAudio = true;
+    bool m_capFullscreen = true;
+    bool m_capMediaRate = true;
     QColor m_iconColor = Qt::white;
 
     QPoint m_dragPosition;

@@ -13,6 +13,8 @@
 #include <QColorDialog>
 #include <QFrame>
 #include <QDialogButtonBox>
+#include <QDir>
+#include <QFileDialog>
 
 namespace rustcam {
 
@@ -33,6 +35,10 @@ SettingsWidget::SettingsWidget(QWidget* parent)
     , m_osdFontColorLabel(nullptr)
     , m_osdBgAlphaSpin(nullptr)
     , m_pluginOrderList(nullptr)
+    , m_screenshotPathEdit(nullptr)
+    , m_clientTmsUrlEdit(nullptr)
+    , m_wfsUrlEdit(nullptr)
+    , m_zoomRangeEdit(nullptr)
 {
     setWindowTitle(tr("Settings"));
     setMinimumWidth(550);
@@ -45,7 +51,9 @@ SettingsWidget::SettingsWidget(QWidget* parent)
 
     setupOsdDisplayTab();
     setupOsdStyleTab();
+    setupScreenshotTab();
     setupPluginTab();
+    setupMapTab();
 
     loadSettings();
 
@@ -83,6 +91,14 @@ void SettingsWidget::loadSettings() {
     m_osdFontColorLabel->setStyleSheet(QString("background-color: %1;").arg(m_osdFontColor.name()));
 
     m_osdBgAlphaSpin->setValue(cfg->getValue(CFG_OSD_BG_ALPHA, 100));
+
+    m_screenshotPathEdit->setText(QDir::toNativeSeparators(SystemConfig::screenshotDirectory()));
+
+    m_clientTmsUrlEdit->setText(cfg->getValue(CFG_MAP_TMS_URL, "").toString());
+    m_wfsUrlEdit->setText(cfg->getValue(CFG_MAP_WFS_URL, "").toString());
+    m_zoomRangeEdit->setText(QString("%1 - %2")
+        .arg(cfg->getValue(CFG_MAP_MIN_ZOOM, 0))
+        .arg(cfg->getValue(CFG_MAP_MAX_ZOOM, 19)));
 
     refreshPluginList();
 }
@@ -209,6 +225,48 @@ void SettingsWidget::setupOsdStyleTab() {
     m_tabWidget->addTab(tab, tr("OSD Style"));
 }
 
+void SettingsWidget::setupScreenshotTab() {
+    QWidget* tab = new QWidget(this);
+    QVBoxLayout* layout = new QVBoxLayout(tab);
+
+    QGroupBox* pathGroup = new QGroupBox(tr("Screenshot Storage"), tab);
+    QFormLayout* pathLayout = new QFormLayout(pathGroup);
+
+    QHBoxLayout* pathRow = new QHBoxLayout();
+    m_screenshotPathEdit = new QLineEdit(tab);
+    m_screenshotPathEdit->setReadOnly(true);
+    pathRow->addWidget(m_screenshotPathEdit, 1);
+
+    QPushButton* browseBtn = new QPushButton(tr("Browse..."), tab);
+    pathRow->addWidget(browseBtn);
+    pathLayout->addRow(tr("Save Path:"), pathRow);
+
+    layout->addWidget(pathGroup);
+
+    QLabel* hintLabel = new QLabel(tr("File name: ChannelName_YYYY_MM_DD_HH_MM_SS_nnn.jpeg"), tab);
+    hintLabel->setStyleSheet("color: gray; font-size: 11px;");
+    layout->addWidget(hintLabel);
+
+    QLabel* fallbackLabel = new QLabel(tr("If the path is unavailable, screenshots are saved to <working dir>/screenshot."), tab);
+    fallbackLabel->setStyleSheet("color: gray; font-size: 11px;");
+    fallbackLabel->setWordWrap(true);
+    layout->addWidget(fallbackLabel);
+
+    layout->addStretch();
+
+    connect(browseBtn, &QPushButton::clicked, this, [this]() {
+        const QString dir = QFileDialog::getExistingDirectory(
+            this, tr("Select Screenshot Directory"), m_screenshotPathEdit->text());
+        if (dir.isEmpty()) {
+            return;
+        }
+        m_screenshotPathEdit->setText(QDir::toNativeSeparators(dir));
+        SystemConfig::instance()->setValue(CFG_SCREENSHOT_PATH, dir);
+    });
+
+    m_tabWidget->addTab(tab, tr("Screenshot"));
+}
+
 void SettingsWidget::setupPluginTab() {
     QWidget* tab = new QWidget(this);
     QVBoxLayout* layout = new QVBoxLayout(tab);
@@ -240,6 +298,40 @@ void SettingsWidget::setupPluginTab() {
     connect(downBtn, &QPushButton::clicked, this, &SettingsWidget::onPluginMoveDown);
 
     m_tabWidget->addTab(tab, tr("Plugin Management"));
+}
+
+void SettingsWidget::setupMapTab() {
+    QWidget* tab = new QWidget(this);
+    QVBoxLayout* layout = new QVBoxLayout(tab);
+
+    QGroupBox* mapGroup = new QGroupBox(tr("Electronic Map"), tab);
+    QFormLayout* mapLayout = new QFormLayout(mapGroup);
+
+    m_clientTmsUrlEdit = new QLineEdit(tab);
+    m_clientTmsUrlEdit->setReadOnly(true);
+    m_clientTmsUrlEdit->setPlaceholderText(tr("https://tile.openstreetmap.org/{z}/{x}/{y}.png"));
+    mapLayout->addRow(tr("Client TMS URL:"), m_clientTmsUrlEdit);
+
+    m_wfsUrlEdit = new QLineEdit(tab);
+    m_wfsUrlEdit->setReadOnly(true);
+    m_wfsUrlEdit->setPlaceholderText(tr("http://localhost:8080/geoserver/ows?service=WFS&version=2.0.0&request=GetFeature"));
+    mapLayout->addRow(tr("WFS URL:"), m_wfsUrlEdit);
+
+    m_zoomRangeEdit = new QLineEdit(tab);
+    m_zoomRangeEdit->setReadOnly(true);
+    m_zoomRangeEdit->setPlaceholderText(tr("0 - 19"));
+    mapLayout->addRow(tr("Zoom Levels:"), m_zoomRangeEdit);
+
+    layout->addWidget(mapGroup);
+
+    QLabel* hintLabel = new QLabel(tr("Hint: The map addresses are served by the server and loaded on startup, they cannot be changed here."), tab);
+    hintLabel->setStyleSheet("color: gray; font-size: 11px;");
+    hintLabel->setWordWrap(true);
+    layout->addWidget(hintLabel);
+
+    layout->addStretch();
+
+    m_tabWidget->addTab(tab, tr("Electronic Map"));
 }
 
 void SettingsWidget::refreshPluginList() {

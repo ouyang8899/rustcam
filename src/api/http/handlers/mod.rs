@@ -9,6 +9,7 @@ pub mod recording_policy_handler;
 pub mod recording_file_handler;
 pub mod ptz_handler;
 pub mod layout_handler;
+pub mod settings_handler;
 pub mod region_handler;
 pub mod group_handler;
 pub mod onvif_handler;

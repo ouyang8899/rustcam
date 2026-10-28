@@ -1,10 +1,12 @@
 #include "VideoPlayerToolbar.h"
-#include "VideoPlayer.h"
+#include "IVideoControls.h"
 #include "SystemConfig.h"
+#include "NotificationWidget.h"
+#include "EventBus.h"
 #include "ThemeManager.h"
 #include "common/Logger.h"
-#include <QFileDialog>
-#include <QMessageBox>
+#include <QDir>
+#include <QRegularExpression>
 #include <QApplication>
 #include <QDateTime>
 #include <QWidgetAction>
@@ -41,7 +43,7 @@ static QIcon createColoredIcon(const QString& svgPath, const QColor& color) {
 
 VideoPlayerToolbar::VideoPlayerToolbar(QWidget* parent)
     : QWidget(parent)
-    , m_videoPlayer(nullptr)
+    , m_controls(nullptr)
     , m_toolbarWidget(nullptr)
     , m_stopBtn(nullptr)
     , m_rotateBtn(nullptr)
@@ -114,8 +116,8 @@ VideoPlayerToolbar::VideoPlayerToolbar(QWidget* parent)
 }
 
 VideoPlayerToolbar::~VideoPlayerToolbar() {
-    if (m_videoPlayer) {
-        m_videoPlayer->removeEventFilter(this);
+    if (m_controls && m_controls->controlWidget()) {
+        m_controls->controlWidget()->removeEventFilter(this);
     }
 }
 
@@ -204,6 +206,17 @@ void VideoPlayerToolbar::setupUi() {
     m_toolbarLayout->addWidget(m_fullscreenBtn);
 
     m_collapseMenu = new QMenu(m_toolbarWidget);
+    // 折叠菜单的动作在构造时创建并连接一次：菜单重建时只重新挂回，不重复连接
+    m_collapseRotateAction = new QAction(tr("Rotate"), this);
+    m_collapseMirrorAction = new QAction(tr("Mirror"), this);
+    m_collapseZoomAction = new QAction(tr("Zoom"), this);
+    m_collapseAudioAction = new QAction(tr("Audio On/Off"), this);
+    m_collapseMediaRateAction = new QAction(tr("Media Rate"), this);
+    connect(m_collapseAudioAction, &QAction::triggered, this, &VideoPlayerToolbar::onAudioClicked);
+    connect(m_collapseMediaRateAction, &QAction::triggered, this, &VideoPlayerToolbar::onMediaRateClicked);
+    m_collapseActions = {m_collapseRotateAction, m_collapseMirrorAction, m_collapseZoomAction,
+                          m_collapseAudioAction, m_collapseMediaRateAction};
+
     m_moreBtn = new QToolButton(m_toolbarWidget);
     m_moreBtn->setObjectName("ToolbarButton");
     m_moreBtn->setIcon(createColoredIcon(":/icons/ic_toolbar_more.svg", m_iconColor));
@@ -220,6 +233,29 @@ void VideoPlayerToolbar::setupUi() {
     m_secondaryButtons = {m_rotateBtn, m_mirrorBtn, m_zoomBtn, m_audioBtn, m_mediaRateBtn};
 
     refreshIcons();
+}
+
+void VideoPlayerToolbar::setCapabilities(bool screenshot, bool audio, bool fullscreen, bool mediaRate) {
+    m_capScreenshot = screenshot;
+    m_capAudio = audio;
+    m_capFullscreen = fullscreen;
+    m_capMediaRate = mediaRate;
+    applyCapabilities();
+}
+
+void VideoPlayerToolbar::applyCapabilities() {
+    if (m_screenshotBtn) m_screenshotBtn->setVisible(m_capScreenshot);
+    if (m_audioBtn) m_audioBtn->setVisible(m_capAudio);
+    if (m_fullscreenBtn) m_fullscreenBtn->setVisible(m_capFullscreen);
+    if (m_mediaRateBtn) m_mediaRateBtn->setVisible(m_capMediaRate);
+
+    m_primaryButtons = {m_stopBtn};
+    if (m_capScreenshot) m_primaryButtons.append(m_screenshotBtn);
+    if (m_capFullscreen) m_primaryButtons.append(m_fullscreenBtn);
+
+    m_secondaryButtons = {m_rotateBtn, m_mirrorBtn, m_zoomBtn};
+    if (m_capAudio) m_secondaryButtons.append(m_audioBtn);
+    if (m_capMediaRate) m_secondaryButtons.append(m_mediaRateBtn);
 }
 
 void VideoPlayerToolbar::createRotationMenu() {
@@ -302,33 +338,29 @@ void VideoPlayerToolbar::createZoomMenu() {
     m_zoomMenu->addAction(widgetAction);
 }
 
-void VideoPlayerToolbar::setVideoPlayer(VideoPlayer* player) {
-    if (m_videoPlayer) {
-        m_videoPlayer->removeEventFilter(this);
+void VideoPlayerToolbar::setControls(IVideoControls* controls) {
+    if (m_controls && m_controls->controlWidget()) {
+        m_controls->controlWidget()->removeEventFilter(this);
     }
 
-    m_videoPlayer = player;
+    m_controls = controls;
 
-    if (m_videoPlayer) {
-        m_videoPlayer->installEventFilter(this);
+    if (m_controls && m_controls->controlWidget()) {
+        m_controls->controlWidget()->installEventFilter(this);
     }
-}
-
-void VideoPlayerToolbar::play(const QString& url) {
-    if (m_videoPlayer) m_videoPlayer->play(url);
 }
 
 void VideoPlayerToolbar::stop() {
-    if (m_videoPlayer) m_videoPlayer->stop();
+    if (m_controls) m_controls->stop();
 }
 
 bool VideoPlayerToolbar::isPlaying() const {
-    return m_videoPlayer && m_videoPlayer->isPlaying();
+    return m_controls && m_controls->isPlaying();
 }
 
 void VideoPlayerToolbar::onStopClicked() {
-    if (m_videoPlayer) {
-        m_videoPlayer->stop();
+    if (m_controls) {
+        m_controls->requestClose();
     }
 }
 
@@ -336,8 +368,8 @@ void VideoPlayerToolbar::onRotateAction(QAction* action) {
     int angle = action->data().toInt();
     m_rotationAngle = angle;
 
-    if (m_videoPlayer) {
-        m_videoPlayer->setRotation(angle);
+    if (m_controls) {
+        m_controls->setRotation(angle);
     }
 
     LOG_INFO("VideoPlayerToolbar", QString("Rotation set to %1°").arg(angle));
@@ -352,43 +384,65 @@ void VideoPlayerToolbar::onMirrorAction(QAction* action) {
         m_mirrorV = action->isChecked();
     }
 
-    if (m_videoPlayer) {
-        m_videoPlayer->setMirror(m_mirrorH, m_mirrorV);
+    if (m_controls) {
+        m_controls->setMirror(m_mirrorH, m_mirrorV);
     }
 
     LOG_INFO("VideoPlayerToolbar", QString("Mirror H=%1, V=%2").arg(m_mirrorH).arg(m_mirrorV));
 }
 
 void VideoPlayerToolbar::onScreenshotClicked() {
-    if (!m_videoPlayer) {
+    if (!m_controls) {
         return;
     }
 
-    QString fileName = QFileDialog::getSaveFileName(
-        this,
-        tr("Save Screenshot"),
-        QString("screenshot_%1.png").arg(QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss")),
-        tr("Images (*.png *.jpg *.jpeg)")
-    );
-
-    if (fileName.isEmpty()) {
-        return;
+    QDir dir(SystemConfig::screenshotDirectory());
+    if (!dir.exists() && !dir.mkpath(".")) {
+        // 配置目录不可用，回退到工作目录/screenshot
+        const QString fallback = SystemConfig::fallbackScreenshotDirectory();
+        dir.setPath(fallback);
+        if (!dir.exists() && !dir.mkpath(".")) {
+            LOG_ERROR("VideoPlayerToolbar", QString("Cannot create screenshot directory: %1")
+                .arg(QDir::toNativeSeparators(dir.path())));
+            EventBus::instance()->publish(TOPIC_NOTIFICATION_SHOW,
+                QSharedPointer<NotificationEventData>(new NotificationEventData(
+                    tr("Screenshot failed: cannot create directory"),
+                    NotificationEventData::Error)));
+            return;
+        }
     }
 
-    if (m_videoPlayer->takeScreenshot(fileName)) {
-        LOG_INFO("VideoPlayerToolbar", QString("Screenshot saved: %1").arg(fileName));
-        QMessageBox::information(this, tr("Success"), tr("Screenshot saved successfully"));
+    QString baseName = m_controls->deviceName().trimmed();
+    if (baseName.isEmpty()) {
+        baseName = "screenshot";
+    }
+    // 过滤文件系统非法字符
+    baseName.replace(QRegularExpression("[\\\\/:*?\"<>|]"), "_");
+
+    const QString fileName = QString("%1_%2.jpeg").arg(
+        baseName,
+        QDateTime::currentDateTime().toString("yyyy_MM_dd_HH_mm_ss_zzz"));
+    const QString filePath = dir.filePath(fileName);
+
+    if (m_controls->takeScreenshot(filePath)) {
+        LOG_INFO("VideoPlayerToolbar", QString("Screenshot saved: %1").arg(filePath));
+        EventBus::instance()->publish(TOPIC_NOTIFICATION_SHOW,
+            QSharedPointer<NotificationEventData>(new NotificationEventData(
+                tr("Screenshot saved: %1").arg(QDir::toNativeSeparators(filePath)),
+                NotificationEventData::Success)));
     } else {
-        LOG_ERROR("VideoPlayerToolbar", "Screenshot failed");
-        QMessageBox::warning(this, tr("Error"), tr("Failed to save screenshot"));
+        LOG_ERROR("VideoPlayerToolbar", QString("Screenshot failed: %1").arg(filePath));
+        EventBus::instance()->publish(TOPIC_NOTIFICATION_SHOW,
+            QSharedPointer<NotificationEventData>(new NotificationEventData(
+                tr("Failed to save screenshot"), NotificationEventData::Error)));
     }
 }
 
 void VideoPlayerToolbar::onZoomToggled(bool checked) {
     m_zoomEnabled = checked;
 
-    if (m_videoPlayer) {
-        m_videoPlayer->setZoomEnabled(checked);
+    if (m_controls) {
+        m_controls->setZoomEnabled(checked);
     }
 
     refreshIcons();
@@ -396,10 +450,11 @@ void VideoPlayerToolbar::onZoomToggled(bool checked) {
 }
 
 void VideoPlayerToolbar::onZoomValueChanged(double value) {
-
-    if (m_videoPlayer && m_zoomEnabled) {
-        QPoint center = QPoint(m_videoPlayer->width() / 2, m_videoPlayer->height() / 2);
-
+Q_UNUSED(value);
+    if (m_controls && m_controls->controlWidget() && m_zoomEnabled) {
+        QPoint center = QPoint(m_controls->controlWidget()->width() / 2,
+                               m_controls->controlWidget()->height() / 2);
+        Q_UNUSED(center);
     }
 
     updateZoomLabel();
@@ -447,31 +502,38 @@ void VideoPlayerToolbar::updateCollapseState() {
     if (buttonsWidth > availableWidth && !m_secondaryButtons.isEmpty()) {
         m_moreBtn->show();
 
-        m_collapseMenu->clear();
+        // 先把旧的动作摘下来（不删除），再按当前状态挂回去
+        for (QAction* action : m_collapseActions) {
+            m_collapseMenu->removeAction(action);
+        }
+
+        m_collapseRotateAction->setIcon(createColoredIcon(":/icons/ic_toolbar_rotate.svg", m_iconColor));
+        m_collapseMirrorAction->setIcon(createColoredIcon(":/icons/ic_toolbar_mirror_h.svg", m_iconColor));
+        m_collapseZoomAction->setIcon(createColoredIcon(":/icons/ic_toolbar_zoom.svg", m_iconColor));
+        m_collapseAudioAction->setIcon(createColoredIcon(":/icons/ic_toolbar_audio_on.svg", m_iconColor));
+        m_collapseMediaRateAction->setIcon(createColoredIcon(":/icons/ic_toolbar_mediainfo.svg", m_iconColor));
 
         if (m_rotateBtn && m_rotateBtn->menu()) {
-            QAction* rotateAction = m_collapseMenu->addAction(createColoredIcon(":/icons/ic_toolbar_rotate.svg", m_iconColor), tr("Rotate"));
-            rotateAction->setMenu(m_rotateBtn->menu());
+            m_collapseRotateAction->setMenu(m_rotateBtn->menu());
+            m_collapseMenu->addAction(m_collapseRotateAction);
         }
 
         if (m_mirrorBtn && m_mirrorBtn->menu()) {
-            QAction* mirrorAction = m_collapseMenu->addAction(createColoredIcon(":/icons/ic_toolbar_mirror_h.svg", m_iconColor), tr("Mirror"));
-            mirrorAction->setMenu(m_mirrorBtn->menu());
+            m_collapseMirrorAction->setMenu(m_mirrorBtn->menu());
+            m_collapseMenu->addAction(m_collapseMirrorAction);
         }
 
         if (m_zoomBtn && m_zoomBtn->menu()) {
-            QAction* zoomAction = m_collapseMenu->addAction(createColoredIcon(":/icons/ic_toolbar_zoom.svg", m_iconColor), tr("Zoom"));
-            zoomAction->setMenu(m_zoomBtn->menu());
+            m_collapseZoomAction->setMenu(m_zoomBtn->menu());
+            m_collapseMenu->addAction(m_collapseZoomAction);
         }
 
-        if (m_audioBtn) {
-            QAction* audioAction = m_collapseMenu->addAction(createColoredIcon(":/icons/ic_toolbar_audio_on.svg", m_iconColor), tr("Audio On/Off"));
-            connect(audioAction, &QAction::triggered, this, [this]() { onAudioClicked(); });
+        if (m_audioBtn && m_capAudio) {
+            m_collapseMenu->addAction(m_collapseAudioAction);
         }
 
-        if (m_mediaRateBtn) {
-            QAction* mediaRateAction = m_collapseMenu->addAction(createColoredIcon(":/icons/ic_toolbar_mediainfo.svg", m_iconColor), tr("Media Rate"));
-            connect(mediaRateAction, &QAction::triggered, this, [this]() { onMediaRateClicked(); });
+        if (m_mediaRateBtn && m_capMediaRate) {
+            m_collapseMenu->addAction(m_collapseMediaRateAction);
         }
 
         for (QWidget* btn : m_secondaryButtons) {
@@ -479,7 +541,9 @@ void VideoPlayerToolbar::updateCollapseState() {
         }
     } else {
         m_moreBtn->hide();
-        m_collapseMenu->clear();
+        for (QAction* action : m_collapseActions) {
+            m_collapseMenu->removeAction(action);
+        }
         for (QWidget* btn : m_secondaryButtons) {
             if (btn) btn->show();
         }
@@ -487,10 +551,10 @@ void VideoPlayerToolbar::updateCollapseState() {
 }
 
 QPoint VideoPlayerToolbar::mapToVideoPlayer(const QPoint& pos) {
-    if (!m_videoPlayer) {
+    if (!m_controls || !m_controls->controlWidget()) {
         return QPoint(0, 0);
     }
-    return m_videoPlayer->mapFrom(this, pos);
+    return m_controls->controlWidget()->mapFrom(this, pos);
 }
 
 void VideoPlayerToolbar::mousePressEvent(QMouseEvent* event) {
@@ -505,11 +569,11 @@ void VideoPlayerToolbar::mouseMoveEvent(QMouseEvent* event) {
 }
 
 bool VideoPlayerToolbar::eventFilter(QObject* obj, QEvent* event) {
-    if (!m_videoPlayer) {
+    if (!m_controls || !m_controls->controlWidget()) {
         return QWidget::eventFilter(obj, event);
     }
 
-    if (obj == m_videoPlayer) {
+    if (obj == m_controls->controlWidget()) {
         if (event->type() == QEvent::Enter) {
             m_toolbarWidget->show();
             updateCollapseState();
@@ -536,29 +600,28 @@ void VideoPlayerToolbar::wheelEvent(QWheelEvent* event) {
 }
 
 void VideoPlayerToolbar::setSelected(bool selected) {
-    if (m_videoPlayer) {
-        m_videoPlayer->setSelected(selected);
+    if (m_controls) {
+        m_controls->setSelected(selected);
     }
 }
 
 void VideoPlayerToolbar::setWatermarkAccount(const QString& account) {
-    if (m_videoPlayer) {
-        m_videoPlayer->setWatermarkAccount(account);
+    if (m_controls) {
+        m_controls->setWatermarkAccount(account);
     }
 }
 
 void VideoPlayerToolbar::setDeviceName(const QString& deviceName) {
-    if (m_videoPlayer) {
-        m_videoPlayer->setDeviceName(deviceName);
+    if (m_controls) {
+        m_controls->setDeviceName(deviceName);
     }
 }
 
 void VideoPlayerToolbar::toggleFullscreen() {
-    if (m_videoPlayer) {
-        m_videoPlayer->toggleFullscreen();
+    if (m_controls) {
+        m_controls->toggleFullscreen();
     }
 }
-
 void VideoPlayerToolbar::onFullscreenClicked() {
     toggleFullscreen();
 }
@@ -566,8 +629,8 @@ void VideoPlayerToolbar::onFullscreenClicked() {
 void VideoPlayerToolbar::onAudioClicked() {
     m_audioEnabled = !m_audioEnabled;
     updateAudioIcon();
-    if (m_videoPlayer) {
-        m_videoPlayer->setAudioEnabled(m_audioEnabled);
+    if (m_controls) {
+        m_controls->setAudioEnabled(m_audioEnabled);
     }
 }
 
@@ -584,12 +647,15 @@ void VideoPlayerToolbar::updateAudioIcon() {
 }
 
 void VideoPlayerToolbar::onMediaRateClicked() {
+    if (!m_capMediaRate) {
+        return;
+    }
     m_mediaRateEnabled = !m_mediaRateEnabled;
     if (m_mediaRateBtn) {
         m_mediaRateBtn->setChecked(m_mediaRateEnabled);
     }
-    if (m_videoPlayer) {
-        m_videoPlayer->setMediaRateVisible(m_mediaRateEnabled);
+    if (m_controls) {
+        m_controls->setMediaRateVisible(m_mediaRateEnabled);
     }
     refreshIcons();
     LOG_INFO("VideoPlayerToolbar", QString("Media rate visible: %1").arg(m_mediaRateEnabled));

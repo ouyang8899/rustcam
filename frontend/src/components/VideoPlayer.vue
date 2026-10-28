@@ -976,7 +976,7 @@ defineExpose({
   max-width: 100%;
   max-height: 100%;
   display: block;
-  object-fit: contain;
+  object-fit: fill;
   background: #000;
 }
 

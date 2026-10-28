@@ -1,6 +1,9 @@
 #include "App.h"
 #include "Logger.h"
 #include "ConfigManager.h"
+#include "ConfigKeys.h"
+#include "SystemConfig.h"
+#include "ServerApi.h"
 #include "ThemeManager.h"
 #include "PluginManager.h"
 #include "MainWindow.h"
@@ -98,10 +101,57 @@ void App::onLoginSuccess(const QJsonObject& userInfo)
     m_loginWindow->hide();
     m_loginWindow->deleteLater();
     m_loginWindow = nullptr;
+
+    // The map settings are served by the backend; the map plugin is created
+    // later and picks the tile url up from the event bus.
+    loadMapSettings();
+
     showMainWindow();
 
     EventBus::instance()->publish(TOPIC_SESSION_LOGGED_IN);
     LOG_INFO("App", "Published session/loggedIn event");
+}
+
+void App::loadMapSettings()
+{
+    ServerApi::instance()->get("/api/v1/settings/map", [this](bool success, const QJsonObject& resp, const QString& error) {
+        QString tmsUrl;
+        QString wfsUrl;
+        int minZoom = 0;
+        int maxZoom = 19;
+
+        if (success) {
+            const QJsonObject data = resp.value("data").toObject();
+            tmsUrl = data.value("client_tms_url").toString();
+            wfsUrl = data.value("wfs_url").toString();
+            minZoom = data.value("client_min_zoom").toInt(0);
+            maxZoom = data.value("client_max_zoom").toInt(19);
+        } else {
+            LOG_WARNING("App", QString("Failed to load map settings: %1").arg(error));
+        }
+
+        if (success) {
+            SystemConfig::instance()->setValue(CFG_MAP_TMS_URL, tmsUrl);
+            SystemConfig::instance()->setValue(CFG_MAP_WFS_URL, wfsUrl);
+            SystemConfig::instance()->setValue(CFG_MAP_MIN_ZOOM, minZoom);
+            SystemConfig::instance()->setValue(CFG_MAP_MAX_ZOOM, maxZoom);
+        } else {
+            // Keep the last known values so that the map still has a basemap.
+            tmsUrl = SystemConfig::instance()->getValue(CFG_MAP_TMS_URL).toString();
+            wfsUrl = SystemConfig::instance()->getValue(CFG_MAP_WFS_URL).toString();
+            minZoom = SystemConfig::instance()->getValue(CFG_MAP_MIN_ZOOM, 0);
+            maxZoom = SystemConfig::instance()->getValue(CFG_MAP_MAX_ZOOM, 19);
+        }
+
+        LOG_INFO("App", QString("Map settings loaded, client tms url: %1 (zoom %2-%3)").arg(tmsUrl).arg(minZoom).arg(maxZoom));
+
+        EventDataPtr data = EventData::create();
+        data->m_payload.insert("tms_url", tmsUrl);
+        data->m_payload.insert("wfs_url", wfsUrl);
+        data->m_payload.insert("min_zoom", minZoom);
+        data->m_payload.insert("max_zoom", maxZoom);
+        EventBus::instance()->publish(TOPIC_MAP_TILES_URL, data);
+    });
 }
 
 void App::showMainWindow()

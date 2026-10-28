@@ -56,97 +56,36 @@ QWidget* AlarmPlugin::createWorkspace(QWidget* parent)
 {
     m_workspace = new QWidget(parent);
     m_workspace->setObjectName("workspaceArea");
-    m_workspace->setStyleSheet(R"(
-        QWidget#workspaceArea {
-            background-color: #2b2b2b;
-        }
-    )");
 
     QVBoxLayout* layout = new QVBoxLayout(m_workspace);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
     QToolBar* toolbar = new QToolBar(m_workspace);
-    toolbar->setStyleSheet(R"(
-        QToolBar {
-            background-color: #1e1e1e;
-            border: none;
-            spacing: 8px;
-            padding: 4px;
-        }
-    )");
 
     QLabel* titleLabel = new QLabel(tr("Alarm Center"), toolbar);
-    titleLabel->setStyleSheet(R"(
-        QLabel {
-            color: #e0e0e0;
-            font-size: 14px;
-            font-weight: bold;
-            padding: 0 8px;
-        }
-    )");
+    titleLabel->setObjectName("sectionTitle");
     toolbar->addWidget(titleLabel);
 
     toolbar->addSeparator();
 
     QPushButton* refreshBtn = new QPushButton(tr("Refresh"), toolbar);
+    refreshBtn->setObjectName("primaryButton");
     refreshBtn->setCursor(Qt::PointingHandCursor);
-    refreshBtn->setStyleSheet(R"(
-        QPushButton {
-            background-color: #0078D4;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            padding: 6px 16px;
-        }
-        QPushButton:hover {
-            background-color: #1084d8;
-        }
-    )");
-    connect(refreshBtn, &QPushButton::clicked, this, [this]() {
-        if (m_sidePanel) {
-            m_sidePanel->loadAlarms();
-        }
-    });
+    connect(refreshBtn, &QPushButton::clicked, this, &AlarmPlugin::onRefreshClicked);
     toolbar->addWidget(refreshBtn);
 
     QLabel* countLabel = new QLabel(m_workspace);
-    countLabel->setStyleSheet(R"(
-        QLabel {
-            color: #f44336;
-            font-size: 12px;
-            padding: 0 8px;
-        }
-    )");
-    connect(this, &AlarmPlugin::alarmCountChanged, this, [countLabel](int count) {
-        countLabel->setText(tr("Unprocessed: %1").arg(count));
-    });
+    countLabel->setObjectName("alarmCount");
+    m_countLabel = countLabel;
+    connect(this, &AlarmPlugin::alarmCountChanged, this, &AlarmPlugin::onAlarmCountChanged);
     toolbar->addWidget(countLabel);
 
     toolbar->addSeparator();
 
     QComboBox* filterCombo = new QComboBox(toolbar);
     filterCombo->addItems({tr("All"), tr("Unprocessed"), tr("Processed"), tr("Alarm"), tr("Fault")});
-    filterCombo->setStyleSheet(R"(
-        QComboBox {
-            background-color: #2b2b2b;
-            color: #e0e0e0;
-            border: 1px solid #3e3e3e;
-            border-radius: 4px;
-            padding: 6px 12px;
-        }
-    )");
-    connect(filterCombo, &QComboBox::currentTextChanged, this, [this](const QString& text) {
-        if (m_sidePanel) {
-            QString filter;
-            if (text == tr("Unprocessed")) filter = "unhandled";
-            else if (text == tr("Processed")) filter = "handled";
-            else if (text == tr("Alarm")) filter = "alarm";
-            else if (text == tr("Fault")) filter = "fault";
-            m_sidePanel->setFilter(filter);
-            m_sidePanel->loadAlarms();
-        }
-    });
+    connect(filterCombo, &QComboBox::currentTextChanged, this, &AlarmPlugin::onFilterChanged);
     toolbar->addWidget(filterCombo);
 
     layout->addWidget(toolbar);
@@ -187,6 +126,32 @@ void AlarmPlugin::loadAlarms()
 {
     if (m_sidePanel) {
         m_sidePanel->loadAlarms();
+    }
+}
+
+void AlarmPlugin::onRefreshClicked()
+{
+    loadAlarms();
+}
+
+void AlarmPlugin::onFilterChanged(const QString& text)
+{
+    if (!m_sidePanel) {
+        return;
+    }
+    QString filter;
+    if (text == tr("Unprocessed")) filter = "unhandled";
+    else if (text == tr("Processed")) filter = "handled";
+    else if (text == tr("Alarm")) filter = "alarm";
+    else if (text == tr("Fault")) filter = "fault";
+    m_sidePanel->setFilter(filter);
+    m_sidePanel->loadAlarms();
+}
+
+void AlarmPlugin::onAlarmCountChanged(int count)
+{
+    if (m_countLabel) {
+        m_countLabel->setText(tr("Unprocessed: %1").arg(count));
     }
 }
 

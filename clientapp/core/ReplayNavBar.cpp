@@ -6,6 +6,7 @@
 #include <QSvgRenderer>
 #include <QIcon>
 #include <QGuiApplication>
+#include <QSignalMapper>
 
 namespace rustcam {
 
@@ -14,11 +15,12 @@ ReplayNavBar::ReplayNavBar(QWidget* parent)
 {
     setFixedHeight(50);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    setStyleSheet(R"(
-        ReplayNavBar {
-            background-color: #1e1e1e;
-        }
-    )");
+    setAttribute(Qt::WA_StyledBackground, true);
+
+    // 按钮 -> 布局序号：点击时由它把序号传出来（不用 sender() 反查）
+    m_indexMapper = new QSignalMapper(this);
+    connect(m_indexMapper, QOverload<int>::of(&QSignalMapper::mapped),
+            this, &ReplayNavBar::onButtonClicked);
 }
 
 ReplayNavBar::~ReplayNavBar() {
@@ -28,6 +30,7 @@ void ReplayNavBar::setLayouts(const QList<PlayerLayout>& layouts) {
     m_layouts = layouts;
 
     for (QPushButton* btn : m_buttons) {
+        m_indexMapper->removeMappings(btn);
         btn->deleteLater();
     }
     m_buttons.clear();
@@ -58,8 +61,8 @@ void ReplayNavBar::setLayouts(const QList<PlayerLayout>& layouts) {
         btn->setProperty("class", "LayoutNavButton");
         btn->show();
 
-        connect(btn, &QPushButton::clicked, this, &ReplayNavBar::onButtonClicked);
-        btn->setProperty("index", i);
+        connect(btn, &QPushButton::clicked, m_indexMapper, QOverload<>::of(&QSignalMapper::map));
+        m_indexMapper->setMapping(btn, i);
         m_buttons.append(btn);
     }
 
@@ -98,19 +101,19 @@ QString ReplayNavBar::generateLayoutSvg(const PlayerLayout& layout, int thumbW, 
     return svg;
 }
 
-void ReplayNavBar::onButtonClicked() {
-    QPushButton* btn = qobject_cast<QPushButton*>(sender());
-    if (btn) {
-        int index = btn->property("index").toInt();
-        if (m_selectedIndex != index) {
-            if (m_selectedIndex >= 0 && m_selectedIndex < m_buttons.size()) {
-                m_buttons[m_selectedIndex]->setChecked(false);
-            }
-            m_selectedIndex = index;
-            btn->setChecked(true);
-            emit layoutSelected(index);
-        }
+void ReplayNavBar::onButtonClicked(int index) {
+    if (index < 0 || index >= m_buttons.size()) {
+        return;
     }
+    if (m_selectedIndex == index) {
+        return;
+    }
+    if (m_selectedIndex >= 0 && m_selectedIndex < m_buttons.size()) {
+        m_buttons[m_selectedIndex]->setChecked(false);
+    }
+    m_selectedIndex = index;
+    m_buttons[index]->setChecked(true);
+    emit layoutSelected(index);
 }
 
 void ReplayNavBar::resizeEvent(QResizeEvent* event) {

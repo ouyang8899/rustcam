@@ -1,5 +1,5 @@
 #include "MapSidePanel.h"
-#include "DeviceTreeModel.h"
+#include "core/DeviceTreeModel.h"
 #include "common/Logger.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>

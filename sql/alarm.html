@@ -34,6 +34,8 @@ LIMIT #{limit} OFFSET #{offset}
 <!--
   报警查询：支持按设备标识、报警类型与时间范围过滤，
   与录像分段的查询口径保持一致（过滤条件全部在 SQL 中完成）。
+  注意：rbatis 的 <where> 只会剥离小写的 "and "/"or " 前缀，
+  这里必须用小写 and，否则会残留前导 AND 导致 SQL 语法错误。
 -->
 <select id="alarm_select_filtered">
 SELECT id, device_id, device_tag, channel_tag, alarm_type, alarm_time, alarm_method,
@@ -41,19 +43,19 @@ SELECT id, device_id, device_tag, channel_tag, alarm_type, alarm_time, alarm_met
 FROM alarms
 <where>
 <if test="device_tag != null">
-AND device_tag = #{device_tag}
+and device_tag = #{device_tag}
 </if>
 <if test="channel_tag != null">
-AND channel_tag = #{channel_tag}
+and channel_tag = #{channel_tag}
 </if>
 <if test="alarm_type != null">
-AND alarm_type = #{alarm_type}
+and alarm_type = #{alarm_type}
 </if>
 <if test="start_time != null">
-AND alarm_time &gt;= #{start_time}
+and alarm_time &gt;= #{start_time}
 </if>
 <if test="end_time != null">
-AND alarm_time &lt;= #{end_time}
+and alarm_time &lt;= #{end_time}
 </if>
 </where>
 ORDER BY alarm_time DESC
@@ -65,19 +67,19 @@ SELECT COUNT(*) as count
 FROM alarms
 <where>
 <if test="device_tag != null">
-AND device_tag = #{device_tag}
+and device_tag = #{device_tag}
 </if>
 <if test="channel_tag != null">
-AND channel_tag = #{channel_tag}
+and channel_tag = #{channel_tag}
 </if>
 <if test="alarm_type != null">
-AND alarm_type = #{alarm_type}
+and alarm_type = #{alarm_type}
 </if>
 <if test="start_time != null">
-AND alarm_time &gt;= #{start_time}
+and alarm_time &gt;= #{start_time}
 </if>
 <if test="end_time != null">
-AND alarm_time &lt;= #{end_time}
+and alarm_time &lt;= #{end_time}
 </if>
 </where>
 </select>

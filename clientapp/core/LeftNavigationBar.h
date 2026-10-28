@@ -8,6 +8,7 @@
 class QToolButton;
 class QVBoxLayout;
 class QLabel;
+class QSignalMapper;
 
 namespace rustcam {
 
@@ -33,7 +34,8 @@ signals:
     void navigationChanged(const QString& id);
 
 public slots:
-    void onIconClicked();
+    /// 某个导航按钮被点击（id 由按钮自己带过来，不靠 sender() 反查）
+    void onIconClicked(const QString& id);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -43,6 +45,8 @@ private:
     void updateStatusDotPosition(const QString& id);
 
     QVBoxLayout* m_iconLayout;
+    /// 按钮 -> 导航 id（点击时由它把 id 传出来）
+    QSignalMapper* m_idMapper = nullptr;
 
     QMap<QString, QToolButton*> m_iconButtons;
     QMap<QString, QLabel*> m_badges;

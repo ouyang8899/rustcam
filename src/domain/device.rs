@@ -127,6 +127,36 @@ impl Default for DeviceStatus {
     }
 }
 
+/// Fallback position for devices that have no coordinates configured.
+/// The map uses it so that every device has a point on the map.
+pub const DEFAULT_MAP_LATITUDE: f64 = 31.2304;
+pub const DEFAULT_MAP_LONGITUDE: f64 = 121.4737;
+
+/// Deterministic fallback position around the Shanghai center.
+///
+/// Devices that have no coordinates are spread over a small area instead of
+/// being stacked on a single point, so that they can be told apart on the
+/// map and can be clustered by zoom level. The position only depends on the
+/// key, therefore it stays stable between restarts.
+pub fn fallback_map_position(key: &str) -> (f64, f64) {
+    // FNV-1a
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in key.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100_0000_01b3);
+    }
+
+    // Golden angle spiral: an even spread without overlaps.
+    let index = (hash % 512) as f64;
+    let angle = index * 2.399_963_229_728_653;
+    let radius = 0.0025 * (1.0 + index).sqrt();
+
+    (
+        DEFAULT_MAP_LATITUDE + radius * angle.sin(),
+        DEFAULT_MAP_LONGITUDE + radius * angle.cos(),
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum DeviceType {

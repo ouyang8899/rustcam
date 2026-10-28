@@ -5,10 +5,17 @@
 #include <QString>
 #include <QMap>
 #include <QJsonObject>
-#include "core/MapSidePanel.h"
+#include <QPointer>
+#include "MapSidePanel.h"
 #include "core/DataManager.h"
+#include "core/EventBus.h"
+
+class QDialog;
 
 namespace rustcam {
+
+class CefBrowserWidget;
+class VideoPlayer;
 
 struct MapMarkerData {
     QString id;
@@ -46,14 +53,35 @@ signals:
 
 private slots:
     void onDataManagerLoaded();
+    void onMapReady();
     void onDeviceSelected(const QString& deviceId, const QString& deviceName);
+    void onMarkerClicked(const QString& markerId);
+    void onTilesUrlReceived(EventDataPtr data);
+    void playCamera(const QString& deviceTag, const QString& channelTag, const QString& name);
 
 private:
     void loadDeviceMarkers();
+    QString resolveMapPageUrl() const;
+    /// Sends the current tile url to the map page.
+    void applyTilesUrl();
+    void showPlayerDialog(const QString& title, const QString& url);
 
     QWidget* m_workspace;
     MapSidePanel* m_mapSidePanel;
+    CefBrowserWidget* m_mapView = nullptr;
     QMap<QString, MapMarkerData> m_markers;
+    /// True once the map page reported that its MapLibre instance is ready.
+    bool m_mapReady = false;
+    /// Tile url of the desktop client map, provided by the backend.
+    QString m_tmsUrl;
+    /// Zoom range of the desktop client map, provided by the backend.
+    int m_minZoom = 0;
+    int m_maxZoom = 19;
+    /// Event bus subscription token for TOPIC_MAP_TILES_URL.
+    QString m_tilesToken;
+    /// Live video dialog opened from a map marker.
+    QPointer<QDialog> m_playerDialog;
+    VideoPlayer* m_player = nullptr;
 };
 
 }

@@ -218,6 +218,15 @@ void PlaybackController::setSpeed(double speed) {
     }
 }
 
+void PlaybackController::setGroupSpeed(PlaybackGroup* group, double speed) {
+    if (!group) {
+        return;
+    }
+    for (StreamSource* cell : group->cells()) {
+        cell->setSpeed(speed);
+    }
+}
+
 PlaybackGroup* PlaybackController::createGroup() {
     QMutexLocker locker(&m_mutex);
     PlaybackGroup* group = new PlaybackGroup(m_nextGroupId++, this);

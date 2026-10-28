@@ -13,6 +13,7 @@ use crate::domain::device_group::{CreateGroupRequest, DeviceGroup, DeviceGroupNo
 use crate::domain::ptz::PtzPreset;
 use crate::domain::region::{Region, RegionNode};
 use crate::domain::player_layout::PlayerLayout;
+use crate::domain::map_settings::MapSettings;
 use crate::error::AppError;
 use crate::error::Result;
 use crate::sql_mappers::{
@@ -27,6 +28,7 @@ use crate::sql_mappers::{
     stream_insert, stream_update, stream_select_by_token, stream_delete_duplicates,
     stream_reset_state, stream_delete_others,
     recording_insert, recording_update, recording_delete_by_id, recording_delete_stale_errors, recording_update_start_result,
+    recording_delete_segments_by_recording_id,
     recording_select_pending, recording_select_pending_by_stream,
     alarm_insert, alarm_select_by_device, alarm_select_all, alarm_select_by_id,
     alarm_select_filtered, alarm_count_filtered,
@@ -37,6 +39,7 @@ use crate::sql_mappers::{
     ServerRow, GroupRow, SessionRow,
     layout_select_by_id, layout_select_all, layout_select_default,
     layout_insert, layout_update, layout_set_default, layout_delete,
+    map_settings_select, map_settings_upsert,
     policy_insert, policy_update, policy_delete_by_id, policy_select_all, policy_select_by_id,
     policy_select_by_device_tag, policy_select_by_alarm_triggered,
     policy_select_paginated, policy_count,
@@ -367,6 +370,14 @@ impl DbRepository {
 
         let device_type_str = device.device_type.to_string();
 
+        // Devices without coordinates are spread around the default position
+        // so that they can be told apart on the map.
+        let (fallback_lat, fallback_lng) = crate::domain::device::fallback_map_position(
+            device.device_tag.as_deref().unwrap_or(&device.name),
+        );
+        let latitude = device.latitude.or(Some(fallback_lat));
+        let longitude = device.longitude.or(Some(fallback_lng));
+
         let _result = device_insert(
             &self.rb,
             Some(&device.name),
@@ -387,8 +398,8 @@ impl DbRepository {
             serde_json::to_value(&device.push_urls).ok(),
             serde_json::to_value(&device.pull_urls).ok(),
             device.region_code.as_deref(),
-            device.latitude,
-            device.longitude,
+            latitude,
+            longitude,
             Some(RbatisDateTime::from_timestamp_millis(chrono::Utc::now().timestamp_millis())),
             ssrc.as_deref(),
             gb_username.as_deref(),
@@ -536,6 +547,14 @@ impl DbRepository {
 
         let device_type_str = device.device_type.to_string();
 
+        // The device carries the stored coordinates; devices without them get
+        // a spread position around the default position.
+        let (fallback_lat, fallback_lng) = crate::domain::device::fallback_map_position(
+            device.device_tag.as_deref().unwrap_or(&device.name),
+        );
+        let latitude = device.latitude.or(Some(fallback_lat));
+        let longitude = device.longitude.or(Some(fallback_lng));
+
         device_update(
             &self.rb,
             device.id,
@@ -556,8 +575,8 @@ impl DbRepository {
             push_urls_json,
             pull_urls_json,
             device.region_code.as_deref(),
-            device.latitude,
-            device.longitude,
+            latitude,
+            longitude,
             Some(RbatisDateTime::from_timestamp_millis(chrono::Utc::now().timestamp_millis())),
             ssrc.as_deref(),
             gb_username.as_deref(),
@@ -1386,6 +1405,9 @@ impl DbRepository {
     }
 
     pub async fn delete_recording(&self, id: i64) -> Result<()> {
+        // 先删录像分段：recording_segments 外键指向 recordings，不先删会违反外键约束
+        recording_delete_segments_by_recording_id(&self.rb, id)
+            .await.map_err(|e| AppError::Internal(e.to_string()))?;
         recording_delete_by_id(&self.rb, id)
             .await.map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(())
@@ -1513,6 +1535,36 @@ impl DbRepository {
 
     pub async fn delete_layout(&self, id: i64) -> Result<()> {
         layout_delete(&self.rb, id).await.map_err(|e| AppError::Internal(e.to_string()))?;
+        Ok(())
+    }
+
+    pub async fn get_map_settings(&self) -> Option<MapSettings> {
+        map_settings_select(&self.rb).await.ok()
+            .and_then(|rows| rows.into_iter().next().map(MapSettings::from))
+    }
+
+    pub async fn upsert_map_settings(
+        &self,
+        browser_tms_url: &str,
+        client_tms_url: &str,
+        wfs_url: &str,
+        browser_min_zoom: i32,
+        browser_max_zoom: i32,
+        client_min_zoom: i32,
+        client_max_zoom: i32,
+    ) -> Result<()> {
+        map_settings_upsert(
+            &self.rb,
+            browser_tms_url,
+            client_tms_url,
+            wfs_url,
+            browser_min_zoom,
+            browser_max_zoom,
+            client_min_zoom,
+            client_max_zoom,
+        )
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(())
     }
 }

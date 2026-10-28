@@ -20,29 +20,28 @@ public:
     explicit PlaybackCell(QWidget* parent = nullptr);
     ~PlaybackCell() override;
 
-    int cellId() const { return m_cellId; }
-    void setCellId(int id) { m_cellId = id; }
-
     /// 布局项 id（格子在布局中的位置标识）
     QString layoutItemId() const { return m_layoutItemId; }
     void setLayoutItemId(const QString& id) { m_layoutItemId = id; }
 
     /// 格子里放的播放器
     PlaybackPlayerWidget* playerWidget() const { return m_playerWidget; }
-    /// 换播放器（把旧的那个摘下来返回）
-    PlaybackPlayerWidget* takePlayerWidget();
-    void setPlayerWidget(PlaybackPlayerWidget* widget);
 
     void setSelected(bool selected);
 
 signals:
-    void clicked();
+    /// 格子被点击（带布局项 id 与当前通道标识）
+    void clicked(const QString& layoutItemId, const QString& deviceId);
     /// 播放进度（绝对时间，毫秒），由格子里的播放器转发
-    void playbackProgressChanged(int64_t absoluteTimeMs);
+    void playbackProgressChanged(const QString& layoutItemId, int64_t absoluteTimeMs);
+    void closeRequested(const QString& layoutItemId);
     /// 有播放器被拖到了本格子上（sourceUid 为被拖动播放器的 uid）
-    void playerDropped(const QString& sourceUid);
+    void playerDropped(const QString& layoutItemId, const QString& sourceUid);
     /// 录像文件被拖到了本格子上
-    void recordingDropped(const QString& channelKey, int64_t startTimeMs);
+    void recordingDropped(const QString& layoutItemId, const QString& channelKey, int64_t startTimeMs);
+    /// 设备树通道被拖到了本格子上
+    void channelDropped(const QString& layoutItemId, const QString& deviceTag,
+                        const QString& channelTag, const QString& displayName);
 
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override;
@@ -52,7 +51,10 @@ protected:
     void paintEvent(QPaintEvent* event) override;
 
 private:
-    int m_cellId = -1;
+    void onPlayerClicked(const QString& deviceId);
+    void onPlayerProgress(int64_t absoluteTimeMs);
+
+private:
     QString m_layoutItemId;
     PlaybackPlayerWidget* m_playerWidget = nullptr;
     bool m_selected = false;

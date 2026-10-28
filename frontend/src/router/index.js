@@ -100,7 +100,7 @@ const routes = [
       {
         path: 'video-wall',
         name: 'PlayerWall',
-        component: () => import('../views/PlayerWallWrapper.vue'),
+        component: () => import('../views/PlayerWall.vue'),
       },
       {
         path: 'video-wall/designer',

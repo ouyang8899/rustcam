@@ -997,9 +997,21 @@ pub async fn recording_delete_by_id(
     impled!()
 }
 
-#[sql("DELETE FROM recordings WHERE state = 'error' AND created_at < NOW() - INTERVAL '1 day' AND COALESCE(output_path, '') = ''")]
+// 清理 1 天前失败且没有产出文件的录制任务。
+// 注意：recording_segments 外键指向 recordings，带分段的录制不能直接删，
+// 否则违反外键约束（23503）；这些分段的录制由录制服务的恢复流程处理。
+#[sql("DELETE FROM recordings WHERE state = 'error' AND created_at < NOW() - INTERVAL '1 day' AND COALESCE(output_path, '') = '' AND NOT EXISTS (SELECT 1 FROM recording_segments s WHERE s.recording_id = recordings.id)")]
 pub async fn recording_delete_stale_errors(
     rb: &dyn rbatis::Executor,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
+
+// 删除某个录制任务的全部录像分段（删除录制任务前要先删分段）
+#[sql("DELETE FROM recording_segments WHERE recording_id = $1")]
+pub async fn recording_delete_segments_by_recording_id(
+    rb: &dyn rbatis::Executor,
+    recording_id: i64,
 ) -> rbatis::Result<rbatis::rbdc::ExecResult> {
     impled!()
 }
@@ -1370,6 +1382,53 @@ pub async fn layout_set_default(rb: &dyn rbatis::Executor) -> rbatis::Result<rba
 
 #[sql("DELETE FROM player_window_layouts WHERE id = $1")]
 pub async fn layout_delete(rb: &dyn rbatis::Executor, id: i64) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct MapSettingsRow {
+    pub id: i64,
+    pub browser_tms_url: String,
+    pub client_tms_url: String,
+    pub wfs_url: String,
+    pub browser_min_zoom: i32,
+    pub browser_max_zoom: i32,
+    pub client_min_zoom: i32,
+    pub client_max_zoom: i32,
+    pub updated_at: Option<RbatisDateTime>,
+}
+
+impl From<MapSettingsRow> for crate::domain::map_settings::MapSettings {
+    fn from(r: MapSettingsRow) -> Self {
+        let updated_at = r
+            .updated_at
+            .map(|dt| chrono::DateTime::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(chrono::Utc::now))
+            .unwrap_or_else(chrono::Utc::now);
+        Self {
+            browser_tms_url: r.browser_tms_url,
+            client_tms_url: r.client_tms_url,
+            wfs_url: r.wfs_url,
+            browser_min_zoom: r.browser_min_zoom,
+            browser_max_zoom: r.browser_max_zoom,
+            client_min_zoom: r.client_min_zoom,
+            client_max_zoom: r.client_max_zoom,
+            updated_at,
+        }
+    }
+}
+
+#[html_sql("sql/map_settings.html")]
+pub async fn map_settings_select(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<MapSettingsRow>> { impled!() }
+
+#[html_sql("sql/map_settings.html")]
+pub async fn map_settings_upsert(
+    rb: &dyn rbatis::Executor,
+    browser_tms_url: &str,
+    client_tms_url: &str,
+    wfs_url: &str,
+    browser_min_zoom: i32,
+    browser_max_zoom: i32,
+    client_min_zoom: i32,
+    client_max_zoom: i32,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct AlarmRow {

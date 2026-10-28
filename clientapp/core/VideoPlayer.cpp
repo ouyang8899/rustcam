@@ -10,9 +10,27 @@
 #include <QStyleOption>
 #include <QPainter>
 #include <QDateTime>
+#include <QPointer>
 #include "SessionManager.h"
 #include "SystemConfig.h"
+#include <QDrag>
+#include <QMimeData>
+#include <QUuid>
+#include <QMouseEvent>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
+#include <QJsonDocument>
+#include <QJsonObject>
+
 namespace rustcam {
+
+namespace {
+/// 拖动实时播放器时用的 mime 类型
+const char* const kLivePlayerMimeType = "application/x-rustcam-live-player";
+/// 从设备树拖入时用的 mime 类型
+const char* const kDeviceMimeType = "application/x-rustcam-device";
+}
 
 VideoPlayer::VideoPlayer(QWidget* parent)
     : QWidget(parent)
@@ -26,6 +44,9 @@ VideoPlayer::VideoPlayer(QWidget* parent)
     , m_selected(false)
 {
     setObjectName("VideoPlayer");
+    setAcceptDrops(true);
+    // 播放器的唯一标识：换格子也不变
+    m_uid = QUuid::createUuid().toString(QUuid::WithoutBraces);
 
     m_placeholderLabel = new QLabel(this);
     m_placeholderLabel->setAlignment(Qt::AlignCenter);
@@ -53,7 +74,7 @@ VideoPlayer::VideoPlayer(QWidget* parent)
     m_errorLabel->hide();
 
     m_toolbar = new VideoPlayerToolbar(this);
-    m_toolbar->setVideoPlayer(this);
+    m_toolbar->setControls(this);
     m_toolbar->setFixedHeight(40);
     m_toolbar->hide();
 
@@ -69,14 +90,15 @@ VideoPlayer::~VideoPlayer() {
 }
 
 void VideoPlayer::play(const QString& url) {
-    QMutexLocker locker(&m_mutex);
-
-    LOG_INFO("VideoPlayer", QString("play: url=%1, winId=%2").arg(url).arg((quint64)winId()));
-
-    if (isPlaying()) {
+    // stop() locks m_mutex itself, so it must not be called while holding it.
+    if (m_playerId > 0) {
         LOG_INFO("VideoPlayer", "play: was playing, stopping first");
         stop();
     }
+
+    QMutexLocker locker(&m_mutex);
+
+    LOG_INFO("VideoPlayer", QString("play: url=%1, winId=%2").arg(url).arg((quint64)winId()));
 
     void* p = reinterpret_cast<void*>(winId());
     m_targetId = static_cast<quint64>(reinterpret_cast<quintptr>(p));
@@ -100,8 +122,12 @@ void VideoPlayer::play(const QString& url) {
 
     m_player->set_play_status_callback([this](const BridgePlayer::PlayerBase::WPtr& player, BridgePlayer::PlayCode code) {
         Q_UNUSED(player);
-        QMetaObject::invokeMethod(this, [this, code]() {
-            onPlayerStatus(static_cast<int>(code));
+        // The callback can arrive after the widget is destroyed.
+        QPointer<VideoPlayer> self(this);
+        QMetaObject::invokeMethod(this, [self, code]() {
+            if (self) {
+                self->onPlayerStatus(static_cast<int>(code));
+            }
         }, Qt::QueuedConnection);
     });
 
@@ -134,6 +160,10 @@ void VideoPlayer::stop() {
     QMutexLocker locker(&m_mutex);
 
     if (m_playerId > 0) {
+        // Detach the status callback before removing the player.
+        if (m_player) {
+            m_player->set_play_status_callback(nullptr);
+        }
         BridgePlayer::PlayerManager::instance().stop(m_playerId);
         BridgePlayer::PlayerManager::instance().remove_player(m_playerId);
         m_playerId = 0;
@@ -144,16 +174,16 @@ void VideoPlayer::stop() {
     emit stopped();
 }
 
-void VideoPlayer::switchTarget(quint64 targetId) {
-    QMutexLocker locker(&m_mutex);
-
-    if (m_playerId == 0) return;
-
-    m_targetId = targetId;
-    if (m_player) {
-        m_player->render_to_target(targetId);
-    }
-}
+//void VideoPlayer::switchTarget(quint64 targetId) {
+//    QMutexLocker locker(&m_mutex);
+//
+//    if (m_playerId == 0) return;
+//
+//    m_targetId = targetId;
+//    if (m_player) {
+//        m_player->render_to_target(targetId);
+//    }
+//}
 
 void VideoPlayer::setState(State state) {
     if (m_state != state) {
@@ -196,8 +226,65 @@ void VideoPlayer::updateStatusLabel() {
 }
 
 void VideoPlayer::mousePressEvent(QMouseEvent* event) {
-    Q_UNUSED(event)
-    emit clicked();
+    if (event->button() == Qt::LeftButton) {
+        m_pressPos = event->pos();
+        m_pressed = true;
+    }
+    emit clicked(m_uid);
+}
+
+void VideoPlayer::mouseMoveEvent(QMouseEvent* event) {
+    if (!m_pressed || !(event->buttons() & Qt::LeftButton)) {
+        return;
+    }
+    if ((event->pos() - m_pressPos).manhattanLength() < QApplication::startDragDistance()) {
+        return;
+    }
+    m_pressed = false;
+
+    // 拖动播放器：在格子之间换位置
+    QDrag* drag = new QDrag(this);
+    QMimeData* mime = new QMimeData();
+    mime->setData(kLivePlayerMimeType, m_uid.toUtf8());
+    drag->setMimeData(mime);
+    drag->exec(Qt::MoveAction);
+}
+
+void VideoPlayer::dragEnterEvent(QDragEnterEvent* event) {
+    if (event->mimeData()->hasFormat(kLivePlayerMimeType)
+        || event->mimeData()->hasFormat(kDeviceMimeType)) {
+        event->acceptProposedAction();
+    }
+}
+
+void VideoPlayer::dragMoveEvent(QDragMoveEvent* event) {
+    if (event->mimeData()->hasFormat(kLivePlayerMimeType)
+        || event->mimeData()->hasFormat(kDeviceMimeType)) {
+        event->acceptProposedAction();
+    }
+}
+
+void VideoPlayer::dropEvent(QDropEvent* event) {
+    if (event->mimeData()->hasFormat(kDeviceMimeType)) {
+        QJsonParseError parseError;
+        const QJsonDocument doc = QJsonDocument::fromJson(
+            event->mimeData()->data(kDeviceMimeType), &parseError);
+        if (parseError.error == QJsonParseError::NoError && doc.isObject()) {
+            emit deviceDropped(m_uid, doc.object().toVariantMap());
+            event->acceptProposedAction();
+        }
+        return;
+    }
+
+    if (!event->mimeData()->hasFormat(kLivePlayerMimeType)) {
+        return;
+    }
+    const QString sourceUid = QString::fromUtf8(event->mimeData()->data(kLivePlayerMimeType));
+    if (sourceUid.isEmpty() || sourceUid == m_uid) {
+        return;
+    }
+    emit playerDropped(m_uid, sourceUid);
+    event->acceptProposedAction();
 }
 
 void VideoPlayer::setSelected(bool selected) {
@@ -360,7 +447,7 @@ void VideoPlayer::setMirrorEnabled(bool enabled) {
 bool VideoPlayer::takeScreenshot(const QString& filePath) {
     QMutexLocker locker(&m_mutex);
     if (m_player) {
-        m_player->capture_video_image(filePath.toStdString());
+        m_player->capture_video_image(filePath.toUtf8().toStdString());
         return true;
     }
     return false;

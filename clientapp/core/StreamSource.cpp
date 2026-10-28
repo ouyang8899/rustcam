@@ -1,21 +1,26 @@
 #include "StreamSource.h"
 #include "ReplayPlayer.h"
 #include "common/Logger.h"
+#include <algorithm>
 
 namespace rustcam {
 
-StreamSource::StreamSource(const QString& deviceId, QObject* parent)
+StreamSource::StreamSource(const QString& deviceId, ReplayPlayer* player, QObject* parent)
     : QObject(parent)
     , m_deviceId(deviceId)
+    , m_player(player)
     , m_currentClipIndex(-1)
     , m_state(State::Stopped)
 {
+    // 播放器在构造时传入，连接一次建立，之后不再变动
+    if (m_player) {
+        connect(m_player, &ReplayPlayer::stateChanged, this, &StreamSource::onPlayerStateChanged);
+        connect(m_player, &ReplayPlayer::progressChanged, this, &StreamSource::onPlayerProgress);
+    }
 }
 
 StreamSource::~StreamSource() {
-    if (m_player) {
-        disconnect(m_player, nullptr, this, nullptr);
-    }
+    // 连接随对象自动断开，不需要手动 disconnect
 }
 
 void StreamSource::setClips(const QList<Clip>& clips) {
@@ -23,27 +28,54 @@ void StreamSource::setClips(const QList<Clip>& clips) {
         m_player->stop();
     }
     m_clips = clips;
+    sortClips();
     m_currentClipIndex = -1;
     if (m_state != State::Stopped) {
         setState(State::Stopped);
     }
-    LOG_INFO("StreamSource", QString("setClips: deviceId=%1, clipCount=%2").arg(m_deviceId).arg(clips.size()));
+    LOG_INFO("StreamSource", QString("setClips: deviceId=%1, clipCount=%2").arg(m_deviceId).arg(m_clips.size()));
 }
 
-void StreamSource::setPlayer(ReplayPlayer* player) {
-    if (m_player) {
-        disconnect(m_player, nullptr, this, nullptr);
-    }
-    m_player = player;
+/// 分片按开始时间升序：连续播放才按时间正序推进
+void StreamSource::sortClips() {
+    std::sort(m_clips.begin(), m_clips.end(), [](const Clip& a, const Clip& b) {
+        return a.startTimeMs < b.startTimeMs;
+    });
+}
 
-    if (m_player) {
-        connect(m_player, &ReplayPlayer::stateChanged, this, [this](ReplayPlayer::State newState) {
-            onPlayerStateChanged(ReplayPlayer::State::Idle, newState);
-        });
-        connect(m_player, &ReplayPlayer::progressChanged, this, [this](int64_t currentMs, int64_t durationMs) {
-            onPlayerProgress(currentMs, durationMs);
-        });
+/// 追加分片（加载更多时用，不打断当前播放）
+void StreamSource::appendClips(const QList<Clip>& clips) {
+    if (clips.isEmpty()) {
+        return;
     }
+    // 记住当前片段，合并后按 url 找回它的位置
+    QString currentUrl;
+    if (m_currentClipIndex >= 0 && m_currentClipIndex < m_clips.size()) {
+        currentUrl = m_clips[m_currentClipIndex].url;
+    }
+    for (const Clip& clip : clips) {
+        bool exists = false;
+        for (const Clip& exist : m_clips) {
+            if (exist.url == clip.url) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) {
+            m_clips.append(clip);
+        }
+    }
+    sortClips();
+    m_currentClipIndex = -1;
+    if (!currentUrl.isEmpty()) {
+        for (int i = 0; i < m_clips.size(); ++i) {
+            if (m_clips[i].url == currentUrl) {
+                m_currentClipIndex = i;
+                break;
+            }
+        }
+    }
+    LOG_INFO("StreamSource", QString("appendClips: deviceId=%1, clipCount=%2").arg(m_deviceId).arg(m_clips.size()));
 }
 
 void StreamSource::play() {
@@ -95,9 +127,6 @@ void StreamSource::seekTo(int64_t absoluteTimeMs) {
         }
         stop();
         setState(State::NoRecording);
-        if (m_noRecordingCallback) {
-            m_noRecordingCallback(absoluteTimeMs);
-        }
         emit noRecording(absoluteTimeMs);
         return;
     }
@@ -170,9 +199,7 @@ void StreamSource::switchToClip(int clipIndex, int64_t startOffsetMs) {
     }
 }
 
-void StreamSource::onPlayerStateChanged(ReplayPlayer::State oldState, ReplayPlayer::State newState) {
-    Q_UNUSED(oldState)
-
+void StreamSource::onPlayerStateChanged(ReplayPlayer::State newState) {
     switch (newState) {
         case ReplayPlayer::State::Playing:
             setState(State::Playing);
@@ -187,9 +214,6 @@ void StreamSource::onPlayerStateChanged(ReplayPlayer::State oldState, ReplayPlay
                 switchToClip(m_currentClipIndex + 1, 0);
             } else {
                 setState(State::Stopped);
-                if (m_clipFinishedCallback) {
-                    m_clipFinishedCallback();
-                }
             }
             break;
         case ReplayPlayer::State::Error:
@@ -211,26 +235,10 @@ void StreamSource::onPlayerProgress(int64_t currentMs, int64_t durationMs) {
     }
 }
 
-void StreamSource::setStateChangeCallback(StateChangeCallback cb) {
-    m_stateChangeCallback = std::move(cb);
-}
-
-void StreamSource::setNoRecordingCallback(NoRecordingCallback cb) {
-    m_noRecordingCallback = std::move(cb);
-}
-
-void StreamSource::setClipFinishedCallback(ClipFinishedCallback cb) {
-    m_clipFinishedCallback = std::move(cb);
-}
-
 void StreamSource::setState(State state) {
     if (m_state != state) {
-        State oldState = m_state;
         m_state = state;
         emit stateChanged(state);
-        if (m_stateChangeCallback) {
-            m_stateChangeCallback(oldState, state);
-        }
     }
 }
 

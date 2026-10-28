@@ -32,13 +32,12 @@ set(CORE_LIB_SOURCES
     RecordingFileListWidget.cpp
     FileDownloader.cpp
     BookmarkStore.cpp
+    BookmarkListWidget.cpp
     ClipExporter.cpp
     ClipExportDialog.cpp
     RecordingApi.cpp
     PlaybackChannel.cpp
     PlaybackSidePanel.cpp
-    MapView.cpp
-    MapSidePanel.cpp
     AlarmSidePanel.cpp
     PTZControlPanel.cpp
     PTZControlPanel.ui
@@ -65,6 +64,7 @@ set(CORE_LIB_HEADERS
     DeviceTreeNode.h
     VideoPlayer.h
     VideoPlayerToolbar.h
+    IVideoControls.h
     VideoWidgetManager.h
     PlayerLayout.h
     NotificationWidget.h
@@ -80,14 +80,13 @@ set(CORE_LIB_HEADERS
     RecordingFileListWidget.h
     FileDownloader.h
     BookmarkStore.h
+    BookmarkListWidget.h
     ClipExporter.h
     ClipExportDialog.h
     RecordingTypes.h
     RecordingApi.h
     PlaybackChannel.h
     PlaybackSidePanel.h
-    MapView.h
-    MapSidePanel.h
     AlarmSidePanel.h
     PTZControlPanel.h
 )
@@ -120,9 +119,6 @@ if(Qt5_FOUND)
         Qt5::Svg
         Qt5::Concurrent
     )
-    if(Qt5_WebEngineWidgets_FOUND)
-        target_link_libraries(rustcam-core PUBLIC Qt5::WebEngineWidgets)
-    endif()
 else()
     target_link_libraries(rustcam-core PUBLIC
         Qt6::Core
@@ -131,9 +127,6 @@ else()
         Qt6::Svg
         Qt6::Concurrent
     )
-    if(Qt6_WebEngineWidgets_FOUND)
-        target_link_libraries(rustcam-core PUBLIC Qt6::WebEngineWidgets)
-    endif()
 endif()
 
 set(BOOST_ROOT "${CMAKE_SOURCE_DIR}/3rd_party/boost")
@@ -203,6 +196,8 @@ target_link_libraries(rustcam-client PRIVATE
     rustcam-core
     ${CURL_LIBRARY}
     bridge_player
+    cef
+    libcef_dll_wrapper
 )
 
 set_target_properties(rustcam-client PROPERTIES
@@ -223,5 +218,8 @@ add_custom_command(TARGET rustcam-client POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy
         ${BRIDGE_PLAYER_BIN_DIR}/SDL3.dll
         $<TARGET_FILE_DIR:rustcam-client>
-    COMMENT "Copying ffmpeg and bridge_player DLLs to output directory"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/resources/qss
+        $<TARGET_FILE_DIR:rustcam-client>/resources/qss
+    COMMENT "Copying ffmpeg, bridge_player DLLs and theme QSS to output directory"
 )

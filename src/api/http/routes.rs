@@ -26,6 +26,7 @@ use crate::api::http::handlers::{
     gb28181_ref_handler,
     channel_handler,
     proxy_handler,
+    settings_handler,
 };
 
 async fn trace_layer(request: Request, next: Next) -> axum::response::Response {
@@ -155,6 +156,9 @@ fn protected_routes(state: Arc<FullState>) -> Router {
         .route("/api/v1/devices/{id}/group", put(group_handler::assign_device_group_handler))
 
         .route("/api/v1/gb28181/ref-data", get(gb28181_ref_handler::get_gb28181_ref_data_handler))
+
+        .route("/api/v1/settings/map", get(settings_handler::get_map_settings_handler))
+        .route("/api/v1/settings/map", put(settings_handler::update_map_settings_handler))
 
         .route("/api/v1/auth/me", get(crate::auth::handlers::me))
         .route("/api/v1/users", get(crate::auth::handlers::list_users))

@@ -27,6 +27,7 @@ private slots:
     void onBrowseOutput();
     void onExport();
     void onDownloadFinished(bool success, const QString& path, const QString& error);
+    void onDownloadProgress(int percent, qint64 downloaded, qint64 total);
 
 private:
     void setBusy(bool busy, const QString& status);

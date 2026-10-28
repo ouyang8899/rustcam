@@ -83,9 +83,8 @@ void PTZControlPanel::setupConnections()
         dirBtns[i]->setAutoRepeatDelay(200);
         dirBtns[i]->setAutoRepeatInterval(100);
         dirBtns[i]->setToolTip(directions[i]);
-        connect(dirBtns[i], &QToolButton::clicked, m_directionMapper, [this, directions, i]() {
-            m_directionMapper->mapped(directions[i]);
-        });
+        // 方向由 QSignalMapper 携带，不在 lambda 里捕获
+        connect(dirBtns[i], &QToolButton::clicked, m_directionMapper, QOverload<>::of(&QSignalMapper::map));
         m_directionMapper->setMapping(dirBtns[i], directions[i]);
     }
 
@@ -113,9 +112,8 @@ void PTZControlPanel::setupConnections()
         auxBtns[i]->setAutoRepeatDelay(200);
         auxBtns[i]->setAutoRepeatInterval(100);
         auxBtns[i]->setToolTip(auxTooltips[i]);
-        connect(auxBtns[i], &QToolButton::clicked, m_auxMapper, [this, auxCmds, i]() {
-            m_auxMapper->mapped(auxCmds[i]);
-        });
+        // 辅助命令由 QSignalMapper 携带，不在 lambda 里捕获
+        connect(auxBtns[i], &QToolButton::clicked, m_auxMapper, QOverload<>::of(&QSignalMapper::map));
         m_auxMapper->setMapping(auxBtns[i], auxCmds[i]);
     }
 }

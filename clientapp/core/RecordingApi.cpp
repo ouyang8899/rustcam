@@ -14,15 +14,20 @@ namespace {
 /// 一次查询里最多补多少个播放地址，避免异常数据导致请求风暴
 constexpr int kMaxPlayUrlResolve = 20;
 
-/// 接口使用的时间格式：yyyy-MM-dd HH:mm:ss（本地时间，不带时区）
-const char* kApiTimeFormat = "yyyy-MM-dd hh:mm:ss";
+/// 请求参数里的时间格式：RFC3339（UTC）
+/// 服务端用 chrono 的 DateTime<Utc> 解析查询参数，必须带时区，否则整个请求 400
+const char* kApiTimeFormat = "yyyy-MM-ddTHH:mm:ss";
+
+/// 兼容旧服务端的本地时间格式（无时区）
+const char* kLegacyApiTimeFormat = "yyyy-MM-dd hh:mm:ss";
 
 QString toApiTime(qint64 msSinceEpoch)
 {
     if (msSinceEpoch <= 0) {
         return QString();
     }
-    return QDateTime::fromMSecsSinceEpoch(msSinceEpoch).toString(kApiTimeFormat);
+    const QDateTime dt = QDateTime::fromMSecsSinceEpoch(msSinceEpoch).toUTC();
+    return dt.toString(kApiTimeFormat) + "Z";
 }
 
 /// 解析接口返回的时间
@@ -31,11 +36,12 @@ QDateTime parseApiTime(const QString& value)
     if (value.isEmpty()) {
         return QDateTime();
     }
-    QDateTime dt = QDateTime::fromString(value, kApiTimeFormat);
+    // 服务端返回的是 RFC3339
+    QDateTime dt = QDateTime::fromString(value, Qt::ISODate);
     if (dt.isValid()) {
         return dt;
     }
-    return QDateTime::fromString(value, Qt::ISODate);   // 兼容旧的 ISO 格式
+    return QDateTime::fromString(value, kLegacyApiTimeFormat);   // 兼容旧的本地时间格式
 }
 
 QString percentEncode(const QString& value)

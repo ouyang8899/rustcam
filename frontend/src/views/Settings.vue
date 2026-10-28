@@ -10,20 +10,6 @@
       <el-row :gutter="12">
         <el-col :span="12">
           <DataCard>
-            <template #header><span>视频墙播放器</span></template>
-            <el-form-item label="播放器类型">
-              <el-select v-model="playerType" style="width: 100%" @change="savePlayerType">
-                <el-option value="rtsp" label="RTSP (rtsp-player, 低延迟)" />
-                <el-option value="flv" label="FLV/WebSocket (flv.js)" />
-              </el-select>
-            </el-form-item>
-            <el-text type="info" size="small">
-              RTSP: 通过 WebAssembly 解码，低延迟但需要媒体服务器支持 RTSP-over-WS<br/>
-              FLV: 通过 WebSocket 传输 FLV 流，兼容性好
-            </el-text>
-          </DataCard>
-
-          <DataCard>
             <template #header><span>服务器配置</span></template>
             <el-text type="info" size="small" style="margin-bottom: 12px; display: block">从配置文件加载，无法在此页面修改</el-text>
             <el-descriptions :column="1" border size="small">
@@ -74,18 +60,42 @@
           </DataCard>
 
           <DataCard>
-            <template #header><span>电子地图配置</span></template>
-            <el-form-item label="TMS 瓦片地址">
-              <el-input v-model="mapTmsUrl" type="textarea" :rows="3" placeholder="https://tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            <template #header>
+              <div style="display: flex; align-items: center; justify-content: space-between">
+                <span>电子地图配置</span>
+                <el-button size="small" type="primary" :loading="savingMap" @click="saveMapConfig">保存地图配置</el-button>
+              </div>
+            </template>
+            <el-form-item label="TMS 瓦片地址（浏览器）">
+              <el-input v-model="browserTmsUrl" type="textarea" :rows="3" placeholder="https://tile.openstreetmap.org/{z}/{x}/{y}.png" />
             </el-form-item>
-            <el-form-item label="WFS 服务地址">
+            <el-form-item label="TMS 瓦片地址（客户端）">
+              <el-input v-model="clientTmsUrl" type="textarea" :rows="3" placeholder="https://tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            </el-form-item>
+            <el-form-item label="缩放层级（浏览器）">
+              <div style="display: flex; align-items: center; gap: 8px">
+                <el-input-number v-model="browserMinZoom" :min="0" :max="24" :step="1" controls-position="right" style="width: 120px" />
+                <span>至</span>
+                <el-input-number v-model="browserMaxZoom" :min="0" :max="24" :step="1" controls-position="right" style="width: 120px" />
+              </div>
+            </el-form-item>
+            <el-form-item label="缩放层级（客户端）">
+              <div style="display: flex; align-items: center; gap: 8px">
+                <el-input-number v-model="clientMinZoom" :min="0" :max="24" :step="1" controls-position="right" style="width: 120px" />
+                <span>至</span>
+                <el-input-number v-model="clientMaxZoom" :min="0" :max="24" :step="1" controls-position="right" style="width: 120px" />
+              </div>
+            </el-form-item>
+            <el-form-item label="WFS 服务地址（共享）">
               <el-input v-model="mapWfsUrl" placeholder="http://localhost:8080/geoserver/ows?service=WFS&version=2.0.0&request=GetFeature" />
             </el-form-item>
             <el-form-item label="自动定位事件">
               <el-switch v-model="mapAutoLocate" />
             </el-form-item>
             <el-text type="info" size="small">
+              地图配置保存到服务器数据库；客户端启动时获取客户端 TMS 地址并应用到电子地图<br/>
               TMS: 地图底图，使用 {x} {y} {z} 占位符<br/>
+              缩放层级: 地图与瓦片层允许的最小/最大级别（0–24）<br/>
               WFS: 设备点位服务，需包含 device_tag、status、latitude、longitude 字段
             </el-text>
           </DataCard>
@@ -110,15 +120,54 @@ import { authFetch } from '../utils/authFetch'
 import DataCard from '../components/common/DataCard.vue'
 
 const settingsStore = useSettingsStore()
-const playerType = ref(settingsStore.playerType)
+const browserTmsUrl = ref(settingsStore.browserTmsUrl)
+const clientTmsUrl = ref(settingsStore.clientTmsUrl)
 const mapWfsUrl = ref(settingsStore.mapWfsUrl)
-const mapTmsUrl = ref(settingsStore.mapTmsUrl)
+const browserMinZoom = ref(settingsStore.browserMinZoom)
+const browserMaxZoom = ref(settingsStore.browserMaxZoom)
+const clientMinZoom = ref(settingsStore.clientMinZoom)
+const clientMaxZoom = ref(settingsStore.clientMaxZoom)
 const mapAutoLocate = ref(settingsStore.mapAutoLocate)
 
-function savePlayerType() { settingsStore.setPlayerType(playerType.value) }
-function saveMapWfsUrl() { settingsStore.setMapWfsUrl(mapWfsUrl.value) }
-function saveMapTmsUrl() { settingsStore.setMapTmsUrl(mapTmsUrl.value) }
 function saveMapAutoLocate() { settingsStore.setMapAutoLocate(mapAutoLocate.value) }
+
+function applyStoreToRefs() {
+  browserTmsUrl.value = settingsStore.browserTmsUrl
+  clientTmsUrl.value = settingsStore.clientTmsUrl
+  mapWfsUrl.value = settingsStore.mapWfsUrl
+  browserMinZoom.value = settingsStore.browserMinZoom
+  browserMaxZoom.value = settingsStore.browserMaxZoom
+  clientMinZoom.value = settingsStore.clientMinZoom
+  clientMaxZoom.value = settingsStore.clientMaxZoom
+}
+
+async function saveMapConfig() {
+  savingMap.value = true; errorMsg.value = ''
+  if (browserMinZoom.value > browserMaxZoom.value) {
+    errorMsg.value = '浏览器最小层级不能大于最大层级'; savingMap.value = false
+    setTimeout(() => { errorMsg.value = '' }, 5000); return
+  }
+  if (clientMinZoom.value > clientMaxZoom.value) {
+    errorMsg.value = '客户端最小层级不能大于最大层级'; savingMap.value = false
+    setTimeout(() => { errorMsg.value = '' }, 5000); return
+  }
+  try {
+    settingsStore.browserTmsUrl = browserTmsUrl.value
+    settingsStore.clientTmsUrl = clientTmsUrl.value
+    settingsStore.mapWfsUrl = mapWfsUrl.value
+    settingsStore.browserMinZoom = browserMinZoom.value
+    settingsStore.browserMaxZoom = browserMaxZoom.value
+    settingsStore.clientMinZoom = clientMinZoom.value
+    settingsStore.clientMaxZoom = clientMaxZoom.value
+    await settingsStore.saveMapSettings()
+    applyStoreToRefs()
+    successMsg.value = '地图配置已保存到服务器'; setTimeout(() => { successMsg.value = '' }, 3000)
+  } catch (e) {
+    console.error('Failed to save map settings:', e); errorMsg.value = '保存地图配置失败'; setTimeout(() => { errorMsg.value = '' }, 5000)
+  } finally {
+    savingMap.value = false
+  }
+}
 
 const config = ref({
   server: { host: '0.0.0.0', port: 8080 },
@@ -129,13 +178,16 @@ const config = ref({
 
 const loading = ref(false)
 const saving = ref(false)
+const savingMap = ref(false)
 const successMsg = ref('')
 const errorMsg = ref('')
 
-onMounted(async () => { await fetchServers() })
+onMounted(async () => {
+  await settingsStore.loadMapSettings()
+  applyStoreToRefs()
+  await fetchServers()
+})
 
-watch(mapWfsUrl, () => saveMapWfsUrl())
-watch(mapTmsUrl, () => saveMapTmsUrl())
 watch(mapAutoLocate, () => saveMapAutoLocate())
 
 async function fetchServers() {

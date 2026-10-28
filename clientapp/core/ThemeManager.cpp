@@ -35,8 +35,22 @@ void ThemeManager::initThemePaths()
 #ifdef TEST_PATH
     m_themeDir = "D:/RustCam-Media/clientapp/resources/qss";
 #else
-    QString basePath = qApp->applicationDirPath();
-    m_themeDir = basePath + "/resources/qss";
+    // The build copies the QSS files to <bin>/resources/qss while the
+    // executable lives in <bin>/<Config>/, so look next to the executable
+    // first and then one level up.
+    const QString basePath = qApp->applicationDirPath();
+    const QStringList candidates = {
+        basePath + "/resources/qss",
+        QDir::cleanPath(basePath + "/../resources/qss"),
+    };
+
+    m_themeDir = candidates.first();
+    for (const QString& candidate : candidates) {
+        if (QDir(candidate).exists()) {
+            m_themeDir = candidate;
+            break;
+        }
+    }
 #endif
 
     LOG_INFO("ThemeManager", QString("Theme dir: %1").arg(m_themeDir));
@@ -144,6 +158,9 @@ void ThemeManager::applyStylesheet(const QString& qss)
         vars[match.captured(1)] = match.captured(2).trimmed();
     }
 
+    // 保存解析后的变量，供自绘控件（时间轴、录像列表等）取色
+    m_styleValues = vars;
+
     QString processedQss = qss;
     processedQss.remove(defRe);
 
@@ -170,7 +187,7 @@ QString ThemeManager::getStyleValue(const QString& key, const QString& defaultVa
 
 QColor ThemeManager::getColor(const QString& key) const
 {
-    QString value = m_styleValues.value(key);
+    const QString value = m_styleValues.value(key).trimmed();
     if (value.isEmpty()) {
         return QColor();
     }
@@ -179,7 +196,32 @@ QColor ThemeManager::getColor(const QString& key) const
         return QColor(value);
     }
 
+    // 支持 rgba(0, 120, 212, 0.25) 这类 QSS 颜色
+    static const QRegularExpression rgbaRe(
+        R"(^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*(\d*\.?\d+)\s*)?\)$)",
+        QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpressionMatch match = rgbaRe.match(value);
+    if (match.hasMatch()) {
+        double alpha = 1.0;
+        if (!match.captured(4).isEmpty()) {
+            alpha = match.captured(4).toDouble();
+            if (alpha > 1.0) {
+                alpha /= 255.0;
+            }
+        }
+        return QColor(match.captured(1).toInt(),
+                      match.captured(2).toInt(),
+                      match.captured(3).toInt(),
+                      qRound(alpha * 255.0));
+    }
+
     return QColor(value);
+}
+
+QColor ThemeManager::getColor(const QString& key, const QColor& defaultValue) const
+{
+    const QColor color = getColor(key);
+    return color.isValid() ? color : defaultValue;
 }
 
 QFont ThemeManager::getFont(const QString& key, const QFont& defaultFont) const

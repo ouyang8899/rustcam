@@ -35,31 +35,22 @@ PlaybackPlayerWidget::PlaybackPlayerWidget(QWidget* parent)
     m_uid = QUuid::createUuid().toString(QUuid::WithoutBraces);
 
     m_player = new ReplayPlayer(this);
-    m_source = new StreamSource(QString(), this);
+    m_source = new StreamSource(QString(), m_player, this);
 
-    m_source->setPlayer(m_player);
+    // 画面控件盖住了本控件，点击由它转发；否则窗口无法被选中
+    connect(m_player, &ReplayPlayer::clicked, this, &PlaybackPlayerWidget::onPlayerClicked);
+    connect(m_player, &ReplayPlayer::closeRequested, this, &PlaybackPlayerWidget::closeRequested);
+    // 画面控件会先吃掉鼠标事件，在这里记录按下位置，否则拖拽无法启动
+    m_player->installEventFilter(this);
 
-    m_source->setNoRecordingCallback([this](int64_t timeMs) {
-        showNoRecording(timeMs);
-    });
-
-    connect(m_source, &StreamSource::playbackProgressChanged, this, [this](int64_t absoluteTimeMs) {
-        emit playbackProgressChanged(absoluteTimeMs);
-    });
+    connect(m_source, &StreamSource::playbackProgressChanged,
+            this, &PlaybackPlayerWidget::onSourceProgress);
+    connect(m_source, &StreamSource::noRecording, this, &PlaybackPlayerWidget::showNoRecording);
 
     m_noRecordingLabel = new QLabel(this);
     m_noRecordingLabel->setAlignment(Qt::AlignCenter);
     m_noRecordingLabel->setObjectName("NoRecordingLabel");
     m_noRecordingLabel->setVisible(false);
-    m_noRecordingLabel->setStyleSheet(R"(
-        QLabel {
-            color: #888;
-            font-size: 14px;
-            background-color: rgba(0, 0, 0, 180);
-            border-radius: 4px;
-            padding: 8px 16px;
-        }
-    )");
 
     style()->polish(this);
 }
@@ -111,6 +102,14 @@ void PlaybackPlayerWidget::setSelected(bool selected) {
     }
 }
 
+void PlaybackPlayerWidget::onPlayerClicked() {
+    emit clicked(m_deviceId);
+}
+
+void PlaybackPlayerWidget::onSourceProgress(int64_t absoluteTimeMs) {
+    emit playbackProgressChanged(absoluteTimeMs);
+}
+
 void PlaybackPlayerWidget::showNoRecording(int64_t timeMs) {
     QDateTime dt = QDateTime::fromMSecsSinceEpoch(timeMs);
     QString timeStr = dt.toString("yyyy-MM-dd hh:mm:ss");
@@ -119,12 +118,54 @@ void PlaybackPlayerWidget::showNoRecording(int64_t timeMs) {
     LOG_INFO("PlaybackPlayerWidget", QString("showNoRecording: time=%1").arg(timeStr));
 }
 
+bool PlaybackPlayerWidget::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_player) {
+        switch (event->type()) {
+        case QEvent::MouseButtonPress: {
+            QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
+            if (mouseEvent->button() == Qt::LeftButton) {
+                m_pressPos = m_player->mapTo(this, mouseEvent->pos());
+                m_pressed = true;
+            }
+            break;
+        }
+        case QEvent::MouseButtonRelease:
+            m_pressed = false;
+            break;
+        case QEvent::MouseMove: {
+            QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
+            if (!m_pressed || !(mouseEvent->buttons() & Qt::LeftButton)) {
+                break;
+            }
+            const QPoint pos = m_player->mapTo(this, mouseEvent->pos());
+            if ((pos - m_pressPos).manhattanLength() >= QApplication::startDragDistance()) {
+                m_pressed = false;
+                startDrag();
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void PlaybackPlayerWidget::startDrag() {
+    // 拖动播放器：在格子之间切换，通道绑定跟着播放器走
+    QDrag* drag = new QDrag(this);
+    QMimeData* mime = new QMimeData();
+    mime->setData(kPlayerMimeType, m_uid.toUtf8());
+    drag->setMimeData(mime);
+    drag->exec(Qt::MoveAction);
+}
+
 void PlaybackPlayerWidget::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
         m_pressPos = event->pos();
         m_pressed = true;
     }
-    emit clicked();
+    emit clicked(m_deviceId);
 }
 
 void PlaybackPlayerWidget::mouseMoveEvent(QMouseEvent* event) {
@@ -135,13 +176,7 @@ void PlaybackPlayerWidget::mouseMoveEvent(QMouseEvent* event) {
         return;
     }
     m_pressed = false;
-
-    // 拖动播放器：在格子之间切换，通道绑定跟着播放器走
-    QDrag* drag = new QDrag(this);
-    QMimeData* mime = new QMimeData();
-    mime->setData(kPlayerMimeType, m_uid.toUtf8());
-    drag->setMimeData(mime);
-    drag->exec(Qt::MoveAction);
+    startDrag();
 }
 
 void PlaybackPlayerWidget::resizeEvent(QResizeEvent* event) {

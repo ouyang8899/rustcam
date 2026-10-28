@@ -61,7 +61,6 @@ public:
     QWidget* createSidePanel(QWidget* parent) override;
 
 public slots:
-    void onChannelClicked(int deviceId, int channelId, const QString& channelName);
     bool isWorkspace() const override { return true; }
 
     void playStream(const QString& cellId, const QString& url, const QString& title);

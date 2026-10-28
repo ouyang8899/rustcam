@@ -36,6 +36,7 @@ public:
     QString getStyleValue(const QString& key, const QString& defaultValue = QString()) const;
 
     QColor getColor(const QString& key) const;
+    QColor getColor(const QString& key, const QColor& defaultValue) const;
     QFont getFont(const QString& key, const QFont& defaultFont = QFont()) const;
 
     void setPaletteColor(const QString& key, const QColor& color);

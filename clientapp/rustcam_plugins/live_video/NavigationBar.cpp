@@ -9,14 +9,19 @@
 #include <QSvgRenderer>
 #include <QIcon>
 #include <QPixmap>
+#include <QSignalMapper>
 
 namespace rustcam {
 
 NavigationBar::NavigationBar(QWidget* parent)
     : QWidget(parent)
 {
-
     this->setStyleSheet("{background-color:red;}");
+
+    // 按钮 -> 布局序号：点击时由它把序号传出来（不用 sender() 反查）
+    m_indexMapper = new QSignalMapper(this);
+    connect(m_indexMapper, QOverload<int>::of(&QSignalMapper::mapped),
+            this, &NavigationBar::onButtonClicked);
 }
 
 NavigationBar::~NavigationBar() {
@@ -26,6 +31,7 @@ void NavigationBar::setLayouts(const QList<PlayerLayout>& layouts) {
     m_layouts = layouts;
 
     for (QPushButton* btn : m_buttons) {
+        m_indexMapper->removeMappings(btn);
         btn->deleteLater();
     }
     m_buttons.clear();
@@ -53,8 +59,8 @@ void NavigationBar::setLayouts(const QList<PlayerLayout>& layouts) {
         btn->setProperty("class", "LayoutNavButton");
         btn->show();
 
-        connect(btn, &QPushButton::clicked, this, &NavigationBar::onButtonClicked);
-        btn->setProperty("index", i);
+        connect(btn, &QPushButton::clicked, m_indexMapper, QOverload<>::of(&QSignalMapper::map));
+        m_indexMapper->setMapping(btn, i);
         m_buttons.append(btn);
     }
 
@@ -87,19 +93,19 @@ QString NavigationBar::generateLayoutSvg(const PlayerLayout& layout, int thumbW,
     return svg;
 }
 
-void NavigationBar::onButtonClicked() {
-    QPushButton* btn = qobject_cast<QPushButton*>(sender());
-    if (btn) {
-        int index = btn->property("index").toInt();
-        if (m_selectedIndex != index) {
-            if (m_selectedIndex >= 0 && m_selectedIndex < m_buttons.size()) {
-                m_buttons[m_selectedIndex]->setChecked(false);
-            }
-            m_selectedIndex = index;
-            btn->setChecked(true);
-            emit layoutSelected(index);
-        }
+void NavigationBar::onButtonClicked(int index) {
+    if (index < 0 || index >= m_buttons.size()) {
+        return;
     }
+    if (m_selectedIndex == index) {
+        return;
+    }
+    if (m_selectedIndex >= 0 && m_selectedIndex < m_buttons.size()) {
+        m_buttons[m_selectedIndex]->setChecked(false);
+    }
+    m_selectedIndex = index;
+    m_buttons[index]->setChecked(true);
+    emit layoutSelected(index);
 }
 
 void NavigationBar::resizeEvent(QResizeEvent* event) {

@@ -6,6 +6,8 @@
 #include "core/PlaybackChannel.h"
 #include "core/PlaybackController.h"
 #include "core/PlaybackCell.h"
+#include "core/PlaybackPlayerWidget.h"
+#include "core/ReplayPlayer.h"
 #include "core/ClipExportDialog.h"
 #include "core/RecordingFileListWidget.h"
 #include "core/StreamSource.h"
@@ -40,7 +42,6 @@ bool PlaybackPlugin::initialize(EventBus* bus, QObject* cfg)
     m_currentDeviceTag.clear();
     m_currentChannelTag.clear();
     m_targetCellId.clear();
-    m_currentPositionMs = 0;
     m_targetLabel = nullptr;
     m_timeEdit = nullptr;
 
@@ -63,11 +64,7 @@ QWidget* PlaybackPlugin::createWorkspace(QWidget* parent)
     QWidget* workspace = new QWidget(parent);
     m_workspace = workspace;
     workspace->setObjectName("playbackWorkspace");
-    workspace->setStyleSheet(R"(
-        QWidget#playbackWorkspace {
-            background-color: #2b2b2b;
-        }
-    )");
+    workspace->setAttribute(Qt::WA_StyledBackground, true);
 
     QHBoxLayout* mainLayout = new QHBoxLayout(workspace);
     mainLayout->setContentsMargins(0, 0, 0, 0);
@@ -83,22 +80,27 @@ QWidget* PlaybackPlugin::createWorkspace(QWidget* parent)
             this, &PlaybackPlugin::onActiveChannelChanged);
     connect(m_sidePanel, &PlaybackSidePanel::channelClosed,
             this, &PlaybackPlugin::onChannelClosed);
+    // 通道的事件由侧栏转发（通道由侧栏拥有，连接在登记通道时建立）
+    connect(m_sidePanel, &PlaybackSidePanel::channelFilesLoaded,
+            this, &PlaybackPlugin::onChannelFilesLoaded);
+    connect(m_sidePanel, &PlaybackSidePanel::channelRangeChanged,
+            this, &PlaybackPlugin::onChannelRangeChanged);
+    connect(m_sidePanel, &PlaybackSidePanel::channelAlarmsLoaded,
+            this, &PlaybackPlugin::onChannelAlarmsLoaded);
+    connect(m_sidePanel, &PlaybackSidePanel::channelBookmarksChanged,
+            this, &PlaybackPlugin::onChannelBookmarksChanged);
+    connect(m_sidePanel, &PlaybackSidePanel::channelPlayFileRequested,
+            this, &PlaybackPlugin::onChannelPlayFileRequested);
 
     QWidget* rightPanel = new QWidget(workspace);
-    rightPanel->setStyleSheet("background-color: #2b2b2b;");
+    rightPanel->setObjectName("playbackRightPanel");
+    rightPanel->setAttribute(Qt::WA_StyledBackground, true);
     QVBoxLayout* rightLayout = new QVBoxLayout(rightPanel);
     rightLayout->setContentsMargins(4, 4, 4, 4);
     rightLayout->setSpacing(4);
 
     QToolBar* toolbar = new QToolBar(rightPanel);
-    toolbar->setStyleSheet(R"(
-        QToolBar {
-            background-color: #1e1e1e;
-            border: none;
-            spacing: 8px;
-            padding: 4px;
-        }
-    )");
+    toolbar->setObjectName("playbackToolbar");
 
     QPushButton* playBtn = new QPushButton("▶", toolbar);
     playBtn->setCursor(Qt::PointingHandCursor);
@@ -124,7 +126,6 @@ QWidget* PlaybackPlugin::createWorkspace(QWidget* parent)
     toolbar->addSeparator();
 
     QLabel* speedLabel = new QLabel(tr("Speed:"), toolbar);
-    speedLabel->setStyleSheet("color: #e0e0e0;");
     toolbar->addWidget(speedLabel);
 
     QComboBox* speedCombo = new QComboBox(toolbar);
@@ -132,35 +133,25 @@ QWidget* PlaybackPlugin::createWorkspace(QWidget* parent)
     speedCombo->setCurrentText("1x");
     speedCombo->setProperty("class", "ToolbarComboBox");
     speedCombo->setFixedWidth(70);
-    connect(speedCombo, &QComboBox::currentTextChanged, this, [this](const QString& text) {
-        bool ok;
-        double speed = text.left(text.size() - 1).toDouble(&ok);
-        if (ok) {
-            onSpeedChanged(speed);
-        }
-    });
+    connect(speedCombo, &QComboBox::currentTextChanged, this, &PlaybackPlugin::onSpeedTextChanged);
     toolbar->addWidget(speedCombo);
 
     toolbar->addSeparator();
 
     QLabel* timeLabel = new QLabel(tr("Time:"), toolbar);
-    timeLabel->setStyleSheet("color: #e0e0e0;");
     toolbar->addWidget(timeLabel);
 
     m_timeEdit = new QDateTimeEdit(m_playbackTime, toolbar);
     m_timeEdit->setProperty("class", "ToolbarDateTimeEdit");
     m_timeEdit->setCalendarPopup(true);
     m_timeEdit->setFixedWidth(160);
-    connect(m_timeEdit, &QDateTimeEdit::dateTimeChanged, this, [this](const QDateTime& dt) {
-        m_playbackTime = dt;
-        onSeek(dt.toMSecsSinceEpoch());
-    });
+    connect(m_timeEdit, &QDateTimeEdit::dateTimeChanged, this, &PlaybackPlugin::onTimeEditChanged);
     toolbar->addWidget(m_timeEdit);
 
     QLabel* currentTimeLabel = new QLabel("--:--:--", toolbar);
     currentTimeLabel->setObjectName("currentTimeLabel");
-    currentTimeLabel->setStyleSheet("color: #e0e0e0; font-family: monospace; min-width: 150px;");
     toolbar->addWidget(currentTimeLabel);
+    m_currentTimeLabel = currentTimeLabel;
 
     QPushButton* exportBtn = new QPushButton(tr("导出片段"), toolbar);
     exportBtn->setCursor(Qt::PointingHandCursor);
@@ -175,7 +166,7 @@ QWidget* PlaybackPlugin::createWorkspace(QWidget* parent)
     toolbar->addWidget(spacer);
 
     m_targetLabel = new QLabel(tr("回放窗口: 未选择"), toolbar);
-    m_targetLabel->setStyleSheet("color: #9a9a9a;");
+    m_targetLabel->setObjectName("PlaybackTargetLabel");
     m_targetLabel->setToolTip(tr("点击录像文件会播放到这个窗口"));
     toolbar->addWidget(m_targetLabel);
 
@@ -183,37 +174,21 @@ QWidget* PlaybackPlugin::createWorkspace(QWidget* parent)
 
     m_container = new ReplayPlayerContainer(rightPanel);
     connect(m_container, &ReplayPlayerContainer::cellClicked, this, &PlaybackPlugin::onCellClicked);
+    // 播放窗口工具栏的关闭按钮：通道没有其它窗口在播放时从回放页注销
+    connect(m_container, &ReplayPlayerContainer::channelCloseRequested,
+            this, &PlaybackPlugin::onChannelClosed);
     // 播放进度同步到对应通道（书签位置用）
-    connect(m_container, &ReplayPlayerContainer::playbackProgress, this, [this](int64_t timeMs) {
-        m_currentPositionMs = timeMs;
-    });
-    connect(m_container, &ReplayPlayerContainer::channelPlaybackProgress, this,
-            [this](const QString& channelKey, int64_t timeMs) {
-                PlaybackChannel* channel = m_sidePanel ? m_sidePanel->channel(channelKey) : nullptr;
-                if (channel) {
-                    channel->setPlaybackPosition(timeMs);
-                }
-            });
+    connect(m_container, &ReplayPlayerContainer::channelPlaybackProgress,
+            this, &PlaybackPlugin::onChannelPlaybackProgress);
     // 目标窗口变化：提示双击录像文件会播到哪里
-    connect(m_container, &ReplayPlayerContainer::targetCellChanged, this, [this](const QString& cellId) {
-        m_targetCellId = cellId;
-        if (m_targetLabel) {
-            m_targetLabel->setText(cellId.isEmpty()
-                ? tr("回放窗口: 未选择")
-                : tr("回放窗口: %1").arg(cellId));
-        }
-    });
+    connect(m_container, &ReplayPlayerContainer::targetCellChanged,
+            this, &PlaybackPlugin::onTargetCellChanged);
     // 录像文件拖到播放窗口：那个窗口播这个通道
-    connect(m_container, &ReplayPlayerContainer::recordingDropped, this,
-            [this](const QString& channelKey, int64_t startTimeMs, const QString& cellId) {
-                PlaybackChannel* channel = m_sidePanel ? m_sidePanel->channel(channelKey) : nullptr;
-                if (!channel || !m_container) {
-                    return;
-                }
-                m_container->bindChannelToCell(channelKey, cellId);
-                m_sidePanel->setActiveChannel(channelKey);
-                playChannelFrom(channelKey, startTimeMs);
-            });
+    connect(m_container, &ReplayPlayerContainer::recordingDropped,
+            this, &PlaybackPlugin::onRecordingDropped);
+    // 设备树通道拖到播放窗口：绑定该通道，加载完录像后自动播放
+    connect(m_container, &ReplayPlayerContainer::channelDropped,
+            this, &PlaybackPlugin::onChannelDropped);
     rightLayout->addWidget(m_container, 1);
 
     m_container->initialize();
@@ -221,18 +196,7 @@ QWidget* PlaybackPlugin::createWorkspace(QWidget* parent)
     mainLayout->addWidget(rightPanel, 1);
 
     QTimer* updateTimer = new QTimer(workspace);
-    connect(updateTimer, &QTimer::timeout, this, [this, currentTimeLabel]() {
-        // 显示当前查看通道的播放位置
-        PlaybackChannel* channel = m_sidePanel ? m_sidePanel->activeChannel() : nullptr;
-        if (!channel) {
-            return;
-        }
-        const int64_t baseTime = channel->playbackPositionMs();
-        if (baseTime > 0) {
-            QDateTime dt = QDateTime::fromMSecsSinceEpoch(baseTime);
-            currentTimeLabel->setText(dt.toString("yyyy-MM-dd hh:mm:ss"));
-        }
-    });
+    connect(updateTimer, &QTimer::timeout, this, &PlaybackPlugin::onUpdateTimer);
     updateTimer->start(1000);
 
     QTimer::singleShot(100, this, &PlaybackPlugin::onLoadDeviceTree);
@@ -307,36 +271,54 @@ void PlaybackPlugin::onPlaybackRequested(const QString& topic, const QVariantMap
 
 void PlaybackPlugin::onPlay()
 {
-    if (m_container) {
-        m_container->play();
+    // 工具栏只作用于当前激活通道
+    const QString key = activeChannelKey();
+    if (key.isEmpty() || !m_container) {
+        return;
     }
-    LOG_INFO("PlaybackPlugin", "Playback started");
+    m_container->playChannel(key, 0);
+    LOG_INFO("PlaybackPlugin", QString("Playback started: %1").arg(key));
 }
 
 void PlaybackPlugin::onPause()
 {
-    if (m_container) {
-        m_container->pause();
+    const QString key = activeChannelKey();
+    if (key.isEmpty() || !m_container) {
+        return;
     }
-    LOG_INFO("PlaybackPlugin", "Playback paused");
+    m_container->pauseChannel(key);
+    LOG_INFO("PlaybackPlugin", QString("Playback paused: %1").arg(key));
 }
 
 void PlaybackPlugin::onStop()
 {
-    if (m_container) {
-        m_container->stop();
+    const QString key = activeChannelKey();
+    if (!key.isEmpty() && m_container) {
+        m_container->stopChannel(key);
     }
     m_playbackTime = QDateTime();
     LOG_INFO("PlaybackPlugin", "Playback stopped");
 }
 
-void PlaybackPlugin::onSpeedChanged(double speed)
+void PlaybackPlugin::onSpeedTextChanged(const QString& text)
 {
+    bool ok = false;
+    const double speed = text.left(text.size() - 1).toDouble(&ok);
+    if (!ok) {
+        return;
+    }
     m_playbackSpeed = speed;
-    if (m_container) {
-        m_container->setSpeed(speed);
+    const QString key = activeChannelKey();
+    if (!key.isEmpty() && m_container) {
+        m_container->setChannelSpeed(key, speed);
     }
     LOG_INFO("PlaybackPlugin", QString("Speed changed: %1x").arg(speed));
+}
+
+void PlaybackPlugin::onTimeEditChanged(const QDateTime& dt)
+{
+    m_playbackTime = dt;
+    onSeek(dt.toMSecsSinceEpoch());
 }
 
 void PlaybackPlugin::onSeek(int64_t timeMs)
@@ -345,7 +327,7 @@ void PlaybackPlugin::onSeek(int64_t timeMs)
         return;
     }
     // 时间输入框只作用到当前查看的通道
-    const QString key = m_sidePanel->activeChannelKey();
+    const QString key = activeChannelKey();
     if (key.isEmpty()) {
         return;
     }
@@ -354,6 +336,24 @@ void PlaybackPlugin::onSeek(int64_t timeMs)
     if (channel) {
         channel->setPlaybackPosition(timeMs);
     }
+}
+
+void PlaybackPlugin::onUpdateTimer()
+{
+    // 显示当前查看通道的播放位置
+    PlaybackChannel* channel = m_sidePanel ? m_sidePanel->activeChannel() : nullptr;
+    if (!channel || !m_currentTimeLabel) {
+        return;
+    }
+    const int64_t baseTime = channel->playbackPositionMs();
+    if (baseTime > 0) {
+        const QDateTime dt = QDateTime::fromMSecsSinceEpoch(baseTime);
+        m_currentTimeLabel->setText(dt.toString("yyyy-MM-dd hh:mm:ss"));
+    }
+}
+
+QString PlaybackPlugin::activeChannelKey() const {
+    return m_sidePanel ? m_sidePanel->activeChannelKey() : QString();
 }
 
 void PlaybackPlugin::updateTimeEdit(int64_t timeMs) {
@@ -366,9 +366,9 @@ void PlaybackPlugin::updateTimeEdit(int64_t timeMs) {
     }
 }
 
-void PlaybackPlugin::onCellClicked(int cellId, const QString& deviceId)
+void PlaybackPlugin::onCellClicked(const QString& layoutItemId, const QString& deviceId)
 {
-    Q_UNUSED(cellId)
+    Q_UNUSED(layoutItemId)
     Q_UNUSED(deviceId)
 }
 
@@ -396,36 +396,19 @@ PlaybackChannel* PlaybackPlugin::ensureChannel(const QString& deviceTag, const Q
     const QString key = deviceTag + "/" + channelTag;
     PlaybackChannel* channel = m_sidePanel->channel(key);
     if (!channel) {
+        // 通道由侧栏创建并连接，这里只补上播放侧的接线
         channel = m_sidePanel->registerChannel(deviceTag, channelTag, displayName);
-        attachChannelSignals(key, channel);
         if (m_container) {
             m_container->attachChannelTimeline(key, channel->timeline());
             // 通道与播放器共用同一个播放组（通道的播放位置）
             channel->setGroup(m_container->channelGroup(key));
+            // 时间轴上的定位直接调用容器 seek（目标唯一）
+            channel->setContainer(m_container);
+            // 时间轴挂上之后再刷一次书签，标记才能画到时间轴上
+            channel->refreshBookmarks();
         }
     }
     return channel;
-}
-
-void PlaybackPlugin::attachChannelSignals(const QString& key, PlaybackChannel* channel) {
-    connect(channel, &PlaybackChannel::filesLoaded, this, [this, key](const QList<RecordingFile>& files) {
-        onChannelFilesLoaded(key, files);
-    });
-    connect(channel, &PlaybackChannel::rangeChanged, this, [this, key](int64_t startMs, int64_t endMs) {
-        onChannelRangeChanged(key, startMs, endMs);
-    });
-    connect(channel, &PlaybackChannel::alarmsLoaded, this, [this, key](const QList<TimelineEvent>& events) {
-        onChannelAlarmsLoaded(key, events);
-    });
-    connect(channel, &PlaybackChannel::bookmarksChanged, this, [this, key](const QList<TimelineEvent>& bookmarks) {
-        onChannelBookmarksChanged(key, bookmarks);
-    });
-    connect(channel, &PlaybackChannel::seekRequested, this, [this, key](int64_t timeMs) {
-        onChannelSeekRequested(key, timeMs);
-    });
-    connect(channel, &PlaybackChannel::playFileRequested, this, [this, key](const RecordingFile& file) {
-        onChannelPlayFileRequested(key, file);
-    });
 }
 
 void PlaybackPlugin::activateChannel(const QString& key, const QString& cellId) {
@@ -442,6 +425,7 @@ void PlaybackPlugin::activateChannel(const QString& key, const QString& cellId) 
     }
     if (!targetCell.isEmpty()) {
         m_container->bindChannelToCell(key, targetCell);
+        applyChannelNameToCell(channel, targetCell);
     }
     m_sidePanel->setActiveChannel(key);
     channel->reload();
@@ -459,6 +443,10 @@ void PlaybackPlugin::onChannelRequested(const QString& deviceTag, const QString&
 void PlaybackPlugin::onActiveChannelChanged(const QString& key) {
     if (m_container) {
         m_container->setActiveChannelTimeline(key);
+        // 倍速跟随当前通道
+        if (m_playbackSpeed != 1.0) {
+            m_container->setChannelSpeed(key, m_playbackSpeed);
+        }
     }
     PlaybackChannel* channel = m_sidePanel ? m_sidePanel->channel(key) : nullptr;
     if (channel) {
@@ -474,9 +462,53 @@ void PlaybackPlugin::onChannelClosed(const QString& key) {
         m_container->removeChannelTimeline(key);
     }
     m_channelRanges.remove(key);
+    m_autoPlayChannels.remove(key);
     if (m_sidePanel) {
         m_sidePanel->unregisterChannel(key);
     }
+}
+
+void PlaybackPlugin::onChannelPlaybackProgress(const QString& channelKey, int64_t timeMs) {
+    // 多个通道共用这一个槽：按 key 找到通道才更新
+    PlaybackChannel* channel = m_sidePanel ? m_sidePanel->channel(channelKey) : nullptr;
+    if (channel) {
+        channel->setPlaybackPosition(timeMs);
+    }
+}
+
+void PlaybackPlugin::onTargetCellChanged(const QString& layoutItemId) {
+    m_targetCellId = layoutItemId;
+    if (m_targetLabel) {
+        m_targetLabel->setText(layoutItemId.isEmpty()
+            ? tr("回放窗口: 未选择")
+            : tr("回放窗口: %1").arg(layoutItemId));
+    }
+}
+
+void PlaybackPlugin::onRecordingDropped(const QString& layoutItemId, const QString& channelKey,
+                                        int64_t startTimeMs) {
+    PlaybackChannel* channel = m_sidePanel ? m_sidePanel->channel(channelKey) : nullptr;
+    if (!channel || !m_container) {
+        return;
+    }
+    m_container->bindChannelToCell(channelKey, layoutItemId);
+    applyChannelNameToCell(channel, layoutItemId);
+    m_sidePanel->setActiveChannel(channelKey);
+    playChannelFrom(channelKey, startTimeMs);
+}
+
+void PlaybackPlugin::onChannelDropped(const QString& layoutItemId, const QString& deviceTag,
+                                      const QString& channelTag, const QString& displayName) {
+    if (!m_container) {
+        return;
+    }
+    PlaybackChannel* channel = ensureChannel(deviceTag, channelTag, displayName);
+    if (!channel) {
+        return;
+    }
+    m_container->selectCell(layoutItemId);
+    m_autoPlayChannels.insert(channel->key());
+    activateChannel(channel->key(), layoutItemId);
 }
 
 void PlaybackPlugin::onChannelFilesLoaded(const QString& key, const QList<RecordingFile>& files) {
@@ -511,7 +543,15 @@ void PlaybackPlugin::onChannelFilesLoaded(const QString& key, const QList<Record
         return;
     }
     const QPair<int64_t, int64_t> range = m_channelRanges.value(key, qMakePair<int64_t, int64_t>(0, 0));
-    m_container->applyChannelClips(key, clips, range.first, range.second);
+    if (m_container->isChannelPlaying(key)) {
+        // 正在播放：只追加分片，不打断
+        m_container->appendChannelClips(key, clips);
+    } else {
+        m_container->applyChannelClips(key, clips, range.first, range.second);
+    }
+    if (m_autoPlayChannels.remove(key)) {
+        m_container->playChannel(key, 0);
+    }
     TimelineWidget* timeline = m_container->channelTimeline(key);
     if (timeline) {
         timeline->setPeriods(periods);
@@ -536,17 +576,6 @@ void PlaybackPlugin::onChannelBookmarksChanged(const QString& key, const QList<T
     }
 }
 
-void PlaybackPlugin::onChannelSeekRequested(const QString& key, int64_t timeMs) {
-    if (!m_container) {
-        return;
-    }
-    m_container->seekChannel(key, timeMs);
-    PlaybackChannel* channel = m_sidePanel ? m_sidePanel->channel(key) : nullptr;
-    if (channel) {
-        channel->setPlaybackPosition(timeMs);
-    }
-}
-
 void PlaybackPlugin::onChannelPlayFileRequested(const QString& key, const RecordingFile& file) {
     if (!m_sidePanel || !m_container) {
         return;
@@ -559,8 +588,23 @@ void PlaybackPlugin::onChannelPlayFileRequested(const QString& key, const Record
     const QString cellId = m_container->selectedCellId();
     if (!cellId.isEmpty()) {
         m_container->bindChannelToCell(key, cellId);
+        applyChannelNameToCell(channel, cellId);
     }
     playChannelFrom(key, file.startTimeMs);
+}
+
+void PlaybackPlugin::applyChannelNameToCell(PlaybackChannel* channel, const QString& cellId) {
+    if (!channel || !m_container || cellId.isEmpty()) {
+        return;
+    }
+    PlaybackCell* cell = m_container->getCell(cellId);
+    PlaybackPlayerWidget* widget = cell ? cell->playerWidget() : nullptr;
+    ReplayPlayer* player = widget ? widget->player() : nullptr;
+    if (!player) {
+        return;
+    }
+    const QString name = channel->displayName().isEmpty() ? channel->channelTag() : channel->displayName();
+    player->setDeviceName(name);
 }
 
 void PlaybackPlugin::playChannelFrom(const QString& key, int64_t startTimeMs) {
@@ -594,10 +638,6 @@ void PlaybackPlugin::playChannelFrom(const QString& key, int64_t startTimeMs) {
     m_container->playChannel(key, startTimeMs);
     channel->setPlaybackPosition(startTimeMs);
     updateTimeEdit(startTimeMs);
-}
-
-void PlaybackPlugin::onFileDoubleClicked(const RecordingFile& file) {
-    Q_UNUSED(file)
 }
 
 void PlaybackPlugin::onExportClip() {

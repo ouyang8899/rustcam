@@ -5,12 +5,11 @@
 #include <QVariantMap>
 #include <QTabWidget>
 #include <QJsonArray>
-#include "CoreExport.h"
-#include "DeviceTree.h"
+#include "core/DeviceTree.h"
 
 namespace rustcam {
 
-class RUSTCAM_CORE_API MapSidePanel : public QWidget {
+class MapSidePanel : public QWidget {
     Q_OBJECT
 public:
     explicit MapSidePanel(QWidget* parent = nullptr);

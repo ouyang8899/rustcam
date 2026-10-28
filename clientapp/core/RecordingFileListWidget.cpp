@@ -1,4 +1,5 @@
 #include "RecordingFileListWidget.h"
+#include "ThemeManager.h"
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
@@ -244,10 +245,14 @@ void RecordingFileDelegate::paint(QPainter* painter,
             .arg(endDt.toString("HH:mm:ss"));
     }
 
+    const ThemeManager* theme = ThemeManager::instance();
+    const QColor primaryText = theme->getColor("text_primary", QColor("#e0e0e0"));
+    const QColor secondaryText = theme->getColor("text_secondary", QColor("#9a9a9a"));
+
     QFont boldFont = font;
     boldFont.setBold(true);
     painter->setFont(boldFont);
-    painter->setPen(QColor("#e0e0e0"));
+    painter->setPen(primaryText);
     const QFontMetrics boldFm(boldFont);
     painter->drawText(QRect(left, top, right - left, lineHeight),
                       Qt::AlignLeft | Qt::AlignVCenter, timeRange);
@@ -259,7 +264,7 @@ void RecordingFileDelegate::paint(QPainter* painter,
 
     // 第二行：文件名 + 大小 + 类型
     painter->setFont(font);
-    painter->setPen(QColor("#9a9a9a"));
+    painter->setPen(secondaryText);
     const int secondLine = top + lineHeight;
 
     int cursor = left;
@@ -275,7 +280,7 @@ void RecordingFileDelegate::paint(QPainter* painter,
         cursor += typeWidth;
     }
 
-    painter->setPen(QColor("#c8c8c8"));
+    painter->setPen(secondaryText);
     const QString sizeText = formatSize(size);
     const int sizeWidth = fm.horizontalAdvance(sizeText);
     painter->drawText(QRect(right - sizeWidth, secondLine, sizeWidth, lineHeight),
@@ -314,18 +319,17 @@ RecordingFileListWidget::RecordingFileListWidget(QWidget* parent)
     headerLayout->setSpacing(6);
 
     m_countLabel = new QLabel(tr("录像文件 (0)"), this);
-    m_countLabel->setStyleSheet("color: #888; font-size: 12px; padding: 2px;");
+    m_countLabel->setObjectName("RecordingCountLabel");
     headerLayout->addWidget(m_countLabel);
     headerLayout->addStretch(1);
 
     m_pageSizeCombo = new QComboBox(this);
-    m_pageSizeCombo->addItem("20", 20);
-    m_pageSizeCombo->addItem("50", 50);
+    m_pageSizeCombo->setObjectName("RecordingPageSizeCombo");
     m_pageSizeCombo->addItem("100", 100);
     m_pageSizeCombo->addItem("200", 200);
+    m_pageSizeCombo->addItem("500", 500);
     m_pageSizeCombo->setCurrentText(QString::number(m_pageSize));
     m_pageSizeCombo->setFixedWidth(64);
-    m_pageSizeCombo->setStyleSheet("font-size: 12px;");
     m_pageSizeCombo->setToolTip(tr("每页条数"));
     connect(m_pageSizeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             [this](int index) {
@@ -341,6 +345,7 @@ RecordingFileListWidget::RecordingFileListWidget(QWidget* parent)
 
     m_model = new RecordingFileListModel(this);
     m_listView = new QListView(this);
+    m_listView->setObjectName("RecordingFileListView");
     m_listView->setModel(m_model);
     m_listView->setUniformItemSizes(false);
     m_listView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
@@ -350,24 +355,10 @@ RecordingFileListWidget::RecordingFileListWidget(QWidget* parent)
     m_listView->setDragEnabled(true);
     m_listView->setDragDropMode(QAbstractItemView::DragOnly);
 
-    m_listView->setStyleSheet(R"(
-        QListView {
-            background-color: #1a1a1a;
-            border: none;
-            outline: none;
-        }
-        QListView::item {
-            padding: 4px;
-            border-bottom: 1px solid #2a2a2a;
-            color: #e0e0e0;
-        }
-        QListView::item:selected {
-            background-color: #0078D4;
-        }
-        QListView::item:hover {
-            background-color: #2a2a2a;
-        }
-    )");
+    // 自绘条目在主题切换后需要重绘
+    connect(ThemeManager::instance(), &ThemeManager::themeChanged, this, [this](ThemeManager::Theme) {
+        m_listView->viewport()->update();
+    });
 
     connect(m_listView, &QListView::doubleClicked, this, &RecordingFileListWidget::onItemDoubleClicked);
     connect(m_listView, &QListView::clicked, this, &RecordingFileListWidget::onItemClicked);

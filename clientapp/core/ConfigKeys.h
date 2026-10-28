@@ -20,4 +20,12 @@
 
 #define CFG_SERVER_HOST          CONFIG_KEY_PREFIX "server/host"
 #define CFG_SERVER_PORT          CONFIG_KEY_PREFIX "server/port"
-#define CFG_SERVER_HTTPS        CONFIG_KEY_PREFIX "server/https"
+#define CFG_SERVER_HTTPS         CONFIG_KEY_PREFIX "server/https"
+
+#define CFG_SCREENSHOT_PATH      CONFIG_KEY_PREFIX "screenshot/savePath"
+
+#define CFG_MAP_TMS_URL          CONFIG_KEY_PREFIX "map/tmsUrl"
+#define CFG_MAP_WFS_URL          CONFIG_KEY_PREFIX "map/wfsUrl"
+#define CFG_MAP_MIN_ZOOM         CONFIG_KEY_PREFIX "map/minZoom"
+#define CFG_MAP_MAX_ZOOM         CONFIG_KEY_PREFIX "map/maxZoom"
+

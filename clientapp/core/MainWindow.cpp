@@ -160,7 +160,7 @@ void MainWindow::createWorkspace()
     workspaceLayout->setContentsMargins(4, 4, 4, 4);
 
     m_workspaceStack = new QStackedWidget(m_workspace);
-    workspaceLayout->addWidget(m_workspaceStack);
+    workspaceLayout->addWidget(m_workspaceStack, 1);
 
     layout->addWidget(m_workspace, 1);
 }
@@ -194,10 +194,13 @@ void MainWindow::createStatusBar()
     statusBar->addPermanentWidget(m_timeLabel);
 
     QTimer* timer = new QTimer(this);
-    connect(timer, &QTimer::timeout, [this]() {
-        m_timeLabel->setText(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss"));
-    });
+    connect(timer, &QTimer::timeout, this, &MainWindow::onClockTick);
     timer->start(1000);
+    m_timeLabel->setText(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss"));
+}
+
+void MainWindow::onClockTick()
+{
     m_timeLabel->setText(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss"));
 }
 

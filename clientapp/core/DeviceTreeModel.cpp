@@ -1,5 +1,7 @@
 #include "DeviceTreeModel.h"
 #include <QIcon>
+#include <QJsonDocument>
+#include <QMimeData>
 #include <QVariant>
 
 namespace rustcam {
@@ -164,7 +166,40 @@ Qt::ItemFlags DeviceTreeModel::flags(const QModelIndex& index) const
     if (!index.isValid())
         return Qt::NoItemFlags;
 
-    return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
+    Qt::ItemFlags itemFlags = Qt::ItemIsEnabled | Qt::ItemIsSelectable;
+    DeviceTreeNodeData* node = static_cast<DeviceTreeNodeData*>(index.internalPointer());
+    if (node && node->type == "channel") {
+        itemFlags |= Qt::ItemIsDragEnabled;
+    }
+    return itemFlags;
+}
+
+QStringList DeviceTreeModel::mimeTypes() const
+{
+    return { QStringLiteral("application/x-rustcam-device") };
+}
+
+QMimeData* DeviceTreeModel::mimeData(const QModelIndexList& indexes) const
+{
+    if (indexes.isEmpty()) {
+        return nullptr;
+    }
+
+    DeviceTreeNodeData* node = static_cast<DeviceTreeNodeData*>(indexes.first().internalPointer());
+    if (!node) {
+        return nullptr;
+    }
+
+    QVariantMap meta;
+    meta["key"] = node->key;
+    meta["name"] = node->name;
+    meta["type"] = node->type;
+    meta.unite(node->metadata);
+
+    QMimeData* mime = new QMimeData();
+    mime->setData(QStringLiteral("application/x-rustcam-device"),
+                  QJsonDocument::fromVariant(meta).toJson(QJsonDocument::Compact));
+    return mime;
 }
 
 QVariant DeviceTreeModel::headerData(int section, Qt::Orientation orientation, int role) const

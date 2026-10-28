@@ -2,10 +2,20 @@ set(PLUGIN_ID "map")
 
 set(PLUGIN_SOURCES
     MapPlugin.cpp
+    CefRuntime.cpp
+    MapCefApp.cpp
+    MapBrowserClient.cpp
+    CefBrowserWidget.cpp
+    MapSidePanel.cpp
 )
 
 set(PLUGIN_HEADERS
     MapPlugin.h
+    CefRuntime.h
+    MapCefApp.h
+    MapBrowserClient.h
+    CefBrowserWidget.h
+    MapSidePanel.h
 )
 
 add_library(${PLUGIN_ID} SHARED
@@ -21,14 +31,21 @@ target_include_directories(${PLUGIN_ID} PRIVATE
     ${CMAKE_SOURCE_DIR}/core
     ${CMAKE_SOURCE_DIR}/interfaces
     ${CMAKE_SOURCE_DIR}/common
+    ${CMAKE_SOURCE_DIR}/3rd_party/bridge_player/include
+    ${CMAKE_SOURCE_DIR}/3rd_party/boost/include/boost-1_91
+    ${CMAKE_SOURCE_DIR}/3rd_party/ffmpeg-n8.1.3-win64-lgpl-shared-8.1/include
+    ${CMAKE_SOURCE_DIR}/3rd_party/jsoncpp/include
 )
 
 target_link_libraries(${PLUGIN_ID} PUBLIC
     interfaces
     common
     rustcam-core
+    cef
+    libcef_dll_wrapper
     Qt5::Core
     Qt5::Widgets
+    Qt5::Concurrent
 )
 
 set_target_properties(${PLUGIN_ID} PROPERTIES
@@ -48,4 +65,7 @@ add_custom_command(TARGET ${PLUGIN_ID} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_CURRENT_SOURCE_DIR}/icons/icon.svg
         $<TARGET_FILE_DIR:${PLUGIN_ID}>/rustcam_plugins/${PLUGIN_ID}/icons/
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/web
+        $<TARGET_FILE_DIR:${PLUGIN_ID}>/rustcam_plugins/${PLUGIN_ID}/web/
 )

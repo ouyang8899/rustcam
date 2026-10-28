@@ -47,6 +47,7 @@ private:
     void setupLogging();
     void loadPlugins();
     void showMainWindow();
+    void loadMapSettings();
 
     QApplication* m_app = nullptr;
     bool m_initialized = false;

@@ -1,4 +1,5 @@
 #include "TimelineWidget.h"
+#include "ThemeManager.h"
 #include <QPainter>
 #include <QPainterPath>
 #include <QMouseEvent>
@@ -10,9 +11,12 @@ namespace rustcam {
 TimelineWidget::TimelineWidget(QWidget* parent)
     : QWidget(parent)
 {
+    setObjectName("TimelineWidget");
+    setAttribute(Qt::WA_StyledBackground, true);
     setMinimumHeight(60);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    setStyleSheet("background-color: #1e1e1e; border: 1px solid #333;");
+    connect(ThemeManager::instance(), &ThemeManager::themeChanged, this,
+            [this](ThemeManager::Theme) { update(); });
 }
 
 TimelineWidget::~TimelineWidget() {
@@ -122,10 +126,12 @@ void TimelineWidget::paintEvent(QPaintEvent* event) {
 
     p.setRenderHint(QPainter::Antialiasing);
 
-    p.fillRect(rect(), QColor("#1e1e1a"));
+    const ThemeManager* theme = ThemeManager::instance();
+    p.fillRect(rect().adjusted(1, 1, -1, -1),
+               theme->getColor("tertiary_bg", QColor("#1e1e1a")));
 
-    QColor noRecordingColor("#2a2a2a");
-    p.fillRect(QRect(margin, 0, width() - margin * 2, height()), noRecordingColor);
+    const QColor noRecordingColor = theme->getColor("border", QColor("#2a2a2a"));
+    p.fillRect(QRect(margin, 1, width() - margin * 2, height() - 2), noRecordingColor);
 
     int visibleLeft = margin;
     int visibleRight = width() - margin;
@@ -212,7 +218,7 @@ void TimelineWidget::paintEvent(QPaintEvent* event) {
         p.drawLine(playheadX, 0, playheadX, height());
     }
 
-    p.setPen(QColor("#888"));
+    p.setPen(theme->getColor("text_secondary", QColor("#888")));
     QFont font = p.font();
     font.setPointSize(8);
     p.setFont(font);
@@ -228,7 +234,7 @@ void TimelineWidget::paintEvent(QPaintEvent* event) {
     int dayOffset = (startDt.date().dayOfWeek() - 1) * (width() - margin * 2) / 7;
     p.drawText(QPoint(margin + dayOffset, 12), startDt.toString("yyyy-MM-dd"));
 
-    p.setPen(QPen(Qt::white, 1));
+    p.setPen(QPen(theme->getColor("text_secondary", QColor("#ffffff")), 1));
 
     int tickCount = 10;
     int64_t timeRange = m_endTimeMs - m_startTimeMs;

@@ -2,6 +2,8 @@
 #include "RecordingApi.h"
 #include "FileDownloader.h"
 #include "RecordingFileListWidget.h"
+#include "BookmarkListWidget.h"
+#include "ReplayPlayerContainer.h"
 #include "common/Logger.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -23,9 +25,6 @@ namespace rustcam {
 
 namespace {
 
-/// 一次查询最多拉取的页数（50 页 * 每页 50 条 = 2500 段），避免异常数据导致请求风暴
-constexpr int kMaxPages = 50;
-
 /// 检索条件区域固定高度（超出部分在滚动区里滚动）
 constexpr int kFilterAreaHeight = 240;
 
@@ -33,7 +32,7 @@ constexpr int kFilterAreaHeight = 240;
 void addFieldRow(QVBoxLayout* form, const QString& text, QWidget* field)
 {
     QLabel* label = new QLabel(text, field);
-    label->setStyleSheet("color: #aaa;");
+    label->setObjectName("PlaybackFilterFieldLabel");
     QVBoxLayout* row = new QVBoxLayout();
     row->setContentsMargins(0, 0, 0, 0);
     row->setSpacing(2);
@@ -49,6 +48,7 @@ PlaybackChannel::PlaybackChannel(const QString& deviceTag,
                                  const QString& displayName,
                                  QObject* parent)
     : QObject(parent)
+    , m_key(deviceTag + "/" + channelTag)
     , m_deviceTag(deviceTag)
     , m_channelTag(channelTag)
     , m_displayName(displayName)
@@ -56,30 +56,23 @@ PlaybackChannel::PlaybackChannel(const QString& deviceTag,
 {
     // 时间轴由 ReplayPlayerContainer 托管显示（视频区下方）
     m_timeline = new TimelineWidget();
-    connect(m_timeline, &TimelineWidget::timeSelected, this, &PlaybackChannel::seekRequested);
-    connect(m_timeline, &TimelineWidget::periodClicked, this, [this](const RecordingPeriod& period) {
-        emit seekRequested(period.startTimeMs);
-    });
+    connect(m_timeline, &TimelineWidget::timeSelected, this, &PlaybackChannel::onTimeSelected);
+    connect(m_timeline, &TimelineWidget::periodClicked, this, &PlaybackChannel::onPeriodClicked);
+    connect(m_timeline, &TimelineWidget::playheadReleased, this, &PlaybackChannel::onPlayheadReleased);
 
     m_downloader = new FileDownloader(this);
-    connect(m_downloader, &FileDownloader::finished, this,
-            [this](bool success, const QString& path, const QString& error) {
-                if (success) {
-                    LOG_INFO("PlaybackChannel", QString("download finished: %1").arg(path));
-                    QMessageBox::information(m_hostWidget.data(), tr("下载完成"),
-                        tr("录像文件已保存到：%1").arg(path));
-                } else {
-                    LOG_ERROR("PlaybackChannel", QString("download failed: %1").arg(error));
-                    QMessageBox::warning(m_hostWidget.data(), tr("下载失败"), error);
-                }
-            });
+    connect(m_downloader, &FileDownloader::finished, this, &PlaybackChannel::onDownloadFinished);
+
+    // 书签存储是全局单例：任何通道新增/删除书签，所有通道各自刷新自己的列表
+    connect(BookmarkStore::instance(), &BookmarkStore::bookmarksChanged,
+            this, &PlaybackChannel::refreshBookmarks);
 }
 
 PlaybackChannel::~PlaybackChannel() {
 }
 
 QString PlaybackChannel::key() const {
-    return m_deviceTag + "/" + m_channelTag;
+    return m_key;
 }
 
 // ── 侧栏页面 ────────────────────────────────────────────────────────
@@ -92,11 +85,11 @@ QWidget* PlaybackChannel::createSidePanelPage(QWidget* parent) {
     layout->setSpacing(4);
 
     QLabel* filterTitle = new QLabel(tr("检索条件"), page);
-    filterTitle->setStyleSheet("color: #e0e0e0; font-weight: bold; padding: 4px;");
+    filterTitle->setObjectName("PlaybackSectionTitle");
     layout->addWidget(filterTitle);
 
     QFrame* filterFrame = new QFrame(page);
-    filterFrame->setStyleSheet("border: 1px solid #3e3e3e;");
+    filterFrame->setObjectName("PlaybackFilterFrame");
     QVBoxLayout* filterFrameLayout = new QVBoxLayout(filterFrame);
     filterFrameLayout->setContentsMargins(2, 2, 2, 2);
     filterFrameLayout->setSpacing(0);
@@ -104,11 +97,14 @@ QWidget* PlaybackChannel::createSidePanelPage(QWidget* parent) {
     layout->addWidget(filterFrame, 0);
 
     QLabel* fileListLabel = new QLabel(tr("Recording Files"), page);
-    fileListLabel->setStyleSheet("color: #e0e0e0; font-weight: bold; padding: 4px;");
+    fileListLabel->setObjectName("PlaybackSectionTitle");
     layout->addWidget(fileListLabel);
 
     layout->addWidget(buildFileListArea(page), 1);
     layout->addWidget(buildBookmarkArea(page), 0);
+
+    // 书签列表初次显示已有书签
+    refreshBookmarks();
 
     return page;
 }
@@ -120,19 +116,11 @@ QWidget* PlaybackChannel::buildFilterArea(QWidget* parent) {
     outer->setSpacing(0);
 
     QScrollArea* scroll = new QScrollArea(m_filterWidget);
+    scroll->setObjectName("PlaybackFilterScroll");
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     scroll->setFixedHeight(kFilterAreaHeight);
-    scroll->setStyleSheet(R"(
-        QScrollArea {
-            background-color: #2a2a2a;
-            border: none;
-        }
-        QScrollArea > QWidget > QWidget {
-            background-color: #2a2a2a;
-        }
-    )");
     outer->addWidget(scroll);
 
     QWidget* formHost = new QWidget(scroll);
@@ -141,16 +129,8 @@ QWidget* PlaybackChannel::buildFilterArea(QWidget* parent) {
     form->setSpacing(4);
 
     m_dateEdit = new QDateEdit(m_selectedDate, formHost);
+    m_dateEdit->setObjectName("PlaybackFilterInput");
     m_dateEdit->setCalendarPopup(true);
-    m_dateEdit->setStyleSheet(R"(
-        QDateEdit {
-            background-color: #2a2a2a;
-            border: 1px solid #3e3e3e;
-            border-radius: 4px;
-            padding: 4px;
-            color: #e0e0e0;
-        }
-    )");
     connect(m_dateEdit, &QDateEdit::dateChanged, this, &PlaybackChannel::onDateChanged);
     addFieldRow(form, tr("Date:"), m_dateEdit);
 
@@ -160,17 +140,16 @@ QWidget* PlaybackChannel::buildFilterArea(QWidget* parent) {
     m_typeCombo->addItem(tr("报警"), QStringLiteral("alarm"));
     m_typeCombo->addItem(tr("预录"), QStringLiteral("prebuffer"));
     m_typeCombo->setToolTip(tr("按录像分段类型过滤"));
-    connect(m_typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
-        onSegmentTypeChanged(m_typeCombo->currentData().toString());
-    });
+    connect(m_typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &PlaybackChannel::onTypeComboChanged);
     addFieldRow(form, tr("Type:"), m_typeCombo);
 
     m_startTimeEdit = new QDateTimeEdit(QDateTime(m_selectedDate, QTime(0, 0, 0)), formHost);
     m_endTimeEdit = new QDateTimeEdit(QDateTime(m_selectedDate, QTime(23, 59, 59)), formHost);
     for (QDateTimeEdit* edit : {m_startTimeEdit, m_endTimeEdit}) {
+        edit->setObjectName("PlaybackFilterInput");
         edit->setCalendarPopup(true);
         edit->setDisplayFormat("yyyy-MM-dd HH:mm");
-        edit->setStyleSheet("font-size: 11px;");
     }
     addFieldRow(form, tr("Start:"), m_startTimeEdit);
     addFieldRow(form, tr("End:"), m_endTimeEdit);
@@ -186,27 +165,31 @@ QWidget* PlaybackChannel::buildFilterArea(QWidget* parent) {
 
 QWidget* PlaybackChannel::buildFileListArea(QWidget* parent) {
     QFrame* frame = new QFrame(parent);
-    frame->setStyleSheet("border: 1px solid #3e3e3e;");
+    frame->setObjectName("PlaybackFileListFrame");
     QVBoxLayout* layout = new QVBoxLayout(frame);
-    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setContentsMargins(2, 2, 2, 2);
     layout->setSpacing(0);
 
     m_statusLabel = new QLabel(tr("未加载"), frame);
-    m_statusLabel->setStyleSheet("color: #9a9a9a; font-size: 11px; padding: 0 4px;");
+    m_statusLabel->setObjectName("PlaybackStatusLabel");
     layout->addWidget(m_statusLabel);
 
     m_fileList = new RecordingFileListWidget(frame);
     m_fileList->setChannelKey(key());
     layout->addWidget(m_fileList, 1);
 
+    m_loadMoreBtn = new QPushButton(tr("加载更多"), frame);
+    m_loadMoreBtn->setObjectName("LoadMoreButton");
+    m_loadMoreBtn->hide();
+    connect(m_loadMoreBtn, &QPushButton::clicked, this, &PlaybackChannel::loadNextPage);
+    layout->addWidget(m_loadMoreBtn, 0);
+
     connect(m_fileList, &RecordingFileListWidget::fileDoubleClicked, this,
-            &PlaybackChannel::playFileRequested);
+            &PlaybackChannel::onFileDoubleClicked);
     connect(m_fileList, &RecordingFileListWidget::downloadRequested, this,
             &PlaybackChannel::onDownloadRequested);
-    connect(m_fileList, &RecordingFileListWidget::pageSizeChanged, this, [this](int size) {
-        m_pageSize = size;
-        reload();
-    });
+    connect(m_fileList, &RecordingFileListWidget::pageSizeChanged,
+            this, &PlaybackChannel::onPageSizeChanged);
 
     return frame;
 }
@@ -220,41 +203,28 @@ QWidget* PlaybackChannel::buildBookmarkArea(QWidget* parent) {
     QHBoxLayout* header = new QHBoxLayout();
     header->setSpacing(4);
     QLabel* label = new QLabel(tr("Bookmarks"), box);
-    label->setStyleSheet("color: #e0e0e0; font-weight: bold;");
+    label->setObjectName("PlaybackSectionTitle");
     header->addWidget(label);
     header->addStretch(1);
 
     QPushButton* addBtn = new QPushButton(tr("添加书签"), box);
     addBtn->setFixedHeight(24);
     addBtn->setToolTip(tr("在当前播放位置打一个书签"));
-    connect(addBtn, &QPushButton::clicked, this, [this]() {
-        addBookmarkAt(m_playbackPositionMs);
-    });
+    connect(addBtn, &QPushButton::clicked, this, &PlaybackChannel::onAddBookmarkClicked);
     header->addWidget(addBtn);
 
     QPushButton* delBtn = new QPushButton(tr("删除"), box);
     delBtn->setFixedHeight(24);
-    connect(delBtn, &QPushButton::clicked, this, &PlaybackChannel::deleteSelectedBookmark);
+    connect(delBtn, &QPushButton::clicked, this, &PlaybackChannel::onDeleteBookmarkClicked);
     header->addWidget(delBtn);
     layout->addLayout(header);
 
-    m_bookmarkList = new QListWidget(box);
-    m_bookmarkList->setMaximumHeight(110);
-    m_bookmarkList->setStyleSheet(R"(
-        QListWidget {
-            background-color: #1a1a1a;
-            border: 1px solid #3e3e3e;
-            color: #e0e0e0;
-            font-size: 12px;
-        }
-        QListWidget::item:selected {
-            background-color: #0078D4;
-        }
-    )");
-    connect(m_bookmarkList, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
-        onBookmarkActivated(m_bookmarkList->row(item));
-    });
+    m_bookmarkList = new BookmarkListWidget(box);
     layout->addWidget(m_bookmarkList, 0);
+
+    // 双击用行号标识，不传 item 指针（列表刷新后指针可能已失效）
+    connect(m_bookmarkList, &BookmarkListWidget::bookmarkActivated,
+            this, &PlaybackChannel::onBookmarkItemDoubleClicked);
 
     return box;
 }
@@ -262,11 +232,31 @@ QWidget* PlaybackChannel::buildBookmarkArea(QWidget* parent) {
 // ── 查询 ────────────────────────────────────────────────────────────
 
 void PlaybackChannel::reload() {
-    loadRecordings();
+    // 重新查询：作废在途请求，清空已加载的，重新从第一页开始
+    ++m_requestSeq;
+    m_loading = false;
+    m_files.clear();
+    m_loadedPage = 0;
+    m_total = 0;
+    m_hasMore = false;
+    m_fileList->clearFiles();
+    if (m_loadMoreBtn) {
+        m_loadMoreBtn->hide();
+        m_loadMoreBtn->setEnabled(true);
+    }
+    loadNextPage();
 }
 
-void PlaybackChannel::loadRecordings() {
-    loadAllPages(++m_requestSeq, queryStartMs(), queryEndMs(), m_segmentType);
+void PlaybackChannel::loadNextPage() {
+    if (m_loading) {
+        return;   // 正在加载
+    }
+    m_loading = true;
+    if (m_loadMoreBtn) {
+        m_loadMoreBtn->setEnabled(false);
+    }
+    // 同一轮查询内翻页共用 seq，避免加载更多时把首页的报警请求判为过期
+    loadAllPages(m_requestSeq, queryStartMs(), queryEndMs(), m_segmentType);
 }
 
 int64_t PlaybackChannel::queryStartMs() const {
@@ -285,19 +275,20 @@ int64_t PlaybackChannel::queryEndMs() const {
 
 void PlaybackChannel::loadAllPages(quint64 seq, int64_t startMs, int64_t endMs,
                                    const QString& segmentType) {
-    m_files.clear();
-    // 旧通道的报警标记先清掉，避免查询期间显示错误的事件
-    emit alarmsLoaded(QList<TimelineEvent>());
-    if (m_statusLabel) {
-        m_statusLabel->setText(tr("正在加载..."));
-    }
-    fetchPage(seq, startMs, endMs, segmentType, 1);
+    fetchPage(seq, startMs, endMs, segmentType, m_loadedPage + 1);
 }
 
 void PlaybackChannel::fetchPage(quint64 seq, int64_t startMs, int64_t endMs,
                                 const QString& segmentType, int page) {
     QPointer<PlaybackChannel> self(this);
-    if (m_statusLabel && page > 1) {
+    if (page == 1) {
+        // 新查询先清掉旧报警标记，避免查询期间显示错位事件；
+        // 加载更多时不能清，否则翻页后报警会消失
+        emit alarmsLoaded(m_key, QList<TimelineEvent>());
+        if (m_statusLabel) {
+            m_statusLabel->setText(tr("正在加载..."));
+        }
+    } else if (m_statusLabel) {
         m_statusLabel->setText(tr("正在加载第 %1 页...").arg(page));
     }
     RecordingApi::instance()->queryFiles(
@@ -318,31 +309,55 @@ void PlaybackChannel::fetchPage(quint64 seq, int64_t startMs, int64_t endMs,
             }
             if (!success) {
                 LOG_ERROR("PlaybackChannel", QString("queryFiles failed: %1").arg(error));
-                self->m_statusLabel->setText(tr("加载失败"));
+                self->m_loading = false;
+                if (self->m_statusLabel) {
+                    self->m_statusLabel->setText(tr("加载失败"));
+                    self->m_statusLabel->setToolTip(error);
+                }
+                if (self->m_loadMoreBtn) {
+                    self->m_loadMoreBtn->setEnabled(true);
+                    self->m_loadMoreBtn->setVisible(true);
+                    self->m_loadMoreBtn->setText(tr("加载失败，点击重试"));
+                }
                 return;
             }
 
             self->m_files.append(result.files);
-            const bool more = result.hasMore
-                && !result.files.isEmpty()
-                && result.page < kMaxPages;
-            if (more) {
-                self->fetchPage(seq, startMs, endMs, segmentType, result.page + 1);
-                return;
-            }
+            self->m_loadedPage = result.page > 0 ? result.page : page;
+            self->m_total = result.total;
+            self->m_hasMore = result.hasMore && !result.files.isEmpty();
+            self->m_loading = false;
 
-            self->applyFiles(self->m_files);
+            // 追加到列表（不清空已加载的），并同步时间轴范围
+            for (const RecordingFile& file : result.files) {
+                self->m_fileList->addFile(file);
+            }
+            // addFile 只知道已加载条数，这里补上服务端总数
+            self->m_fileList->setPagingInfo(self->m_total, self->m_files.size());
+            self->updateTimelineRange();
+
             if (self->m_statusLabel) {
-                self->m_statusLabel->setText(self->m_files.isEmpty()
-                    ? tr("该时间段没有录像")
-                    : tr("共 %1 段录像").arg(self->m_files.size()));
+                self->m_statusLabel->setText(tr("共 %1 段录像（已加载 %2 段）")
+                    .arg(self->m_total).arg(self->m_files.size()));
+                self->m_statusLabel->setToolTip(QString());
+            }
+            if (self->m_loadMoreBtn) {
+                self->m_loadMoreBtn->setEnabled(true);
+                self->m_loadMoreBtn->setVisible(self->m_hasMore);
+                self->m_loadMoreBtn->setText(tr("加载更多（剩余 %1 段）")
+                    .arg(qMax(0, self->m_total - self->m_files.size())));
             }
             LOG_INFO("PlaybackChannel",
-                QString("queryFiles: device=%1 channel=%2 files=%3")
-                    .arg(self->m_deviceTag).arg(self->m_channelTag).arg(self->m_files.size()));
+                QString("queryFiles: device=%1 channel=%2 page=%3 loaded=%4 total=%5 hasMore=%6")
+                    .arg(self->m_deviceTag).arg(self->m_channelTag).arg(self->m_loadedPage)
+                    .arg(self->m_files.size()).arg(self->m_total)
+                    .arg(self->m_hasMore ? "yes" : "no"));
 
-            emit self->filesLoaded(self->m_files);
-            self->loadAlarms(startMs, endMs, seq);
+            // 交给外部：列表/时间轴分段按已加载的全部数据更新
+            emit self->filesLoaded(self->m_key, self->m_files);
+            if (page == 1) {
+                self->loadAlarms(startMs, endMs, seq);
+            }
         });
 }
 
@@ -370,13 +385,8 @@ void PlaybackChannel::loadAlarms(int64_t startMs, int64_t endMs, quint64 seq) {
                 event.label = alarm.alarmType.isEmpty() ? tr("报警") : alarm.alarmType;
                 events.append(event);
             }
-            emit self->alarmsLoaded(events);
+            emit self->alarmsLoaded(self->m_key, events);
         });
-}
-
-void PlaybackChannel::applyFiles(const QList<RecordingFile>& files) {
-    m_fileList->setFiles(files);
-    updateTimelineRange();
 }
 
 void PlaybackChannel::updateTimelineRange() {
@@ -404,7 +414,7 @@ void PlaybackChannel::updateTimelineRange() {
     if (m_timeline) {
         m_timeline->setTimeRange(start, end);
     }
-    emit rangeChanged(start, end);
+    emit rangeChanged(m_key, start, end);
 }
 
 // ── 检索条件 ────────────────────────────────────────────────────────
@@ -446,10 +456,9 @@ void PlaybackChannel::refreshBookmarks() {
     if (!m_bookmarkList) {
         return;
     }
-    m_bookmarkList->clear();
-    m_visibleBookmarks.clear();
 
     // 只列当前通道的书签
+    QList<Bookmark> visible;
     const QList<Bookmark> all = BookmarkStore::instance()->bookmarks();
     for (const Bookmark& b : all) {
         if (!m_deviceTag.isEmpty() && b.deviceTag != m_deviceTag) {
@@ -458,20 +467,19 @@ void PlaybackChannel::refreshBookmarks() {
         if (!m_channelTag.isEmpty() && !b.channelTag.isEmpty() && b.channelTag != m_channelTag) {
             continue;
         }
-        m_visibleBookmarks.append(b);
+        visible.append(b);
     }
+    m_bookmarkList->setBookmarks(visible);
 
     QList<TimelineEvent> marks;
-    for (const Bookmark& b : m_visibleBookmarks) {
-        const QString time = QDateTime::fromMSecsSinceEpoch(b.timeMs).toString("MM-dd hh:mm:ss");
-        m_bookmarkList->addItem(b.note.isEmpty() ? time : QString("%1  %2").arg(time, b.note));
+    for (const Bookmark& b : visible) {
         TimelineEvent event;
         event.timeMs = b.timeMs;
         event.color = QColor("#ffd166");
         event.label = b.note;
         marks.append(event);
     }
-    emit bookmarksChanged(marks);
+    emit bookmarksChanged(m_key, marks);
 }
 
 void PlaybackChannel::addBookmarkAt(int64_t timeMs) {
@@ -482,26 +490,89 @@ void PlaybackChannel::addBookmarkAt(int64_t timeMs) {
         timeMs = queryStartMs();
     }
     BookmarkStore::instance()->addBookmark(m_deviceTag, m_channelTag, timeMs);
-    refreshBookmarks();
+    // 列表刷新由 BookmarkStore::bookmarksChanged 触发
 }
 
 void PlaybackChannel::deleteSelectedBookmark() {
-    if (!m_bookmarkList) {
+    Bookmark bookmark;
+    if (!m_bookmarkList || !m_bookmarkList->currentBookmark(&bookmark)) {
         return;
     }
-    const int row = m_bookmarkList->currentRow();
-    if (row < 0 || row >= m_visibleBookmarks.size()) {
-        return;
-    }
-    BookmarkStore::instance()->removeBookmark(m_visibleBookmarks[row].id);
-    refreshBookmarks();
+    BookmarkStore::instance()->removeBookmark(bookmark.id);
 }
 
 void PlaybackChannel::onBookmarkActivated(int row) {
-    if (row < 0 || row >= m_visibleBookmarks.size()) {
+    Bookmark bookmark;
+    if (!m_bookmarkList || !m_bookmarkList->model()->bookmarkAt(row, &bookmark)) {
         return;
     }
-    emit seekRequested(m_visibleBookmarks[row].timeMs);
+    seekTo(bookmark.timeMs);
+}
+
+// ── 定位（时间轴 / 书签）────────────────────────────────────────────
+
+void PlaybackChannel::onTimeSelected(int64_t timeMs) {
+    seekTo(timeMs);
+}
+
+void PlaybackChannel::onPeriodClicked(const RecordingPeriod& period) {
+    seekTo(period.startTimeMs);
+}
+
+void PlaybackChannel::onPlayheadReleased(const QString& windowId, int64_t timeMs) {
+    Q_UNUSED(windowId)
+    seekTo(timeMs);
+}
+
+/// 定位到某个绝对时间：目标唯一，直接调用播放器容器
+void PlaybackChannel::seekTo(int64_t timeMs) {
+    if (m_container) {
+        m_container->seekChannel(m_key, timeMs);
+    }
+    setPlaybackPosition(timeMs);
+}
+
+// ── 检索条件回调 ────────────────────────────────────────────────────
+
+void PlaybackChannel::onTypeComboChanged(int index) {
+    Q_UNUSED(index)
+    onSegmentTypeChanged(m_typeCombo->currentData().toString());
+}
+
+void PlaybackChannel::onPageSizeChanged(int size) {
+    m_pageSize = size;
+    reload();
+}
+
+// ── 书签回调 ────────────────────────────────────────────────────────
+
+void PlaybackChannel::onBookmarkItemDoubleClicked(int row) {
+    onBookmarkActivated(row);
+}
+
+void PlaybackChannel::onAddBookmarkClicked() {
+    addBookmarkAt(m_playbackPositionMs);
+}
+
+void PlaybackChannel::onDeleteBookmarkClicked() {
+    deleteSelectedBookmark();
+}
+
+// ── 录像文件 ────────────────────────────────────────────────────────
+
+void PlaybackChannel::onFileDoubleClicked(const RecordingFile& file) {
+    emit playFileRequested(m_key, file);
+}
+
+void PlaybackChannel::onDownloadFinished(bool success, const QString& path, const QString& error) {
+    if (success) {
+        LOG_INFO("PlaybackChannel", QString("download finished: %1").arg(path));
+        QMessageBox::information(m_hostWidget.data(), tr("下载完成"),
+            tr("录像文件已保存到：%1").arg(path));
+    } else {
+        LOG_ERROR("PlaybackChannel", QString("download failed: %1").arg(error));
+        QMessageBox::warning(m_hostWidget.data(), tr("下载失败"), error);
+    }
 }
 
 void PlaybackChannel::onDownloadRequested(const RecordingFile& file) {

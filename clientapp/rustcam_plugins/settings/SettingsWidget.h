@@ -40,7 +40,9 @@ private:
     void loadSettings();
     void setupOsdDisplayTab();
     void setupOsdStyleTab();
+    void setupScreenshotTab();
     void setupPluginTab();
+    void setupMapTab();
     void refreshPluginList();
 
     QTabWidget* m_tabWidget;
@@ -62,6 +64,12 @@ private:
     QColor m_osdFontColor;
 
     QListWidget* m_pluginOrderList;
+
+    QLineEdit* m_screenshotPathEdit;
+
+    QLineEdit* m_clientTmsUrlEdit;
+    QLineEdit* m_wfsUrlEdit;
+    QLineEdit* m_zoomRangeEdit;
 };
 
 }

@@ -31,9 +31,6 @@ export default defineConfig({
     outDir: 'dist',
     rollupOptions: {
       input: resolve(__dirname, 'index.html'), // 指向 public 目录下的 index.html
-      external: [
-        '/rtsp-player/rtsp-viewer.min.js'
-      ],
     },
   },
   resolve: {

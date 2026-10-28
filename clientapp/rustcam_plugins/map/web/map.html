@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RustCam Map</title>
+    <script src="maplibre-gl.js"></script>
+    <link rel="stylesheet" href="maplibre-gl.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body, html, #map {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #1a2a3a;
+        }
+        #map {
+            background: #1a2a3a;
+        }
+
+        /* 摄像头点位：类型图标 + 状态底色 */
+        .camera-marker {
+            position: relative;
+            width: 28px;
+            height: 28px;
+            cursor: pointer;
+        }
+        .camera-disc {
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.95);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+        }
+        .camera-icon {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+        }
+        .camera-icon svg {
+            width: 17px;
+            height: 17px;
+        }
+        .camera-marker.located::after {
+            content: '';
+            position: absolute;
+            inset: -8px;
+            border-radius: 50%;
+            border: 3px solid #facc15;
+            animation: camera-pulse 1.4s ease-out infinite;
+        }
+        @keyframes camera-pulse {
+            0% { transform: scale(0.85); opacity: 1; }
+            100% { transform: scale(1.35); opacity: 0; }
+        }
+
+        /* 聚合标识：显示数量 */
+        .map-cluster {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background: rgba(59, 130, 246, 0.92);
+            color: #fff;
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #fff;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        /* 图例 */
+        .map-legend {
+            position: absolute;
+            left: 12px;
+            bottom: 48px;
+            z-index: 5;
+            background: rgba(17, 24, 39, 0.88);
+            color: #e5e7eb;
+            border-radius: 6px;
+            padding: 10px 12px;
+            font-size: 12px;
+            font-family: "Segoe UI", Arial, sans-serif;
+            backdrop-filter: blur(4px);
+            pointer-events: none;
+        }
+        .legend-title {
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            line-height: 18px;
+        }
+        .legend-icon {
+            display: inline-flex;
+            width: 16px;
+            height: 16px;
+        }
+        .legend-icon svg {
+            width: 16px;
+            height: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="map-legend" id="legend"></div>
+    <script>
+        var map = null;
+        var markers = {};
+        var clusterMarkers = [];
+        var pendingInit = null;
+        var pendingMarkers = [];
+        var locatedId = null;
+
+        // 上海初始坐标
+        var SHANGHAI_LNG = 121.4737;
+        var SHANGHAI_LAT = 31.2304;
+        var SHANGHAI_ZOOM = 11;
+
+        var DEFAULT_TILES = [
+            'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+        ];
+
+        // 底图与地图视图允许的缩放层级，由后端配置下发。
+        var zoomLimits = { min: 0, max: 19 };
+
+        var STATUS_COLORS = {
+            online: '#22c55e',
+            offline: '#9ca3af',
+            error: '#f97316',
+            maintaining: '#3b82f6',
+            alarm: '#ef4444',
+            intrusion: '#ef4444'
+        };
+
+        // 标准摄像头图标（按类型）
+        var CAMERA_ICONS = {
+            ipc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+                + '<rect x="2.5" y="8" width="9.5" height="7.5" rx="1.6"/>'
+                + '<path d="M12 10.2 L20.2 7.2 L21.6 11.2 L13.4 13.6 Z"/>'
+                + '<path d="M7.2 15.5 V18.6 M4 18.6 H11"/></svg>',
+            camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+                + '<path d="M4.2 12.6 A7.8 7.8 0 0 1 19.8 12.6 Z"/>'
+                + '<path d="M3.4 12.6 H20.6 M4.6 12.6 V15.2 H19.4 V12.6"/>'
+                + '<circle cx="12" cy="9.4" r="1.5"/></svg>',
+            nvr: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+                + '<rect x="2.5" y="6" width="19" height="12" rx="2"/>'
+                + '<path d="M6 10.6 H15.5 M6 13.6 H11"/>'
+                + '<circle cx="17.6" cy="14" r="1"/></svg>',
+            dvr: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+                + '<rect x="2.5" y="6" width="19" height="12" rx="2"/>'
+                + '<path d="M6 10.6 H15.5 M6 13.6 H11"/>'
+                + '<circle cx="17.6" cy="14" r="1"/></svg>',
+            encoder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+                + '<rect x="2.5" y="7" width="13" height="10" rx="2"/>'
+                + '<path d="M6 10.8 H11.5 M6 13.4 H9.5"/>'
+                + '<path d="M16.2 12 H21.5 M19.2 9.4 L21.8 12 L19.2 14.6"/></svg>',
+            videoserver: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+                + '<rect x="3.5" y="3.5" width="17" height="6.5" rx="1.6"/>'
+                + '<rect x="3.5" y="14" width="17" height="6.5" rx="1.6"/>'
+                + '<circle cx="7.4" cy="6.8" r="1"/><circle cx="7.4" cy="17.3" r="1"/>'
+                + '<path d="M11 6.8 H17 M11 17.3 H17"/></svg>',
+            platform: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+                + '<circle cx="12" cy="12" r="8.6"/>'
+                + '<path d="M3.4 12 H20.6"/>'
+                + '<ellipse cx="12" cy="12" rx="4" ry="8.6"/></svg>',
+            other: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+                + '<rect x="2.5" y="8" width="10" height="7.5" rx="1.6"/>'
+                + '<path d="M12.5 10.2 L20.5 7.6 L21.5 11.6 L13.5 13.6 Z"/></svg>'
+        };
+
+        var TYPE_LABELS = {
+            ipc: 'IPC',
+            camera: 'Camera',
+            nvr: 'NVR',
+            dvr: 'DVR',
+            encoder: 'Encoder',
+            videoserver: 'Video Server',
+            platform: 'Platform',
+            other: 'Other'
+        };
+
+        function sendToNative(payload) {
+            if (typeof window.rustcamNative === 'function') {
+                window.rustcamNative(JSON.stringify(payload));
+            } else {
+                console.warn('native bridge unavailable');
+            }
+        }
+
+        function normalizeType(type) {
+            var t = (type || 'other').toLowerCase();
+            return CAMERA_ICONS[t] ? t : 'other';
+        }
+
+        function cameraIcon(type) {
+            return CAMERA_ICONS[normalizeType(type)];
+        }
+
+        function statusColor(status, online) {
+            var s = (status || '').toLowerCase();
+            if (STATUS_COLORS[s]) return STATUS_COLORS[s];
+            return online ? STATUS_COLORS.online : STATUS_COLORS.offline;
+        }
+
+        function renderLegend() {
+            var used = {};
+            for (var id in markers) {
+                used[normalizeType(markers[id].type)] = true;
+            }
+            var keys = Object.keys(used);
+            if (keys.length === 0) keys = ['other'];
+
+            var html = '<div class="legend-title">Camera Type</div>';
+            keys.forEach(function (k) {
+                html += '<div class="legend-item">'
+                    + '<span class="legend-icon">' + CAMERA_ICONS[k] + '</span>'
+                    + '<span>' + (TYPE_LABELS[k] || k) + '</span></div>';
+            });
+            document.getElementById('legend').innerHTML = html;
+        }
+
+        function normalizeZoom(value, fallback) {
+            var n = Number(value);
+            if (!isFinite(n)) return fallback;
+            return Math.max(0, Math.min(24, Math.round(n)));
+        }
+
+        function buildTileSource(tmsUrl) {
+            var lines = (tmsUrl || '').split('\n').map(function (u) { return u.trim(); })
+                .filter(function (u) { return u.length > 0; });
+            var valid = lines.filter(function (u) {
+                return u.indexOf('{x}') >= 0 && u.indexOf('{z}') >= 0;
+            });
+
+            if (valid.length === 0) {
+                return {
+                    type: 'raster',
+                    tiles: DEFAULT_TILES.slice(),
+                    tileSize: 256,
+                    minzoom: zoomLimits.min,
+                    maxzoom: zoomLimits.max,
+                    attribution: '&copy; Esri, Maxar, Earthstar Geographics'
+                };
+            }
+
+            var hasNegY = valid.some(function (u) { return u.indexOf('{-y}') >= 0; });
+            var tiles = valid.map(function (u) {
+                return hasNegY ? u.replace(/\{-y\}/g, '{y}') : u;
+            });
+            var source = {
+                type: 'raster',
+                tiles: tiles,
+                tileSize: 256,
+                minzoom: zoomLimits.min,
+                maxzoom: zoomLimits.max,
+                scheme: hasNegY ? 'tms' : 'xyz',
+                attribution: '&copy; Esri, Maxar, Earthstar Geographics'
+            };
+
+            return source;
+        }
+
+        function applyZoomLimits() {
+            if (!map) return;
+            map.setMinZoom(zoomLimits.min);
+            map.setMaxZoom(zoomLimits.max);
+            if (map.getZoom() < zoomLimits.min) map.setZoom(zoomLimits.min);
+            if (map.getZoom() > zoomLimits.max) map.setZoom(zoomLimits.max);
+        }
+
+        function applyTileSource(tmsUrl) {
+            if (!map) return;
+
+            if (map.getLayer('raster-basemap-layer')) {
+                map.removeLayer('raster-basemap-layer');
+            }
+            if (map.getSource('raster-basemap')) {
+                map.removeSource('raster-basemap');
+            }
+
+            map.addSource('raster-basemap', buildTileSource(tmsUrl));
+            map.addLayer({
+                id: 'raster-basemap-layer',
+                type: 'raster',
+                source: 'raster-basemap',
+                minzoom: zoomLimits.min,
+                maxzoom: zoomLimits.max
+            });
+            applyZoomLimits();
+        }
+
+        function createMap(centerLng, centerLat, zoom) {
+            map = new maplibregl.Map({
+                container: 'map',
+                style: {
+                    version: 8,
+                    sources: {},
+                    layers: [
+                        {
+                            id: 'background',
+                            type: 'background',
+                            paint: {
+                                'background-color': '#1a2a3a'
+                            }
+                        }
+                    ]
+                },
+                center: [centerLng, centerLat],
+                zoom: zoom,
+                attributionControl: false
+            });
+
+            map.addControl(new maplibregl.NavigationControl(), 'top-right');
+            map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
+
+            map.on('load', function () {
+                applyTileSource(pendingInit ? pendingInit.tmsUrl : '');
+                flushPendingMarkers();
+                window.mapReady = true;
+                sendToNative({ type: 'mapReady' });
+                if (window.onMapReadyCallback) {
+                    window.onMapReadyCallback();
+                }
+                updateClusters();
+            });
+
+            map.on('moveend', updateClusters);
+            map.on('zoomend', updateClusters);
+
+            map.on('error', function (e) {
+                console.error('Map error:', e);
+            });
+        }
+
+        // Called by the native side with the tile url that the client
+        // received from the backend.
+        function initMap(centerLng, centerLat, zoom, tmsUrl, minZoom, maxZoom) {
+            if (centerLng === undefined || centerLng === null) centerLng = SHANGHAI_LNG;
+            if (centerLat === undefined || centerLat === null) centerLat = SHANGHAI_LAT;
+            if (zoom === undefined || zoom === null) zoom = SHANGHAI_ZOOM;
+
+            zoomLimits.min = normalizeZoom(minZoom, 0);
+            zoomLimits.max = normalizeZoom(maxZoom, 19);
+            if (zoomLimits.min > zoomLimits.max) {
+                zoomLimits.min = 0;
+                zoomLimits.max = 19;
+            }
+
+            pendingInit = {
+                lng: centerLng,
+                lat: centerLat,
+                zoom: zoom,
+                tmsUrl: tmsUrl || ''
+            };
+
+            if (!map) {
+                createMap(centerLng, centerLat, zoom);
+                flushPendingMarkers();
+                return;
+            }
+
+            applyTileSource(pendingInit.tmsUrl);
+            map.jumpTo({
+                center: [centerLng, centerLat],
+                zoom: zoom
+            });
+        }
+
+        // Changes the basemap without moving the view.
+        function setTilesUrl(tmsUrl) {
+            if (!pendingInit) {
+                pendingInit = { lng: SHANGHAI_LNG, lat: SHANGHAI_LAT, zoom: SHANGHAI_ZOOM, tmsUrl: '' };
+            }
+            pendingInit.tmsUrl = tmsUrl || '';
+            if (map) {
+                applyTileSource(pendingInit.tmsUrl);
+            }
+        }
+
+        function setZoomLimits(minZoom, maxZoom) {
+            zoomLimits.min = normalizeZoom(minZoom, 0);
+            zoomLimits.max = normalizeZoom(maxZoom, 19);
+            if (zoomLimits.min > zoomLimits.max) {
+                zoomLimits.min = 0;
+                zoomLimits.max = 19;
+            }
+            if (!map) return;
+            applyTileSource(pendingInit ? pendingInit.tmsUrl : '');
+        }
+
+        function setCenter(lng, lat, zoom) {
+            if (!map) return;
+            map.flyTo({
+                center: [lng, lat],
+                zoom: zoom || map.getZoom(),
+                duration: 1000
+            });
+        }
+
+        function markerElement(id, name, type, online, status) {
+            var el = document.createElement('div');
+            el.className = 'camera-marker';
+            el.title = name || id;
+            el.dataset.status = (status || (online ? 'online' : 'offline')).toLowerCase();
+            el.dataset.type = normalizeType(type);
+
+            var disc = document.createElement('span');
+            disc.className = 'camera-disc';
+            disc.style.background = statusColor(status, online);
+
+            var icon = document.createElement('span');
+            icon.className = 'camera-icon';
+            icon.innerHTML = cameraIcon(type);
+
+            el.appendChild(disc);
+            el.appendChild(icon);
+
+            el.addEventListener('click', function (e) {
+                if (e && e.stopPropagation) e.stopPropagation();
+                var parts = String(id).split('|');
+                sendToNative({
+                    type: 'markerClicked',
+                    id: id,
+                    device_tag: parts[0] || id,
+                    channel_tag: parts.length > 1 ? parts[1] : (parts[0] || id),
+                    name: name || ''
+                });
+            });
+
+            return el;
+        }
+
+        function addMarker(id, lng, lat, name, type, online, status) {
+            if (!id) return;
+
+            // The native side may push devices before the map exists; keep
+            // them and flush once initMap() has created the map instance.
+            if (!map) {
+                pendingMarkers.push([id, lng, lat, name, type, online, status]);
+                return;
+            }
+
+            if (markers[id]) {
+                markers[id].marker.remove();
+            }
+
+            var el = markerElement(id, name, type, online, status);
+            var marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+                .setLngLat([lng, lat])
+                .addTo(map);
+
+            markers[id] = {
+                marker: marker,
+                element: el,
+                lng: lng,
+                lat: lat,
+                name: name,
+                type: type,
+                online: online,
+                status: status
+            };
+
+            renderLegend();
+            updateClusters();
+            return true;
+        }
+
+        function flushPendingMarkers() {
+            if (!map || pendingMarkers.length === 0) return;
+
+            var queued = pendingMarkers;
+            pendingMarkers = [];
+            for (var i = 0; i < queued.length; i++) {
+                var m = queued[i];
+                addMarker(m[0], m[1], m[2], m[3], m[4], m[5], m[6]);
+            }
+        }
+
+        function removeMarker(id) {
+            if (markers[id]) {
+                markers[id].marker.remove();
+                delete markers[id];
+                renderLegend();
+                updateClusters();
+                return true;
+            }
+            return false;
+        }
+
+        function updateMarker(id, lng, lat, name, type, online, status) {
+            if (!map) return false;
+
+            // 重建点位，保证 MapLibre 内部的元素引用与新的图标一致
+            if (markers[id]) {
+                markers[id].marker.remove();
+                delete markers[id];
+            }
+            return addMarker(id, lng, lat, name, type, online, status);
+        }
+
+        function clearMarkers() {
+            for (var id in markers) {
+                markers[id].marker.remove();
+            }
+            markers = {};
+            pendingMarkers = [];
+            clearClusterMarkers();
+            renderLegend();
+        }
+
+        function clearClusterMarkers() {
+            for (var i = 0; i < clusterMarkers.length; i++) {
+                clusterMarkers[i].remove();
+            }
+            clusterMarkers = [];
+        }
+
+        // 稠密摄像头按 zoom 合并，标识为数量
+        function updateClusters() {
+            if (!map) return;
+
+            clearClusterMarkers();
+
+            var cell = 64;
+            var groups = {};
+            var ids = Object.keys(markers);
+
+            for (var i = 0; i < ids.length; i++) {
+                var entry = markers[ids[i]];
+                var point = map.project([entry.lng, entry.lat]);
+                var key = Math.floor(point.x / cell) + ':' + Math.floor(point.y / cell);
+                if (!groups[key]) groups[key] = [];
+                groups[key].push(ids[i]);
+            }
+
+            for (var key in groups) {
+                var group = groups[key];
+
+                if (group.length === 1) {
+                    markers[group[0]].element.style.display = '';
+                    continue;
+                }
+
+                var sumLng = 0;
+                var sumLat = 0;
+                for (var j = 0; j < group.length; j++) {
+                    markers[group[j]].element.style.display = 'none';
+                    sumLng += markers[group[j]].lng;
+                    sumLat += markers[group[j]].lat;
+                }
+
+                var centerLng = sumLng / group.length;
+                var centerLat = sumLat / group.length;
+                var count = group.length;
+
+                var el = document.createElement('div');
+                el.className = 'map-cluster';
+                el.textContent = count;
+                el.title = count + ' cameras';
+                el.addEventListener('click', (function (lng, lat, n) {
+                    return function (e) {
+                        if (e && e.stopPropagation) e.stopPropagation();
+                        map.flyTo({ center: [lng, lat], zoom: Math.min(map.getZoom() + 2, 18), duration: 500 });
+                    };
+                })(centerLng, centerLat, count));
+
+                var clusterMarker = new maplibregl.Marker({ element: el })
+                    .setLngLat([centerLng, centerLat])
+                    .addTo(map);
+                clusterMarkers.push(clusterMarker);
+            }
+        }
+
+        // 精确定位某个点位：飞行并高亮
+        function locateMarker(id) {
+            if (!map || !markers[id]) return false;
+
+            var entry = markers[id];
+            locatedId = id;
+            map.flyTo({ center: [entry.lng, entry.lat], zoom: 17, duration: 1000 });
+
+            for (var key in markers) {
+                if (markers[key].element) {
+                    markers[key].element.classList.toggle('located', key === id);
+                }
+            }
+            updateClusters();
+            if (markers[id].element) {
+                markers[id].element.style.display = '';
+            }
+            return true;
+        }
+
+        function zoomIn() {
+            if (map) map.zoomIn();
+        }
+
+        function zoomOut() {
+            if (map) map.zoomOut();
+        }
+
+        function setZoom(zoom) {
+            if (map) map.setZoom(zoom);
+        }
+
+        function resize() {
+            if (map) map.resize();
+            updateClusters();
+        }
+
+        // The native side calls initMap() once it knows the tile url; as a
+        // fallback the default basemap is used when no call arrives.
+        window.addEventListener('load', function () {
+            setTimeout(function () {
+                if (!map) {
+                    initMap(SHANGHAI_LNG, SHANGHAI_LAT, SHANGHAI_ZOOM, '');
+                }
+            }, 5000);
+        });
+    </script>
+</body>
+</html>

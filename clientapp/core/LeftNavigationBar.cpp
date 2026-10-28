@@ -6,6 +6,7 @@
 #include <QEvent>
 #include <QMouseEvent>
 #include <QStyle>
+#include <QSignalMapper>
 
 namespace rustcam {
 
@@ -24,6 +25,11 @@ LeftNavigationBar::LeftNavigationBar(QWidget* parent)
     mainLayout->addWidget(spacer);
 
     m_iconLayout = mainLayout;
+
+    // 按钮 -> 导航 id：点击时由它把 id 传出来（不用 sender() 反查）
+    m_idMapper = new QSignalMapper(this);
+    connect(m_idMapper, QOverload<const QString&>::of(&QSignalMapper::mapped),
+            this, &LeftNavigationBar::onIconClicked);
 
     installEventFilter(this);
 }
@@ -48,7 +54,8 @@ void LeftNavigationBar::addNavigationItem(const QString& id, const QIcon& icon,
     btn->setAutoExclusive(true);
     btn->setContextMenuPolicy(Qt::NoContextMenu);
 
-    connect(btn, &QToolButton::clicked, this, &LeftNavigationBar::onIconClicked);
+    connect(btn, &QToolButton::clicked, m_idMapper, QOverload<>::of(&QSignalMapper::map));
+    m_idMapper->setMapping(btn, id);
 
     int insertPos = m_iconLayout->count() - 1;
     m_iconLayout->insertWidget(insertPos, btn);
@@ -77,6 +84,9 @@ void LeftNavigationBar::removeNavigationItem(const QString& id)
     }
 
     QToolButton* btn = m_iconButtons.take(id);
+    if (m_idMapper) {
+        m_idMapper->removeMappings(btn);
+    }
     btn->deleteLater();
 
     if (m_badges.contains(id)) {
@@ -107,25 +117,11 @@ void LeftNavigationBar::setCurrentItem(const QString& id)
     }
 }
 
-void LeftNavigationBar::onIconClicked()
+void LeftNavigationBar::onIconClicked(const QString& id)
 {
-    QToolButton* btn = qobject_cast<QToolButton*>(sender());
-    if (!btn) {
-        return;
-    }
-
-    QString id;
-    for (auto it = m_iconButtons.begin(); it != m_iconButtons.end(); ++it) {
-        if (it.value() == btn) {
-            id = it.key();
-            break;
-        }
-    }
-
     if (id.isEmpty()) {
         return;
     }
-
     setCurrentItem(id);
 }
 

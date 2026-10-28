@@ -8,6 +8,7 @@
 #include "CoreExport.h"
 #include "StreamSource.h"
 
+class QEvent;
 class QMouseEvent;
 
 namespace rustcam {
@@ -47,13 +48,21 @@ public:
     void showNoRecording(int64_t timeMs);
 
 signals:
-    void clicked();
+    /// 画面被点击（带当前绑定的通道标识）
+    void clicked(const QString& deviceId);
     void playbackProgressChanged(int64_t absoluteTimeMs);
+    void closeRequested();
 
 protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+
+private:
+    void startDrag();
+    void onPlayerClicked();
+    void onSourceProgress(int64_t absoluteTimeMs);
 
 private:
     QString m_uid;

@@ -6,6 +6,7 @@
 #include <QVariant>
 #include <QList>
 #include <QString>
+#include <QStringList>
 #include <QVariantMap>
 #include <QVector>
 #include "CoreExport.h"
@@ -44,6 +45,8 @@ public:
     bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override;
     Qt::ItemFlags flags(const QModelIndex& index) const override;
     QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
+    QStringList mimeTypes() const override;
+    QMimeData* mimeData(const QModelIndexList& indexes) const override;
 
     void setRootNodes(const QList<DeviceTreeNodeData*>& nodes);
     void clear();

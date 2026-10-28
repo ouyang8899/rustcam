@@ -34,17 +34,20 @@ public:
     };
     Q_ENUM(State)
 
-    explicit StreamSource(const QString& deviceId, QObject* parent = nullptr);
-    ~StreamSource();
+    /// 播放器在构造时传入：连接在构造函数里建立，之后不再变动
+    StreamSource(const QString& deviceId, ReplayPlayer* player, QObject* parent = nullptr);
+    ~StreamSource() override;
 
     const QString& deviceId() const { return m_deviceId; }
     const QList<Clip>& clips() const { return m_clips; }
     State state() const { return m_state; }
     int currentClipIndex() const { return m_currentClipIndex; }
     int64_t baseTimeMs() const { return m_baseTimeMs; }
+    ReplayPlayer* player() const { return m_player; }
 
     void setClips(const QList<Clip>& clips);
-    void setPlayer(ReplayPlayer* player);
+    /// 追加分片（加载更多时用，不打断当前播放）
+    void appendClips(const QList<Clip>& clips);
 
     void play();
     void pause();
@@ -55,14 +58,6 @@ public:
     bool isInRange(int64_t absoluteTimeMs) const;
     int64_t totalDurationMs() const;
 
-    using StateChangeCallback = std::function<void(State oldState, State newState)>;
-    using NoRecordingCallback = std::function<void(int64_t timeMs)>;
-    using ClipFinishedCallback = std::function<void()>;
-
-    void setStateChangeCallback(StateChangeCallback cb);
-    void setNoRecordingCallback(NoRecordingCallback cb);
-    void setClipFinishedCallback(ClipFinishedCallback cb);
-
 signals:
     void stateChanged(State state);
     void clipChanged(int oldIndex, int newIndex);
@@ -72,10 +67,12 @@ signals:
 
 private:
     void setState(State newState);
+    /// 分片按开始时间升序
+    void sortClips();
     int findClipAt(int64_t absoluteTimeMs) const;
     int findNearestClip(int64_t absoluteTimeMs) const;
     void switchToClip(int clipIndex, int64_t startOffsetMs = 0);
-    void onPlayerStateChanged(ReplayPlayer::State oldState, ReplayPlayer::State newState);
+    void onPlayerStateChanged(ReplayPlayer::State newState);
     void onPlayerProgress(int64_t currentMs, int64_t durationMs);
 
     QString m_deviceId;
@@ -84,10 +81,6 @@ private:
     int64_t m_baseTimeMs = 0;
     State m_state = State::Stopped;
     ReplayPlayer* m_player = nullptr;
-
-    StateChangeCallback m_stateChangeCallback;
-    NoRecordingCallback m_noRecordingCallback;
-    ClipFinishedCallback m_clipFinishedCallback;
 
     int64_t m_lastProgressMs = 0;
 };

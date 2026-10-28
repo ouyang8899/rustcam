@@ -87,10 +87,15 @@ ClipExportDialog::ClipExportDialog(const RecordingFile& file, QWidget* parent)
     connect(m_exportBtn, &QPushButton::clicked, this, &ClipExportDialog::onExport);
 
     m_downloader = new FileDownloader(this);
-    connect(m_downloader, &FileDownloader::progressChanged, this, [this](int percent, qint64, qint64) {
-        m_progress->setValue(percent);
-    });
+    connect(m_downloader, &FileDownloader::progressChanged, this, &ClipExportDialog::onDownloadProgress);
     connect(m_downloader, &FileDownloader::finished, this, &ClipExportDialog::onDownloadFinished);
+}
+
+void ClipExportDialog::onDownloadProgress(int percent, qint64 downloaded, qint64 total)
+{
+    Q_UNUSED(downloaded)
+    Q_UNUSED(total)
+    m_progress->setValue(percent);
 }
 
 ClipExportDialog::~ClipExportDialog()

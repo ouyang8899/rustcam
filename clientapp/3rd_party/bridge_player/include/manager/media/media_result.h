@@ -18,7 +18,7 @@ struct EmptyResult {};
 // ============================================================
 class BadResultAccess : public std::runtime_error {
 public:
-    explicit BadResultAccess(const std::string& msg) 
+    explicit BadResultAccess(const std::string& msg)
         : std::runtime_error(msg) {}
 };
 
@@ -32,102 +32,102 @@ public:
     using ErrorType = MediaError;
 
     // ---- 构造函数 ----
-    
+
     Result() : storage_(T()) {}
-    
+
     Result(const T& value) : storage_(value) {}
     Result(T&& value) : storage_(std::move(value)) {}
-    
+
     Result(const MediaError& error) : storage_(error) {}
     Result(MediaError&& error) : storage_(std::move(error)) {}
-    
+
     Result(const Result& other) : storage_(other.storage_) {}
     Result(Result&& other) noexcept : storage_(std::move(other.storage_)) {}
-    
+
     // ---- 赋值操作符 ----
-    
+
     Result& operator=(const Result& other) {
         if (this != &other) {
             storage_ = other.storage_;
         }
         return *this;
     }
-    
+
     Result& operator=(Result&& other) noexcept {
         if (this != &other) {
             storage_ = std::move(other.storage_);
         }
         return *this;
     }
-    
+
     Result& operator=(const T& value) {
         storage_ = value;
         return *this;
     }
-    
+
     Result& operator=(T&& value) {
         storage_ = std::move(value);
         return *this;
     }
-    
+
     Result& operator=(const MediaError& error) {
         storage_ = error;
         return *this;
     }
-    
+
     Result& operator=(MediaError&& error) {
         storage_ = std::move(error);
         return *this;
     }
-    
+
     // ---- 状态查询 ----
-    
+
     bool has_value() const noexcept { return storage_.which() == 0; }
     bool has_error() const noexcept { return storage_.which() == 1; }
-    
-    explicit operator bool() const noexcept { return hasValue(); }
-    bool operator!() const noexcept { return hasError(); }
-    
+
+    explicit operator bool() const noexcept { return has_value(); }
+    bool operator!() const noexcept { return has_error(); }
+
     // ---- 值访问 ----
-    
+
     T& value() {
         if (has_error()) {
             throw BadResultAccess(
-                "Result does not contain a value: " + 
+                "Result does not contain a value: " +
                 boost::get<MediaError>(storage_).full_message());
         }
         return boost::get<T>(storage_);
     }
-    
+
     const T& value() const {
         if (has_error()) {
             throw BadResultAccess(
-                "Result does not contain a value: " + 
+                "Result does not contain a value: " +
                 boost::get<MediaError>(storage_).full_message());
         }
         return boost::get<T>(storage_);
     }
-    
+
     T value_or(const T& default_value) const noexcept {
         return has_value() ? boost::get<T>(storage_) : default_value;
     }
-    
+
     T value_or(T&& default_value) const noexcept {
         return has_value() ? boost::get<T>(storage_) : std::move(default_value);
     }
-    
+
     T& operator*() { return value(); }
     const T& operator*() const { return value(); }
     T* operator->() { return &value(); }
     const T* operator->() const { return &value(); }
-    
+
     // ---- 错误访问 ----
-    
+
     MediaError& error() { return boost::get<MediaError>(storage_); }
     const MediaError& error() const { return boost::get<MediaError>(storage_); }
-    
+
     // ---- 函数式操作 ----
-    
+
     template<typename Func>
     auto map(Func&& func) const -> Result<decltype(func(std::declval<T>()))> {
         using U = decltype(func(std::declval<T>()));
@@ -136,7 +136,7 @@ public:
         }
         return Result<U>(error());
     }
-    
+
     template<typename Func>
     auto and_then(Func&& func) const -> decltype(func(std::declval<T>())) {
         using ResultU = decltype(func(std::declval<T>()));
@@ -145,7 +145,7 @@ public:
         }
         return ResultU(error());
     }
-    
+
     template<typename Func>
     Result or_else(Func&& func) const {
         if (has_value()) {
@@ -169,62 +169,62 @@ public:
     using ErrorType = MediaError;
 
     // ---- 构造函数 ----
-    
+
     Result() : storage_(EmptyResult{}) {}
-    
+
     Result(const MediaError& error) : storage_(error) {}
     Result(MediaError&& error) : storage_(std::move(error)) {}
-    
+
     Result(const Result& other) : storage_(other.storage_) {}
     Result(Result&& other) noexcept : storage_(std::move(other.storage_)) {}
-    
+
     // ---- 赋值操作符 ----
-    
+
     Result& operator=(const Result& other) {
         if (this != &other) storage_ = other.storage_;
         return *this;
     }
-    
+
     Result& operator=(Result&& other) noexcept {
         if (this != &other) storage_ = std::move(other.storage_);
         return *this;
     }
-    
+
     Result& operator=(const MediaError& error) {
         storage_ = error;
         return *this;
     }
-    
+
     Result& operator=(MediaError&& error) {
         storage_ = std::move(error);
         return *this;
     }
-    
+
     // ---- 状态查询 ----
-    
+
     bool has_value() const noexcept { return storage_.which() == 0; }
     bool has_error() const noexcept { return storage_.which() == 1; }
-    
+
     explicit operator bool() const noexcept { return has_value(); }
     bool operator!() const noexcept { return has_error(); }
-    
+
     // ---- 值访问 ----
-    
+
     void value() const {
         if (has_error()) {
             throw BadResultAccess(
-                "Result does not contain a value: " + 
+                "Result does not contain a value: " +
                 boost::get<MediaError>(storage_).full_message());
         }
     }
-    
+
     // ---- 错误访问 ----
-    
+
     MediaError& error() { return boost::get<MediaError>(storage_); }
     const MediaError& error() const { return boost::get<MediaError>(storage_); }
-    
+
     // ---- 函数式操作 ----
-    
+
     template<typename Func>
     auto map(Func&& func) const -> Result<decltype(func())> {
         using U = decltype(func());
@@ -233,7 +233,7 @@ public:
         }
         return Result<U>(error());
     }
-    
+
     template<typename Func>
     auto and_then(Func&& func) const -> decltype(func()) {
         if (has_value()) {
@@ -241,7 +241,7 @@ public:
         }
         return decltype(func())(error());
     }
-    
+
     template<typename Func>
     Result or_else(Func&& func) const {
         if (has_value()) {

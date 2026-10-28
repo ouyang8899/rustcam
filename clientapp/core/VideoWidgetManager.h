@@ -28,7 +28,7 @@ public:
     void stop(const QString& itemId);
     void stopAll();
 
-    void switchTarget(const QString& itemId, quint64 targetId);
+    //void switchTarget(const QString& itemId, quint64 targetId);
 
     VideoPlayer* getPlayer(const QString& itemId);
     QWidget* getTarget(quint64 targetId);

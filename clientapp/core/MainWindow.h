@@ -45,6 +45,10 @@ public slots:
     void onPanelVisibilityChanged(bool visible);
     void switchToWorkspace(const QString& workspaceId);
 
+private slots:
+    /// 状态栏时钟刷新
+    void onClockTick();
+
 protected:
     void closeEvent(QCloseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;

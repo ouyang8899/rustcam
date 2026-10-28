@@ -15,13 +15,16 @@ VideoPlayerContainer::VideoPlayerContainer(QWidget* parent)
     , m_videoArea(nullptr)
     , m_navBar(nullptr)
 {
+    setAcceptDrops(true);
+
     QVBoxLayout* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
     m_videoArea = new QWidget(this);
     m_videoArea->setObjectName("videoArea");
-    m_videoArea->setAcceptDrops(true);
+    // 容器统一接收拖放，避免视频区拦截设备拖入
+    m_videoArea->setAcceptDrops(false);
 
     m_navBar = new NavigationBar(this);
     m_navBar->setObjectName("navBar");
@@ -100,9 +103,11 @@ void VideoPlayerContainer::calculateVideoLayout(const PlayerLayout& layout) {
             player->setContentsMargins(1, 1, 1, 1);
             VideoWidgetManager::instance().registerPlayer(item.id, player);
             m_playerWrappers[item.id] = wrapper;
-            connect(player, &VideoPlayer::clicked, this, [this, itemId = item.id]() {
-                onVideoPlayerClicked(itemId);
-            });
+            // 播放器由容器拥有：连接在这里一次建立，之后不再变动
+            // 播放器的身份用 uid 传递，换格子后依然能定位到当前所在的位置
+            connect(player, &VideoPlayer::clicked, this, &VideoPlayerContainer::onPlayerClicked);
+            connect(player, &VideoPlayer::playerDropped, this, &VideoPlayerContainer::onPlayerDropped);
+            connect(player, &VideoPlayer::deviceDropped, this, &VideoPlayerContainer::onDeviceDropped);
         } else {
             wrapper = m_playerWrappers.value(item.id);
         }
@@ -132,6 +137,9 @@ void VideoPlayerContainer::calculateVideoLayout(const PlayerLayout& layout) {
 }
 
 void VideoPlayerContainer::onVideoPlayerClicked(const QString& itemId) {
+    if (itemId.isEmpty()) {
+        return;
+    }
     QString oldSelected = m_selectedItemId;
     m_selectedItemId = itemId;
 
@@ -152,6 +160,117 @@ void VideoPlayerContainer::onVideoPlayerClicked(const QString& itemId) {
     EventDataPtr eventData = EventData::create();
     eventData->m_payload["itemId"] = itemId;
     EventBus::instance()->publish(TOPIC_VIDEO_CELL_SELECTED, eventData);
+}
+
+// ── 播放器在格子之间拖动换位 ────────────────────────────────────────
+
+QString VideoPlayerContainer::itemIdOfPlayer(VideoPlayer* player) const {
+    for (const QString& itemId : VideoWidgetManager::instance().getPlayerIds()) {
+        if (VideoWidgetManager::instance().getPlayer(itemId) == player) {
+            return itemId;
+        }
+    }
+    return QString();
+}
+
+QString VideoPlayerContainer::itemIdOfUid(const QString& uid) const {
+    for (const QString& itemId : VideoWidgetManager::instance().getPlayerIds()) {
+        VideoPlayer* player = VideoWidgetManager::instance().getPlayer(itemId);
+        if (player && player->uid() == uid) {
+            return itemId;
+        }
+    }
+    return QString();
+}
+
+VideoPlayer* VideoPlayerContainer::findPlayerByUid(const QString& uid) const {
+    for (const QString& itemId : VideoWidgetManager::instance().getPlayerIds()) {
+        VideoPlayer* player = VideoWidgetManager::instance().getPlayer(itemId);
+        if (player && player->uid() == uid) {
+            return player;
+        }
+    }
+    return nullptr;
+}
+
+void VideoPlayerContainer::layoutPlayerInWrapper(VideoPlayer* player, QWidget* wrapper) {
+    if (!player || !wrapper) {
+        return;
+    }
+    const int borderWidth = 1;
+    // 只摆位置，不改父窗口（窗口句柄不变）
+    player->setGeometry(borderWidth, borderWidth,
+                        wrapper->width() - borderWidth * 2,
+                        wrapper->height() - borderWidth * 2);
+}
+
+void VideoPlayerContainer::applySelectionStyles() {
+    for (const QString& itemId : VideoWidgetManager::instance().getPlayerIds()) {
+        VideoPlayer* player = VideoWidgetManager::instance().getPlayer(itemId);
+        if (player) {
+            player->setSelected(itemId == m_selectedItemId);
+        }
+        QWidget* wrapper = m_playerWrappers.value(itemId);
+        if (!wrapper) {
+            continue;
+        }
+        wrapper->setStyleSheet(itemId == m_selectedItemId
+            ? "QWidget#VideoPlayerWrapper { border: 2px solid #0078D4; background-color: #1a1a1a; }"
+            : "QWidget#VideoPlayerWrapper { border: 2px solid #1a1a1a; background-color: #1a1a1a; }");
+    }
+}
+
+void VideoPlayerContainer::onPlayerClicked(const QString& uid) {
+    // 多个播放器共用这一个槽：按 uid 定位到当前所在的格子
+    onVideoPlayerClicked(itemIdOfUid(uid));
+}
+
+void VideoPlayerContainer::onDeviceDropped(const QString& uid, const QVariantMap& meta) {
+    handleDrop(meta, itemIdOfUid(uid));
+}
+
+void VideoPlayerContainer::onPlayerDropped(const QString& targetUid, const QString& sourceUid) {
+    VideoPlayer* target = findPlayerByUid(targetUid);
+    VideoPlayer* source = findPlayerByUid(sourceUid);
+    if (!source || !target || source == target) {
+        return;
+    }
+
+    const QString sourceItemId = itemIdOfPlayer(source);
+    const QString targetItemId = itemIdOfPlayer(target);
+    if (sourceItemId.isEmpty() || targetItemId.isEmpty()) {
+        return;
+    }
+
+    QWidget* sourceWrapper = m_playerWrappers.value(sourceItemId);
+    QWidget* targetWrapper = m_playerWrappers.value(targetItemId);
+    if (!sourceWrapper || !targetWrapper) {
+        return;
+    }
+
+    LOG_INFO("VideoPlayerContainer", QString("swap players: %1 <-> %2").arg(sourceItemId, targetItemId));
+
+    // 两个位置上的流也要跟着换
+    const QString sourceUrl = m_playingUrls.value(sourceItemId);
+    const QString targetUrl = m_playingUrls.value(targetItemId);
+
+    // 交换两个格子的位置：播放器留在原来的父窗口里（父窗口不变 → 窗口句柄不变 → 画面不用重建）
+    const QRect sourceRect = sourceWrapper->geometry();
+    const QRect targetRect = targetWrapper->geometry();
+    sourceWrapper->setGeometry(targetRect);
+    targetWrapper->setGeometry(sourceRect);
+    layoutPlayerInWrapper(source, sourceWrapper);
+    layoutPlayerInWrapper(target, targetWrapper);
+
+    // 格子标识与流都跟着位置走：itemId 始终代表那个位置上的播放器
+    m_playerWrappers.insert(targetItemId, sourceWrapper);
+    m_playerWrappers.insert(sourceItemId, targetWrapper);
+    VideoWidgetManager::instance().registerPlayer(targetItemId, source);
+    VideoWidgetManager::instance().registerPlayer(sourceItemId, target);
+    m_playingUrls.insert(targetItemId, sourceUrl);
+    m_playingUrls.insert(sourceItemId, targetUrl);
+
+    applySelectionStyles();
 }
 
 void VideoPlayerContainer::onStreamRequested(const QString& topic) {
@@ -175,6 +294,9 @@ void VideoPlayerContainer::playStream(const QString& itemId, const QString& url,
     VideoPlayer* player = VideoWidgetManager::instance().getPlayer(targetId);
     if (player) {
         m_playingUrls[targetId] = url;
+        if (!title.isEmpty()) {
+            player->setDeviceName(title);
+        }
         player->play(url);
     } else {
         LOG_ERROR("VideoPlayerContainer", QString("playStream: player not found for targetId=%1, available players: %2")
@@ -225,42 +347,55 @@ void VideoPlayerContainer::dragMoveEvent(QDragMoveEvent* event) {
 }
 
 void VideoPlayerContainer::dropEvent(QDropEvent* event) {
-    if (event->mimeData()->hasFormat("application/x-rustcam-device")) {
-        QByteArray data = event->mimeData()->data("application/x-rustcam-device");
-        QJsonDocument doc = QJsonDocument::fromJson(data);
-        QVariantMap meta = doc.object().toVariantMap();
-        handleDrop(meta);
-        event->acceptProposedAction();
+    if (!event->mimeData()->hasFormat("application/x-rustcam-device")) {
+        return;
     }
+
+    QByteArray data = event->mimeData()->data("application/x-rustcam-device");
+    QJsonDocument doc = QJsonDocument::fromJson(data);
+    QVariantMap meta = doc.object().toVariantMap();
+
+    // 优先播到鼠标落点所在的格子；落在空隙/导航栏时退回当前选中格
+    QString targetItemId;
+    const QPoint pos = m_videoArea->mapFrom(this, event->pos());
+    for (auto it = m_playerWrappers.constBegin(); it != m_playerWrappers.constEnd(); ++it) {
+        if (it.value() && it.value()->geometry().contains(pos)) {
+            targetItemId = it.key();
+            break;
+        }
+    }
+
+    handleDrop(meta, targetItemId);
+    event->acceptProposedAction();
 }
 
-void VideoPlayerContainer::handleDrop(const QVariantMap& meta) {
-    QString type = meta["type"].toString();
-    if (type == "channel") {
-        QString deviceTag = meta["device_tag"].toString();
-        QString channelTag = meta["channel_tag"].toString();
-        if (!deviceTag.isEmpty() && !channelTag.isEmpty()) {
-            QString title = meta["name"].toString();
-            QString targetId = selectTargetItem();
-            QtConcurrent::run([this, deviceTag, channelTag, title, targetId]() {
-                QJsonObject response;
-                QString error;
-                QString endpoint = QString("/api/v1/channels/%1/%2/play-links").arg(deviceTag, channelTag);
-                bool success = ServerApi::instance()->getSync(endpoint, response, error);
-                QMetaObject::invokeMethod(this, [this, success, response, error, title, targetId]() {
-                    onChannelPlayLinksReceived(success, response, error, title, targetId);
-                }, Qt::QueuedConnection);
-            });
-        }
-    } else if (type == "region" || type == "group" || type == "device") {
-        QString key = meta["key"].toString();
-        int deviceId = key.toInt();
-        if (deviceId > 0) {
-            QString url = QString("rtsp://localhost/live/%1").arg(deviceId);
-            QString targetId = selectTargetItem();
-            playStream(targetId, url, meta["name"].toString());
-        }
+void VideoPlayerContainer::handleDrop(const QVariantMap& meta, const QString& targetItemId) {
+    QString targetId = targetItemId;
+    if (targetId.isEmpty() || !VideoWidgetManager::instance().getPlayer(targetId)) {
+        targetId = selectTargetItem();
     }
+
+    if (meta["type"].toString() != "channel") {
+        return;
+    }
+
+    QString deviceTag = meta["device_tag"].toString();
+    QString channelTag = meta["channel_tag"].toString();
+    if (deviceTag.isEmpty() || channelTag.isEmpty()) {
+        return;
+    }
+
+    QString title = meta["name"].toString();
+    QtConcurrent::run([this, deviceTag, channelTag, title, targetId]() {
+        // 播放地址统一由后端生成，避免客户端拼接 RTSP URL
+        QString endpoint = QString("/api/v1/channels/%1/%2/play-links").arg(deviceTag, channelTag);
+        QJsonObject response;
+        QString error;
+        bool success = ServerApi::instance()->getSync(endpoint, response, error);
+        QMetaObject::invokeMethod(this, [this, success, response, error, title, targetId]() {
+            onChannelPlayLinksReceived(success, response, error, title, targetId);
+        }, Qt::QueuedConnection);
+    });
 }
 
 void VideoPlayerContainer::onChannelPlayLinksReceived(bool success, const QJsonObject& response, const QString& error, const QString& title, const QString& targetId)

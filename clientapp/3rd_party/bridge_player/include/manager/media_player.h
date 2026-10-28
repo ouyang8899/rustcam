@@ -92,7 +92,7 @@ namespace BridgePlayer {
         //void set_audio_frame_callback(MediaFrameCallback callback);
         const std::unique_ptr<SDLAudioPlayer>& get_audio_player() { return this->audio_player_; };
     public:
-
+        MediaEventCallback media_event_callback_{ nullptr };
     private:
         class Impl;
         std::unique_ptr<Impl> impl_;

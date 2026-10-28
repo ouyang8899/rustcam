@@ -103,7 +103,7 @@
                     :deviceTag="bindings[item.id]?.deviceTag"
                     :channelTag="bindings[item.id]?.channelTag"
                     :enableBroadcast="true"
-                    type="wsflv"
+                    :type="playerTypeFor(bindings[item.id]?.flvUrl)"
                   />
                   <div class="cell-label">{{ bindings[item.id]?.name }}</div>
                 </template>
@@ -471,6 +471,12 @@ const gridStyle = computed(() => {
   if (!layout.value) return {}
   return { gridTemplateColumns: `repeat(${layout.value.cols}, 1fr)`, gridTemplateRows: `repeat(${layout.value.rows}, 1fr)` }
 })
+
+// ws-flv 走 WebSocket，http-flv 走 HTTP，两者都由 flv.js 播放
+function playerTypeFor(url) {
+  if (!url) return 'wsflv'
+  return /^wss?:\/\//i.test(url) ? 'wsflv' : 'flv'
+}
 
 function itemStyle(item) {
   return {
@@ -1115,6 +1121,8 @@ async function deleteLayout() {
 
 .player-grid { display: grid; gap: 4px; width: 100%; height: 100%; }
 .grid-cell { border: 1px dashed var(--border); border-radius: 4px; overflow: hidden; position: relative; background: var(--video-bg); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+/* 平铺时格子可能很小，去掉 VideoPlayer 的最小高度，避免溢出格子 */
+.grid-cell :deep(.video-player) { min-height: 0; }
 .grid-cell.selected { border-color: var(--color-accent); border-style: solid; box-shadow: 0 0 10px var(--color-accent-glow); }
 .cell-empty { font-size: 24px; color: var(--text-muted); font-weight: 700; }
 .cell-label { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,.5); color: #fff; font-size: 11px; padding: 2px 6px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
