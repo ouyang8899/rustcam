@@ -17,6 +17,7 @@
           <el-option value="Maintaining" label="维护中" />
           <el-option value="Error" label="错误" />
         </el-select>
+        <el-button type="primary" @click="openCreateDialog">新建通道</el-button>
         <el-button :icon="Refresh" @click="fetchChannels">刷新</el-button>
       </div>
     </div>
@@ -57,6 +58,14 @@
                 <span v-else>-</span>
               </template>
             </el-table-column>
+            <el-table-column label="坐标" min-width="180">
+              <template #default="{ row }">
+                <span v-if="row.latitude != null && row.longitude != null">
+                  {{ Number(row.latitude).toFixed(6) }}, {{ Number(row.longitude).toFixed(6) }}
+                </span>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
             <el-table-column label="厂商/型号" min-width="140">
               <template #default="{ row }">
                 <span>{{ [row.manufacturer, row.model].filter(Boolean).join(' ') || '-' }}</span>
@@ -76,9 +85,10 @@
                 <span v-else>-</span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="240" align="center">
+            <el-table-column label="操作" width="320" align="center">
               <template #default="{ row }">
                 <el-button size="small" type="primary" @click="$router.push(`/channels/${row.device_tag}/${row.channel_tag}`)">详情</el-button>
+                <el-button size="small" @click="openEditDialog(row)">编辑</el-button>
                 <el-button size="small" @click="locateOnMap(row)">定位</el-button>
                 <el-button size="small" @click="startChannelStream(row)">播放</el-button>
               </template>
@@ -97,6 +107,14 @@
         />
       </div>
     </div>
+
+    <ChannelEditDialog
+      v-model="editVisible"
+      :mode="editMode"
+      :device-tag="editingChannel?.device_tag || ''"
+      :channel-tag="editingChannel?.channel_tag || ''"
+      @saved="onChannelSaved"
+    />
   </div>
 </template>
 
@@ -108,6 +126,7 @@ import { useChannelStore } from '../stores/channelStore'
 import { useStreamStore } from '../stores/streamStore'
 import { ElMessage } from 'element-plus'
 import StatusDot from '../components/common/StatusDot.vue'
+import ChannelEditDialog from '../components/channel/ChannelEditDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -117,6 +136,10 @@ const streamStore = useStreamStore()
 const searchQuery = ref('')
 const statusFilter = ref('')
 const currentPage = ref(1)
+
+const editVisible = ref(false)
+const editMode = ref('edit')
+const editingChannel = ref(null)
 
 const deviceTagFilter = computed(() => route.query.device_tag || '')
 
@@ -166,6 +189,22 @@ function locateOnMap(channel) {
       channel_tag: channel.channel_tag,
     },
   })
+}
+
+function openEditDialog(channel) {
+  editingChannel.value = channel
+  editMode.value = 'edit'
+  editVisible.value = true
+}
+
+function openCreateDialog() {
+  editingChannel.value = null
+  editMode.value = 'create'
+  editVisible.value = true
+}
+
+async function onChannelSaved() {
+  await fetchChannels()
 }
 
 async function startChannelStream(channel) {

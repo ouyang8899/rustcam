@@ -8,6 +8,7 @@
         <h1 class="page-title">{{ channel?.name || '通道详情' }}</h1>
       </div>
       <div class="page-toolbar">
+        <el-button type="primary" @click="editVisible = true">编辑</el-button>
         <el-button :icon="Refresh" @click="fetchData">刷新</el-button>
       </div>
     </div>
@@ -200,6 +201,13 @@
         <el-button type="primary" :disabled="!newPresetName.trim()" @click="savePreset">保存</el-button>
       </template>
     </el-dialog>
+
+    <ChannelEditDialog
+      v-model="editVisible"
+      mode="edit"
+      :device-tag="route.params.deviceTag || ''"
+      :channel-tag="route.params.channelTag || ''"
+    />
   </div>
 </template>
 
@@ -211,6 +219,7 @@ import { ElMessage } from 'element-plus'
 import { useChannelStore } from '../stores/channelStore'
 import { useDeviceStore } from '../stores/deviceStore'
 import VideoPlayer from '../components/VideoPlayer.vue'
+import ChannelEditDialog from '../components/channel/ChannelEditDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -226,6 +235,7 @@ const ptzSpeed = ref(50)
 const presets = ref([])
 const showPresetDialog = ref(false)
 const newPresetName = ref('')
+const editVisible = ref(false)
 let ptzStopTimer = null
 const joystickRef = ref(null)
 const joystickActive = ref(false)
