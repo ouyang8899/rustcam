@@ -1,16 +1,16 @@
 <mapper>
 <select id="device_select_by_id">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, latitude, longitude, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
 FROM devices WHERE id = #{id}
 </select>
 
 <select id="device_select_all">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, latitude, longitude, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
 FROM devices ORDER BY id DESC
 </select>
 
 <select id="device_select_all_paginated">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, latitude, longitude, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
 FROM devices ORDER BY id DESC
 LIMIT #{limit} OFFSET #{offset}
 </select>
@@ -20,7 +20,7 @@ SELECT id, device_tag FROM devices ORDER BY id DESC LIMIT #{limit} OFFSET #{offs
 </select>
 
 <select id="device_select_paginated">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, latitude, longitude, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
 FROM devices
 <where>
 1=1
@@ -53,7 +53,7 @@ SELECT COUNT(*) FROM devices
 </select>
 
 <select id="device_select_online_paginated">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, latitude, longitude, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
 FROM devices WHERE status = 'online'
 ORDER BY id DESC
 LIMIT #{limit} OFFSET #{offset}
@@ -64,17 +64,17 @@ SELECT COUNT(*) FROM devices WHERE status = 'online'
 </select>
 
 <select id="device_select_by_device_tag">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, latitude, longitude, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
 FROM devices WHERE device_tag = #{device_tag}
 </select>
 
 <select id="device_select_by_parent_device_tag">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, latitude, longitude, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
 FROM devices WHERE parent_device_tag = #{parent_device_tag} ORDER BY created_at
 </select>
 
 <select id="device_select_by_status">
-SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, latitude, longitude, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
+SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
 FROM devices WHERE status = #{status} ORDER BY id DESC
 </select>
 
@@ -99,8 +99,6 @@ INSERT INTO devices
 <if test="push_urls != null">, push_urls</if>
 <if test="pull_urls != null">, pull_urls</if>
 <if test="region_code != null">, region_code</if>
-<if test="latitude != null">, latitude</if>
-<if test="longitude != null">, longitude</if>
 <if test="updated_at != null">, updated_at</if>
 <if test="ssrc != null">, ssrc</if>
 <if test="extended != null">, extended</if>
@@ -129,8 +127,6 @@ VALUES
 <if test="push_urls != null">, #{push_urls}</if>
 <if test="pull_urls != null">, #{pull_urls}</if>
 <if test="region_code != null">, #{region_code}</if>
-<if test="latitude != null">, #{latitude}</if>
-<if test="longitude != null">, #{longitude}</if>
 <if test="updated_at != null">, #{updated_at}</if>
 <if test="ssrc != null">, #{ssrc}</if>
 <if test="extended != null">, #{extended}</if>
@@ -161,8 +157,6 @@ UPDATE devices
 <if test="push_urls != null">push_urls = #{push_urls},</if>
 <if test="pull_urls != null">pull_urls = #{pull_urls},</if>
 <if test="region_code != null">region_code = #{region_code},</if>
-<if test="latitude != null">latitude = #{latitude},</if>
-<if test="longitude != null">longitude = #{longitude},</if>
 <if test="updated_at != null">updated_at = #{updated_at},</if>
 <if test="ssrc != null">ssrc = #{ssrc},</if>
 <if test="gb_username != null">gb_username = #{gb_username},</if>
@@ -204,8 +198,6 @@ UPDATE devices
 <if test="push_urls != null">push_urls = #{push_urls},</if>
 <if test="pull_urls != null">pull_urls = #{pull_urls},</if>
 <if test="region_code != null">region_code = #{region_code},</if>
-<if test="latitude != null">latitude = #{latitude},</if>
-<if test="longitude != null">longitude = #{longitude},</if>
 <if test="updated_at != null">updated_at = #{updated_at},</if>
 <if test="ssrc != null">ssrc = #{ssrc},</if>
 <if test="gb_username != null">gb_username = #{gb_username},</if>

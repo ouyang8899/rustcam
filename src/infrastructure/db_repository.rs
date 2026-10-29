@@ -380,14 +380,6 @@ impl DbRepository {
 
         let device_type_str = device.device_type.to_string();
 
-        // Devices without coordinates are spread around the default position
-        // so that they can be told apart on the map.
-        let (fallback_lat, fallback_lng) = crate::domain::device::fallback_map_position(
-            device.device_tag.as_deref().unwrap_or(&device.name),
-        );
-        let latitude = device.latitude.or(Some(fallback_lat));
-        let longitude = device.longitude.or(Some(fallback_lng));
-
         let _result = device_insert(
             &self.rb,
             Some(&device.name),
@@ -408,8 +400,6 @@ impl DbRepository {
             serde_json::to_value(&device.push_urls).ok(),
             serde_json::to_value(&device.pull_urls).ok(),
             device.region_code.as_deref(),
-            latitude,
-            longitude,
             Some(RbatisDateTime::from_timestamp_millis(chrono::Utc::now().timestamp_millis())),
             ssrc.as_deref(),
             gb_username.as_deref(),
@@ -557,14 +547,6 @@ impl DbRepository {
 
         let device_type_str = device.device_type.to_string();
 
-        // The device carries the stored coordinates; devices without them get
-        // a spread position around the default position.
-        let (fallback_lat, fallback_lng) = crate::domain::device::fallback_map_position(
-            device.device_tag.as_deref().unwrap_or(&device.name),
-        );
-        let latitude = device.latitude.or(Some(fallback_lat));
-        let longitude = device.longitude.or(Some(fallback_lng));
-
         device_update(
             &self.rb,
             device.id,
@@ -585,8 +567,6 @@ impl DbRepository {
             push_urls_json,
             pull_urls_json,
             device.region_code.as_deref(),
-            latitude,
-            longitude,
             Some(RbatisDateTime::from_timestamp_millis(chrono::Utc::now().timestamp_millis())),
             ssrc.as_deref(),
             gb_username.as_deref(),
