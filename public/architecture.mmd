@@ -1,0 +1,64 @@
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "fontFamily": "'Microsoft YaHei UI','Microsoft YaHei','Segoe UI',sans-serif",
+    "fontSize": "15px",
+    "lineColor": "#7a94ab",
+    "textColor": "#0d2b45",
+    "edgeLabelBackground": "#ffffff"
+  },
+  "flowchart": { "curve": "basis", "nodeSpacing": 26, "rankSpacing": 48, "padding": 14, "htmlLabels": true, "wrappingWidth": 900, "useMaxWidth": false, "titleTopMargin": 42, "subGraphTitleMargin": { "top": 20, "bottom": 34 } }
+}}%%
+
+%% RustCam-Media 系统架构图
+%% 渲染: node public/render-architecture.mjs  ->  public/architecture.png
+%% 修改本文件后重新执行渲染命令即可更新 PNG
+%% 注意: Mermaid 子图标题固定按 200px 排版, 过长会被截断, 标题请控制在 12 个汉字以内
+
+flowchart TB
+
+  subgraph CLIENTS["客户端"]
+    direction LR
+    WEB["<b>Vue 3 Web 控制台</b><br/>Vite · Element Plus · Pinia · flv.js / hls.js<br/>MapLibre GL JS · ECharts<br/>→ HTTP /api/v1 · WebSocket"]
+    DESK["<b>Qt5 / C++ 桌面客户端</b><br/>CMake · libcurl · FFmpeg + bridge_player<br/>CEF 地图插件 · 插件化架构<br/>→ HTTP /api/v1"]
+  end
+
+  subgraph BACKEND["RustCam 后端"]
+    direction TB
+    L1["<b>API 层</b> · src/api · Rust / Axum + Tokio<br/>HTTP 路由 routes.rs（102 受保护 + 14 公开）<br/>JWT + Casbin 认证中间件 · WebSocket 事件推送 · 语音对讲 WS"]
+    L2["<b>应用服务层</b> · src/application + src/domain<br/>设备 / 通道 / 分组 / 行政区划 · 流 / 会话 / 故障自恢复<br/>录像 / 策略 / 定时调度 · 媒体服务器 / Hook / 事件广播"]
+    L3["<b>协议适配层</b> · src/protocol — SignalAdapter<br/>GB28181（SIP 注册 / INVITE / 云台 / 对讲） · ONVIF（WS-Discovery / SOAP / PTZ）<br/>RTSP 拉流 / 服务端 · WebSocket"]
+    L4["<b>传输与媒体数据面</b> · src/transport + src/media<br/>SIP 信令 TCP :5060 / UDP :5061 · RTP 服务 :15000-15100<br/>MediaNode 中间件链（G711 ⇄ PCM · rubato 重采样 · 20ms 定速）<br/>语音对讲：浏览器 PCM ⇄ WebSocket ⇄ G711 ⇄ GB28181 广播 / ONVIF Backchannel"]
+    L5["<b>媒体服务器适配</b> · src/adapter/media_server<br/>MediaServerAdapter 抽象 · ClusterManager 负载策略<br/>ZLMediaKit / SRS / XIU"]
+    L1 --> L2 --> L3 --> L4 --> L5
+  end
+
+  subgraph OUT["基础设施与外部系统"]
+    direction LR
+    INFRA["<b>基础设施</b><br/>PostgreSQL + PostGIS · Redis"]
+    EXTSYS["<b>外部系统</b><br/>监控设备 · 流媒体服务器 · GeoServer"]
+  end
+
+  WEB --> L1
+  DESK --> L1
+  L2 -->|"持久化 · 缓存"| INFRA
+  L3 -->|"设备接入 · SIP / RTP 回传"| EXTSYS
+  L5 -->|"拉流 / 转推 / Hook"| EXTSYS
+
+  classDef client fill:#e3f0ff,stroke:#3f8fd0,stroke-width:1.6px,color:#0d2b45;
+  classDef layer fill:#eaf5ec,stroke:#4f9d69,stroke-width:1.6px,color:#0d2b45;
+  classDef layer2 fill:#eaf2fb,stroke:#4f8ac0,stroke-width:1.6px,color:#0d2b45;
+  classDef layer3 fill:#fdf6ec,stroke:#c98a3c,stroke-width:1.6px,color:#0d2b45;
+  classDef infra fill:#fdf3e3,stroke:#d99b2b,stroke-width:1.6px,color:#0d2b45;
+  classDef external fill:#f3f0f9,stroke:#8b7bb8,stroke-width:1.6px,color:#0d2b45;
+
+  class WEB,DESK client;
+  class L1,L2,L3 layer;
+  class L4 layer3;
+  class L5 layer2;
+  class INFRA infra;
+  class EXTSYS external;
+
+  style CLIENTS fill:#f2f8ff,stroke:#a9c9e8,stroke-width:1.5px
+  style BACKEND fill:#f3faf5,stroke:#a9d3b6,stroke-width:1.5px
+  style OUT fill:#fbf8fd,stroke:#c4b8dd,stroke-width:1.5px
