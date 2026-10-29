@@ -1,4 +1,8 @@
-﻿@primary_bg: #1a1a2e;
+/* ── 主题 token ──────────────────────────────────────────────────────
+ * 三个主题文件（midnight_pro / arctic_clean / obsidian_neon）结构完全一致，
+ * 唯一的差别就是下面这张表。增删 token 必须同步三份文件。
+ */
+@primary_bg: #1a1a2e;
 @secondary_bg: #16213e;
 @tertiary_bg: #0f172a;
 @accent: #7c3aed;
@@ -11,12 +15,41 @@
 @success: #10b981;
 @warning: #f59e0b;
 @error: #ef4444;
+@info: #22d3ee;
+@on_accent: #ffffff;
 @hover_bg: rgba(124, 58, 237, 0.15);
-@selected_bg: rgba(124, 58, 237, 0.3);
-@selected_bg_active: rgba(124, 58, 237, 0.5);
+@pressed_bg: rgba(124, 58, 237, 0.30);
+@selected_bg: rgba(124, 58, 237, 0.30);
+@selected_bg_active: rgba(124, 58, 237, 0.50);
+@panel_alt: rgba(124, 58, 237, 0.05);
 @video_area_bg: #16213e;
 
-QMainWindow, QDialog {
+/* 视频浮层：始终压在画面上，底色恒为深色，三套主题取值一致 */
+@overlay_bg: rgba(0, 0, 0, 180);
+@overlay_text: #e0e0e0;
+@overlay_hover: rgba(255, 255, 255, 0.10);
+@overlay_pressed: rgba(255, 255, 255, 0.20);
+
+/* 实时视频格子 */
+@cell_bg: #0f172a;
+@cell_border: rgba(124, 58, 237, 0.20);
+@cell_fg: #64748b;
+@osd_bg: rgba(124, 58, 237, 0.60);
+
+/* 布局切换按钮（class 属性为 LayoutNavButton） */
+@navbtn_bg1: #2a2a44;
+@navbtn_bg2: #1e1e38;
+@navbtn_hover1: #3a3a55;
+@navbtn_hover2: #2a2a44;
+@navbtn_border: #334155;
+
+/* 滚动条 / 错误提示 */
+@scrollbar_hover: #7c3aed;
+@error_soft_bg: rgba(239, 68, 68, 0.10);
+@error_soft_border: rgba(239, 68, 68, 0.30);
+@error_overlay_bg: rgba(180, 50, 50, 200);
+
+QMainWindow, QDialog, QWidget {
     background-color: @primary_bg;
 }
 
@@ -26,6 +59,11 @@ QWidget#centralArea {
 
 QLabel, QPushButton {
     color: @text_primary;
+}
+
+/* 标签不画底色，避免在面板上留下与父容器不一致的色块 */
+QLabel {
+    background-color: transparent;
 }
 
 QLabel#secondaryText {
@@ -43,6 +81,7 @@ QPushButton {
 QPushButton:hover {
     background-color: @accent;
     border-color: @accent;
+    color: @on_accent;
 }
 
 QPushButton:pressed {
@@ -57,7 +96,7 @@ QPushButton:disabled {
 }
 
 QLineEdit, QTextEdit, QPlainTextEdit {
-    background-color: #0f172a;
+    background-color: @tertiary_bg;
     border: 1px solid @border;
     border-radius: 4px;
     padding: 6px;
@@ -70,7 +109,7 @@ QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
 }
 
 QLineEdit:disabled, QTextEdit:disabled, QPlainTextEdit:disabled {
-    background-color: #0c1322;
+    background-color: @primary_bg;
     color: @text_secondary;
 }
 
@@ -124,6 +163,7 @@ QMenuBar {
 
 QMenuBar::item:selected {
     background-color: @accent;
+    color: @on_accent;
 }
 
 QMenu {
@@ -134,6 +174,7 @@ QMenu {
 
 QMenu::item:selected {
     background-color: @accent;
+    color: @on_accent;
 }
 
 QToolBar {
@@ -164,11 +205,11 @@ QToolButton {
 }
 
 QToolButton:hover {
-    background-color: rgba(124, 58, 237, 0.2);
+    background-color: @hover_bg;
 }
 
 QToolButton:pressed {
-    background-color: rgba(124, 58, 237, 0.3);
+    background-color: @pressed_bg;
 }
 
 QToolButton#navIconButton {
@@ -180,23 +221,24 @@ QToolButton#navIconButton {
 }
 
 QToolButton#navIconButton:hover {
-    background-color: rgba(124, 58, 237, 0.2);
+    background-color: @hover_bg;
 }
 
 QToolButton#navIconButton:checked {
-    background-color: rgba(124, 58, 237, 0.35);
+    background-color: @selected_bg;
 }
 
 QWidget#PTZControlPanel QToolButton:hover {
-    background-color: rgba(124, 58, 237, 0.3);
+    background-color: @selected_bg;
 }
 
 QWidget#PTZControlPanel QToolButton:pressed {
-    background-color: rgba(124, 58, 237, 0.4);
+    background-color: @selected_bg_active;
 }
 
+/* 必须比 QWidget#PTZControlPanel QToolButton:hover 更具体，否则会被它压掉 */
 QWidget#PTZControlPanel QToolButton#btnCenter:hover {
-    background-color: rgba(124, 58, 237, 0.5);
+    background-color: @selected_bg;
 }
 
 QLabel#userLabel {
@@ -205,7 +247,7 @@ QLabel#userLabel {
 }
 
 QWidget#navIconBar {
-    background-color: #151528;
+    background-color: @tertiary_bg;
     border-right: 1px solid @border;
 }
 
@@ -225,7 +267,7 @@ QSplitter::handle:hover {
 
 QLabel#navBadge {
     background-color: @error;
-    color: white;
+    color: @on_accent;
     font-size: 10px;
     font-weight: bold;
     border-radius: 8px;
@@ -281,7 +323,7 @@ QTabBar::tab:selected {
 }
 
 QTabBar::tab:hover {
-    background-color: rgba(124, 58, 237, 0.15);
+    background-color: @hover_bg;
 }
 
 QScrollBar:vertical {
@@ -297,7 +339,11 @@ QScrollBar::handle:vertical {
 }
 
 QScrollBar::handle:vertical:hover {
-    background-color: @accent;
+    background-color: @scrollbar_hover;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
 }
 
 QScrollBar:horizontal {
@@ -313,7 +359,11 @@ QScrollBar::handle:horizontal {
 }
 
 QScrollBar::handle:horizontal:hover {
-    background-color: @accent;
+    background-color: @scrollbar_hover;
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0px;
 }
 
 QDockWidget {
@@ -330,7 +380,7 @@ QDockWidget::title {
 
 QTreeView {
     background-color: @tertiary_bg;
-    alternate-background-color: rgba(124, 58, 237, 0.05);
+    alternate-background-color: @panel_alt;
     border: 1px solid @border;
     color: @text_primary;
     gridline-color: @border;
@@ -351,19 +401,18 @@ QTreeView::item:hover {
     background-color: @hover_bg;
 }
 
+/* 选中底色由 FullRowSelectDelegate 与 DeviceTreeView::drawBranches 绘制，
+   这里不能再设 background-color，否则半透明色会被叠两层。 */
 QTreeView::item:selected {
-    color: #ffffff;
-    background-color: @selected_bg;
+    color: @text_primary;
 }
 
 QTreeView::item:selected:active {
-    color: #ffffff;
-    background-color: @selected_bg_active;
+    color: @text_primary;
 }
 
 QTreeView::item:selected:!active {
-    color: #ffffff;
-    background-color: @selected_bg;
+    color: @text_primary;
 }
 
 QTreeView::item:disabled {
@@ -397,7 +446,7 @@ QHeaderView::section {
 
 QTableView {
     background-color: @tertiary_bg;
-    alternate-background-color: rgba(124, 58, 237, 0.05);
+    alternate-background-color: @panel_alt;
     border: 1px solid @border;
     border-radius: 4px;
     color: @text_primary;
@@ -440,7 +489,7 @@ QLabel#alarmCount {
 
 QPushButton#primaryButton {
     background-color: @accent;
-    color: white;
+    color: @on_accent;
     border: 1px solid @accent;
     border-radius: 4px;
     padding: 6px 16px;
@@ -467,14 +516,14 @@ QToolTip {
 
     background-color: @primary_bg;
     color: @text_primary;
-    border: 1px solid @accent;
+    border: 1px solid @border;
     padding: 4px;
     border-radius: 4px;
 }
 
 /* LoginWindow Styles */
 
-rustcam--LoginWindow#loginTitle {
+#loginTitle {
     color: @accent;
     font-size: 42px;
     font-weight: bold;
@@ -482,47 +531,47 @@ rustcam--LoginWindow#loginTitle {
     letter-spacing: 4px;
 }
 
-rustcam--LoginWindow#loginSubtitle {
-    color: rgba(226, 232, 240, 0.7);
+#loginSubtitle {
+    color: @text_secondary;
     font-size: 14px;
     font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
     letter-spacing: 1px;
 }
 
-rustcam--LoginWindow#loginVersion {
-    color: rgba(226, 232, 240, 0.3);
+#loginVersion {
+    color: @text_disabled;
     font-size: 12px;
     font-family: 'Segoe UI', sans-serif;
 }
 
-rustcam--LoginWindow#rightPanel {
+#rightPanel {
     background-color: @secondary_bg;
 }
 
-rustcam--LoginWindow#welcomeLabel {
+#welcomeLabel {
     color: @text_primary;
     font-size: 28px;
     font-weight: bold;
     font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
 }
 
-rustcam--LoginWindow#descLabel {
+#descLabel {
     color: @text_secondary;
     font-size: 14px;
     font-family: 'Microsoft YaHei', sans-serif;
     margin-bottom: 20px;
 }
 
-rustcam--LoginWindow#formLabel {
+#formLabel {
     color: @text_secondary;
     font-size: 12px;
     font-family: 'Microsoft YaHei', sans-serif;
 }
 
-rustcam--LoginWindow#serverHostEdit,
-rustcam--LoginWindow#usernameEdit,
-rustcam--LoginWindow#passwordEdit {
-    background-color: @primary_bg;
+#serverHostEdit,
+#usernameEdit,
+#passwordEdit {
+    background-color: @secondary_bg;
     border: 1px solid @border;
     border-radius: 6px;
     padding: 0 12px;
@@ -532,21 +581,22 @@ rustcam--LoginWindow#passwordEdit {
     min-height: 40px;
 }
 
-rustcam--LoginWindow#serverHostEdit:focus,
-rustcam--LoginWindow#usernameEdit:focus,
-rustcam--LoginWindow#passwordEdit:focus {
+#serverHostEdit:focus,
+#usernameEdit:focus,
+#passwordEdit:focus {
     border-color: @accent;
+    background-color: @primary_bg;
 }
 
-rustcam--LoginWindow#serverHostEdit:disabled,
-rustcam--LoginWindow#usernameEdit:disabled,
-rustcam--LoginWindow#passwordEdit:disabled {
+#serverHostEdit:disabled,
+#usernameEdit:disabled,
+#passwordEdit:disabled {
     background-color: @primary_bg;
     color: @text_secondary;
 }
 
-rustcam--LoginWindow#serverPortSpin {
-    background-color: @primary_bg;
+#serverPortSpin {
+    background-color: @secondary_bg;
     border: 1px solid @border;
     border-radius: 6px;
     padding: 0 12px;
@@ -556,71 +606,72 @@ rustcam--LoginWindow#serverPortSpin {
     min-height: 40px;
 }
 
-rustcam--LoginWindow#serverPortSpin:focus {
+#serverPortSpin:focus {
     border-color: @accent;
+    background-color: @primary_bg;
 }
 
-rustcam--LoginWindow#serverPortSpin::up-button,
-rustcam--LoginWindow#serverPortSpin::down-button {
+#serverPortSpin::up-button,
+#serverPortSpin::down-button {
     background-color: transparent;
     border: none;
     width: 20px;
 }
 
-rustcam--LoginWindow#serverPortSpin::up-arrow {
+#serverPortSpin::up-arrow {
     image: none;
     border-left: 4px solid transparent;
     border-right: 4px solid transparent;
     border-bottom: 6px solid @text_secondary;
 }
 
-rustcam--LoginWindow#serverPortSpin::down-arrow {
+#serverPortSpin::down-arrow {
     image: none;
     border-left: 4px solid transparent;
     border-right: 4px solid transparent;
     border-top: 6px solid @text_secondary;
 }
 
-rustcam--LoginWindow#httpsCheck,
-rustcam--LoginWindow#rememberCheck {
+#httpsCheck,
+#rememberCheck {
     color: @text_secondary;
     font-size: 13px;
     font-family: 'Microsoft YaHei', sans-serif;
 }
 
-rustcam--LoginWindow#httpsCheck::indicator,
-rustcam--LoginWindow#rememberCheck::indicator {
+#httpsCheck::indicator,
+#rememberCheck::indicator {
     width: 18px;
     height: 18px;
     border-radius: 4px;
     border: 1px solid @border;
-    background-color: @primary_bg;
+    background-color: @secondary_bg;
 }
 
-rustcam--LoginWindow#httpsCheck::indicator:checked,
-rustcam--LoginWindow#rememberCheck::indicator:checked {
+#httpsCheck::indicator:checked,
+#rememberCheck::indicator:checked {
     background-color: @accent;
     border-color: @accent;
 }
 
-rustcam--LoginWindow#httpsCheck:hover,
-rustcam--LoginWindow#rememberCheck:hover {
+#httpsCheck:hover,
+#rememberCheck:hover {
     color: @text_primary;
 }
 
-rustcam--LoginWindow#errorLabel {
+#errorLabel {
     color: @error;
     font-size: 13px;
     font-family: 'Microsoft YaHei', sans-serif;
-    background-color: rgba(239, 68, 68, 0.1);
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    background-color: @error_soft_bg;
+    border: 1px solid @error_soft_border;
     border-radius: 4px;
     padding: 8px 12px;
 }
 
-rustcam--LoginWindow#loginButton {
+#loginButton {
     background-color: @accent;
-    color: white;
+    color: @on_accent;
     border: none;
     border-radius: 6px;
     font-size: 16px;
@@ -630,80 +681,80 @@ rustcam--LoginWindow#loginButton {
     min-height: 50px;
 }
 
-rustcam--LoginWindow#loginButton:hover {
+#loginButton:hover {
     background-color: @accent_hover;
 }
 
-rustcam--LoginWindow#loginButton:pressed {
+#loginButton:pressed {
     background-color: @accent_pressed;
 }
 
-rustcam--LoginWindow#loginButton:disabled {
+#loginButton:disabled {
     background-color: @border;
     color: @text_secondary;
 }
 
-rustcam--LoginWindow#forgotLabel,
-rustcam--LoginWindow#serverConfigLink {
+#forgotLabel,
+#serverConfigLink {
     color: @text_secondary;
     font-size: 13px;
     font-family: 'Microsoft YaHei', sans-serif;
 }
 
-rustcam--LoginWindow#forgotLabel a,
-rustcam--LoginWindow#serverConfigLink a {
+#forgotLabel a,
+#serverConfigLink a {
     color: @text_secondary;
     text-decoration: none;
 }
 
-rustcam--LoginWindow#forgotLabel a:hover,
-rustcam--LoginWindow#serverConfigLink a:hover {
+#forgotLabel a:hover,
+#serverConfigLink a:hover {
     color: @accent;
 }
 
-rustcam--LoginWindow#copyrightLabel {
+#copyrightLabel {
     color: @text_secondary;
     font-size: 12px;
     font-family: 'Segoe UI', sans-serif;
 }
 
 /* LiveVideo Styles */
-VideoCell {
-    background-color: #0f172a;
-    border: 1px solid rgba(124, 58, 237, 0.2);
+rustcam--VideoCell {
+    background-color: @cell_bg;
+    border: 1px solid @cell_border;
     border-radius: 4px;
 }
 
-VideoCell:hover {
+rustcam--VideoCell:hover {
     border: 1px solid @accent;
 }
 
-VideoLabel {
-    color: #64748b;
+#VideoLabel {
+    color: @cell_fg;
     font-size: 14px;
-    background-color: #0f172a;
+    background-color: @cell_bg;
 }
 
-VideoOverlay {
-    background-color: rgba(15, 23, 42, 0.7);
+#VideoOverlay {
+    background-color: @overlay_bg;
 }
 
-VideoOverlay #OverlayText {
-    color: #64748b;
+#VideoOverlay #OverlayText {
+    color: @cell_fg;
     font-size: 12px;
 }
 
-OsdLabel {
+#OsdLabel {
     color: white;
-    background-color: rgba(124, 58, 237, 0.6);
+    background-color: @osd_bg;
     padding: 4px 8px;
     border-radius: 2px;
     font-size: 11px;
 }
 
-TitleLabel {
+#TitleLabel {
     color: white;
-    background-color: rgba(124, 58, 237, 0.6);
+    background-color: @osd_bg;
     padding: 4px 8px;
     border-radius: 2px;
     font-size: 12px;
@@ -731,29 +782,64 @@ QToolBar#VideoToolbar QComboBox {
 
 #VideoPlayer {
     border: none;
-    background-color: #0f172a;
+    background-color: @video_area_bg;
 }
 
 
 #VideoPlayer #NoSignalIcon{
     background-color: transparent;
 }
+
+#VideoPlayerToolbar {
+    background-color: @overlay_bg;
+}
+
+#VideoPlayerToolbar #ToolbarButton {
+    background-color: transparent;
+    border: none;
+    padding: 4px;
+    color: @overlay_text;
+}
+
+#VideoPlayerToolbar #ToolbarButton:hover {
+    background-color: @overlay_hover;
+    border-radius: 4px;
+}
+
+#VideoPlayerToolbar #ToolbarButton:pressed {
+    background-color: @overlay_pressed;
+    border-radius: 4px;
+}
+
+#VideoPlayerToolbar #ToolbarButton:checked {
+    background-color: @accent;
+    border-radius: 4px;
+}
+
+#VideoPlayerToolbar #VideoPlayerToolbarWidget {
+    background-color: transparent;
+}
+
+#VideoPlayerToolbar QToolButton::menu-indicator {
+    image: none;
+}
 #videoArea {
     background-color: @video_area_bg;
 }
 
-LayoutNavButton {
+/* class 属性由 setProperty("class", "LayoutNavButton") 设置 */
+.LayoutNavButton {
     border: 1px solid @border;
     border-radius: 4px;
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #333, stop:1 #222);
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @navbtn_bg1, stop:1 @navbtn_bg2);
 }
 
-LayoutNavButton:hover {
-    border: 1px solid #888;
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #444, stop:1 #333);
+.LayoutNavButton:hover {
+    border: 1px solid @navbtn_border;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @navbtn_hover1, stop:1 @navbtn_hover2);
 }
 
-LayoutNavButton:pressed {
+.LayoutNavButton:pressed {
     border: 1px solid @accent;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 @accent, stop:1 @accent_pressed);
 }
@@ -1062,9 +1148,9 @@ QComboBox#RecordingPageSizeCombo {
     border-color: @accent;
 }
 #NoRecordingLabel {
-    color: #e0e0e0;
+    color: @text_primary;
     font-size: 14px;
-    background-color: rgba(0, 0, 0, 180);
+    background-color: @overlay_bg;
     border-radius: 4px;
     padding: 8px 16px;
 }
@@ -1099,7 +1185,7 @@ QCalendarWidget QMenu {
 
 QCalendarWidget QMenu::item:selected {
     background-color: @accent;
-    color: #ffffff;
+    color: @on_accent;
 }
 
 QCalendarWidget QSpinBox {
@@ -1107,14 +1193,14 @@ QCalendarWidget QSpinBox {
     color: @text_primary;
     border: 1px solid @border;
     selection-background-color: @accent;
-    selection-color: #ffffff;
+    selection-color: @on_accent;
 }
 
 QCalendarWidget QAbstractItemView {
     background-color: @secondary_bg;
     color: @text_primary;
     selection-background-color: @accent;
-    selection-color: #ffffff;
+    selection-color: @on_accent;
     outline: none;
 }
 
@@ -1123,4 +1209,259 @@ QCalendarWidget QHeaderView::section {
     color: @text_secondary;
     padding: 2px;
     border: none;
+}
+
+/* ── 设备树容器 ────────────────────────────────────────────────────
+ * DeviceTree 本身是透明容器，底色由外层的 tab pane 决定；
+ * 这里显式给一层 @secondary_bg，保证树视图的"凹陷"效果在三个主题一致。
+ */
+#deviceTree {
+    background-color: @secondary_bg;
+}
+
+/* ── 实时视频 ────────────────────────────────────────────────────── */
+#LiveVideoWorkspace {
+    background-color: @secondary_bg;
+}
+
+#sidePanel,
+#VideoSidePanel {
+    background-color: @secondary_bg;
+    border-right: 1px solid @border;
+}
+
+#VideoPlayerWrapper {
+    border: 2px solid @tertiary_bg;
+    background-color: @tertiary_bg;
+}
+
+#VideoPlayerWrapper[selected="true"] {
+    border: 2px solid @accent;
+}
+
+#StatusLabel {
+    background-color: @overlay_bg;
+    color: @overlay_text;
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+#ErrorLabel {
+    background-color: @error_overlay_bg;
+    color: @overlay_text;
+    padding: 12px 20px;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+/* ── 电子地图 ────────────────────────────────────────────────────── */
+#mapToolbar {
+    background-color: @primary_bg;
+    border: none;
+    spacing: 8px;
+    padding: 4px;
+}
+
+#mapToolbar QLabel {
+    color: @text_primary;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 0 8px;
+}
+
+/* class 属性由 setProperty("class", "mapToolButton") 设置 */
+.mapToolButton {
+    background-color: @secondary_bg;
+    color: @text_primary;
+    border: 1px solid @border;
+    border-radius: 4px;
+    padding: 4px 12px;
+}
+
+.mapToolButton:hover {
+    background-color: @hover_bg;
+    border-color: @accent;
+}
+
+#mapSidePanel {
+    background-color: @secondary_bg;
+}
+
+QTabWidget#mapTabs::pane {
+    background-color: @secondary_bg;
+    border: 1px solid @border;
+    border-radius: 4px;
+}
+
+QTabWidget#mapTabs QTabBar::tab {
+    background-color: @primary_bg;
+    color: @text_secondary;
+    padding: 6px 12px;
+    border: 1px solid @border;
+    border-bottom: none;
+}
+
+QTabWidget#mapTabs QTabBar::tab:selected {
+    background-color: @secondary_bg;
+    color: @text_primary;
+}
+
+QTabWidget#mapTabs QTabBar::tab:hover {
+    background-color: @hover_bg;
+}
+
+#mapContainer {
+    background-color: @tertiary_bg;
+    border: 1px solid @border;
+}
+
+#mapSearchEdit {
+    background-color: @tertiary_bg;
+    border: 1px solid @border;
+    border-radius: 4px;
+    padding: 8px 12px;
+    color: @text_primary;
+}
+
+#mapSearchEdit:focus {
+    border-color: @accent;
+}
+
+#mapDeviceList {
+    background-color: @tertiary_bg;
+    border: 1px solid @border;
+    border-radius: 4px;
+    color: @text_primary;
+}
+
+#mapDeviceList::item {
+    padding: 8px;
+    border-bottom: 1px solid @border;
+}
+
+#mapDeviceList::item:selected {
+    background-color: @selected_bg;
+}
+
+#mapPlayerDialog {
+    background-color: @tertiary_bg;
+}
+
+/* ── 服务器配置对话框 ────────────────────────────────────────────── */
+#serverConfigDialog {
+    background-color: @primary_bg;
+}
+
+#serverConfigTitle {
+    color: @text_primary;
+    font-size: 18px;
+    font-weight: bold;
+    font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+}
+
+#serverConfigDesc {
+    color: @text_secondary;
+    font-size: 13px;
+    font-family: 'Microsoft YaHei', sans-serif;
+}
+
+#serverConfigForm {
+    background-color: @secondary_bg;
+    border: 1px solid @border;
+    border-radius: 8px;
+}
+
+#serverConfigFormLabel {
+    color: @text_primary;
+    font-size: 14px;
+    font-family: 'Microsoft YaHei', sans-serif;
+}
+
+#serverConfigHostEdit,
+#serverConfigPortSpin {
+    background-color: @secondary_bg;
+    border: 1px solid @border;
+    border-radius: 6px;
+    padding: 0 12px;
+    color: @text_primary;
+    font-size: 14px;
+    font-family: 'Microsoft YaHei', sans-serif;
+    min-height: 40px;
+}
+
+#serverConfigHostEdit:focus,
+#serverConfigPortSpin:focus {
+    border-color: @accent;
+}
+
+#serverConfigHostEdit:disabled,
+#serverConfigPortSpin:disabled {
+    background-color: @primary_bg;
+    color: @text_secondary;
+}
+
+#serverConfigHttpsCheck {
+    color: @text_secondary;
+    font-size: 13px;
+    font-family: 'Microsoft YaHei', sans-serif;
+}
+
+#serverConfigStatus {
+    color: @text_secondary;
+    font-size: 13px;
+}
+
+#serverConfigTestButton,
+#serverConfigCancelButton {
+    background-color: @secondary_bg;
+    color: @text_primary;
+    border: 1px solid @border;
+    border-radius: 4px;
+    padding: 6px 16px;
+    min-width: 70px;
+}
+
+#serverConfigTestButton:hover,
+#serverConfigCancelButton:hover {
+    background-color: @hover_bg;
+    border-color: @accent;
+    color: @text_primary;
+}
+
+#serverConfigSaveButton {
+    background-color: @accent;
+    color: @on_accent;
+    border: 1px solid @accent;
+    border-radius: 4px;
+    padding: 6px 16px;
+    min-width: 70px;
+}
+
+#serverConfigSaveButton:hover {
+    background-color: @accent_hover;
+    border-color: @accent_hover;
+}
+
+#serverConfigSaveButton:pressed {
+    background-color: @accent_pressed;
+    border-color: @accent_pressed;
+}
+
+/* ── 片段导出 / 设置页 / 连接状态 ────────────────────────────────── */
+#clipExportInfo {
+    color: @text_secondary;
+}
+
+#clipExportStatus {
+    color: @text_secondary;
+}
+
+#settingsHintLabel {
+    color: @text_secondary;
+    font-size: 11px;
+}
+
+#statusConnection {
+    color: @text_secondary;
 }

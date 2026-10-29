@@ -20,26 +20,7 @@ MapSidePanel::MapSidePanel(QWidget* parent)
     mainLayout->setSpacing(0);
 
     m_tabWidget = new QTabWidget(this);
-    m_tabWidget->setStyleSheet(R"(
-        QTabWidget::pane {
-            border: 1px solid #3e3e3e;
-            background-color: #1a1a1a;
-        }
-        QTabBar::tab {
-            background-color: #2b2b2b;
-            color: #aaa;
-            padding: 6px 12px;
-            border: 1px solid #3e3e3e;
-            border-bottom: none;
-        }
-        QTabBar::tab:selected {
-            background-color: #2a2a2a;
-            color: #fff;
-        }
-        QTabBar::tab:hover {
-            background-color: #333;
-        }
-    )");
+    m_tabWidget->setObjectName("mapTabs");
     m_tabWidget->setMinimumWidth(200);
     m_tabWidget->setMaximumWidth(300);
 
@@ -54,12 +35,7 @@ MapSidePanel::MapSidePanel(QWidget* parent)
     mainLayout->addWidget(m_tabWidget);
 
     m_mapContainer = new QFrame(this);
-    m_mapContainer->setStyleSheet(R"(
-        QFrame {
-            background-color: #1a2a3a;
-            border: 1px solid #3e3e3e;
-        }
-    )");
+    m_mapContainer->setObjectName("mapContainer");
     m_mapContainer->setFrameShape(QFrame::NoFrame);
 
     QVBoxLayout* mapLayout = new QVBoxLayout(m_mapContainer);

@@ -92,35 +92,15 @@ QWidget* MapPlugin::createWorkspace(QWidget* parent)
 {
     m_workspace = new QWidget(parent);
     m_workspace->setObjectName("workspaceArea");
-    m_workspace->setStyleSheet(R"(
-        QWidget#workspaceArea {
-            background-color: #2b2b2b;
-        }
-    )");
 
     QVBoxLayout* layout = new QVBoxLayout(m_workspace);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
     QToolBar* toolbar = new QToolBar(m_workspace);
-    toolbar->setStyleSheet(R"(
-        QToolBar {
-            background-color: #1e1e1e;
-            border: none;
-            spacing: 8px;
-            padding: 4px;
-        }
-    )");
+    toolbar->setObjectName("mapToolbar");
 
     QLabel* titleLabel = new QLabel(tr("Electronic Map"), toolbar);
-    titleLabel->setStyleSheet(R"(
-        QLabel {
-            color: #e0e0e0;
-            font-size: 14px;
-            font-weight: bold;
-            padding: 0 8px;
-        }
-    )");
     toolbar->addWidget(titleLabel);
 
     toolbar->addSeparator();
@@ -128,35 +108,13 @@ QWidget* MapPlugin::createWorkspace(QWidget* parent)
     QToolButton* zoomInBtn = new QToolButton(toolbar);
     zoomInBtn->setText("+");
     zoomInBtn->setCursor(Qt::PointingHandCursor);
-    zoomInBtn->setStyleSheet(R"(
-        QToolButton {
-            background-color: #2b2b2b;
-            color: #e0e0e0;
-            border: 1px solid #3e3e3e;
-            border-radius: 4px;
-            min-width: 32px;
-        }
-        QToolButton:hover {
-            background-color: #3e3e3e;
-        }
-    )");
+    zoomInBtn->setProperty("class", "mapToolButton");
     toolbar->addWidget(zoomInBtn);
 
     QToolButton* zoomOutBtn = new QToolButton(toolbar);
     zoomOutBtn->setText("-");
     zoomOutBtn->setCursor(Qt::PointingHandCursor);
-    zoomOutBtn->setStyleSheet(R"(
-        QToolButton {
-            background-color: #2b2b2b;
-            color: #e0e0e0;
-            border: 1px solid #3e3e3e;
-            border-radius: 4px;
-            min-width: 32px;
-        }
-        QToolButton:hover {
-            background-color: #3e3e3e;
-        }
-    )");
+    zoomOutBtn->setProperty("class", "mapToolButton");
     toolbar->addWidget(zoomOutBtn);
 
     toolbar->addSeparator();
@@ -164,18 +122,7 @@ QWidget* MapPlugin::createWorkspace(QWidget* parent)
     QToolButton* locateBtn = new QToolButton(toolbar);
     locateBtn->setText(tr("Locate"));
     locateBtn->setCursor(Qt::PointingHandCursor);
-    locateBtn->setStyleSheet(R"(
-        QToolButton {
-            background-color: #2b2b2b;
-            color: #e0e0e0;
-            border: 1px solid #3e3e3e;
-            border-radius: 4px;
-            padding: 4px 12px;
-        }
-        QToolButton:hover {
-            background-color: #3e3e3e;
-        }
-    )");
+    locateBtn->setProperty("class", "mapToolButton");
     toolbar->addWidget(locateBtn);
 
     toolbar->addSeparator();
@@ -183,18 +130,7 @@ QWidget* MapPlugin::createWorkspace(QWidget* parent)
     QToolButton* fullscreenBtn = new QToolButton(toolbar);
     fullscreenBtn->setText(tr("Fullscreen"));
     fullscreenBtn->setCursor(Qt::PointingHandCursor);
-    fullscreenBtn->setStyleSheet(R"(
-        QToolButton {
-            background-color: #2b2b2b;
-            color: #e0e0e0;
-            border: 1px solid #3e3e3e;
-            border-radius: 4px;
-            padding: 4px 12px;
-        }
-        QToolButton:hover {
-            background-color: #3e3e3e;
-        }
-    )");
+    fullscreenBtn->setProperty("class", "mapToolButton");
     toolbar->addWidget(fullscreenBtn);
 
     layout->addWidget(toolbar);
