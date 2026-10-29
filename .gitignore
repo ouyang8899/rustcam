@@ -15,6 +15,9 @@ Cargo.lock
 /vite/
 /target
 *.md
+# 贡献指南与 API 文档需要入库, 不受上面的 *.md 规则影响
+!CONTRIBUTING.md
+!public/api.md
 /local_tool
 /rtsp-player
 /node_modules

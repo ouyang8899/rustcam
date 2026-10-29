@@ -41,6 +41,14 @@
 | 构建 | CMake |
 | 音视频 | FFmpeg |
 
+## 系统架构
+
+后端采用 **Axum + Tokio** 分层架构：HTTP 处理器 → 应用服务 → 领域模型/端口 → 基础设施实现；协议侧通过 `SignalAdapter` 统一抽象 GB28181 / ONVIF / RTSP / WebSocket；传输与媒体数据面（`src/transport` + `src/media`）负责 SIP 信令与 RTP 收发，并通过 **MediaNode** 中间件链完成 G711 ⇄ PCM 转换与重采样，支撑 GB28181 广播 / ONVIF Backchannel 语音对讲；媒体侧通过 `MediaServerAdapter` 对接 ZLMediaKit / SRS / XIU。
+
+![RustCam-Media 系统架构](./public/architecture.png)
+
+> 架构图源码为 [`public/architecture.mmd`](./public/architecture.mmd)（Mermaid），修改后执行 `node public/render-architecture.mjs` 可重新生成 PNG。
+
 ## 截图预览
 
 ### 前端控制台 (Vue 3)
@@ -143,6 +151,77 @@
 
 ![系统设置](./screenshot/2026-10-29-destop/客户端-系统设置.png)
 
+## API 说明
+
+后端基于 Axum 暴露 HTTP + WebSocket 接口，业务接口统一前缀 `/api/v1`，共 **102 条受保护路由** 与 **14 条公开路由**。完整接口清单（按业务域分组、含请求体与响应字段）见 **[`public/api.md`](./public/api.md)**。
+
+### 认证
+
+除公开端点外，所有接口都需在请求头携带 JWT：
+
+```http
+Authorization: Bearer <access_token>
+```
+
+```bash
+# 1) 登录获取令牌
+curl -s -X POST http://127.0.0.1:8081/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin"}'
+
+# 2) 携带令牌访问业务接口
+curl -s "http://127.0.0.1:8081/api/v1/devices?limit=20" \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### 统一响应格式
+
+```json
+{ "code": 200, "message": "success", "data": { } }
+```
+
+失败时 `code` 为 400 / 401 / 403 / 404 / 500 / 502 / 503，`message` 为中文错误描述，`data` 为 `null`。
+
+> ⚠️ 两个例外：`/hook/*` 与 `/alarm/{stream_key}` 返回 `{"code": 0, "msg": "ok"}`（`code` 为 `0`，字段名是 `msg`）；`GET /api/v1/stats` 返回不带封装的裸 JSON。
+
+### 接口分组速览
+
+**受保护路由（102 条，需携带 JWT）**
+
+| 分组 | 端点数 | 主要端点 |
+|------|:------:|----------|
+| 用户 / 角色 / 权限 | 11 | `GET/POST /users`、`PUT /users/{id}/roles`、`GET/POST /roles`、`PUT /roles/{id}/permissions`、`GET/POST /permissions` |
+| 设备 | 13 | `GET/POST /devices`、`POST /devices/{id}/play`、`GET /devices/{id}/config` |
+| 通道 | 7 | `GET/POST /channels`、`GET /channels/{device_tag}/{channel_tag}/status` |
+| 云台 PTZ | 6 | `POST /channels/{d}/{c}/ptz`、`GET/POST/PUT/DELETE /channels/{d}/{c}/ptz/presets` |
+| 流 | 9 | `GET/POST /streams`、`GET /streams/{id}/play`、`POST /streams/{id}/restart` |
+| 会话 | 1 | `GET /sessions` |
+| 录像任务 | 10 | `GET/POST /recordings`、`POST /recordings/{id}/start\|stop\|pause\|resume` |
+| 录像策略 | 5 | `GET/POST /recording-policies`、`PUT/DELETE /recording-policies/{id}` |
+| 录像文件 | 2 | `GET /recordings/files`、`GET /recordings/files/{id}/play-url` |
+| 报警 | 2 | `GET /alarms`、`PUT /alarms/{id}/processed` |
+| 媒体服务器 | 10 | `GET/POST /servers`、`GET /servers/{tag}/status`、`POST /servers/{tag}/enable` |
+| 监控墙布局 | 6 | `GET/POST /layouts`、`PUT /layouts/{id}/default` |
+| 设备分组 | 6 | `GET /groups/tree`、`POST /groups`、`PUT /devices/{id}/group` |
+| 行政区划 | 2 | `GET /regions`、`GET /regions/tree` |
+| ONVIF | 6 | `POST /onvif/discover`、`POST /onvif/probe`、`POST /onvif/devices` |
+| 地图设置 | 2 | `GET/PUT /settings/map` |
+| 仪表盘 / 缓存管理 | 2 | `GET /dashboard`、`POST /admin/reload-cache` |
+| GB28181 参考数据 | 1 | `GET /gb28181/ref-data` |
+| 当前用户 | 1 | `GET /auth/me` |
+
+**公开路由（14 条，无需认证）**
+
+| 分组 | 端点数 | 路径 |
+|------|:------:|------|
+| 登录 / 刷新令牌 | 2 | `POST /api/v1/auth/login`、`POST /api/v1/auth/refresh` |
+| 健康 / 指标 / 统计 / 根路径 | 4 | `GET /`、`/api/v1/health`、`/api/v1/metrics`、`/api/v1/stats` |
+| 公开直播 | 1 | `GET /api/v1/public/streams` |
+| 地图 WFS 代理 | 1 | `GET /api/v1/proxy/wfs` |
+| 媒体服务器 Hook | 3 | `/hook`、`/hook/{event_name}`、`/hook/{server_type}/{event_name}` |
+| 外部告警上报 | 1 | `POST /alarm/{stream_key}` |
+| WebSocket | 2 | `/ws`（事件推送）、`/ws/audio-talk/{device_tag}/{channel_id}`（语音对讲） |
+
 ## 模块进度
 
 | 模块 | 功能 | 状态 | 说明 |
@@ -184,8 +263,13 @@ RUSTCAM/
 │   └── src/
 ├── clientapp/             # Qt 桌面版
 │   └── src/
+├── public/                # 对外文档
+│   ├── api.md             # API 参考
+│   ├── architecture.mmd   # 架构图
+│   └── architecture.png   # 架构图
 ├── sql/                   # 数据库脚本
-└── tests/                 # 测试用例
+├── tests/                 # 测试用例
+└── CONTRIBUTING.md        # 贡献指南
 ```
 
 ## 部署
@@ -206,7 +290,7 @@ RUSTCAM/
 ```toml
 [server]
 host = "0.0.0.0"
-port = 8080
+port = 8081
 tls_enabled = false                    # 启用 TLS
 tls_cert = "/path/to/cert.pem"        # TLS 证书
 tls_key = "/path/to/key.pem"          # TLS 私钥
@@ -219,12 +303,17 @@ max_connections = 10
 url = "redis://localhost:6379"
 pool_size = 5
 
-[[media_servers]]
+[[media_servers.servers]]
 name = "zlmediakit"
-url = "http://localhost:8085"
+url = "http://127.0.0.1:80"
 api_key = "your_api_key"
-server_type = "ZLMediaKit"
+server_type = "zlmediakit"            # zlmediakit / srs / xiu
+weight = 100
 enabled = true
+server_tag = "default"
+
+[jwt]
+secret = "change-me-in-production"     # 生产环境务必修改
 ```
 
 ### 数据库初始化
@@ -233,7 +322,6 @@ enabled = true
 # 创建数据库
 psql -U postgres -c "CREATE DATABASE rustcam;"
 psql -U postgres -d rustcam -f sql/schema.sql
-psql -U postgres -d rustcam -f sql/init.sql
 ```
 
 ### 构建与运行
@@ -289,7 +377,7 @@ docker build -t rustcam .
 docker run -d --name rustcam \
   --link postgres \
   --link redis \
-  -p 8080:8080 \
+  -p 8081:8081 \
   -v $(pwd)/config.toml:/app/config.toml \
   rustcam
 ```
@@ -306,6 +394,35 @@ docker run -d --name rustcam \
 - [ ] SRS 流媒体支持
 - [ ] XIU 流媒体支持
 - [x] HTTPS/WSS 加密传输
+
+## 贡献指南
+
+欢迎参与 RustCam-Media。开发环境、本地启动、代码规范、提交规范与 PR 流程详见 **[`CONTRIBUTING.md`](./CONTRIBUTING.md)**。
+
+快速开始：
+
+```bash
+# 后端
+cargo build && cargo run
+
+# 前端
+cd frontend && npm install && npm run dev
+```
+
+提交代码前请至少执行：
+
+```bash
+cargo fmt && cargo clippy --all-targets -- -D warnings && cargo test
+```
+
+提交信息采用 Conventional Commits 规范：
+
+```
+feat(frontend): 通道编辑弹窗接入地图选点
+fix(device): 修复设备按 tag 更新时坐标未迁移的问题
+```
+
+> 新增或修改接口后，请同步更新 [`public/api.md`](./public/api.md)；架构调整时修改 `public/architecture.mmd` 并执行 `node public/render-architecture.mjs` 重新生成架构图。
 
 ## License
 
