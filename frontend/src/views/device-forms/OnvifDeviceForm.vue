@@ -47,19 +47,6 @@
 
     <el-row :gutter="12">
       <el-col :span="12">
-        <el-form-item label="经度">
-          <el-input-number v-model="localForm.longitude" :precision="6" :step="0.000001" :min="-180" :max="180" style="width: 100%" placeholder="例: 116.4074" />
-        </el-form-item>
-      </el-col>
-      <el-col :span="12">
-        <el-form-item label="纬度">
-          <el-input-number v-model="localForm.latitude" :precision="6" :step="0.000001" :min="-90" :max="90" style="width: 100%" placeholder="例: 39.9042" />
-        </el-form-item>
-      </el-col>
-    </el-row>
-
-    <el-row :gutter="12">
-      <el-col :span="12">
         <el-form-item label="应用名称 (App)">
           <el-input v-model="localForm.app" placeholder="live" />
         </el-form-item>
@@ -281,8 +268,6 @@ const localForm = reactive({
   name: '',
   media_server_tag: '',
   group_id: null,
-  latitude: null,
-  longitude: null,
   app: 'live',
   host: '',
   device_username: '',
@@ -477,8 +462,6 @@ async function loadData(deviceTag) {
     localForm.device_password = fullDevice.device_password || ''
     localForm.media_server_tag = fullDevice.media_server_tag || ''
     localForm.group_id = fullDevice.group_id ?? null
-    localForm.latitude = fullDevice.latitude ?? null
-    localForm.longitude = fullDevice.longitude ?? null
     localForm.playback_username = fullDevice.playback_username || ''
     localForm.playback_password = fullDevice.playback_password || ''
     localForm.is_public = fullDevice.is_public || false
