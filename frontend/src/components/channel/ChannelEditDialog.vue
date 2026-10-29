@@ -15,6 +15,11 @@
           </el-form-item>
         </el-col>
         <el-col :span="12">
+          <el-form-item label="地址">
+            <el-input v-model="form.address" placeholder="安装位置描述" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
           <el-form-item label="通道标识">
             <el-input :model-value="channelTag" disabled />
           </el-form-item>
@@ -22,42 +27,6 @@
         <el-col :span="12">
           <el-form-item label="设备标识">
             <el-input :model-value="deviceTag" disabled />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="IP 地址">
-            <el-input v-model="form.ip_address" placeholder="例如 192.168.1.64" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="端口">
-            <el-input-number
-              v-model="form.port"
-              :min="0"
-              :max="65535"
-              controls-position="right"
-              style="width: 100%"
-            />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="地址">
-            <el-input v-model="form.address" placeholder="安装位置描述" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="行政区划">
-            <el-input v-model="form.civil_code" placeholder="GB28181 行政区划编码" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="厂商">
-            <el-input v-model="form.manufacturer" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="型号">
-            <el-input v-model="form.model" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
@@ -122,6 +91,7 @@ const props = defineProps({
   mode: { type: String, default: 'edit' },
   deviceTag: { type: String, default: '' },
   channelTag: { type: String, default: '' },
+  channel: { type: Object, default: null },
 })
 
 const emit = defineEmits(['update:modelValue', 'saved'])
@@ -133,12 +103,7 @@ const pickerContainer = ref(null)
 
 const form = reactive({
   name: '',
-  civil_code: '',
   address: '',
-  ip_address: '',
-  port: 0,
-  manufacturer: '',
-  model: '',
   latitude: null,
   longitude: null,
 })
@@ -156,23 +121,23 @@ let map = null
 let marker = null
 
 function resetForm(channel) {
-  form.name = channel?.name || ''
-  form.civil_code = channel?.civil_code || ''
-  form.address = channel?.address || ''
-  form.ip_address = channel?.ip_address || ''
-  form.port = channel?.port ?? 0
-  form.manufacturer = channel?.manufacturer || ''
-  form.model = channel?.model || ''
+  form.name = channel?.name ?? ''
+  form.address = channel?.address ?? ''
   form.latitude = channel?.latitude ?? null
   form.longitude = channel?.longitude ?? null
 }
 
 async function onOpen() {
-  resetForm()
+  resetForm(props.channel)
   if (props.mode === 'edit' && props.channelTag) {
     try {
       const channel = await getChannel(props.deviceTag, props.channelTag)
-      resetForm(channel)
+      // 接口数据只在本地已有对象缺字段时才覆盖，避免空值把列表里的名称冲掉
+      resetForm({
+        ...props.channel,
+        ...channel,
+        name: channel?.name || props.channel?.name || '',
+      })
     } catch (e) {
       ElMessage.error('加载通道信息失败: ' + (e?.message || e))
     }
@@ -304,12 +269,7 @@ async function submit() {
   try {
     const payload = {
       name: form.name || null,
-      civil_code: form.civil_code || null,
       address: form.address || null,
-      ip_address: form.ip_address || null,
-      port: form.port ?? 0,
-      manufacturer: form.manufacturer || null,
-      model: form.model || null,
       latitude: form.latitude,
       longitude: form.longitude,
     }
@@ -320,12 +280,7 @@ async function submit() {
         device_tag: props.deviceTag,
         channel_tag: props.channelTag,
         name: form.name || props.channelTag,
-        civil_code: payload.civil_code,
         address: payload.address,
-        ip_address: payload.ip_address,
-        port: payload.port,
-        manufacturer: payload.manufacturer,
-        model: payload.model,
         latitude: payload.latitude,
         longitude: payload.longitude,
       })

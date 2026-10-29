@@ -113,6 +113,7 @@
       :mode="editMode"
       :device-tag="editingChannel?.device_tag || ''"
       :channel-tag="editingChannel?.channel_tag || ''"
+      :channel="editingChannel"
       @saved="onChannelSaved"
     />
   </div>

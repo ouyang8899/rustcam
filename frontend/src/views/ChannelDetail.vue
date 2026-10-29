@@ -207,6 +207,8 @@
       mode="edit"
       :device-tag="route.params.deviceTag || ''"
       :channel-tag="route.params.channelTag || ''"
+      :channel="channel"
+      @saved="fetchData"
     />
   </div>
 </template>
