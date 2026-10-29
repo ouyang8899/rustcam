@@ -69,6 +69,9 @@ CREATE TABLE IF NOT EXISTS channels (
     manufacturer varchar(255),
     model varchar(255),
     parental integer DEFAULT 0,
+    latitude double precision,
+    longitude double precision,
+    geom geometry(Point,4326),
     extended jsonb DEFAULT '{}'::jsonb,
     created_at timestamptz DEFAULT now() NOT NULL,
     updated_at timestamptz DEFAULT now() NOT NULL,
@@ -82,6 +85,7 @@ CREATE INDEX IF NOT EXISTS idx_channels_device_tag ON channels USING btree (devi
 CREATE INDEX IF NOT EXISTS idx_channels_is_default ON channels USING btree (is_default);
 CREATE INDEX IF NOT EXISTS idx_channels_parent_channel ON channels USING btree (parent_channel_tag);
 CREATE INDEX IF NOT EXISTS idx_channels_status ON channels USING btree (status);
+CREATE INDEX IF NOT EXISTS idx_channels_geom ON channels USING GIST (geom);
 CREATE INDEX IF NOT EXISTS idx_streams_channel_tag ON channels USING btree (channel_tag);
 
 -- ============================================
@@ -135,9 +139,6 @@ CREATE TABLE IF NOT EXISTS devices (
     device_type varchar(50) DEFAULT 'Other'::character varying,
     device_type_code varchar(10),
     channel_count integer DEFAULT 0,
-    latitude double precision,
-    longitude double precision,
-    geom geometry(Point,4326),
     CONSTRAINT devices_pkey PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_device_id ON devices USING btree (device_id) WHERE (device_id IS NOT NULL);
@@ -555,6 +556,27 @@ ALTER SEQUENCE recordings_id_seq OWNED BY recordings.id;
 ALTER SEQUENCE servers_id_seq OWNED BY servers.id;
 ALTER SEQUENCE sessions_id_seq OWNED BY sessions.id;
 ALTER SEQUENCE streams_id_seq OWNED BY streams.id;
+
+-- ============================================
+-- Triggers
+-- ============================================
+-- 通道坐标写入时自动维护 geom：经度在前，SRID 4326。
+-- 任一维度为 NULL 时 geom 置 NULL。
+CREATE OR REPLACE FUNCTION channels_sync_geom() RETURNS trigger AS $$
+BEGIN
+    IF NEW.latitude IS NOT NULL AND NEW.longitude IS NOT NULL THEN
+        NEW.geom := ST_SetSRID(ST_MakePoint(NEW.longitude, NEW.latitude), 4326);
+    ELSE
+        NEW.geom := NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_channels_sync_geom ON channels;
+CREATE TRIGGER trg_channels_sync_geom
+BEFORE INSERT OR UPDATE OF latitude, longitude ON channels
+FOR EACH ROW EXECUTE FUNCTION channels_sync_geom();
 
 -- ============================================
 -- Views
