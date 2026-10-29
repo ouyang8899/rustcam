@@ -226,8 +226,8 @@ function statusColor(status) {
   return STATUS_COLORS[(status || 'offline').toLowerCase()] || STATUS_COLORS.offline
 }
 
-// WFS: 设备地理信息（开发环境走后端代理，正式部署由 nginx 代理）
-async function fetchWfsDevices() {
+// WFS: 通道点位图层 myw:channels（开发环境走后端代理，正式部署由 nginx 代理）
+async function fetchWfsChannels() {
   const wfsUrl = settingsStore.mapWfsUrl
   if (!wfsUrl) {
     ElMessage.warning('请先在设置中配置 WFS 服务地址')
@@ -253,14 +253,16 @@ async function fetchWfsDevices() {
     if (!text || text.trim() === '') return new Map()
 
     const trimmed = text.trim()
-    const devices = new Map()
+    const channels = new Map()
 
     if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
       const geojson = JSON.parse(text)
       for (const f of geojson.features || []) {
         const props = f.properties || {}
-        const tag = (props.device_tag || '').toLowerCase()
-        if (!tag) continue
+        const deviceTag = (props.device_tag || '').toLowerCase()
+        const channelTag = (props.channel_tag || '').toLowerCase()
+        if (!deviceTag || !channelTag) continue
+        const tag = `${deviceTag}|${channelTag}`
 
         let lng = null
         let lat = null
@@ -273,9 +275,10 @@ async function fetchWfsDevices() {
         }
         if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue
 
-        devices.set(tag, {
-          device_tag: props.device_tag,
-          name: props.name || props.device_tag,
+        channels.set(tag, {
+          device_tag: deviceTag,
+          channel_tag: channelTag,
+          name: props.name || channelTag,
           device_type: props.device_type || 'Other',
           status: (props.status || 'offline').toLowerCase(),
           lng,
@@ -296,8 +299,10 @@ async function fetchWfsDevices() {
           for (const child of featureMember.children) {
             properties[child.tagName.split(':').pop()] = child.textContent
           }
-          const tag = (properties.device_tag || '').toLowerCase()
-          if (!tag) continue
+          const deviceTag = (properties.device_tag || '').toLowerCase()
+          const channelTag = (properties.channel_tag || '').toLowerCase()
+          if (!deviceTag || !channelTag) continue
+          const tag = `${deviceTag}|${channelTag}`
 
           let lng = parseFloat(properties.longitude || properties.lng || properties.lon)
           let lat = parseFloat(properties.latitude || properties.lat)
@@ -313,9 +318,10 @@ async function fetchWfsDevices() {
           }
           if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue
 
-          devices.set(tag, {
-            device_tag: properties.device_tag,
-            name: properties.name || properties.device_tag,
+          channels.set(tag, {
+            device_tag: deviceTag,
+            channel_tag: channelTag,
+            name: properties.name || channelTag,
             device_type: properties.device_type || 'Other',
             status: (properties.status || 'offline').toLowerCase(),
             lng,
@@ -325,7 +331,7 @@ async function fetchWfsDevices() {
       }
     }
 
-    return devices
+    return channels
   } catch (e) {
     if (e.name === 'AbortError') {
       console.warn('[DeviceMap] WFS request timeout')
@@ -358,56 +364,39 @@ function matchesFilter(point) {
   return true
 }
 
-function buildPoints(wfsDevices, channels) {
+function buildPoints(wfsChannels, channels) {
   const result = []
-  const devicesWithChannels = new Set()
-  // 同一设备下的多个通道在设备位置附近散开，避免点位重叠
-  const channelIndex = new Map()
 
   for (const channel of channels) {
     const deviceTag = (channel.device_tag || '').toLowerCase()
-    devicesWithChannels.add(deviceTag)
-    const device = wfsDevices.get(deviceTag)
+    const channelTag = (channel.channel_tag || '').toLowerCase()
+    const key = `${deviceTag}|${channelTag}`
+    const wfs = wfsChannels.get(key)
 
-    const baseLng = device ? device.lng : SHANGHAI_LNG
-    const baseLat = device ? device.lat : SHANGHAI_LAT
-    const deviceType = channel.device_type || (device ? device.device_type : 'Other')
-
-    const index = channelIndex.get(deviceTag) || 0
-    channelIndex.set(deviceTag, index + 1)
-    const angle = index * 2.399963
-    const radius = index === 0 ? 0 : 0.0009 * index
-    const lng = baseLng + radius * Math.cos(angle)
-    const lat = baseLat + radius * Math.sin(angle)
+    // 坐标优先级：API 返回的通道坐标 → WFS feature 坐标 → 不上图。
+    // 早期版本围绕设备点位做黄金角偏移，是为解决"一个设备多通道挤在同一点"；
+    // 现在每个通道有独立坐标，偏移只会让点位失真。
+    let lng = null
+    let lat = null
+    if (channel.latitude != null && channel.longitude != null) {
+      lng = Number(channel.longitude)
+      lat = Number(channel.latitude)
+    } else if (wfs) {
+      lng = wfs.lng
+      lat = wfs.lat
+    }
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue
 
     result.push({
       kind: 'camera',
       device_tag: channel.device_tag,
       channel_tag: channel.channel_tag,
       name: channel.name || channel.channel_tag,
-      device_type: deviceType,
-      status: (channel.status || (device ? device.status : 'offline')).toLowerCase(),
-      protocol: device ? device.protocol || '' : '',
+      device_type: channel.device_type || (wfs ? wfs.device_type : 'Other'),
+      status: (channel.status || (wfs ? wfs.status : 'offline')).toLowerCase(),
+      protocol: wfs ? wfs.protocol || '' : '',
       lng,
       lat,
-    })
-  }
-
-  // 没有通道的设备也画在地图上
-  for (const device of wfsDevices.values()) {
-    const deviceTag = (device.device_tag || '').toLowerCase()
-    if (devicesWithChannels.has(deviceTag)) continue
-
-    result.push({
-      kind: 'device',
-      device_tag: device.device_tag,
-      channel_tag: '',
-      name: device.name || device.device_tag,
-      device_type: device.device_type || 'Other',
-      status: device.status,
-      protocol: device.protocol || '',
-      lng: device.lng,
-      lat: device.lat,
     })
   }
 
@@ -600,8 +589,8 @@ function clearClusterMarkers() {
 async function loadPoints() {
   if (!map) return
 
-  const [wfsDevices, channels] = await Promise.all([fetchWfsDevices(), fetchChannels()])
-  points.value = buildPoints(wfsDevices, channels)
+  const [wfsChannels, channels] = await Promise.all([fetchWfsChannels(), fetchChannels()])
+  points.value = buildPoints(wfsChannels, channels)
 
   initCluster()
   updateMapView()

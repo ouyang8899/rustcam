@@ -96,7 +96,7 @@
               地图配置保存到服务器数据库；客户端启动时获取客户端 TMS 地址并应用到电子地图<br/>
               TMS: 地图底图，使用 {x} {y} {z} 占位符<br/>
               缩放层级: 地图与瓦片层允许的最小/最大级别（0–24）<br/>
-              WFS: 设备点位服务，需包含 device_tag、status、latitude、longitude 字段
+              WFS: 通道点位服务，图层名 myw:channels，需包含 device_tag、channel_tag、name、status、latitude、longitude 字段
             </el-text>
           </DataCard>
         </el-col>
