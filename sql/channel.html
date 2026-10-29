@@ -1,21 +1,21 @@
 <mapper>
 <select id="channel_select_by_device_tag">
-SELECT id, device_tag, channel_tag, name, status, device_type, device_type_code, channel_extended, is_default, parent_channel_tag, civil_code, address, ip_address, port, manufacturer, model, parental, extended, created_at, updated_at
+SELECT id, device_tag, channel_tag, name, status, device_type, device_type_code, channel_extended, is_default, parent_channel_tag, civil_code, address, ip_address, port, manufacturer, model, parental, latitude, longitude, extended, created_at, updated_at
 FROM channels WHERE device_tag = #{device_tag} ORDER BY created_at
 </select>
 
 <select id="channel_select_by_device_tag_and_channel_tag">
-SELECT id, device_tag, channel_tag, name, status, device_type, device_type_code, channel_extended, is_default, parent_channel_tag, civil_code, address, ip_address, port, manufacturer, model, parental, extended, created_at, updated_at
+SELECT id, device_tag, channel_tag, name, status, device_type, device_type_code, channel_extended, is_default, parent_channel_tag, civil_code, address, ip_address, port, manufacturer, model, parental, latitude, longitude, extended, created_at, updated_at
 FROM channels WHERE device_tag = #{device_tag} AND channel_tag = #{channel_tag}
 </select>
 
 <select id="channel_select_all">
-SELECT id, device_tag, channel_tag, name, status, device_type, device_type_code, channel_extended, is_default, parent_channel_tag, civil_code, address, ip_address, port, manufacturer, model, parental, extended, created_at, updated_at
+SELECT id, device_tag, channel_tag, name, status, device_type, device_type_code, channel_extended, is_default, parent_channel_tag, civil_code, address, ip_address, port, manufacturer, model, parental, latitude, longitude, extended, created_at, updated_at
 FROM channels ORDER BY created_at DESC
 </select>
 
 <select id="channel_select_paginated">
-SELECT id, device_tag, channel_tag, name, status, device_type, device_type_code, channel_extended, is_default, parent_channel_tag, civil_code, address, ip_address, port, manufacturer, model, parental, extended, created_at, updated_at
+SELECT id, device_tag, channel_tag, name, status, device_type, device_type_code, channel_extended, is_default, parent_channel_tag, civil_code, address, ip_address, port, manufacturer, model, parental, latitude, longitude, extended, created_at, updated_at
 FROM channels
 <where>
 <if test="device_tag != null">device_tag = #{device_tag}</if>
@@ -61,6 +61,8 @@ INSERT INTO channels
 <if test="port != null">, port</if>
 <if test="manufacturer != null">, manufacturer</if>
 <if test="model != null">, model</if>
+<if test="latitude != null">, latitude</if>
+<if test="longitude != null">, longitude</if>
 <if test="parental != null">, parental</if>
 <if test="extended != null">, extended</if>
 <if test="created_at != null">, created_at</if>
@@ -83,6 +85,8 @@ VALUES
 <if test="port != null">, #{port}</if>
 <if test="manufacturer != null">, #{manufacturer}</if>
 <if test="model != null">, #{model}</if>
+<if test="latitude != null">, #{latitude}</if>
+<if test="longitude != null">, #{longitude}</if>
 <if test="parental != null">, #{parental}</if>
 <if test="extended != null">, #{extended}</if>
 <if test="created_at != null">, #{created_at}</if>
@@ -110,6 +114,12 @@ UPDATE channels
 <if test="extended != null">extended = #{extended},</if>
 <if test="updated_at != null">updated_at = #{updated_at},</if>
 </set>
+WHERE device_tag = #{device_tag} AND channel_tag = #{channel_tag}
+</update>
+
+<update id="channel_update_position">
+UPDATE channels
+SET latitude = #{latitude}, longitude = #{longitude}, updated_at = #{updated_at}
 WHERE device_tag = #{device_tag} AND channel_tag = #{channel_tag}
 </update>
 

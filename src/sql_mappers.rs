@@ -67,6 +67,8 @@ pub struct ChannelRow {
     pub manufacturer: Option<String>,
     pub model: Option<String>,
     pub parental: Option<i32>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
     pub extended: Option<serde_json::Value>,
     pub created_at: RbatisDateTime,
     pub updated_at: Option<RbatisDateTime>,
@@ -1657,6 +1659,8 @@ impl TryFrom<ChannelRow> for Channel {
             manufacturer: row.manufacturer,
             model: row.model,
             parental: row.parental.unwrap_or(0),
+            latitude: row.latitude,
+            longitude: row.longitude,
             extended: row.extended,
             created_at,
             updated_at,
@@ -1718,6 +1722,8 @@ pub async fn channel_insert(
     port: Option<i32>,
     manufacturer: Option<&str>,
     model: Option<&str>,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
     parental: Option<i32>,
     extended: Option<serde_json::Value>,
     created_at: Option<RbatisDateTime>,
@@ -1744,6 +1750,16 @@ pub async fn channel_update(
     model: Option<&str>,
     parental: Option<i32>,
     extended: Option<serde_json::Value>,
+    updated_at: Option<RbatisDateTime>,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+#[html_sql("sql/channel.html")]
+pub async fn channel_update_position(
+    rb: &dyn rbatis::Executor,
+    device_tag: &str,
+    channel_tag: &str,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
     updated_at: Option<RbatisDateTime>,
 ) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
 

@@ -92,6 +92,16 @@ impl DbRepository {
 
     async fn ensure_schema(&self) {
         let statements = [
+            // 通道侧地理结构：坐标下沉到通道，geom 由触发器维护。
+            // CREATE EXTENSION 必须排在 ADD COLUMN geom 之前，否则几何类型不存在。
+            "CREATE EXTENSION IF NOT EXISTS postgis WITH SCHEMA public",
+            "ALTER TABLE channels ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION",
+            "ALTER TABLE channels ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION",
+            "ALTER TABLE channels ADD COLUMN IF NOT EXISTS geom geometry(Point,4326)",
+            "CREATE OR REPLACE FUNCTION channels_sync_geom() RETURNS trigger AS $$ BEGIN IF NEW.latitude IS NOT NULL AND NEW.longitude IS NOT NULL THEN NEW.geom := ST_SetSRID(ST_MakePoint(NEW.longitude, NEW.latitude), 4326); ELSE NEW.geom := NULL; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql",
+            "DROP TRIGGER IF EXISTS trg_channels_sync_geom ON channels",
+            "CREATE TRIGGER trg_channels_sync_geom BEFORE INSERT OR UPDATE OF latitude, longitude ON channels FOR EACH ROW EXECUTE FUNCTION channels_sync_geom()",
+            "CREATE INDEX IF NOT EXISTS idx_channels_geom ON channels USING GIST (geom)",
             "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ",
             "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS max_duration_secs INTEGER",
@@ -650,6 +660,8 @@ impl DbRepository {
             Some(channel.port as i32),
             channel.manufacturer.as_deref(),
             channel.model.as_deref(),
+            channel.latitude,
+            channel.longitude,
             Some(channel.parental),
             Some(extended_json),
             Some(RbatisDateTime::from_timestamp_millis(channel.created_at.timestamp_millis())),
