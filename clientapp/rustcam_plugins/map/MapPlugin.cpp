@@ -331,12 +331,9 @@ void MapPlugin::onDataManagerLoaded() {
 
 void MapPlugin::loadDeviceMarkers()
 {
-    const QJsonArray devices = DataManager::instance()->devicesData();
     const QJsonArray channels = DataManager::instance()->channelsData();
 
-    // 设备 -> 通道列表；通道对象按 device|channel 索引
-    QMap<QString, QList<QString>> deviceChannels;
-    QMap<QString, QJsonObject> channelObjects;
+    int markerCount = 0;
     for (const QJsonValue& value : channels) {
         const QJsonObject channel = value.toObject();
         const QString deviceTag = channel.value("device_tag").toString();
@@ -344,62 +341,30 @@ void MapPlugin::loadDeviceMarkers()
         if (deviceTag.isEmpty() || channelTag.isEmpty()) {
             continue;
         }
-        deviceChannels[deviceTag].append(channelTag);
-        channelObjects.insert(deviceTag + "|" + channelTag, channel);
+
+        // 坐标挂在通道上：字段缺失（JSON 里没有该键）就不上图。
+        // Channel 的 latitude / longitude 带 skip_serializing_if，
+        // 所以 None 的通道这两个键根本不出现，用 isNull() 判定即可，
+        // 这样 (0, 0) 这种合法坐标不会被误判成"没设置"。
+        if (channel.value("latitude").isNull() || channel.value("longitude").isNull()) {
+            continue;
+        }
+        const double lat = channel.value("latitude").toDouble();
+        const double lon = channel.value("longitude").toDouble();
+
+        MapMarkerData marker;
+        marker.id = deviceTag + "|" + channelTag;
+        marker.name = channel.value("name").toString(channelTag);
+        marker.lat = lat;
+        marker.lon = lon;
+        marker.type = channel.value("device_type").toString();
+        marker.status = channel.value("status").toString();
+        marker.online = marker.status.compare(QStringLiteral("Online"), Qt::CaseInsensitive) == 0;
+        addMarker(marker);
+        ++markerCount;
     }
 
-    for (const QJsonValue& value : devices) {
-        const QJsonObject device = value.toObject();
-        const QString deviceTag = device.value("device_tag").toString();
-        if (deviceTag.isEmpty()) {
-            continue;
-        }
-
-        const double lat = device.value("latitude").toDouble();
-        const double lon = device.value("longitude").toDouble();
-        if (lat == 0.0 && lon == 0.0) {
-            continue;
-        }
-
-        const QList<QString> channelTags = deviceChannels.value(deviceTag);
-        if (channelTags.isEmpty()) {
-            MapMarkerData marker;
-            marker.id = deviceTag + "|" + deviceTag;
-            marker.name = device.value("name").toString(deviceTag);
-            marker.lat = lat;
-            marker.lon = lon;
-            marker.type = device.value("device_type").toString();
-            marker.status = device.value("status").toString();
-            marker.online = marker.status.compare(QStringLiteral("Online"), Qt::CaseInsensitive) == 0;
-            addMarker(marker);
-            continue;
-        }
-
-        const int count = channelTags.size();
-        for (int index = 0; index < count; ++index) {
-            const QString channelTag = channelTags.at(index);
-            const QJsonObject channel = channelObjects.value(deviceTag + "|" + channelTag);
-
-            // 同一设备的多通道做轻微错位，避免完全重叠
-            const double offsetLon = count > 1
-                ? 0.00025 * (index - (count - 1) / 2.0)
-                : 0.0;
-
-            MapMarkerData marker;
-            marker.id = deviceTag + "|" + channelTag;
-            marker.name = channel.value("name").toString(deviceTag);
-            marker.lat = lat;
-            marker.lon = lon + offsetLon;
-            marker.type = channel.value("device_type").toString(
-                device.value("device_type").toString());
-            marker.status = channel.value("status").toString(
-                device.value("status").toString());
-            marker.online = marker.status.compare(QStringLiteral("Online"), Qt::CaseInsensitive) == 0;
-            addMarker(marker);
-        }
-    }
-
-    LOG_INFO("MapPlugin", QString("Loaded %1 map markers").arg(m_markers.size()));
+    LOG_INFO("MapPlugin", QString("Loaded %1 map markers").arg(markerCount));
 }
 
 void MapPlugin::onMapReady()

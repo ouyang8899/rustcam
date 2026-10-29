@@ -226,7 +226,7 @@ function statusColor(status) {
   return STATUS_COLORS[(status || 'offline').toLowerCase()] || STATUS_COLORS.offline
 }
 
-// WFS: 通道点位图层 myw:channels（开发环境走后端代理，正式部署由 nginx 代理）
+// WFS: 通道点位图层 rustcam:channels（开发环境走后端代理，正式部署由 nginx 代理）
 async function fetchWfsChannels() {
   const wfsUrl = settingsStore.mapWfsUrl
   if (!wfsUrl) {
