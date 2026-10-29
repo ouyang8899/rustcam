@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::api::response::ApiResponse;
 use crate::api::state::FullState;
 
-use crate::domain::{ Channel, DeviceStatus, Protocol };
+use crate::domain::{ Channel, CreateChannelRequest, DeviceStatus, Protocol, UpdateChannelRequest };
 use crate::error::AppError;
 use crate::protocol::adapter_manager;
 use crate::api::http::handlers::device_handler::ChannelWithMediaServer;
@@ -74,6 +74,42 @@ pub async fn get_channel_handler(
         .get_channel(&device_tag, &channel_tag)
         .await?
         .ok_or_else(|| AppError::NotFound(format!("Channel {}/{} not found", device_tag, channel_tag)))?;
+    Ok(Json(ApiResponse::success(channel)))
+}
+
+/// 更新通道。
+///
+/// 直接复用 domain 层的 `UpdateChannelRequest`——它已经带好了
+/// `double_option` 的反序列化配置，能区分"字段缺省"与"显式 null"。
+pub async fn update_channel_handler(
+    State(state): State<Arc<FullState>>,
+    Path((device_tag, channel_tag)): Path<(String, String)>,
+    Json(payload): Json<UpdateChannelRequest>,
+) -> Result<Json<ApiResponse<Channel>>, AppError> {
+    let channel = state
+        .app
+        .registry
+        .channel_service
+        .update_channel_info(&device_tag, &channel_tag, payload)
+        .await?;
+    Ok(Json(ApiResponse::success(channel)))
+}
+
+pub async fn create_channel_handler(
+    State(state): State<Arc<FullState>>,
+    Json(payload): Json<CreateChannelRequest>,
+) -> Result<Json<ApiResponse<Channel>>, AppError> {
+    if payload.device_tag.trim().is_empty() || payload.channel_tag.trim().is_empty() {
+        return Err(AppError::BadRequest(
+            "device_tag and channel_tag are required".to_string(),
+        ));
+    }
+    let channel = state
+        .app
+        .registry
+        .channel_service
+        .create_channel_info(payload)
+        .await?;
     Ok(Json(ApiResponse::success(channel)))
 }
 

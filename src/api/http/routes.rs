@@ -73,7 +73,9 @@ fn protected_routes(state: Arc<FullState>) -> Router {
         .route("/api/v1/devices/{id}/channels", get(channel_handler::get_device_channels_handler))
 
         .route("/api/v1/channels", get(channel_handler::list_channels_handler))
+        .route("/api/v1/channels", post(channel_handler::create_channel_handler))
         .route("/api/v1/channels/{device_tag}/{channel_tag}", get(channel_handler::get_channel_handler))
+        .route("/api/v1/channels/{device_tag}/{channel_tag}", put(channel_handler::update_channel_handler))
         .route("/api/v1/channels/{device_tag}/{channel_tag}/play-links", get(channel_handler::get_channel_play_links_handler))
         .route("/api/v1/channels/{device_tag}/{channel_tag}/status", get(channel_handler::get_channel_status_handler))
         .route("/api/v1/channels/{device_tag}/{channel_tag}/start", post(channel_handler::start_channel_stream_handler))

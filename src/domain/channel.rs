@@ -44,9 +44,9 @@ pub struct Channel {
 #[serde(default)]
     pub parental: i32,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
+    // 不加 skip_serializing_if：坐标为 None 时也要显式输出 null，
+    // 消费方不必区分"字段缺失"和"未设置"。
     pub latitude: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub longitude: Option<f64>,
 
     #[serde(default)]

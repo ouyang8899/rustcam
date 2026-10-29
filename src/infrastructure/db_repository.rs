@@ -35,7 +35,7 @@ use crate::sql_mappers::{
     alarm_count_by_device, alarm_count_all, alarm_mark_processed,
     channel_insert, channel_update, channel_select_all, channel_select_paginated, channel_count,
     channel_select_by_device_tag, channel_select_by_device_tag_and_channel_tag,
-    channel_delete_by_device_tag_and_channel_tag,
+    channel_delete_by_device_tag_and_channel_tag, channel_update_position,
     ServerRow, GroupRow, SessionRow,
     layout_select_by_id, layout_select_all, layout_select_default,
     layout_insert, layout_update, layout_set_default, layout_delete,
@@ -716,6 +716,52 @@ impl DbRepository {
         let cache = self.channels_cache.clone();
         tokio::spawn(async move {
             cache.insert(key, channel_clone);
+        });
+
+        Ok(())
+    }
+
+    /// 只更新通道坐标。
+    ///
+    /// 与 `update_channel` 分开是有意为之：`channel_update` 的 `<if test="x != null">`
+    /// 守卫无法把字段写成 NULL，而"清空坐标"必须写 NULL。
+    /// 这条语句无条件写两列，且不涉及任何描述性字段，
+    /// 因此 GB28181 / ONVIF 注册流程调用 `update_channel` 时不会碰到坐标。
+    pub async fn update_channel_position(
+        &self,
+        device_tag: &str,
+        channel_tag: &str,
+        latitude: Option<f64>,
+        longitude: Option<f64>,
+    ) -> Result<()> {
+        let device_tag = device_tag.to_lowercase();
+        let channel_tag = channel_tag.to_lowercase();
+
+        channel_update_position(
+            &self.rb,
+            &device_tag,
+            &channel_tag,
+            latitude,
+            longitude,
+            Some(RbatisDateTime::from_timestamp_millis(chrono::Utc::now().timestamp_millis())),
+        )
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        // 刷新缓存里的通道对象，保证后续读取拿到新坐标。
+        // channels_cache 是 DashMap<String, Channel>，get() 返回的是引用守卫，
+        // 必须先 clone 出来再 insert——持有守卫时写同一分片会死锁。
+        let key = format_cache_key(&device_tag, &channel_tag);
+        let cache = self.channels_cache.clone();
+        let lat = latitude;
+        let lng = longitude;
+        tokio::spawn(async move {
+            let existing = cache.get(&key).map(|c| c.clone());
+            if let Some(mut channel) = existing {
+                channel.latitude = lat;
+                channel.longitude = lng;
+                cache.insert(key, channel);
+            }
         });
 
         Ok(())

@@ -10,6 +10,19 @@ export async function getChannel(deviceTag, channelTag) {
   return res.data.data
 }
 
+export async function updateChannel(deviceTag, channelTag, payload) {
+  const res = await request.put(
+    `/channels/${encodeURIComponent(deviceTag)}/${encodeURIComponent(channelTag)}`,
+    payload,
+  )
+  return res.data.data
+}
+
+export async function createChannel(payload) {
+  const res = await request.post('/channels', payload)
+  return res.data.data
+}
+
 export async function getChannelPlayLinks(deviceTag, channelTag, params) {
   const res = await request.get(`/channels/${encodeURIComponent(deviceTag)}/${encodeURIComponent(channelTag)}/play-links`, { params })
   return res.data.data
