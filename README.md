@@ -2,6 +2,16 @@
 
 现代化视频监控网关与信令控制平台，基于 Rust 后端 + Vue 前端构建，支持多协议设备接入、实时视频播放、录像回放、云台控制等功能。
 
+## 仓库地址
+
+| 平台 | 地址 |
+|------|------|
+| Gitee | https://gitee.com/ouliuying/rustcam |
+| GitHub | https://github.com/ouyang8899/rustcam |
+
+- 官网：https://www.rustcam.com
+- 联系邮箱：ouyang.8899@hotmail.com
+
 ## 功能特性
 
 | 类别 | 功能 |

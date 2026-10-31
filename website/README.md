@@ -2,6 +2,16 @@
 
 RustCam-Media 的官方推广站点，基于 Nuxt 4 静态生成，中英双语。
 
+## 仓库地址
+
+| 平台 | 地址 |
+|---|---|
+| Gitee | https://gitee.com/ouliuying/rustcam |
+| GitHub | https://github.com/ouyang8899/rustcam |
+
+- 官网：https://www.rustcam.com
+- 联系邮箱：ouyang.8899@hotmail.com
+
 ## 技术栈
 
 | 关注点 | 选型 |

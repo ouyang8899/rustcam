@@ -5,8 +5,6 @@
 #include "manager/media/media_result.h"
 #include "manager/media/media_player_config.h"
 
-
-
 #include <string>
 #include <memory>
 #include <functional>

@@ -82,3 +82,6 @@ rustcam-plan.md
 /webTest/
 /clientapp/build-test/
 /clientapp/tests
+
+# 本地 git 辅助脚本（不纳入版本库）
+/squash-unpushed.bat
