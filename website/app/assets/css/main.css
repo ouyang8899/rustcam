@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink-950: #05080E;
+  --color-ink-900: #0A1018;
+  --color-ink-800: #121A26;
+  --color-ink-700: #1C2634;
+  --color-accent: #22D3EE;
+  --color-accent-blue: #3B82F6;
+  --color-accent-amber: #F59E0B;
+  --color-muted: #8A9BAE;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", "Hiragino Sans GB", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-ink-950);
+    color: #E6EDF5;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+    color: #fff;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
+
+@utility bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(148, 163, 184, 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.06) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+@utility panel {
+  background-color: color-mix(in srgb, var(--color-ink-900) 85%, transparent);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1rem;
+}
+
+@utility text-gradient {
+  background-image: linear-gradient(
+    100deg,
+    var(--color-accent) 0%,
+    #7DD3FC 40%,
+    var(--color-accent-blue) 100%
+  );
+  background-clip: text;
+  color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "rustcam-website",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt generate",
+    "preview": "nuxt preview",
+    "images": "node scripts/prepare-images.mjs",
+    "verify": "node scripts/verify-build.mjs"
+  },
+  "dependencies": {
+    "@nuxtjs/i18n": "^10.6.0",
+    "@nuxtjs/robots": "^7.0.2",
+    "@nuxtjs/sitemap": "^9.1.0",
+    "nuxt": "^4.6.3",
+    "vue": "^3.5.0",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "esbuild": "^0.28.2",
+    "sharp": "^0.35.5",
+    "tailwindcss": "^4.3.3"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "esbuild@0.25.12": true
+  }
+}

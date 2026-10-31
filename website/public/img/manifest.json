@@ -1,0 +1,52 @@
+{
+  "console-overview.webp": {
+    "width": 1920,
+    "height": 1082,
+    "source": "screenshot/2026-10-29/系统概览.png"
+  },
+  "console-devices.webp": {
+    "width": 1920,
+    "height": 1082,
+    "source": "screenshot/2026-10-29/设备管理-设备列表.png"
+  },
+  "console-channels.webp": {
+    "width": 1920,
+    "height": 1082,
+    "source": "screenshot/2026-10-29/设备管理-通道列表.png"
+  },
+  "console-map-points.webp": {
+    "width": 1920,
+    "height": 1082,
+    "source": "screenshot/2026-10-29/设备列表-电子地图2.png"
+  },
+  "console-tvwall.webp": {
+    "width": 1920,
+    "height": 1082,
+    "source": "screenshot/2026-10-29/监控墙-监控墙.png"
+  },
+  "console-playback.webp": {
+    "width": 1920,
+    "height": 1082,
+    "source": "screenshot/2026-10-29/录像管理-录像回放.png"
+  },
+  "desktop-live.webp": {
+    "width": 1920,
+    "height": 1041,
+    "source": "screenshot/2026-10-29-destop/客户端-实时预览.png"
+  },
+  "desktop-map.webp": {
+    "width": 1920,
+    "height": 1041,
+    "source": "screenshot/2026-10-29-destop/客户端-电子地图.png"
+  },
+  "desktop-playback.webp": {
+    "width": 1920,
+    "height": 1041,
+    "source": "screenshot/2026-10-29-destop/客户端-录像回放.png"
+  },
+  "architecture.webp": {
+    "width": 1920,
+    "height": 2145,
+    "source": "public/architecture.png"
+  }
+}
