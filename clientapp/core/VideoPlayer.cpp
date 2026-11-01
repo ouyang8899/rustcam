@@ -107,7 +107,10 @@ void VideoPlayer::play(const QString& url) {
     BridgePlayer::NativeWindowHandle handle(reinterpret_cast<HWND>(winId()));
     LOG_INFO("VideoPlayer", QString("play: add_player(render_target_id=%1, player_id=0, hwnd=%2)")
         .arg(m_targetId).arg((quint64)handle.get_int_handle()));
-    m_playerId = BridgePlayer::PlayerManager::instance().add_player(m_targetId, 0, handle);
+    BridgePlayer::PlayerConfig config;
+    config.host_window = handle;
+    config.render_target_id = handle.get_int_handle();
+    m_playerId = BridgePlayer::PlayerManager::instance().add_player(0, config);
     LOG_INFO("VideoPlayer", QString("play: add_player returned playerId=%1").arg(m_playerId));
 
     m_player = BridgePlayer::PlayerManager::instance().get_player(m_playerId);

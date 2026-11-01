@@ -423,4 +423,18 @@ struct MediaInfo {
     std::string artist;
     std::string album;
 };
+typedef struct PlayerConfig{
+    uint64_t render_target_id{ 0 };
+    NativeWindowHandle host_window{ nullptr };
+    // 录像播放配置
+    struct MediaPlayback {
+        double speed{ 1.0 };
+        double volume{ 1.0 };
+        bool muted{ false };
+        int sync_mode{ 0 };  // 现在 MediaSyncMode 已定义
+        int64_t start_position_ms{ 0 };
+        bool auto_play{ true };
+        bool loop{ false };
+    } playback;
+}PlayerConfig;
 }

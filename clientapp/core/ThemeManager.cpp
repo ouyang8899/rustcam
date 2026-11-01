@@ -11,7 +11,6 @@
 #include <QPixmapCache>
 #include <QWidget>
 #include <QtWidgets>
-#define TEST_PATH 1
 namespace rustcam {
 
 ThemeManager::ThemeManager(QObject* parent)
@@ -32,12 +31,9 @@ ThemeManager* ThemeManager::instance()
 
 void ThemeManager::initThemePaths()
 {
-#ifdef TEST_PATH
-    m_themeDir = "D:/RustCam-Media/clientapp/resources/qss";
-#else
-    // The build copies the QSS files to <bin>/resources/qss while the
-    // executable lives in <bin>/<Config>/, so look next to the executable
-    // first and then one level up.
+    // The build copies the QSS files next to the executable and into
+    // <bin>/resources/qss, so look next to the executable first and then
+    // one level up.
     const QString basePath = qApp->applicationDirPath();
     const QStringList candidates = {
         basePath + "/resources/qss",
@@ -51,7 +47,6 @@ void ThemeManager::initThemePaths()
             break;
         }
     }
-#endif
 
     LOG_INFO("ThemeManager", QString("Theme dir: %1").arg(m_themeDir));
 

@@ -82,9 +82,15 @@ set_target_properties(bridge_player PROPERTIES
 include(${CMAKE_SOURCE_DIR}/cmake/CEF.cmake)
 
 enable_testing()
-add_subdirectory(tests/cef_smoke)
-add_subdirectory(tests/bridge_protocol_test)
-add_subdirectory(tests/map_page_test)
+# 测试目录可能被 .gitignore 排除（本地存在但不在版本库里），
+# 只在目录确实存在时才加入构建，保证干净的检出也能 configure。
+foreach(_test_dir cef_smoke bridge_protocol_test map_page_test timeline_test)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/${_test_dir}/CMakeLists.txt")
+        add_subdirectory(tests/${_test_dir})
+    else()
+        message(STATUS "Skip test dir not present: tests/${_test_dir}")
+    endif()
+endforeach()
 
 add_subdirectory(common)
 add_subdirectory(core)

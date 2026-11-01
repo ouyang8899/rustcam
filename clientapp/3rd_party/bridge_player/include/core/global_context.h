@@ -13,15 +13,15 @@ namespace BridgePlayer{
     public:
         static GlobalContext& instance();
     public:
-        void install();
+        void install(GlobalContextConfig::Ptr config);
         void build_render_target(const std::vector<RenderTargetData>& render_target_vec, int max_queue_size);
         void uninstall();
         void set_rtsp_transport_type(const std::string& transport);
-        PlayerConfig::Ptr get_player_config();
-        void set_player_config(PlayerConfig::Ptr config);
+        GlobalContextConfig::Ptr get_config();
+ /*       void set_config(GlobalContextConfig::Ptr config);*/
         const std::string& get_rtsp_transport_type();
     protected:
         std::string rtsp_transport_{ "UDP" };
-        PlayerConfig::Ptr player_config_;
+        GlobalContextConfig::Ptr config_;
     };
 }

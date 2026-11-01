@@ -135,8 +135,8 @@ int main(int argc, char* argv[])
                                         BridgePlayer::Logger::Mode::ASYNC, true);
     APP_LOG_STREAM(BridgePlayer::LogLevel::DEBUG) << "init bridge player logger!";
     curl_global_init(CURL_GLOBAL_DEFAULT);
-
-    BridgePlayer::GlobalContext::instance().install();
+    BridgePlayer::GlobalContextConfig::Ptr config = std::make_shared<BridgePlayer::GlobalContextConfig>();;
+    BridgePlayer::GlobalContext::instance().install(config);
 
     app.installEventFilter(App::instance());
 

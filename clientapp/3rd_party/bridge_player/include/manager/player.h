@@ -15,6 +15,7 @@ extern "C"
 #include <libavcodec/codec_id.h>
 #include "core/player_code.h"
 }
+#include"manager/player_types.h"
 #include "manager/player_base.h"
 
 namespace asio = boost::asio;
@@ -43,8 +44,7 @@ namespace BridgePlayer
         using WPtr = WeakPtr<Player>;
     protected:
         explicit Player(const uint64_t &id,
-            const uint64_t& render_target_id,
-            NativeWindowHandle handle= nullptr);
+           const PlayerConfig& config);
        Player() = delete;
        Player(const Player& other) = delete;
        Player(Player&& other) = delete;

@@ -81,7 +81,11 @@ rustcam-plan.md
 /examples/
 /webTest/
 /clientapp/build-test/
-/clientapp/tests
+# 客户端测试：默认不跟踪本地那几套 CEF 测试，但时间轴单元测试要入库
+/clientapp/tests/*
+!/clientapp/tests/timeline_test/
 
 # 本地 git 辅助脚本（不纳入版本库）
 /squash-unpushed.bat
+/clientapp/tests
+/clientapp/logs

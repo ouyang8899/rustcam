@@ -4,6 +4,7 @@
 #include "RecordingFileListWidget.h"
 #include "BookmarkListWidget.h"
 #include "ReplayPlayerContainer.h"
+#include "ThemeManager.h"
 #include "common/Logger.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -378,10 +379,11 @@ void PlaybackChannel::loadAlarms(int64_t startMs, int64_t endMs, quint64 seq) {
             }
             QList<TimelineEvent> events;
             events.reserve(alarms.size());
+            const QColor alarmColor = ThemeManager::instance()->getColor("error", QColor("#ff6b6b"));
             for (const AlarmEvent& alarm : alarms) {
                 TimelineEvent event;
                 event.timeMs = alarm.timeMs;
-                event.color = QColor("#ff6b6b");
+                event.color = alarmColor;
                 event.label = alarm.alarmType.isEmpty() ? tr("报警") : alarm.alarmType;
                 events.append(event);
             }
@@ -472,10 +474,11 @@ void PlaybackChannel::refreshBookmarks() {
     m_bookmarkList->setBookmarks(visible);
 
     QList<TimelineEvent> marks;
+    const QColor bookmarkColor = ThemeManager::instance()->getColor("warning", QColor("#ffd166"));
     for (const Bookmark& b : visible) {
         TimelineEvent event;
         event.timeMs = b.timeMs;
-        event.color = QColor("#ffd166");
+        event.color = bookmarkColor;
         event.label = b.note;
         marks.append(event);
     }
@@ -520,14 +523,22 @@ void PlaybackChannel::onPeriodClicked(const RecordingPeriod& period) {
 }
 
 void PlaybackChannel::onPlayheadReleased(const QString& windowId, int64_t timeMs) {
-    Q_UNUSED(windowId)
-    seekTo(timeMs);
+    // 拖的是哪一路播放头，就只定位那个窗口
+    if (m_container) {
+        m_container->seekCellByUid(windowId, timeMs);
+    }
+    setPlaybackPosition(timeMs);
 }
 
-/// 定位到某个绝对时间：目标唯一，直接调用播放器容器
+/// 定位到某个绝对时间：优先只作用于当前选中的窗口（它正显示本通道时）
 void PlaybackChannel::seekTo(int64_t timeMs) {
     if (m_container) {
-        m_container->seekChannel(m_key, timeMs);
+        const QString cellId = m_container->selectedCellId();
+        if (!cellId.isEmpty() && m_container->channelOfCell(cellId) == m_key) {
+            m_container->seekCell(cellId, timeMs);
+        } else {
+            m_container->seekChannel(m_key, timeMs);
+        }
     }
     setPlaybackPosition(timeMs);
 }

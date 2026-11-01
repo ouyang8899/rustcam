@@ -64,7 +64,7 @@ namespace BridgePlayer{
         using MessageSender = std::function<void(const std::string& message)>;
         using PlayStatusCallback = std::function<void(const PlayerBase::WPtr& player, PlayCode code)>;
     public:
-        PlayerBase(const std::uint64_t& id, const uint64_t render_target_id, NativeWindowHandle handler);
+        PlayerBase(const std::uint64_t& id, const PlayerConfig& config);
         virtual ~PlayerBase();
  /*       template <typename T> SharedPtr<T> child_shared_from_this() {
             return std::static_pointer_cast<T>(std::enable_shared_from_this<T>::shared_from_this());

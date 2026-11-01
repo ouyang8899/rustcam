@@ -76,8 +76,9 @@ private:
                                    const QString& displayName);
     /// 把通道绑到窗口并激活（cellId 为空时用当前选中的窗口）
     void activateChannel(const QString& key, const QString& cellId);
-    /// 用通道的录像文件装载并播放
-    void playChannelFrom(const QString& key, int64_t startTimeMs);
+    /// 用通道的录像文件装载并播放；targetCellId 非空时只作用于该窗口
+    void playChannelFrom(const QString& key, int64_t startTimeMs,
+                         const QString& targetCellId = QString());
     /// 把通道显示名称写到格子里的播放器（截图文件名用）
     void applyChannelNameToCell(PlaybackChannel* channel, const QString& cellId);
     void updateTimeEdit(int64_t timeMs);
@@ -97,6 +98,8 @@ private:
     /// 当前目标回放窗口（双击录像文件播到这里）
     QString m_targetCellId;
     QLabel* m_targetLabel = nullptr;
+    /// 程序在同步时间输入框，忽略它反过来发出的定位请求
+    bool m_syncingTimeEdit = false;
     /// 工具栏的当前时间显示
     QLabel* m_currentTimeLabel = nullptr;
     /// 工具栏的时间输入框

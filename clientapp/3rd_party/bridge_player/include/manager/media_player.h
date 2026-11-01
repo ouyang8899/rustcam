@@ -3,7 +3,7 @@
 #include "manager/player_types.h"
 #include "manager/media/media_error.h"
 #include "manager/media/media_result.h"
-#include "manager/media/media_player_config.h"
+//#include "manager/media/media_player_config.h"
 
 #include <string>
 #include <memory>
@@ -42,8 +42,7 @@ namespace BridgePlayer {
         using WPtr = WeakPtr<MediaPlayer>;
     protected:
         explicit MediaPlayer(const uint64_t& id,
-            const uint64_t& render_target_id,
-            NativeWindowHandle handle = nullptr);
+           const PlayerConfig& config);
         MediaPlayer() = delete;
         MediaPlayer(const MediaPlayer& other) = delete;
         MediaPlayer(MediaPlayer&& other) = delete;
@@ -52,7 +51,7 @@ namespace BridgePlayer {
             return std::static_pointer_cast<MediaPlayer>(PlayerBase::shared_from_this());
         }
         ~MediaPlayer();
-        Result<void> initialize(const MediaPlayerConfig& config = MediaPlayerConfig());
+        //Result<void> initialize(const MediaPlayerConfig& config = MediaPlayerConfig());
     public:
         virtual bool start(const std::string& url) override;
         virtual void in_context(Task task) override;
@@ -63,7 +62,7 @@ namespace BridgePlayer {
         const Stats& get_stats()  override;
      //   void capture_video_image(const std::string& fullPath) override;
     public:
-        Result<bool> play(const std::string& url, int64_t position_ms = 0);
+        //Result<bool> play(const std::string& url, int64_t position_ms = 0);
         Result<bool> is_ready();
         Result<int64_t> position_ms();
         Result<void> seek_when_ready(int64_t position_ms);
@@ -77,8 +76,8 @@ namespace BridgePlayer {
         void set_mute(bool mute);
         void set_sync_mode(int mode);
 
-        Result<void> select_video_track(int index);
-        Result<void> select_audio_track(int index);
+        //Result<void> select_video_track(int index);
+        //Result<void> select_audio_track(int index);
 
         boost::optional<MediaInfo> get_media_info() const;
         bool can_seek() const;
@@ -89,8 +88,11 @@ namespace BridgePlayer {
         //void set_video_frame_callback(MediaFrameCallback callback);
         //void set_audio_frame_callback(MediaFrameCallback callback);
         const std::unique_ptr<SDLAudioPlayer>& get_audio_player() { return this->audio_player_; };
-    public:
+    protected:
+        void initialize();
+    protected:
         MediaEventCallback media_event_callback_{ nullptr };
+
     private:
         class Impl;
         std::unique_ptr<Impl> impl_;

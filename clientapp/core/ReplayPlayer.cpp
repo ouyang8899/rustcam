@@ -135,9 +135,11 @@ bool ReplayPlayer::createBridgePlayer() {
     const int outputHeight = height() > 0 ? height() : 720;
 
     BridgePlayer::NativeWindowHandle handle(reinterpret_cast<HWND>(winId()));
-
+    BridgePlayer::PlayerConfig config;
+    config.host_window = handle;
+    config.render_target_id = handle.get_int_handle();
     const uint64_t playerId =
-        BridgePlayer::PlayerManager::instance().add_media_player(m_targetId, 0, handle);
+        BridgePlayer::PlayerManager::instance().add_media_player(0, config);
     m_playerId.store(playerId);
     m_player = std::static_pointer_cast<BridgePlayer::MediaPlayer>(
         BridgePlayer::PlayerManager::instance().get_player(playerId));
@@ -212,7 +214,8 @@ void ReplayPlayer::startBridgePlayback() {
     QSize size = this->size();
     BridgePlayer::PlayerManager::instance().set_player_output_size(playerId, size.width(), size.height());
     BridgePlayer::MediaPlayer* mp = dynamic_cast<BridgePlayer::MediaPlayer*>(player.get());
-    if (!mp->play(m_url.toUtf8().toStdString(),0)) {
+
+    if (!BridgePlayer::PlayerManager::instance().play(playerId,m_url.toUtf8().toStdString())) {
         reportError("startBridgePlayback: play rejected by player");
         return;
     }
@@ -267,11 +270,14 @@ void ReplayPlayer::play() {
         }
     } else if (m_state == State::Completed && !m_url.isEmpty()) {
         setState(State::Loading);
-        auto result = m_player->play(m_url.toStdString(), 0);
-        if (result.has_error()) {
-            reportError(QString("play: restart failed: %1")
-                            .arg(QString::fromStdString(result.error().full_message())));
-        } else if (!result.value()) {
+        BridgePlayer::PlayerConfig config;
+        auto pid =  BridgePlayer::PlayerManager::instance().add_media_player(0, config);
+        this->m_playerId.store(pid);
+        auto result = BridgePlayer::PlayerManager::instance().play(pid, m_url.toUtf8().toStdString());
+        if (result) {
+      /*      reportError(QString("play: restart failed: %1")
+                            .arg(QString::number(m_playerId.load())));*/
+        } else if (!result) {
             reportError("play: restart rejected by player");
         }
     }
@@ -520,27 +526,27 @@ void ReplayPlayer::pollPosition() {
         return;
     }
     if (m_durationMs > 0) {
-        if (currentMs >= m_durationMs) {
+        // 末尾留一点容差：桥接层往往停在 duration 前几毫秒
+        if (currentMs >= m_durationMs - 200) {
             handlePlaybackFinished();
             return;
         }
-    } else {
-        // 时长未知时用「播放中位置连续多次不前进」判断已播完
-        if (m_state == State::Playing) {
-            if (currentMs == m_lastPositionMs && m_lastPositionMs > 0) {
-                ++m_stallTicks;
-            } else {
-                m_stallTicks = 0;
-                m_lastPositionMs = currentMs;
-            }
-            if (m_stallTicks >= 15) {
-                handlePlaybackFinished();
-                return;
-            }
+    }
+    // 位置连续多次不前进也视为播完：时长未知，或已知时长但位置卡在末尾之前
+    if (m_state == State::Playing) {
+        if (currentMs == m_lastPositionMs && m_lastPositionMs > 0) {
+            ++m_stallTicks;
         } else {
             m_stallTicks = 0;
             m_lastPositionMs = currentMs;
         }
+        if (m_stallTicks >= 15) {
+            handlePlaybackFinished();
+            return;
+        }
+    } else {
+        m_stallTicks = 0;
+        m_lastPositionMs = currentMs;
     }
     if (currentMs == m_currentTimeMs) {
         return;

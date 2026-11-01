@@ -52,14 +52,20 @@ public:
     PlaybackGroup* channelGroup(const QString& channelKey);
 
     // ── 通道的片段装载与播放 ───────────────────────────────────────
+    /// targetCellId 为空：作用于该通道的所有窗口；非空：只作用于目标窗口
     void applyChannelClips(const QString& channelKey, const QList<Clip>& clips,
-                           int64_t rangeStartMs, int64_t rangeEndMs);
+                           int64_t rangeStartMs, int64_t rangeEndMs,
+                           const QString& targetCellId = QString());
     /// 追加分片（加载更多时用，不打断正在进行的播放）
     void appendChannelClips(const QString& channelKey, const QList<Clip>& clips);
     /// 该通道是否正在播放
     bool isChannelPlaying(const QString& channelKey) const;
     void seekChannel(const QString& channelKey, int64_t timeMs);
-    void playChannel(const QString& channelKey, int64_t timeMs);
+    /// 只定位/播放一个窗口（同通道其他窗口不受影响）
+    void seekCell(const QString& cellId, int64_t timeMs);
+    void seekCellByUid(const QString& uid, int64_t timeMs);
+    void playChannel(const QString& channelKey, int64_t timeMs,
+                     const QString& targetCellId = QString());
     void pauseChannel(const QString& channelKey);
     void stopChannel(const QString& channelKey);
     void setChannelSpeed(const QString& channelKey, double speed);
@@ -109,6 +115,12 @@ private:
     QString selectTargetCell() const;
     void applySelectionStates();
     PlaybackCell* findCellByUid(const QString& uid) const;
+    /// 切换到某条时间轴时，按该通道当前的播放位置刷新播放头
+    void refreshTimelinePlayhead(const QString& channelKey);
+    /// 高亮当前选中的播放窗口对应的播放头，并切到该通道的时间轴
+    void updatePlayheadHighlight(const QString& cellId);
+    /// 按窗口分配播放头配色索引（同一个窗口颜色固定）
+    int playheadColorIndex(const QString& uid) const;
 
     QWidget* m_videoArea;
     ReplayNavBar* m_navBar;
@@ -118,8 +130,6 @@ private:
     QMap<QString, PlaybackCell*> m_cells;
     /// 上一次布局的 item id 顺序：resize 时按位置复用，避免 QMap 的 key 排序打乱
     QStringList m_cellOrder;
-    /// 已经创建过播放头的窗口，避免布局重算时重复添加
-    QSet<QString> m_playheads;
     QString m_selectedCellId;
     PlaybackController* m_controller;
     int m_totalRecords;

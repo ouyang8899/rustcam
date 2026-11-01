@@ -25,11 +25,10 @@ namespace BridgePlayer {
             return sInstance;
         }
      /*   bool add_player(const uint64_t& id, const std::string& url);*/
-        uint64_t add_player(const uint64_t& render_target_id, const uint64_t& id = 0,NativeWindowHandle handle=nullptr);
+        uint64_t add_player(const uint64_t& id, const PlayerConfig& config);
         uint64_t add_media_player(
-            const uint64_t& render_target_id,
-            const uint64_t& id = 0,
-            NativeWindowHandle handle = nullptr);
+            const uint64_t& id,
+            const PlayerConfig& config);
         bool play(const uint64_t& id, const std::string& url);
         void stop(const uint64_t& id);
         PlayerBase::Ptr get_player(const uint64_t id,bool remove=false);
