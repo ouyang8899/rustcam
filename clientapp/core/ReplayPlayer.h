@@ -40,10 +40,12 @@ public:
     bool createBridgePlayer();
     void startBridgePlayback();
     //void ensureBridgeWindow();
-    void play();
-    void pause();
+    void play() override;
+    void pause() override;
     void stop() override;
     void seek(int64_t positionMs);
+    void setPauseAfterLoad(bool enabled);
+    void setPauseAfterLoadOnce();
     void setSpeed(double speed);
     void setVolume(double volume);
     void setMute(bool mute);
@@ -64,6 +66,7 @@ public:
     int64_t currentTimeMs() const { return m_currentTimeMs; }
     int64_t durationMs() const { return m_durationMs; }
     bool isPlaying() const override { return m_state == State::Playing; }
+    bool isPaused() const override { return m_state == State::Paused; }
     QString currentUrl() const { return m_url; }
     uint64_t playerId() const { return m_playerId.load(); }
 
@@ -128,6 +131,8 @@ private:
     qint64 m_lastRebuildMs = 0;
     /// 播放倍速（新建 bridge 播放器后需要重新应用）
     double m_speed = 1.0;
+    bool m_pauseAfterLoad = false;
+    bool m_pauseAfterLoadOnce = false;
 
     ProgressCallback m_progressCallback;
     StateChangeCallback m_stateChangeCallback;

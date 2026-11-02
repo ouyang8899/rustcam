@@ -12,6 +12,8 @@
     <file>no_signal.svg</file>
     <file>video_placeholder.svg</file>
     <file>ic_toolbar_stop.svg</file>
+    <file>ic_toolbar_play.svg</file>
+    <file>ic_toolbar_pause.svg</file>
     <file>ic_toolbar_rotate.svg</file>
     <file>ic_toolbar_mirror_h.svg</file>
     <file>ic_toolbar_mirror_v.svg</file>

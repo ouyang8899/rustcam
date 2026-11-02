@@ -90,7 +90,10 @@ signals:
 private slots:
     void onTimeSelected(int64_t timeMs);
     void onPeriodClicked(const RecordingPeriod& period);
+    void onPlayheadPressed(const QString& windowId, int64_t timeMs);
+    void onPlayheadMoved(const QString& windowId, int64_t timeMs);
     void onPlayheadReleased(const QString& windowId, int64_t timeMs);
+    void flushDragSeek();
     void onTypeComboChanged(int index);
     void onPageSizeChanged(int size);
     void onBookmarkItemDoubleClicked(int row);
@@ -136,6 +139,10 @@ private:
     /// 对话框宿主（侧栏页面）
     QPointer<QWidget> m_hostWidget;
     class FileDownloader* m_downloader = nullptr;
+    class QTimer* m_dragSeekTimer = nullptr;
+    QString m_dragWindowId;
+    int64_t m_pendingDragSeekMs = -1;
+    bool m_dragSeekPending = false;
 
     QList<RecordingFile> m_files;
     QDate m_selectedDate;

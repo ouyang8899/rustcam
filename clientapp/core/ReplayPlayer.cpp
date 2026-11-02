@@ -67,6 +67,7 @@ ReplayPlayer::ReplayPlayer(QWidget* parent)
     m_toolbar = new VideoPlayerToolbar(this);
     m_toolbar->setControls(this);
     m_toolbar->setCapabilities(true, true, true, false);
+    m_toolbar->setPlaybackControlsEnabled(true);
     // bridge 的回放渲染器直接向本控件的 HWND 呈现 D3D 画面，嵌在控件内部的
     // 子窗口会被渲染画面覆盖；这里把工具栏做独立置顶窗口，保证浮在视频之上。
     m_toolbar->setWindowFlags(Qt::Tool | Qt::FramelessWindowHint |
@@ -256,6 +257,8 @@ void ReplayPlayer::startBridgePlayback() {
 //        m_player->id(), rtd.width, rtd.height);
 //}
 void ReplayPlayer::play() {
+    m_pauseAfterLoad = false;
+    m_pauseAfterLoadOnce = false;
     if (!m_player) {
         return;
     }
@@ -298,6 +301,16 @@ void ReplayPlayer::pause() {
             setState(State::Paused);
         }
     }
+}
+
+void ReplayPlayer::setPauseAfterLoad(bool enabled) {
+    m_pauseAfterLoad = enabled;
+    m_pauseAfterLoadOnce = false;
+}
+
+void ReplayPlayer::setPauseAfterLoadOnce() {
+    m_pauseAfterLoad = true;
+    m_pauseAfterLoadOnce = true;
 }
 
 void ReplayPlayer::stop() {
@@ -488,6 +501,9 @@ void ReplayPlayer::setState(State state) {
             m_stateChangeCallback(oldState, state);
         }
         updatePlaceholder();
+        if (m_toolbar) {
+            m_toolbar->refreshPlaybackState();
+        }
     }
 }
 
@@ -640,6 +656,14 @@ void ReplayPlayer::onPlayerStatus(int code) {
             if (m_state != State::Idle) {
                 setState(State::Playing);
                 applyPendingStartPosition();
+                if (m_pauseAfterLoad && m_player) {
+                    m_player->pause();
+                    setState(State::Paused);
+                    if (m_pauseAfterLoadOnce) {
+                        m_pauseAfterLoad = false;
+                        m_pauseAfterLoadOnce = false;
+                    }
+                }
             }
             break;
 

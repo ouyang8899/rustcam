@@ -18,6 +18,9 @@ public:
     /// 工具栏关闭按钮：默认仅停止播放，回放播放器可重写为关闭格子。
     virtual void requestClose() { stop(); }
     virtual bool isPlaying() const = 0;
+    virtual void play() {}
+    virtual void pause() {}
+    virtual bool isPaused() const { return false; }
 
     virtual void setRotation(int angle) = 0;
     virtual void setMirror(bool horizontal, bool vertical) = 0;

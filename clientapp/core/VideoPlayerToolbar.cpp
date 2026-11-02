@@ -46,6 +46,7 @@ VideoPlayerToolbar::VideoPlayerToolbar(QWidget* parent)
     , m_controls(nullptr)
     , m_toolbarWidget(nullptr)
     , m_stopBtn(nullptr)
+    , m_playPauseBtn(nullptr)
     , m_rotateBtn(nullptr)
     , m_mirrorBtn(nullptr)
     , m_screenshotBtn(nullptr)
@@ -134,6 +135,15 @@ void VideoPlayerToolbar::setupUi() {
     m_stopBtn->setFixedSize(32, 32);
     connect(m_stopBtn, &QToolButton::clicked, this, &VideoPlayerToolbar::onStopClicked);
     m_toolbarLayout->addWidget(m_stopBtn);
+
+    m_playPauseBtn = new QToolButton(m_toolbarWidget);
+    m_playPauseBtn->setObjectName("ToolbarButton");
+    m_playPauseBtn->setIcon(createColoredIcon(":/icons/ic_toolbar_pause.svg", m_iconColor));
+    m_playPauseBtn->setToolTip(tr("Pause"));
+    m_playPauseBtn->setFixedSize(32, 32);
+    m_playPauseBtn->setVisible(false);
+    connect(m_playPauseBtn, &QToolButton::clicked, this, &VideoPlayerToolbar::onPlayPauseClicked);
+    m_toolbarLayout->addWidget(m_playPauseBtn);
 
     m_rotateBtn = new QToolButton(m_toolbarWidget);
     m_rotateBtn->setObjectName("ToolbarButton");
@@ -243,13 +253,31 @@ void VideoPlayerToolbar::setCapabilities(bool screenshot, bool audio, bool fulls
     applyCapabilities();
 }
 
+void VideoPlayerToolbar::setPlaybackControlsEnabled(bool enabled) {
+    m_playbackControlsEnabled = enabled;
+    applyCapabilities();
+    refreshPlaybackState();
+}
+
+void VideoPlayerToolbar::refreshPlaybackState() {
+    if (!m_playPauseBtn) {
+        return;
+    }
+    const bool paused = m_controls && m_controls->isPaused();
+    m_playPauseBtn->setIcon(createColoredIcon(
+        paused ? ":/icons/ic_toolbar_play.svg" : ":/icons/ic_toolbar_pause.svg", m_iconColor));
+    m_playPauseBtn->setToolTip(paused ? tr("Play") : tr("Pause"));
+}
+
 void VideoPlayerToolbar::applyCapabilities() {
     if (m_screenshotBtn) m_screenshotBtn->setVisible(m_capScreenshot);
     if (m_audioBtn) m_audioBtn->setVisible(m_capAudio);
     if (m_fullscreenBtn) m_fullscreenBtn->setVisible(m_capFullscreen);
     if (m_mediaRateBtn) m_mediaRateBtn->setVisible(m_capMediaRate);
+    if (m_playPauseBtn) m_playPauseBtn->setVisible(m_playbackControlsEnabled);
 
     m_primaryButtons = {m_stopBtn};
+    if (m_playbackControlsEnabled) m_primaryButtons.append(m_playPauseBtn);
     if (m_capScreenshot) m_primaryButtons.append(m_screenshotBtn);
     if (m_capFullscreen) m_primaryButtons.append(m_fullscreenBtn);
 
@@ -362,6 +390,18 @@ void VideoPlayerToolbar::onStopClicked() {
     if (m_controls) {
         m_controls->requestClose();
     }
+}
+
+void VideoPlayerToolbar::onPlayPauseClicked() {
+    if (!m_controls) {
+        return;
+    }
+    if (m_controls->isPaused()) {
+        m_controls->play();
+    } else {
+        m_controls->pause();
+    }
+    refreshPlaybackState();
 }
 
 void VideoPlayerToolbar::onRotateAction(QAction* action) {
@@ -677,6 +717,7 @@ void VideoPlayerToolbar::refreshIcons() {
     }
 
     if (m_stopBtn) m_stopBtn->setIcon(createColoredIcon(":/icons/ic_toolbar_stop.svg", m_iconColor));
+    refreshPlaybackState();
     if (m_rotateBtn) m_rotateBtn->setIcon(createColoredIcon(":/icons/ic_toolbar_rotate.svg", m_iconColor));
     if (m_mirrorBtn) m_mirrorBtn->setIcon(createColoredIcon(":/icons/ic_toolbar_mirror_h.svg", m_iconColor));
     if (m_screenshotBtn) m_screenshotBtn->setIcon(createColoredIcon(":/icons/ic_toolbar_screenshot.svg", m_iconColor));

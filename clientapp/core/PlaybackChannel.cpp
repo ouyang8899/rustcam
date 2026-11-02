@@ -21,6 +21,7 @@
 #include <QFileDialog>
 #include <QStandardPaths>
 #include <QUrl>
+#include <QTimer>
 
 namespace rustcam {
 
@@ -59,7 +60,14 @@ PlaybackChannel::PlaybackChannel(const QString& deviceTag,
     m_timeline = new TimelineWidget();
     connect(m_timeline, &TimelineWidget::timeSelected, this, &PlaybackChannel::onTimeSelected);
     connect(m_timeline, &TimelineWidget::periodClicked, this, &PlaybackChannel::onPeriodClicked);
+    connect(m_timeline, &TimelineWidget::playheadPressed, this, &PlaybackChannel::onPlayheadPressed);
+    connect(m_timeline, &TimelineWidget::playheadMoved, this, &PlaybackChannel::onPlayheadMoved);
     connect(m_timeline, &TimelineWidget::playheadReleased, this, &PlaybackChannel::onPlayheadReleased);
+
+    m_dragSeekTimer = new QTimer(this);
+    m_dragSeekTimer->setSingleShot(true);
+    m_dragSeekTimer->setInterval(100);
+    connect(m_dragSeekTimer, &QTimer::timeout, this, &PlaybackChannel::flushDragSeek);
 
     m_downloader = new FileDownloader(this);
     connect(m_downloader, &FileDownloader::finished, this, &PlaybackChannel::onDownloadFinished);
@@ -522,11 +530,62 @@ void PlaybackChannel::onPeriodClicked(const RecordingPeriod& period) {
     seekTo(period.startTimeMs);
 }
 
-void PlaybackChannel::onPlayheadReleased(const QString& windowId, int64_t timeMs) {
-    // 拖的是哪一路播放头，就只定位那个窗口
-    if (m_container) {
-        m_container->seekCellByUid(windowId, timeMs);
+void PlaybackChannel::onPlayheadPressed(const QString& windowId, int64_t timeMs) {
+    Q_UNUSED(timeMs)
+    if (!m_container || windowId.isEmpty()) {
+        return;
     }
+    if (m_dragSeekTimer) {
+        m_dragSeekTimer->stop();
+    }
+    m_dragWindowId = windowId;
+    m_pendingDragSeekMs = -1;
+    m_dragSeekPending = false;
+    m_container->beginPlayheadDrag(windowId);
+}
+
+void PlaybackChannel::onPlayheadMoved(const QString& windowId, int64_t timeMs) {
+    if (!m_container || windowId.isEmpty()) {
+        return;
+    }
+    if (m_dragWindowId != windowId) {
+        onPlayheadPressed(windowId, timeMs);
+    }
+    if (m_dragSeekTimer && m_dragSeekTimer->isActive()) {
+        m_pendingDragSeekMs = timeMs;
+        m_dragSeekPending = true;
+        return;
+    }
+    m_container->seekCellDuringDrag(windowId, timeMs);
+    setPlaybackPosition(timeMs);
+    if (m_dragSeekTimer) {
+        m_dragSeekTimer->start();
+    }
+}
+
+void PlaybackChannel::flushDragSeek() {
+    if (!m_dragSeekPending || !m_container || m_dragWindowId.isEmpty()) {
+        return;
+    }
+    m_dragSeekPending = false;
+    const int64_t timeMs = m_pendingDragSeekMs;
+    m_pendingDragSeekMs = -1;
+    m_container->seekCellDuringDrag(m_dragWindowId, timeMs);
+    setPlaybackPosition(timeMs);
+}
+
+void PlaybackChannel::onPlayheadReleased(const QString& windowId, int64_t timeMs) {
+    if (m_dragSeekTimer) {
+        m_dragSeekTimer->stop();
+    }
+    m_dragSeekPending = false;
+    m_pendingDragSeekMs = -1;
+    const QString targetId = windowId.isEmpty() ? m_dragWindowId : windowId;
+    if (m_container && !targetId.isEmpty()) {
+        m_container->seekCellDuringDrag(targetId, timeMs);
+        m_container->endPlayheadDrag(targetId);
+    }
+    m_dragWindowId.clear();
     setPlaybackPosition(timeMs);
 }
 

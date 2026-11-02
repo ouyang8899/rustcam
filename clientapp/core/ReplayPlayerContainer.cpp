@@ -647,8 +647,7 @@ void ReplayPlayerContainer::seekChannel(const QString& channelKey, int64_t timeM
     }
 }
 
-void ReplayPlayerContainer::seekCell(const QString& cellId, int64_t timeMs) {
-    PlaybackCell* cell = m_cells.value(cellId, nullptr);
+void ReplayPlayerContainer::seekCellInternal(PlaybackCell* cell, int64_t timeMs, bool resume) {
     PlaybackPlayerWidget* player = cell ? cell->playerWidget() : nullptr;
     if (!player || !player->source()) {
         return;
@@ -660,7 +659,9 @@ void ReplayPlayerContainer::seekCell(const QString& cellId, int64_t timeMs) {
         group->setBaseTime(timeMs);
     }
     player->source()->seekTo(timeMs);
-    player->source()->play();
+    if (resume) {
+        player->source()->play();
+    }
 
     TimelineWidget* timeline = channelTimeline(channelKey);
     if (timeline) {
@@ -669,12 +670,67 @@ void ReplayPlayerContainer::seekCell(const QString& cellId, int64_t timeMs) {
     }
 }
 
+void ReplayPlayerContainer::seekCell(const QString& cellId, int64_t timeMs) {
+    PlaybackCell* cell = m_cells.value(cellId, nullptr);
+    if (!cell) {
+        return;
+    }
+    seekCellInternal(cell, timeMs, true);
+}
+
 void ReplayPlayerContainer::seekCellByUid(const QString& uid, int64_t timeMs) {
     PlaybackCell* cell = findCellByUid(uid);
     if (!cell) {
         return;
     }
     seekCell(cell->layoutItemId(), timeMs);
+}
+
+bool ReplayPlayerContainer::beginPlayheadDrag(const QString& uid) {
+    PlaybackCell* cell = findCellByUid(uid);
+    PlaybackPlayerWidget* player = cell ? cell->playerWidget() : nullptr;
+    if (!player || !player->source()) {
+        return false;
+    }
+    const bool wasPlaying = player->source()->state() == StreamSource::State::Playing;
+    m_playheadDragWasPlaying.insert(uid, wasPlaying);
+    if (player->player()) {
+        player->player()->setPauseAfterLoad(true);
+    }
+    if (wasPlaying) {
+        player->source()->pause();
+    }
+    return wasPlaying;
+}
+
+void ReplayPlayerContainer::seekCellDuringDrag(const QString& uid, int64_t timeMs) {
+    PlaybackCell* cell = findCellByUid(uid);
+    if (!cell) {
+        return;
+    }
+    seekCellInternal(cell, timeMs, false);
+}
+
+void ReplayPlayerContainer::endPlayheadDrag(const QString& uid) {
+    const bool wasPlaying = m_playheadDragWasPlaying.take(uid);
+    PlaybackCell* cell = findCellByUid(uid);
+    PlaybackPlayerWidget* player = cell ? cell->playerWidget() : nullptr;
+    if (!player || !player->source()) {
+        return;
+    }
+    ReplayPlayer* replayPlayer = player->player();
+    if (wasPlaying) {
+        if (replayPlayer) {
+            replayPlayer->setPauseAfterLoad(false);
+        }
+        player->source()->play();
+    } else if (replayPlayer) {
+        if (replayPlayer->isPaused()) {
+            replayPlayer->setPauseAfterLoad(false);
+        } else {
+            replayPlayer->setPauseAfterLoadOnce();
+        }
+    }
 }
 
 void ReplayPlayerContainer::playChannel(const QString& channelKey, int64_t timeMs,

@@ -149,8 +149,8 @@ public:
     void noteManualNavigation();
 
 signals:
+    void playheadPressed(const QString& windowId, int64_t timeMs);
     void playheadMoved(const QString& windowId, int64_t timeMs);
-    /// 拖拽播放头结束（拖动过程中只移动标记，松手才 seek，避免连续切换片源）
     void playheadReleased(const QString& windowId, int64_t timeMs);
     void selectedWindowPlayheadMoved(const QString& windowId, int64_t timeMs);
     void timeSelected(int64_t timeMs);

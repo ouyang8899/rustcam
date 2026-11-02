@@ -31,6 +31,8 @@ public:
     IVideoControls* controls() const { return m_controls; }
     /// Disable capability buttons (screenshot/audio/fullscreen/media rate).
     void setCapabilities(bool screenshot, bool audio, bool fullscreen, bool mediaRate);
+    void setPlaybackControlsEnabled(bool enabled);
+    void refreshPlaybackState();
 
     void stop();
     bool isPlaying() const;
@@ -53,6 +55,7 @@ protected:
 
 private slots:
     void onStopClicked();
+    void onPlayPauseClicked();
     void onRotateAction(QAction* action);
     void onMirrorAction(QAction* action);
     void onScreenshotClicked();
@@ -82,6 +85,7 @@ private:
     QHBoxLayout* m_toolbarLayout = nullptr;
 
     QToolButton* m_stopBtn = nullptr;
+    QToolButton* m_playPauseBtn = nullptr;
     QToolButton* m_rotateBtn = nullptr;
     QMenu* m_rotateMenu = nullptr;
     QToolButton* m_mirrorBtn = nullptr;
@@ -119,6 +123,7 @@ private:
     bool m_capAudio = true;
     bool m_capFullscreen = true;
     bool m_capMediaRate = true;
+    bool m_playbackControlsEnabled = false;
     QColor m_iconColor = Qt::white;
 
     QPoint m_dragPosition;

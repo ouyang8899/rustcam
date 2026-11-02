@@ -64,6 +64,9 @@ public:
     /// 只定位/播放一个窗口（同通道其他窗口不受影响）
     void seekCell(const QString& cellId, int64_t timeMs);
     void seekCellByUid(const QString& uid, int64_t timeMs);
+    bool beginPlayheadDrag(const QString& uid);
+    void seekCellDuringDrag(const QString& uid, int64_t timeMs);
+    void endPlayheadDrag(const QString& uid);
     void playChannel(const QString& channelKey, int64_t timeMs,
                      const QString& targetCellId = QString());
     void pauseChannel(const QString& channelKey);
@@ -115,6 +118,7 @@ private:
     QString selectTargetCell() const;
     void applySelectionStates();
     PlaybackCell* findCellByUid(const QString& uid) const;
+    void seekCellInternal(PlaybackCell* cell, int64_t timeMs, bool resume);
     /// 切换到某条时间轴时，按该通道当前的播放位置刷新播放头
     void refreshTimelinePlayhead(const QString& channelKey);
     /// 高亮当前选中的播放窗口对应的播放头，并切到该通道的时间轴
@@ -142,6 +146,7 @@ private:
     QMap<QString, PlaybackGroup*> m_channelGroups;
     /// 当前显示的时间轴所属通道
     QString m_activeChannelKey;
+    QMap<QString, bool> m_playheadDragWasPlaying;
 };
 
 }

@@ -725,6 +725,8 @@ void TimelineWidget::mousePressEvent(QMouseEvent* event) {
             if (qAbs(event->x() - timeToX(it.value().timeMs)) <= 8) {
                 m_draggingPlayheadId = it.key();
                 m_isDraggingPlayhead = true;
+                grabMouse();
+                emit playheadPressed(it.key(), it.value().timeMs);
                 return;
             }
         }
@@ -830,6 +832,7 @@ void TimelineWidget::mouseReleaseEvent(QMouseEvent* event) {
             const QString releasedId = m_draggingPlayheadId;
             m_isDraggingPlayhead = false;
             m_draggingPlayheadId.clear();
+            releaseMouse();
             if (!releasedId.isEmpty() && m_playheads.contains(releasedId)) {
                 emit playheadReleased(releasedId, m_playheads[releasedId].timeMs);
             }
