@@ -333,6 +333,7 @@ enum class MediaType {
 
 // 帧数据
 struct MediaFrameData {
+    using Ptr = std::shared_ptr<MediaFrameData>;
     AVFrame* frame{nullptr};
     MediaTimestamp timestamp;
     AVRational time_base{1, 1};

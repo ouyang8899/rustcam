@@ -70,7 +70,7 @@ namespace BridgePlayer {
         Result<void> pause();
         Result<void> seek(int64_t position_ms);
         Result<void> seek_relative(int64_t delta_ms);
-
+        Result<bool> is_paused();
         void set_speed(double speed);
         void set_volume(double volume);
         void set_mute(bool mute);
