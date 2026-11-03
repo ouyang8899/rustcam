@@ -1,0 +1,52 @@
+syntax = "proto3";
+package drone.v1.common;
+
+message Empty {}
+
+message Telemetry {
+  string device_id = 1;
+  int64  ts_ms = 2;
+  double lat = 3;
+  double lon = 4;
+  double alt_amsl = 5;
+  double rel_alt = 6;
+  double roll = 7;
+  double pitch = 8;
+  double yaw = 9;
+  double qx = 10;
+  double qy = 11;
+  double qz = 12;
+  double qw = 13;
+  double vx = 14;
+  double vy = 15;
+  double vz = 16;
+  double battery_pct = 17;
+  double voltage = 18;
+  uint32 link_quality = 19;
+  uint32 seq = 20;
+}
+
+message Command {
+  string cmd_id = 1;
+  string device_id = 2;
+  string type = 3;
+  map<string, string> params = 4;
+  int64  deadline_ms = 5;
+  string operator = 6;
+}
+
+message CommandReply {
+  string cmd_id = 1;
+  string device_id = 2;
+  string status = 3;
+  int32  code = 4;
+  string message = 5;
+  int64  ts_ms = 6;
+}
+
+message DeviceEvent {
+  string device_id = 1;
+  string type = 2;
+  string detail = 3;
+  int64  ts_ms = 4;
+}

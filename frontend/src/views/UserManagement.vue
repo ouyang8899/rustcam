@@ -64,11 +64,11 @@
       <div style="display: flex; flex-direction: column; gap: 8px">
         <div
           v-for="role in availableRoles"
-          :key="role.name"
+          :key="role.id"
           style="display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 4px; cursor: pointer"
-          @click="toggleRole(role.name)"
+          @click="toggleRole(role.id)"
         >
-          <el-checkbox :model-value="rolesForm.roles.includes(role.name)" />
+          <el-checkbox :model-value="rolesForm.roleIds.includes(role.id)" />
           <div>
             <div style="font-weight: 500">{{ role.name }}</div>
             <div style="font-size: 12px; color: var(--text-muted)">{{ role.description || role.name }}</div>
@@ -90,6 +90,7 @@ import { Plus } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/authStore'
 import { useToast } from '../composables/useToast'
 import * as userApi from '../api/users'
+import * as roleApi from '../api/roles'
 import DataCard from '../components/common/DataCard.vue'
 
 const auth = useAuthStore()
@@ -108,12 +109,12 @@ const currentUserId = auth.currentUser?.id
 
 const createForm = ref({ username: '', password: '' })
 const editForm = ref({ password: '' })
-const rolesForm = ref({ roles: [] })
+const rolesForm = ref({ roleIds: [] })
 
 onMounted(async () => { await Promise.all([fetchUsers(), fetchRoles()]) })
 
 async function fetchUsers() { loading.value = true; try { users.value = await userApi.getUsers() } catch (e) { toast.error('获取用户列表失败: ' + e.message) } finally { loading.value = false } }
-async function fetchRoles() { try { availableRoles.value = await userApi.getRoles() } catch (e) { toast.error('获取角色列表失败') } }
+async function fetchRoles() { try { availableRoles.value = await roleApi.getRoles() } catch (e) { toast.error('获取角色列表失败') } }
 
 function openCreateModal() { createForm.value = { username: '', password: '' }; showCreateModal.value = true }
 async function submitCreate() { submitting.value = true; try { await userApi.createUser(createForm.value); toast.success('用户创建成功'); showCreateModal.value = false; await fetchUsers() } catch {} finally { submitting.value = false } }
@@ -121,9 +122,9 @@ async function submitCreate() { submitting.value = true; try { await userApi.cre
 function openEditModal(user) { editUser.value = user; editForm.value = { password: '' }; showEditModal.value = true }
 async function submitEdit() { if (!editForm.value.password) { showEditModal.value = false; return }; submitting.value = true; try { await userApi.updateUser(editUser.value.id, { password: editForm.value.password }); toast.success('用户更新成功'); showEditModal.value = false } catch {} finally { submitting.value = false } }
 
-function openRolesModal(user) { rolesUser.value = user; rolesForm.value = { roles: [...(user.roles || [])] }; showRolesModal.value = true }
-function toggleRole(name) { const idx = rolesForm.value.roles.indexOf(name); if (idx >= 0) rolesForm.value.roles.splice(idx, 1); else rolesForm.value.roles.push(name) }
-async function submitRoles() { submitting.value = true; try { await userApi.assignUserRoles(rolesUser.value.id, rolesForm.value.roles); toast.success('角色分配成功'); showRolesModal.value = false; await fetchUsers() } catch {} finally { submitting.value = false } }
+function openRolesModal(user) { rolesUser.value = user; rolesForm.value = { roleIds: [...(user.role_ids || [])] }; showRolesModal.value = true }
+function toggleRole(id) { const idx = rolesForm.value.roleIds.indexOf(id); if (idx >= 0) rolesForm.value.roleIds.splice(idx, 1); else rolesForm.value.roleIds.push(id) }
+async function submitRoles() { submitting.value = true; try { await userApi.assignUserRoles(rolesUser.value.id, rolesForm.value.roleIds); toast.success('角色分配成功'); showRolesModal.value = false; await fetchUsers() } catch {} finally { submitting.value = false } }
 
 async function confirmDelete(user) { try { await ElMessageBox.confirm(`确定删除用户 "${user.username}" 吗？`, '确认删除', { type: 'warning' }); await userApi.deleteUser(user.id); toast.success('用户已删除'); await fetchUsers() } catch {} }
 

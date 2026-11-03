@@ -1,0 +1,22 @@
+[package]
+name = "rustcam-server"
+version = "0.1.0"
+edition = "2021"
+authors = ["RustCam Team"]
+description = "RustCam binary entrypoint"
+
+[[bin]]
+name = "rustcam-media"
+path = "src/main.rs"
+
+[dependencies]
+rustcam-media = { path = "../rustcam-media" }
+tokio = { workspace = true }
+axum = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-log = { workspace = true }
+anyhow = { workspace = true }
+jsonwebtoken = { workspace = true }
+futures = { workspace = true }

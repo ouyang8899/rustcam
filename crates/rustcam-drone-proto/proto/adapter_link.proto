@@ -1,0 +1,58 @@
+syntax = "proto3";
+package drone.v1.link;
+
+import "common.proto";
+
+service AdapterLink {
+  // 注意：RPC 不能命名为 Connect —— tonic 会为客户端生成同名 connect(dst) 构造器，
+  // 导致重复定义（E0592）。这里用 Open 表示"打开会话"。
+  rpc Open (stream AdapterMessage) returns (stream ServiceMessage);
+}
+
+message AdapterMessage {
+  oneof payload {
+    Register            register      = 1;
+    Heartbeat           heartbeat     = 2;
+    common.Telemetry    telemetry     = 3;
+    common.CommandReply command_reply = 4;
+    common.DeviceEvent  event         = 5;
+  }
+}
+
+message ServiceMessage {
+  oneof payload {
+    RegisterAck  register_ack  = 1;
+    common.Command command     = 2;
+    ControlState control_state = 3;
+  }
+}
+
+message Register {
+  string adapter_id = 1;
+  string protocol   = 2;
+  string version    = 3;
+  repeated string devices = 4;
+}
+
+message RegisterAck {
+  bool accepted = 1;
+  string reason = 2;
+  repeated string assigned_devices = 3;
+  int32 heartbeat_interval_sec = 4;
+}
+
+message Heartbeat {
+  int64 ts_ms = 1;
+  int32 device_count = 2;
+  int32 inflight_commands = 3;
+  string adapter_state = 4;
+}
+
+message ControlState {
+  string device_id = 1;
+  string control_type = 2;
+  string holder = 3;
+  int32  priority = 4;
+  int64  expire_at_ms = 5;
+  string action = 6;
+}

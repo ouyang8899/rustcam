@@ -1,0 +1,140 @@
+syntax = "proto3";
+package drone.v1.control;
+
+import "common.proto";
+
+service ControlService {
+  rpc AcquireControl (AcquireRequest) returns (Lease);
+  rpc ReleaseControl (ReleaseRequest) returns (ReleaseReply);
+  rpc PreemptControl (PreemptRequest) returns (Lease);
+  rpc RenewControl   (RenewRequest)   returns (Lease);
+  rpc ForceReleaseControl (ForceReleaseRequest) returns (ReleaseReply);
+  rpc GetControlState(StateRequest)   returns (StateReply);
+  rpc SendCommand    (common.Command) returns (common.CommandReply);
+}
+
+service QueryService {
+  rpc GetDevice     (DeviceRequest) returns (DeviceInfo);
+  rpc ListDevices   (common.Empty)  returns (DeviceList);
+  rpc GetTelemetry  (DeviceRequest) returns (common.Telemetry);
+  rpc GetCommandStatus (CommandStatusRequest) returns (CommandStatus);
+  rpc ListAlerts       (AlertListRequest)     returns (AlertList);
+}
+
+service GeofenceService {
+  rpc ListGeofences  (GeofenceListRequest)   returns (GeofenceList);
+  rpc CreateGeofence (GeofenceUpsertRequest) returns (Geofence);
+  rpc UpdateGeofence (GeofenceUpsertRequest) returns (Geofence);
+  rpc DeleteGeofence (GeofenceDeleteRequest) returns (DeleteReply);
+}
+
+service EventService {
+  rpc Subscribe (SubscribeRequest) returns (stream EventMessage);
+}
+
+message AcquireRequest {
+  string device_id = 1;
+  string control_type = 2;
+  string operator = 3;
+  int32  priority = 4;
+  int32  lease_seconds = 5;
+}
+
+message ReleaseRequest {
+  string device_id = 1;
+  string control_type = 2;
+  string operator = 3;
+}
+
+message ForceReleaseRequest {
+  string device_id = 1;
+  string control_type = 2;
+  string operator = 3;
+}
+
+message ReleaseReply {
+  bool released = 1;
+  string reason = 2;
+}
+
+message PreemptRequest {
+  string device_id = 1;
+  string control_type = 2;
+  string operator = 3;
+  int32  priority = 4;
+  int32  lease_seconds = 5;
+}
+
+message RenewRequest {
+  string device_id = 1;
+  string control_type = 2;
+  string operator = 3;
+  int32  lease_seconds = 4;
+}
+
+message Lease {
+  string device_id = 1;
+  string control_type = 2;
+  string holder = 3;
+  int32  priority = 4;
+  int64  expire_at_ms = 5;
+  string preempted = 6;
+}
+
+message StateRequest {
+  string device_id = 1;
+  string control_type = 2;
+}
+
+message StateReply {
+  bool held = 1;
+  Lease lease = 2;
+}
+
+message DeviceRequest {
+  string device_id = 1;
+}
+
+message DeviceInfo {
+  string device_id = 1;
+  string protocol = 2;
+  string adapter_id = 3;
+  bool   online = 4;
+  int64  last_seen_ms = 5;
+  common.Telemetry last_telemetry = 6;
+}
+
+message DeviceList {
+  repeated DeviceInfo devices = 1;
+}
+
+message CommandStatusRequest { string cmd_id = 1; }
+message CommandStatus { string cmd_id = 1; string status = 2; string message = 3; }
+message AlertListRequest { string device_id = 1; int32 limit = 2; }
+message Alert { string device_id = 1; string rule = 2; string level = 3; string message = 4; int64 ts_ms = 5; }
+message AlertList { repeated Alert alerts = 1; }
+message GeofenceListRequest { bool only_enabled = 1; }
+message GeofenceList { repeated Geofence geofences = 1; }
+message Geofence {
+  string id = 1;
+  string name = 2;
+  string type = 3;
+  string geojson = 4;
+  double min_alt = 5;
+  double max_alt = 6;
+  bool enabled = 7;
+  int32 version = 8;
+}
+message GeofenceUpsertRequest { Geofence geofence = 1; string operator = 2; }
+message GeofenceDeleteRequest { string id = 1; string operator = 2; }
+message DeleteReply { bool deleted = 1; string reason = 2; }
+
+message SubscribeRequest {
+  repeated string device_ids = 1;
+}
+
+message EventMessage {
+  string msg_type = 1;
+  string payload_json = 2;
+  int64  ts_ms = 3;
+}

@@ -89,6 +89,8 @@
             <span>管理</span>
           </template>
           <el-menu-item index="/users">用户管理</el-menu-item>
+          <el-menu-item index="/roles">角色管理</el-menu-item>
+          <el-menu-item index="/permissions">权限管理</el-menu-item>
           <el-menu-item index="/settings">系统设置</el-menu-item>
         </el-sub-menu>
       </el-menu>

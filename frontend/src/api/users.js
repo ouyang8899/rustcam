@@ -25,27 +25,7 @@ export async function deleteUser(id) {
   return res.data
 }
 
-export async function assignUserRoles(id, roles) {
-  const res = await request.put(`/users/${id}/roles`, { roles })
+export async function assignUserRoles(id, roleIds) {
+  const res = await request.put(`/users/${id}/roles`, { role_ids: roleIds })
   return res.data
-}
-
-export async function getRoles() {
-  const res = await request.get('/roles')
-  return res.data.data || []
-}
-
-export async function createRole(data) {
-  const res = await request.post('/roles', data)
-  return res.data.data
-}
-
-export async function setRolePermissions(id, permissions) {
-  const res = await request.put(`/roles/${id}/permissions`, { permissions })
-  return res.data
-}
-
-export async function getPermissions() {
-  const res = await request.get('/permissions')
-  return res.data.data || []
 }

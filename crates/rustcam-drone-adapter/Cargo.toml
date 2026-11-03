@@ -1,0 +1,25 @@
+[package]
+name = "rustcam-drone-adapter"
+version = "0.1.0"
+edition = "2021"
+authors = ["RustCam Team"]
+description = "RustCam drone protocol adapter"
+
+[[bin]]
+name = "rustcam-drone-adapter"
+path = "src/main.rs"
+
+[dependencies]
+rustcam-drone-proto = { path = "../rustcam-drone-proto" }
+rustcam-drone-core = { path = "../rustcam-drone-core" }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tonic = { workspace = true }
+prost = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+config = { workspace = true }

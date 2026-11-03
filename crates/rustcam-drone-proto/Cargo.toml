@@ -1,0 +1,18 @@
+[package]
+name = "rustcam-drone-proto"
+version = "0.1.0"
+edition = "2021"
+authors = ["RustCam Team"]
+description = "RustCam drone gRPC contracts"
+
+[dependencies]
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+tonic-prost-build = { workspace = true }
+prost-build = { workspace = true }
+protoc-bin-vendored = "3"

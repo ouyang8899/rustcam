@@ -93,6 +93,16 @@ const routes = [
         component: () => import('../views/UserManagement.vue'),
       },
       {
+        path: 'roles',
+        name: 'RoleManagement',
+        component: () => import('../views/RoleManagement.vue'),
+      },
+      {
+        path: 'permissions',
+        name: 'PermissionManagement',
+        component: () => import('../views/PermissionManagement.vue'),
+      },
+      {
         path: 'alarms',
         name: 'Alarms',
         component: () => import('../views/Alarms.vue'),
