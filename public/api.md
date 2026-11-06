@@ -1,6 +1,6 @@
 # RustCam-Media API 参考
 
-后端 HTTP / WebSocket 接口说明，覆盖 `src/api/http/routes.rs` 中注册的全部 **102 条受保护路由** 与 **14 条公开路由**。
+后端 HTTP / WebSocket 接口说明，覆盖 `src/api/http/routes.rs` 中注册的全部 **120 条受保护路由** 与 **15 条公开路由**（含移动眼 19 条）。
 
 - 服务框架：Axum 0.8 + Tokio
 - 默认监听：`0.0.0.0:8081`（见 `config.toml` 的 `[server].port`）
@@ -563,6 +563,187 @@ curl -s -X POST "$BASE/api/v1/channels/onvif-test/ch1/ptz" \
 const ws = new WebSocket('ws://127.0.0.1:8081/ws')
 ws.onmessage = (e) => console.log(JSON.parse(e.data))
 ```
+
+---
+
+## 移动眼（drone）接口
+
+移动眼接口统一前缀 `/api/v1/drone`，需要 JWT；服务端转 gRPC 调用 `rustcam-drone-service`。
+未配置 drone-service 时返回 `503`。
+
+鉴权说明：
+
+- 全部路由需要有效 JWT：无 token 返回 `401`。
+- 每个路由绑定一个无人机权限点，权限不足返回 `403`；权限点来自数据库 `permissions` /
+  `role_permissions`（种子脚本 `sql/migrate_drone_permissions.py`）。
+- 权限点与路由的映射见 `crates/rustcam-media/src/drone_gateway/permissions.rs`。
+
+错误状态码（真实 HTTP 状态码，body 仍是 `{code, message, data}`）：
+
+| 状态 | 含义 |
+|---|---|
+| `400` | 参数非法（参数范围越界、指令被拒绝） |
+| `401` | 未认证（缺 token / token 过期） |
+| `403` | 权限不足，或指令被业务规则拒绝（无控制权、目标点落在禁飞区） |
+| `404` | 设备 / 指令不存在 |
+| `409` | 控制权冲突（已被他人持有，message 里带当前持有人与到期时间） |
+| `503` | drone-service 不可用或设备离线 |
+
+| 权限点 | 覆盖的路由 |
+|---|---|
+| `drone:view` | 设备列表/详情、遥测之外的只读接口、控制权查询、告警、审计 |
+| `drone:telemetry:read` | `GET /api/v1/drone/{device_id}/telemetry` |
+| `drone:control:acquire` | `POST /api/v1/drone/control/acquire`、`POST /api/v1/drone/control/renew` |
+| `drone:control:preempt` | `POST /api/v1/drone/control/preempt` |
+| `drone:control:release` | `POST /api/v1/drone/control/release` |
+| `drone:control:force_release` | `POST /api/v1/drone/control/force_release` |
+| `drone:command:send` | `POST /api/v1/drone/{device_id}/command`、`POST /api/v1/drone/routes/{id}/execute` |
+| `drone:manage` | 无人机档案、航线、围栏的增删改 |
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/v1/drone/drones` | 无人机列表（含在线状态、最新遥测、业务档案） |
+| POST | `/api/v1/drone/drones` | 新增/更新无人机档案 |
+| GET | `/api/v1/drone/drones/{device_id}` | 无人机详情 |
+| PUT | `/api/v1/drone/drones/{device_id}` | 更新档案 |
+| DELETE | `/api/v1/drone/drones/{device_id}` | 删除档案（同时删除其航线） |
+| GET | `/api/v1/drone/{device_id}/telemetry` | 最新遥测 |
+| POST | `/api/v1/drone/{device_id}/command` | 下发飞行/云台/相机指令（见下方「指令参数」） |
+| GET | `/api/v1/drone/commands/{cmd_id}` | 指令状态 |
+| GET/POST | `/api/v1/drone/routes` | 航线列表 / 新建 |
+| PUT/DELETE | `/api/v1/drone/routes/{id}` | 更新 / 删除航线 |
+| POST | `/api/v1/drone/routes/{id}/execute` | 执行航线（顺序下发 goto） |
+| GET/POST | `/api/v1/drone/fences` | 围栏列表 / 新建 |
+| PUT/DELETE | `/api/v1/drone/fences/{id}` | 更新 / 删除围栏 |
+| GET | `/api/v1/drone/alerts` | 告警记录（`device_id`、`limit`） |
+| GET | `/api/v1/drone/audits` | 审计记录（`device_id`、`limit`） |
+| POST | `/api/v1/drone/control/acquire` | 申请控制权（**不抢占**：仅无人持有或已过期时成功） |
+| POST | `/api/v1/drone/control/preempt` | 抢占控制权（需**严格更高**优先级，成功时返回被抢占者） |
+| POST | `/api/v1/drone/control/release` | 释放控制权（仅持有人） |
+| POST | `/api/v1/drone/control/renew` | 续约（仅持有人） |
+| POST | `/api/v1/drone/control/force_release` | 强制释放控制权（管理员，不受持有人限制） |
+| GET | `/api/v1/drone/control/{device_id}/{type}` | 查询控制权 |
+| POST | `/api/v1/drone/ws-ticket` | 签发 60s 一次性 WS ticket |
+
+> WS 票据在签发时绑定可订阅的消息类型（`drone:view` → 告警/控制权/指令回执，
+> `drone:telemetry:read` → 遥测）；`/ws/drone/*` 升级时按路径校验，越权订阅返回 `403`，
+> 票据过期或已核销返回 `401`。
+
+### 指令参数
+
+请求体：
+
+```json
+{
+  "kind": "goto",
+  "params": { "lat": "31.2304", "lon": "121.4737", "alt": "50" },
+  "deadline_ms": 1730000000000,
+  "cmd_id": "可选；客户端自带时按该 id 幂等"
+}
+```
+
+- `kind`：`rtl` / `takeoff` / `land` / `goto` / `gimbal` / `camera`。
+- 参数范围由服务端强校验，越界返回 `400`：
+  - `goto`：`lat` ∈ [-90, 90]、`lon` ∈ [-180, 180]（**必填**）、`alt` ∈ [0, 500] 米；
+  - `takeoff`：`alt` ∈ [0, 500] 米；
+  - `gimbal`：`pitch` ∈ [-90, 90]、`yaw` ∈ [-180, 180]、`zoom` ∈ [1, 30]；
+  - `camera`：`action` ∈ `start` / `stop` / `photo` / `video_start` / `video_stop`。
+- `goto` 的目标点会做**围栏预检**，落在禁飞区内返回 `403`；坐标缺失同样拒绝。
+- 幂等：`cmd_id` 由服务端以 `cmd:idem:{cmd_id}`（24h）去重，重复提交不会二次下发。
+
+### 无人机档案
+
+```json
+{
+  "device_id": "drone-001",
+  "name": "东区巡检机",
+  "model": "S500",
+  "autopilot": "auto",
+  "device_tag": "drone-001",
+  "channel_tag": "drone-001",
+  "video_stream": "",
+  "notes": "",
+  "enabled": true,
+  "adapter_id": "adapter-mavlink-1",
+  "unique_id": "0123456789abcdef",
+  "mavlink_addr": "udpin:10.88.0.2:14540",
+  "mavlink_version": 2,
+  "mavlink_sysid": 1,
+  "mavlink_compid": 1,
+  "signing_secret": "",
+  "signing_allow_unsigned": true
+}
+```
+
+机载链路身份字段（drone.md §12.4）：
+
+| 字段 | 说明 |
+|---|---|
+| `adapter_id` | 该机归属的 adapter；服务端按它把设备分配给对应 adapter。留空 = 未归属，不会被分配 |
+| `unique_id` | 登记的无人机唯一标识（`AUTOPILOT_VERSION.uid`），小写十六进制。登记后 adapter 实测值必须一致，否则该机不被分配、指令下发返回 `409` |
+| `mavlink_addr` | 该机的 MAVLink 端点（**隧道内地址**，如 `udpin:10.88.0.2:14540`）。生产禁止 `0.0.0.0`；同一 adapter 下各机端点必须唯一 |
+| `mavlink_version` | MAVLink 协议版本：`1` / `2`（默认 `2`）。版本 1 没有签名字段，不能配签名密钥 |
+| `mavlink_sysid` / `mavlink_compid` | 该机的寻址地址（1–255）。adapter 用其作为出站 `target_system` / `target_component`；默认 `1` / `1` |
+| `signing_secret` | MAVLink 2 消息签名密钥（32 字节 hex）。**留空表示该机不需要签名**；服务端加密存储，接口只返回密文 |
+| `signing_allow_unsigned` | 是否放行未签名帧（含 MAVLink 1 帧）。仅在有密钥时生效；混发 v1/v2 的机体必须为 `true` |
+
+> 密钥落库需配置 `DRONE_SIGNING_MASTER_KEY`（64 位十六进制）；未配置时录入签名密钥会被拒绝，
+> 服务端不会保存明文密钥。
+
+### 指令
+
+```json
+{ "kind": "goto", "params": { "lat": "31.2304", "lon": "121.4737", "alt": "30" } }
+```
+
+`kind`：`takeoff` / `land` / `rtl` / `goto` / `gimbal` / `camera`。
+飞行指令要求先持有 `flight` 控制权（`require_control = true` 时）；
+`goto` 会做围栏预检，命中禁飞区返回 `rejected`。
+状态：`sent` → `accepted` / `failed` / `timeout`，service 侧拒单为 `rejected`。
+
+### 围栏
+
+```json
+{
+  "name": "机场禁飞区",
+  "type": "no_fly",
+  "shape": "polygon",
+  "geojson": "{\"type\":\"Polygon\",\"coordinates\":[[[121.46,31.22],[121.49,31.22],[121.49,31.25],[121.46,31.25],[121.46,31.22]]]}",
+  "min_alt": 0,
+  "max_alt": 120,
+  "device_id": "",
+  "enabled": true
+}
+```
+
+`type`：`no_fly`（进入即违规）/ `allowed`（离开即违规）；`shape`：`polygon` / `circle`
+（圆形填 `center_lat`、`center_lon`、`radius_m`）。
+
+### 控制权
+
+```json
+{ "device_id": "drone-001", "control_type": "flight", "priority": 10, "lease_seconds": 180 }
+```
+
+返回 `granted=false` 时表示控制权被更高优先级占用。
+
+### 遥测 WebSocket
+
+```javascript
+const ticket = await fetch('/api/v1/drone/ws-ticket', {
+  method: 'POST',
+  headers: { Authorization: `Bearer ${token}` },
+}).then(r => r.json()).then(r => r.data.ticket)
+
+const ws = new WebSocket(`ws://127.0.0.1:8081/ws/drone/events?ticket=${ticket}`)
+// 也支持 /ws/drone/telemetry、/alerts、/commands、/control 按类型过滤
+ws.onmessage = (e) => {
+  const { msg_type, data, timestamp } = JSON.parse(e.data)
+  console.log(msg_type, data, timestamp)
+}
+```
+
+Ticket 一次性，断开重连需重新申请。
 
 ---
 

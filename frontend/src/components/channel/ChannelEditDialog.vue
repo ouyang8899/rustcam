@@ -21,12 +21,20 @@
         </el-col>
         <el-col :span="12">
           <el-form-item label="通道标识">
-            <el-input :model-value="channelTag" disabled />
+            <el-input
+              v-model="form.channel_tag"
+              :disabled="mode !== 'create'"
+              placeholder="如 ch-1"
+            />
           </el-form-item>
         </el-col>
         <el-col :span="12">
           <el-form-item label="设备标识">
-            <el-input :model-value="deviceTag" disabled />
+            <el-input
+              v-model="form.device_tag"
+              :disabled="mode !== 'create' || !!deviceTag"
+              placeholder="平台设备 tag"
+            />
           </el-form-item>
         </el-col>
         <el-col :span="12">
@@ -106,6 +114,8 @@ const form = reactive({
   address: '',
   latitude: null,
   longitude: null,
+  channel_tag: '',
+  device_tag: '',
 })
 
 const dialogTitle = computed(() => (props.mode === 'create' ? '新建通道' : '编辑通道'))
@@ -125,6 +135,8 @@ function resetForm(channel) {
   form.address = channel?.address ?? ''
   form.latitude = channel?.latitude ?? null
   form.longitude = channel?.longitude ?? null
+  form.channel_tag = channel?.channel_tag ?? props.channelTag
+  form.device_tag = channel?.device_tag ?? props.deviceTag
 }
 
 async function onOpen() {
@@ -260,7 +272,9 @@ watch(pickerVisible, async (visible) => {
 })
 
 async function submit() {
-  if (props.mode === 'create' && (!props.deviceTag || !props.channelTag)) {
+  const deviceTag = form.device_tag.trim()
+  const channelTag = form.channel_tag.trim()
+  if (props.mode === 'create' && (!deviceTag || !channelTag)) {
     ElMessage.error('新建通道需要指定设备标识与通道标识')
     return
   }
@@ -277,9 +291,9 @@ async function submit() {
     let channel
     if (props.mode === 'create') {
       channel = await createChannel({
-        device_tag: props.deviceTag,
-        channel_tag: props.channelTag,
-        name: form.name || props.channelTag,
+        device_tag: deviceTag,
+        channel_tag: channelTag,
+        name: form.name || channelTag,
         address: payload.address,
         latitude: payload.latitude,
         longitude: payload.longitude,

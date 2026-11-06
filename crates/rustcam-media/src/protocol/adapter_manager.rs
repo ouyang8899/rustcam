@@ -78,3 +78,15 @@ pub async fn cleanup_expired_subscriptions_all() -> usize {
     }
     total
 }
+
+pub async fn refresh_expiring_subscriptions_all() -> usize {
+    let mut total = 0;
+    let keys: Vec<String> = ADAPTER_MAP.iter().map(|r| r.key().clone()).collect();
+    for key in keys {
+        if let Some(adapter) = get_adapter(&key) {
+            let mut guard = adapter.lock().await;
+            total += guard.refresh_expiring_subscriptions().await;
+        }
+    }
+    total
+}

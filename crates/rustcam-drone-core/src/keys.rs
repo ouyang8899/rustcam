@@ -38,7 +38,10 @@ mod tests {
 
     #[test]
     fn keys_are_namespaced() {
-        assert_eq!(control_key("drone-001", "flight"), "control:drone-001:flight");
+        assert_eq!(
+            control_key("drone-001", "flight"),
+            "control:drone-001:flight"
+        );
         assert_eq!(adapter_instance_key("a-1"), "adapter:instance:a-1");
         assert_eq!(adapter_device_key("drone-001"), "adapter:device:drone-001");
         assert_eq!(shadow_key("drone-001"), "shadow:drone-001");

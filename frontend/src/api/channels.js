@@ -5,6 +5,11 @@ export async function getChannels(params) {
   return res.data.data
 }
 
+export async function getDeviceChannels(deviceTag) {
+  const res = await request.get(`/devices/${encodeURIComponent(deviceTag)}/channels`)
+  return res.data.data
+}
+
 export async function getChannel(deviceTag, channelTag) {
   const res = await request.get(`/channels/${encodeURIComponent(deviceTag)}/${encodeURIComponent(channelTag)}`)
   return res.data.data

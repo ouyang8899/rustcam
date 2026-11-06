@@ -41,7 +41,7 @@
 
 | 组件 | 版本要求 | 用途 |
 |------|----------|------|
-| Rust | 1.70+（edition 2021） | 后端服务 |
+| Rust | 1.95+（edition 2021，依赖树 MSRV） | 后端服务 |
 | Node.js | 18+ | 前端构建 / 开发服务器 / Playwright |
 | PostgreSQL | 14+（需 **PostGIS** 扩展） | 业务持久化 |
 | Redis | 6+ | 流信息缓存、媒体服务器心跳、事件 Pub/Sub |

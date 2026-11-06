@@ -54,6 +54,8 @@ pub trait SignalAdapter: Send + Sync {
 
     async fn cleanup_expired_subscriptions(&self) -> usize { 0 }
 
+    async fn refresh_expiring_subscriptions(&mut self) -> usize { 0 }
+
     async fn send_device_config_query(&self, _config_type: &str) -> Result<String> {
         Ok(String::new())
     }

@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 rustcam-drone-proto = { path = "../rustcam-drone-proto" }
 rustcam-drone-core = { path = "../rustcam-drone-core" }
+mavlink = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
@@ -19,6 +20,7 @@ prost = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
+thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }

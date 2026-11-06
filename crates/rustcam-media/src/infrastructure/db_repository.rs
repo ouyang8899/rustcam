@@ -2,6 +2,15 @@ use std::sync::Arc;
 use dashmap::DashMap;
 
 pub const DEFAULT_MAX_CONNECTIONS: u64 = 50;
+
+/// 无人机与摄像头设备的关联表 DDL（幂等）。
+///
+/// 关联只存 `drone_tag` 与 `camera_device_tag`；通道始终按摄像头实时解析。
+pub const DRONE_CAMERA_SCHEMA: &[&str] = &[
+    "CREATE TABLE IF NOT EXISTS drone_camera (id bigserial PRIMARY KEY, drone_tag text NOT NULL, camera_device_tag text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), UNIQUE (drone_tag, camera_device_tag))",
+    "CREATE INDEX IF NOT EXISTS idx_drone_camera_drone_tag ON drone_camera (drone_tag)",
+    "CREATE INDEX IF NOT EXISTS idx_drone_camera_camera_tag ON drone_camera (camera_device_tag)",
+];
   use rbatis::rbdc::datetime::DateTime as RbatisDateTime;
   use rbatis::rbdc::db::Driver as RbdcDriver;
   use rbatis::RBatis;
@@ -114,6 +123,11 @@ impl DbRepository {
             "CREATE INDEX IF NOT EXISTS idx_alarms_channel_time ON alarms(channel_tag, alarm_time DESC)",
         ];
         for sql in statements {
+            if let Err(e) = self.rb.exec(sql, vec![]).await {
+                tracing::warn!("[DbRepository] ensure_schema warning: {} ({})", e, sql);
+            }
+        }
+        for sql in DRONE_CAMERA_SCHEMA {
             if let Err(e) = self.rb.exec(sql, vec![]).await {
                 tracing::warn!("[DbRepository] ensure_schema warning: {} ({})", e, sql);
             }
@@ -655,6 +669,72 @@ impl DbRepository {
             cache.insert(key, channel_clone);
         });
         Ok(id)
+    }
+
+    /// 列出无人机已关联的摄像头设备 tag。
+    pub async fn list_drone_cameras(&self, drone_tag: &str) -> Result<Vec<String>> {
+        #[derive(Debug, Clone, serde::Deserialize)]
+        struct DroneCameraRow {
+            camera_device_tag: String,
+        }
+
+        let rows: Vec<DroneCameraRow> = self
+            .rb
+            .query_decode(
+                "SELECT camera_device_tag FROM drone_camera \
+                 WHERE drone_tag = $1 ORDER BY created_at, camera_device_tag",
+                vec![rbs::value![drone_tag]],
+            )
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        Ok(rows.into_iter().map(|r| r.camera_device_tag).collect())
+    }
+
+    /// 关联摄像头设备；已关联时幂等成功。
+    pub async fn add_drone_camera(&self, drone_tag: &str, camera_device_tag: &str) -> Result<()> {
+        self.rb
+            .exec(
+                "INSERT INTO drone_camera (drone_tag, camera_device_tag) \
+                 VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                vec![
+                    rbs::value![drone_tag],
+                    rbs::value![camera_device_tag],
+                ],
+            )
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        Ok(())
+    }
+
+    /// 取消关联；未关联时也视为成功。
+    pub async fn remove_drone_camera(
+        &self,
+        drone_tag: &str,
+        camera_device_tag: &str,
+    ) -> Result<()> {
+        self.rb
+            .exec(
+                "DELETE FROM drone_camera WHERE drone_tag = $1 AND camera_device_tag = $2",
+                vec![
+                    rbs::value![drone_tag],
+                    rbs::value![camera_device_tag],
+                ],
+            )
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        Ok(())
+    }
+
+    /// 清空某架无人机的全部关联（删除档案时调用）。
+    pub async fn delete_drone_cameras_by_drone(&self, drone_tag: &str) -> Result<()> {
+        self.rb
+            .exec(
+                "DELETE FROM drone_camera WHERE drone_tag = $1",
+                vec![rbs::value![drone_tag]],
+            )
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        Ok(())
     }
 
     pub async fn update_channel(&self, channel: &Channel) -> Result<()> {
@@ -2213,6 +2293,24 @@ impl DbRepository {
     ) -> Result<i64> {
         let count = policy_count(&self.rb, device_tag, policy_type)
             .await.map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
-        Ok(count)
+        Ok(count as i64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drone_camera_schema_is_defined() {
+        assert!(DRONE_CAMERA_SCHEMA
+            .iter()
+            .any(|sql| sql.contains("CREATE TABLE IF NOT EXISTS drone_camera")));
+        assert!(DRONE_CAMERA_SCHEMA
+            .iter()
+            .any(|sql| sql.contains("UNIQUE (drone_tag, camera_device_tag)")));
+        assert!(DRONE_CAMERA_SCHEMA
+            .iter()
+            .any(|sql| sql.contains("idx_drone_camera_drone_tag")));
     }
 }

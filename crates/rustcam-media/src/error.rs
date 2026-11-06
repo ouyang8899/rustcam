@@ -30,6 +30,15 @@ pub enum AppError {
 
     #[error("Auth error: {0}")]
     Auth(String),
+
+    #[error("Forbidden: {0}")]
+    Forbidden(String),
+
+    #[error("Conflict: {0}")]
+    Conflict(String),
+
+    #[error("Service unavailable: {0}")]
+    ServiceUnavailable(String),
 }
 
 impl IntoResponse for AppError {
@@ -43,6 +52,11 @@ impl IntoResponse for AppError {
             AppError::MediaServerError(msg) => (StatusCode::BAD_GATEWAY, 502, msg.clone()),
             AppError::WebSocketError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, 500, msg.clone()),
             AppError::Auth(msg) => (StatusCode::UNAUTHORIZED, 401, msg.clone()),
+            AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, 403, msg.clone()),
+            AppError::Conflict(msg) => (StatusCode::CONFLICT, 409, msg.clone()),
+            AppError::ServiceUnavailable(msg) => {
+                (StatusCode::SERVICE_UNAVAILABLE, 503, msg.clone())
+            }
         };
 
         let body = Json(serde_json::json!({

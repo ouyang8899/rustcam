@@ -13,6 +13,11 @@ impl DroneRedis {
         Ok(DroneRedis { conn })
     }
 
+    /// 取一个可用的连接副本（多路复用连接可并发使用）。
+    pub fn connection(&self) -> redis::aio::MultiplexedConnection {
+        self.conn.clone()
+    }
+
     pub async fn script_load(&self, script: &str) -> anyhow::Result<String> {
         let mut conn = self.conn.clone();
         let sha: String = redis::cmd("SCRIPT")

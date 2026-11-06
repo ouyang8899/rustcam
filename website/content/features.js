@@ -12,6 +12,7 @@ export default {
       { id: 'map', icon: 'map-pin', title: '电子地图', summary: '地图渲染、设备标记与状态筛选', items: ['MapLibre GL JS 渲染', 'GeoServer 图层与 WFS 代理', '设备点位聚合', '地图选点绑定通道坐标'] },
       { id: 'record', icon: 'clock', title: '录像与回放', summary: '录像任务、策略与文件管理', items: ['录像任务启停、暂停与恢复', '按时间段录像策略', '录像文件与播放地址', '多通道并行回放'] },
       { id: 'alarm', icon: 'bell', title: '告警', summary: '告警上报、记录与处理闭环', items: ['外部告警上报接口', '告警记录查询与分页', '处理状态标记', '告警与会话联动'] },
+      { id: 'mobile', icon: 'navigation', title: '移动眼', summary: '无人机作为会动的视点接入同一套平台', items: ['MAVLink / PX4 / ArduPilot 自动识别', 'Cesium 3D 地球与实时位置姿态', '起飞、降落、返航、定点、云台、相机指令与 ACK', '航线规划与顺序执行', '禁飞区 / 允许区与越界告警', '多摄像头设备关联：一架无人机可挂接多个平台摄像头', '关联后通道实时解析，直播页自动取 FLV / HLS 地址', '控制权租约、审计与状态持久化'] },
       { id: 'auth', icon: 'lock', title: '用户与权限', summary: 'JWT 认证与 RBAC 权限控制', items: ['JWT 登录与令牌刷新', 'Casbin 策略授权', '用户 / 角色 / 权限三级模型', '动态角色权限分配'] }
     ],
     protocols: {
@@ -22,6 +23,7 @@ export default {
         { name: 'ONVIF', status: '完成', support: '设备发现、PTZ 控制、Backchannel 语音对讲' },
         { name: 'RTSP', status: '完成', support: 'TCP / UDP 模式，RTP over RTSP' },
         { name: 'WebSocket', status: '完成', support: '事件推送、语音对讲双向通道' },
+        { name: 'MAVLink', status: '完成', support: 'PX4 / ArduPilot 自动识别，UDP / TCP / 串口，遥测与指令 ACK' },
       ]
     },
     progress: {
@@ -33,7 +35,13 @@ export default {
         { module: 'RTSP 流接收', status: '完成', note: '支持 RTP over RTSP' },
         { module: '前端实时视频 / PTZ / 监控墙', status: '完成', note: 'D-pad + 摇杆 + 预置位独立卡片' },
         { module: '电子地图', status: '完成', note: 'MapLibre GL JS + GeoServer' },
-        { module: '传输层 (TCP / UDP / TLS)', status: '完成', note: 'rustls 实现 HTTPS / WSS' }
+        { module: '传输层 (TCP / UDP / TLS)', status: '完成', note: 'rustls 实现 HTTPS / WSS' },
+        { module: '移动眼三进程骨架', status: '完成', note: 'drone-service / drone-adapter / 网关' },
+        { module: '移动眼飞控接入与遥测', status: '完成', note: 'PX4 / ArduPilot 自动识别，UDP / TCP / 串口' },
+        { module: '移动眼控制台', status: '完成', note: 'Cesium 3D、档案、航线、围栏、告警审计' },
+        { module: '移动眼机载视频接入', status: '完成', note: '无人机关联摄像头设备，通道动态解析与自动出流' },
+        { module: '控制权 / 指令状态机 / 围栏风控', status: '完成', note: '单实例租约与预检；Redis 多实例租约待做' },
+        { module: '一键测试环境', status: '完成', note: '内置 MAVLink 模拟器 + start.ps1' }
       ]
     }
   },
@@ -51,6 +59,7 @@ export default {
       { id: 'map', icon: 'map-pin', title: 'Electronic map', summary: 'Map rendering, device markers and status filters', items: ['MapLibre GL JS rendering', 'GeoServer layers with WFS proxy', 'Marker clustering', 'Pick coordinates on the map'] },
       { id: 'record', icon: 'clock', title: 'Recording & playback', summary: 'Tasks, policies and file management', items: ['Start, stop, pause and resume tasks', 'Time-window recording policies', 'Recording files and play URLs', 'Parallel multi-channel playback'] },
       { id: 'alarm', icon: 'bell', title: 'Alarms', summary: 'Reporting, records and closed-loop handling', items: ['External alarm intake API', 'Query and paginate alarm records', 'Processing status flags', 'Alarm to session linkage'] },
+      { id: 'mobile', icon: 'navigation', title: 'Mobile Eye', summary: 'Drones join the platform as moving vantage points', items: ['Automatic MAVLink / PX4 / ArduPilot detection', 'Cesium 3D globe with live position and attitude', 'Takeoff, landing, RTL, goto, gimbal and camera commands with ACK', 'Route planning and sequential execution', 'No-fly / allowed zones with breach alarms', 'Camera device association: one drone can link several platform cameras', 'Channels resolve live once linked; the live view fetches FLV / HLS automatically', 'Control leases, audit and persisted state'] },
       { id: 'auth', icon: 'lock', title: 'Users & permissions', summary: 'JWT authentication and RBAC', items: ['JWT login and token refresh', 'Casbin policy authorisation', 'Users / roles / permissions model', 'Dynamic role permission assignment'] }
     ],
     protocols: {
@@ -60,7 +69,8 @@ export default {
         { name: 'GB28181', status: 'Done', support: 'SIP signalling, stream ingest, PTZ, broadcast, two-way talk' },
         { name: 'ONVIF', status: 'Done', support: 'Discovery, PTZ control, Backchannel audio' },
         { name: 'RTSP', status: 'Done', support: 'TCP / UDP modes, RTP over RTSP' },
-        { name: 'WebSocket', status: 'Done', support: 'Event push, two-way talk channel' }
+        { name: 'WebSocket', status: 'Done', support: 'Event push, two-way talk channel' },
+        { name: 'MAVLink', status: 'Done', support: 'PX4 / ArduPilot detection, UDP / TCP / serial, telemetry and command ACKs' }
       ]
     },
     progress: {
@@ -72,7 +82,13 @@ export default {
         { module: 'RTSP stream ingest', status: 'Done', note: 'RTP over RTSP supported' },
         { module: 'Frontend live video / PTZ / video wall', status: 'Done', note: 'D-pad + joystick + dedicated preset card' },
         { module: 'Electronic map', status: 'Done', note: 'MapLibre GL JS + GeoServer' },
-        { module: 'Transport TCP / UDP / TLS', status: 'Done', note: 'HTTPS / WSS via rustls' }
+        { module: 'Transport TCP / UDP / TLS', status: 'Done', note: 'HTTPS / WSS via rustls' },
+        { module: 'Mobile Eye three-process skeleton', status: 'Done', note: 'drone-service / drone-adapter / gateway' },
+        { module: 'Mobile Eye flight-control integration', status: 'Done', note: 'PX4 / ArduPilot detection, UDP / TCP / serial' },
+        { module: 'Mobile Eye console', status: 'Done', note: 'Cesium 3D, profiles, routes, geofences, alerts and audit' },
+        { module: 'Mobile Eye video association', status: 'Done', note: 'Drones link camera devices; channels resolve live and stream automatically' },
+        { module: 'Control leases / command state machine / geofencing', status: 'Done', note: 'In-process leases and pre-checks; Redis multi-instance leases planned' },
+        { module: 'One-command test environment', status: 'Done', note: 'Built-in MAVLink simulator + start.ps1' }
       ]
     }
   }

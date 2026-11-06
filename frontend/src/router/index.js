@@ -108,6 +108,57 @@ const routes = [
         component: () => import('../views/Alarms.vue'),
       },
       {
+        path: 'drone',
+        redirect: '/drone/drones',
+      },
+      {
+        // 规则 §10.2 的 /drone/devices：兼容别名
+        path: 'drone/devices',
+        redirect: '/drone/drones',
+      },
+      {
+        path: 'drone/drones',
+        name: 'DroneList',
+        component: () => import('../views/drone/DroneList.vue'),
+      },
+      {
+        path: 'drone/live',
+        name: 'DroneLive',
+        component: () => import('../views/drone/DroneLive.vue'),
+      },
+      {
+        // 规则 §10.2 的 /drone/control：控制权管理（分控/仲裁）
+        path: 'drone/control',
+        name: 'DroneControl',
+        component: () => import('../views/drone/DroneControl.vue'),
+      },
+      {
+        path: 'drone/routes',
+        name: 'DroneRoutes',
+        component: () => import('../views/drone/RoutePlanner.vue'),
+      },
+      {
+        // 规则 §10.2 的 /drone/geofence：兼容别名
+        path: 'drone/geofence',
+        redirect: '/drone/fences',
+      },
+      {
+        path: 'drone/fences',
+        name: 'DroneFences',
+        component: () => import('../views/drone/FenceManager.vue'),
+      },
+      {
+        path: 'drone/alerts',
+        name: 'DroneAlerts',
+        component: () => import('../views/drone/DroneAlerts.vue'),
+      },
+      {
+        // 规则 §10.2 的 /drone/replay：轨迹回放
+        path: 'drone/replay',
+        name: 'DroneReplay',
+        component: () => import('../views/drone/DroneReplay.vue'),
+      },
+      {
         path: 'video-wall',
         name: 'PlayerWall',
         component: () => import('../views/PlayerWall.vue'),

@@ -5,10 +5,10 @@ use rustcam_drone_proto::control::{
 };
 use tonic::{Request, Response, Status};
 
+use crate::control;
 use crate::state::DroneState;
 
 pub struct ControlServiceImpl {
-    #[allow(dead_code)]
     state: DroneState,
 }
 
@@ -18,20 +18,16 @@ impl ControlServiceImpl {
     }
 }
 
-fn lease_from(
-    device_id: &str,
-    control_type: &str,
-    holder: &str,
-    priority: i32,
-    lease_seconds: i32,
-) -> Lease {
+fn to_lease(outcome: &control::LeaseOutcome) -> Lease {
     Lease {
-        device_id: device_id.to_string(),
-        control_type: control_type.to_string(),
-        holder: holder.to_string(),
-        priority,
-        expire_at_ms: chrono::Utc::now().timestamp_millis() + (lease_seconds as i64) * 1000,
-        preempted: String::new(),
+        device_id: outcome.lease.device_id.clone(),
+        control_type: outcome.lease.control_type.clone(),
+        holder: outcome.lease.holder.clone(),
+        priority: outcome.lease.priority,
+        expire_at_ms: outcome.lease.expire_at_ms,
+        preempted: outcome.preempted.clone(),
+        granted: outcome.granted,
+        reason: outcome.reason.clone(),
     }
 }
 
@@ -42,24 +38,42 @@ impl ControlService for ControlServiceImpl {
         request: Request<AcquireRequest>,
     ) -> Result<Response<Lease>, Status> {
         let r = request.into_inner();
-        Ok(Response::new(lease_from(
+        let outcome = control::acquire(
+            &self.state,
             &r.device_id,
             &r.control_type,
             &r.operator,
             r.priority,
             r.lease_seconds,
-        )))
+        )
+        .await
+        .map_err(Status::invalid_argument)?;
+        Ok(Response::new(to_lease(&outcome)))
     }
 
     async fn release_control(
         &self,
         request: Request<ReleaseRequest>,
     ) -> Result<Response<ReleaseReply>, Status> {
-        let _ = request.into_inner();
-        Ok(Response::new(ReleaseReply {
-            released: true,
-            reason: String::new(),
-        }))
+        let r = request.into_inner();
+        match control::release(
+            &self.state,
+            &r.device_id,
+            &r.control_type,
+            &r.operator,
+            false,
+        )
+        .await
+        {
+            Ok(lease) => Ok(Response::new(ReleaseReply {
+                released: true,
+                reason: format!("released by {}", lease.holder),
+            })),
+            Err(e) => Ok(Response::new(ReleaseReply {
+                released: false,
+                reason: e,
+            })),
+        }
     }
 
     async fn preempt_control(
@@ -67,13 +81,17 @@ impl ControlService for ControlServiceImpl {
         request: Request<PreemptRequest>,
     ) -> Result<Response<Lease>, Status> {
         let r = request.into_inner();
-        Ok(Response::new(lease_from(
+        let outcome = control::preempt(
+            &self.state,
             &r.device_id,
             &r.control_type,
             &r.operator,
             r.priority,
             r.lease_seconds,
-        )))
+        )
+        .await
+        .map_err(Status::invalid_argument)?;
+        Ok(Response::new(to_lease(&outcome)))
     }
 
     async fn renew_control(
@@ -81,34 +99,71 @@ impl ControlService for ControlServiceImpl {
         request: Request<RenewRequest>,
     ) -> Result<Response<Lease>, Status> {
         let r = request.into_inner();
-        Ok(Response::new(lease_from(
+        match control::renew(
+            &self.state,
             &r.device_id,
             &r.control_type,
             &r.operator,
-            0,
             r.lease_seconds,
-        )))
+        )
+        .await
+        {
+            Ok(outcome) => Ok(Response::new(to_lease(&outcome))),
+            Err(e) => Ok(Response::new(Lease {
+                device_id: r.device_id,
+                control_type: r.control_type,
+                granted: false,
+                reason: e,
+                ..Default::default()
+            })),
+        }
     }
 
     async fn force_release_control(
         &self,
         request: Request<ForceReleaseRequest>,
     ) -> Result<Response<ReleaseReply>, Status> {
-        let _ = request.into_inner();
-        Ok(Response::new(ReleaseReply {
-            released: true,
-            reason: String::new(),
-        }))
+        let r = request.into_inner();
+        match control::release(
+            &self.state,
+            &r.device_id,
+            &r.control_type,
+            &r.operator,
+            true,
+        )
+        .await
+        {
+            Ok(_) => Ok(Response::new(ReleaseReply {
+                released: true,
+                reason: "force released".into(),
+            })),
+            Err(e) => Ok(Response::new(ReleaseReply {
+                released: false,
+                reason: e,
+            })),
+        }
     }
 
     async fn get_control_state(
         &self,
         request: Request<StateRequest>,
     ) -> Result<Response<StateReply>, Status> {
-        let _ = request.into_inner();
+        let r = request.into_inner();
+        let lease = control::get(&self.state, &r.device_id, &r.control_type)
+            .await
+            .map(|l| Lease {
+                device_id: l.device_id,
+                control_type: l.control_type,
+                holder: l.holder,
+                priority: l.priority,
+                expire_at_ms: l.expire_at_ms,
+                preempted: String::new(),
+                granted: true,
+                reason: String::new(),
+            });
         Ok(Response::new(StateReply {
-            held: false,
-            lease: None,
+            held: lease.is_some(),
+            lease,
         }))
     }
 
@@ -117,13 +172,8 @@ impl ControlService for ControlServiceImpl {
         request: Request<rustcam_drone_proto::common::Command>,
     ) -> Result<Response<rustcam_drone_proto::common::CommandReply>, Status> {
         let cmd = request.into_inner();
-        Ok(Response::new(rustcam_drone_proto::common::CommandReply {
-            cmd_id: cmd.cmd_id,
-            device_id: cmd.device_id,
-            status: "rejected".into(),
-            code: 501,
-            message: "command pipeline not implemented yet".into(),
-            ts_ms: chrono::Utc::now().timestamp_millis(),
-        }))
+        Ok(Response::new(
+            crate::commands::submit(&self.state, cmd).await,
+        ))
     }
 }

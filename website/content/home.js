@@ -2,18 +2,18 @@ export default {
   zh: {
     meta: {
       title: 'RustCam · Rust 驱动的视频监控网关与信令控制平台',
-      description: 'RustCam 是基于 Rust 构建的现代化视频监控网关，支持 GB28181、ONVIF、RTSP 多协议设备接入，实时视频、录像回放、云台控制、电子地图与流媒体集群。'
+      description: 'RustCam 是基于 Rust 构建的现代化视频监控网关，支持 GB28181、ONVIF、RTSP 多协议设备接入与无人机飞控接入（MAVLink / PX4 / ArduPilot），提供实时视频、录像回放、云台控制、电子地图与流媒体集群。'
     },
     hero: {
       eyebrow: 'RUST + VUE + QT',
       title: 'Rust 驱动的\n摄像头视频监控网关',
-      subtitle: '多协议设备接入、实时音视频、录像回放与信令控制，一套平台覆盖 Web 控制台、桌面客户端与信令服务。',
+      subtitle: '多协议设备接入、实时音视频、录像回放与信令控制，一套平台覆盖 Web 控制台、桌面客户端与信令服务；并把监控域扩展到会动的视点——移动眼，飞控、3D 实时视图、航线与围栏统一纳管。',
       primaryCta: '查看开发者文档',
       secondaryCta: 'Gitee 仓库',
       stats: [
-        { value: 102, suffix: ' 条', label: '受保护 API 路由' },
-        { value: 4, suffix: ' 大', label: '协议族接入' },
-        { value: 8, suffix: ' 大', label: '能力域' },
+        { value: 120, suffix: ' 条', label: '受保护 API 路由' },
+        { value: 5, suffix: ' 大', label: '协议族接入' },
+        { value: 9, suffix: ' 大', label: '能力域' },
         { value: 3, suffix: ' 端', label: 'Web / 桌面 / 服务端' }
       ]
     },
@@ -24,7 +24,8 @@ export default {
         { name: 'GB28181', desc: 'SIP 信令注册、INVITE 呼叫、PS 流解析、平台广播与语音对讲' },
         { name: 'ONVIF', desc: 'WS-Discovery 设备发现、ContinuousMove/AbsoluteMove 云台、Backchannel 对讲' },
         { name: 'RTSP', desc: 'TCP / UDP 模式接入，支持 RTP over RTSP 直连拉流' },
-        { name: 'WebSocket', desc: '事件实时推送与语音对讲双向通道，基于 JWT 鉴权' }
+        { name: 'WebSocket', desc: '事件实时推送与语音对讲双向通道，基于 JWT 鉴权' },
+        { name: 'MAVLink', desc: '无人机飞控协议接入（PX4 / ArduPilot），UDP / TCP / 串口连接与指令回执闭环' }
       ]
     },
     features: {
@@ -39,6 +40,30 @@ export default {
         { icon: 'clock', title: '录像与回放', description: '录像任务、录像策略、文件管理与多通道回放时间轴检索。', items: ['录像策略调度', '多通道并行回放', '回放进度精确控制'] },
         { icon: 'server', title: '流媒体集群', description: '按权重调度与故障切换。', items: ['多服务器权重路由', 'Hook 事件处理', '启停与状态探测'] }
       ]
+    },
+    mobileEye: {
+      eyebrow: '移动眼 · MOBILE EYE',
+      title: '固定摄像机看住该看的，移动眼盯住会变的。',
+      description: '无人机不是「会飞的摄像头」：它自带飞控，决定去哪看、怎么看、何时回。RustCam 把整套飞行能力接进监控域——Cesium 3D 地球上的实时位置、航线规划、电子围栏与飞行指令，与固定摄像机共用同一套录像、证据链与监控墙。',
+      principles: [
+        { title: '不新增固定点位', desc: '需要时才调度：省掉布线、杆件、点位与后续维护，视觉覆盖按需扩展，而不是提前埋满。' },
+        { title: '不锁场景', desc: '航线、围栏、告警规则以配置组合而成；巡检 / 安防补盲 / 应急取证是同一套能力的不同模板。' }
+      ],
+      capabilities: ['MAVLink / PX4 / ArduPilot', 'Cesium 3D 实时视图', '航线规划与执行', '电子围栏 / 越界告警', '多摄像头关联与自动取流', '控制权租约与抢占', '飞行日志与审计', '内置 MAVLink 模拟器'],
+      cta: '查看开发者文档',
+      status: '已落地：飞控接入、3D 实时视图、无人机档案、机载摄像头关联与自动取流、航线、围栏、告警审计与一键测试环境。',
+      hud: {
+        title: 'DRONE-01 · 移动眼',
+        link: 'MAVLink 已连接',
+        alt: '无人机飞控视锥锁定移动目标的示意图',
+        caption: '飞控决定去哪看：三维地球上的位置、姿态、航线与围栏实时可视',
+        readouts: [
+          { key: 'heading', label: 'HDG' },
+          { key: 'altitude', label: 'ALT' },
+          { key: 'battery', label: 'BAT' },
+          { key: 'distance', label: 'DIST' }
+        ]
+      }
     },
     architecture: {
       eyebrow: '系统架构',
@@ -57,6 +82,9 @@ export default {
       web: {
         title: 'Web 控制台',
         items: [
+          { src: '/img/mobile-eye-live.webp', alt: '移动眼 Cesium 3D 实时飞行', caption: '移动眼 · 3D 实时飞行', width: 1600, height: 950 },
+          { src: '/img/mobile-eye-drones.webp', alt: '移动眼无人机档案', caption: '移动眼 · 无人机档案', width: 1600, height: 950 },
+          { src: '/img/mobile-eye-fence.webp', alt: '移动眼电子围栏', caption: '移动眼 · 电子围栏', width: 1600, height: 950 },
           { src: '/img/console-overview.webp', alt: '系统概览面板', caption: '系统概览', width: 1920, height: 1082 },
           { src: '/img/console-devices.webp', alt: '设备列表', caption: '设备列表', width: 1920, height: 1082 },
           { src: '/img/console-channels.webp', alt: '通道列表', caption: '通道列表', width: 1920, height: 1082 },
@@ -119,18 +147,18 @@ export default {
   en: {
     meta: {
       title: 'RustCam · A Camera video surveillance gateway written in Rust',
-      description: 'RustCam is a modern video surveillance gateway and signalling platform built with Rust, supporting GB28181, ONVIF and RTSP ingestion, live playback, recording, PTZ control and an electronic map.'
+      description: 'RustCam is a modern video surveillance gateway and signalling platform built with Rust, supporting GB28181, ONVIF and RTSP ingestion plus drone flight-control integration (MAVLink / PX4 / ArduPilot), live playback, recording, PTZ control and an electronic map.'
     },
     hero: {
       eyebrow: 'RUST + VUE + QT',
       title: 'A video surveillance\ngateway written in Rust',
-      subtitle: 'Multi-protocol ingestion, live media, recording playback and signalling control — one platform for the web console, the desktop client and the signalling server.',
+      subtitle: 'Multi-protocol ingestion, live media, recording playback and signalling control — one platform for the web console, the desktop client and the signalling server, now extending the surveillance domain to moving vantage points: the Mobile Eye, with flight control, a live 3D view, routes and geofences.',
       primaryCta: 'Read the docs',
       secondaryCta: 'Gitee repository',
       stats: [
-        { value: 102, suffix: '', label: 'protected API routes' },
-        { value: 4, suffix: '', label: 'protocol families' },
-        { value: 8, suffix: '', label: 'capability domains' },
+        { value: 120, suffix: '', label: 'protected API routes' },
+        { value: 5, suffix: '', label: 'protocol families' },
+        { value: 9, suffix: '', label: 'capability domains' },
         { value: 3, suffix: '', label: 'web / desktop / server' }
       ]
     },
@@ -141,7 +169,8 @@ export default {
         { name: 'GB28181', desc: 'SIP registration, INVITE calls, PS stream parsing, platform broadcast and two-way talk' },
         { name: 'ONVIF', desc: 'WS-Discovery discovery, ContinuousMove/AbsoluteMove PTZ, Backchannel audio' },
         { name: 'RTSP', desc: 'TCP / UDP modes, including direct RTP over RTSP pull' },
-        { name: 'WebSocket', desc: 'Real-time event push and two-way talk channel, JWT protected' }
+        { name: 'WebSocket', desc: 'Real-time event push and two-way talk channel, JWT protected' },
+        { name: 'MAVLink', desc: 'Drone flight-control integration (PX4 / ArduPilot) over UDP / TCP / serial, with command acknowledgements' }
       ]
     },
     features: {
@@ -156,6 +185,30 @@ export default {
         { icon: 'clock', title: 'Recording & playback', description: 'Recording tasks, policies, file management and multi-channel timeline playback.', items: ['Policy scheduling', 'Parallel multi-channel playback', 'Frame-accurate seek'] },
         { icon: 'server', title: 'Streaming cluster', description: 'Media Server behind one adapter, with weighted routing and failover.', items: ['Weighted server routing', 'Hook event handling', 'Enable / disable and probing'] }
       ]
+    },
+    mobileEye: {
+      eyebrow: 'MOBILE EYE',
+      title: 'Fixed cameras watch what matters; the mobile eye watches what moves.',
+      description: 'A drone is not "a camera that flies": it carries its own flight control and decides where to look, how to look and when to return. RustCam pulls that flight capability into the surveillance domain — live position on a Cesium 3D globe, route planning, geofences and flight commands share the same recording, evidence chain and video wall as fixed cameras.',
+      principles: [
+        { title: 'No new fixed points', desc: 'Dispatch only when it is needed: no cabling, no poles, no permanent points, and coverage that grows on demand instead of being buried in advance.' },
+        { title: 'No scenario lock-in', desc: 'Routes, geofences and alarm rules are composed by configuration; patrol, blind-spot coverage and emergency response are templates of one capability set.' }
+      ],
+      capabilities: ['MAVLink / PX4 / ArduPilot', 'Cesium 3D live view', 'Route planning & execution', 'Geofences & breach alarms', 'Camera association & auto play', 'Control leases & preemption', 'Flight logs & audit', 'Built-in MAVLink simulator'],
+      cta: 'Read the developer docs',
+      status: 'Delivered: flight control, 3D live view, drone profiles, camera association with automatic live streams, routes, geofences, alerts, audit and a one-command test environment.',
+      hud: {
+        title: 'DRONE-01 · MOBILE EYE',
+        link: 'MAVLink connected',
+        alt: 'Illustration of a drone vision cone locking onto a moving target',
+        caption: 'Flight control decides where to look: position, attitude, routes and geofences on a 3D globe',
+        readouts: [
+          { key: 'heading', label: 'HDG' },
+          { key: 'altitude', label: 'ALT' },
+          { key: 'battery', label: 'BAT' },
+          { key: 'distance', label: 'DIST' }
+        ]
+      }
     },
     architecture: {
       eyebrow: 'Architecture',
@@ -174,6 +227,9 @@ export default {
       web: {
         title: 'Web console',
         items: [
+          { src: '/img/mobile-eye-live.webp', alt: 'Mobile Eye Cesium 3D live flight', caption: 'Mobile Eye · 3D live flight', width: 1600, height: 950 },
+          { src: '/img/mobile-eye-drones.webp', alt: 'Mobile Eye drone profiles', caption: 'Mobile Eye · drone profiles', width: 1600, height: 950 },
+          { src: '/img/mobile-eye-fence.webp', alt: 'Mobile Eye geofence editor', caption: 'Mobile Eye · geofences', width: 1600, height: 950 },
           { src: '/img/console-overview.webp', alt: 'System overview', caption: 'System overview', width: 1920, height: 1082 },
           { src: '/img/console-devices.webp', alt: 'Device list', caption: 'Device list', width: 1920, height: 1082 },
           { src: '/img/console-channels.webp', alt: 'Channel list', caption: 'Channel list', width: 1920, height: 1082 },

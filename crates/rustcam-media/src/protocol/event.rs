@@ -491,7 +491,12 @@ pub enum PtzCommand {
     AbsoluteMove { pan: f64, tilt: f64, zoom: f64 },
     RelativeMove { pan: f64, tilt: f64, zoom: f64 },
     GotoPreset { preset_token: String },
-    SetPreset { preset_name: Option<String> },
+    SetPreset {
+        #[serde(default)]
+        preset_name: Option<String>,
+        #[serde(default)]
+        preset_index: Option<u8>,
+    },
     RemovePreset { preset_token: String },
 }
 

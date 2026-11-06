@@ -7,11 +7,12 @@ members = [
     "crates/rustcam-drone-core",
     "crates/rustcam-drone-service",
     "crates/rustcam-drone-adapter",
+    "crates/rustcam-drone-sim",
 ]
 
 [workspace.package]
 version = "0.1.0"
-edition = "2026"
+edition = "2021"
 authors = ["ouyang"]
 
 [workspace.dependencies]
@@ -46,6 +47,7 @@ hyper-util = { version = "0.1.21", features = ["tokio", "server", "http1"] }
 rustls = { version = "0.23.46", features = ["ring"] }
 rustls-pemfile = "2.1"
 tokio-rustls = "0.26.6"
+ring = "0.17"
 parking_lot = "0.13.0"
 dashmap = "6.2.1"
 once_cell = "1.19"
@@ -82,6 +84,19 @@ tonic-build = "0.14.9"
 tonic-prost = "0.14.9"
 tonic-prost-build = "0.14.9"
 prost-build = "0.14.4"
+# 围栏几何判定（drone-service）
+geo = "0.33.1"
+geo-types = "0.7"
+geojson = "1.0.0"
+mavlink = { version = "0.21", default-features = false, features = [
+    "std",
+    "tokio",
+    "transport-udp",
+    "transport-tcp",
+    "transport-direct-serial",
+    "dialect-common",
+    "dialect-ardupilotmega",
+] }
 
 [profile.dev]
 opt-level = 0

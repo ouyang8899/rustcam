@@ -15,6 +15,10 @@ import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from
 
 echarts.use([SVGRenderer, LineChart, BarChart, PieChart, GaugeChart, RadarChart, GridComponent, TooltipComponent, LegendComponent, TitleComponent])
 
+// Cesium 静态资源：生产由 vite-static-copy 发布到 /cesium/，开发直接走 node_modules。
+window.CESIUM_BASE_URL = import.meta.env.DEV
+  ? '/node_modules/cesium/Build/Cesium/'
+  : '/cesium/'
 
 const app = createApp(App)
 const pinia = createPinia()

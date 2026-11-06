@@ -34,6 +34,20 @@
           <el-menu-item index="/channels">通道列表</el-menu-item>
         </el-sub-menu>
 
+        <el-sub-menu index="/drone-group">
+          <template #title>
+            <el-icon><Promotion /></el-icon>
+            <span>移动眼</span>
+          </template>
+          <el-menu-item index="/drone/drones">无人机</el-menu-item>
+          <el-menu-item index="/drone/control">控制权管理</el-menu-item>
+          <el-menu-item index="/drone/live">实时飞行</el-menu-item>
+          <el-menu-item index="/drone/routes">航线规划</el-menu-item>
+          <el-menu-item index="/drone/fences">电子围栏</el-menu-item>
+          <el-menu-item index="/drone/alerts">告警与审计</el-menu-item>
+          <el-menu-item index="/drone/replay">轨迹回放</el-menu-item>
+        </el-sub-menu>
+
         <el-sub-menu index="/stream-group">
           <template #title>
             <el-icon><DataLine /></el-icon>
@@ -139,7 +153,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import { Monitor, VideoCamera, DataLine, VideoPlay, Cpu, Compass, Grid, User, Sunny, Moon, DArrowLeft, DArrowRight, SwitchButton, Bell } from '@element-plus/icons-vue'
+import { Monitor, VideoCamera, DataLine, VideoPlay, Cpu, Compass, Grid, User, Sunny, Moon, DArrowLeft, DArrowRight, SwitchButton, Bell, Promotion } from '@element-plus/icons-vue'
 import { useThemeStore } from '../../stores/themeStore'
 import { useAuthStore } from '../../stores/authStore'
 import { useWsConnection } from '../../composables/useWsConnection'

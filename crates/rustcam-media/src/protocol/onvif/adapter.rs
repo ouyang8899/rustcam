@@ -921,7 +921,7 @@ impl SignalAdapter for OnvifAdapter {
             PtzCommand::GotoPreset { preset_token } => {
                 let _ = client.goto_preset(preset_token).await;
             }
-            PtzCommand::SetPreset { preset_name } => {
+            PtzCommand::SetPreset { preset_name, .. } => {
                 let _ = client
                     .set_preset("", preset_name.as_deref())
                     .await

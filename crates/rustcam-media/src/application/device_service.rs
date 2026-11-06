@@ -1476,6 +1476,24 @@ impl DeviceService {
             } else {
                 uuid::Uuid::new_v4().to_string()
             }
+        } else if matches!(target_protocol, Protocol::Gb28181) {
+            let presets = self.list_ptz_presets(device_id).await?;
+            let used: std::collections::HashSet<u8> = presets
+                .iter()
+                .filter_map(|p| p.token.parse::<u8>().ok())
+                .collect();
+            let index = (1u8..=255)
+                .find(|index| !used.contains(index))
+                .ok_or_else(|| {
+                    AppError::BadRequest("No free GB28181 preset slots".to_string())
+                })?;
+
+            let command = PtzCommand::SetPreset {
+                preset_name: Some(name.to_string()),
+                preset_index: Some(index),
+            };
+            Self::dispatch_gb28181_ptz(&self.infra, &device, &command, &None).await?;
+            index.to_string()
         } else {
             uuid::Uuid::new_v4().to_string()
         };
@@ -1588,6 +1606,22 @@ impl DeviceService {
                     if let Err(e) = ptz_client.with_profile(profile_token).remove_preset(token).await {
                         tracing::warn!("[PTZ] RemovePreset failed (continuing to delete from DB): {}", e);
                     }
+                }
+            }
+        }
+
+        if matches!(target_protocol, Protocol::Gb28181) {
+            if let Ok(index) = token.parse::<u8>() {
+                let command = PtzCommand::RemovePreset {
+                    preset_token: index.to_string(),
+                };
+                if let Err(e) =
+                    Self::dispatch_gb28181_ptz(&self.infra, &device, &command, &None).await
+                {
+                    tracing::warn!(
+                        "[PTZ] GB28181 RemovePreset failed (continuing to delete from DB): {}",
+                        e
+                    );
                 }
             }
         }

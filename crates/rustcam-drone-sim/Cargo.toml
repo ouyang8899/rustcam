@@ -1,0 +1,18 @@
+[package]
+name = "rustcam-drone-sim"
+version = "0.1.0"
+edition = "2021"
+authors = ["RustCam Team"]
+description = "Lightweight MAVLink vehicle simulator for RustCam mobile-eye development"
+
+[[bin]]
+name = "rustcam-drone-sim"
+path = "src/main.rs"
+
+[dependencies]
+mavlink = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+chrono = { workspace = true }

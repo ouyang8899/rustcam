@@ -98,16 +98,62 @@ RustCam 正在把监控域从**固定点位**扩展到**会动的视点**——�
 | 位置与遥测 | 位置、姿态、电池、链路状态实时上云，地图与轨迹随动 |
 | 控制权仲裁 | 飞行 / 云台控制权带租约与抢占，多人、多系统同时操作不打架 |
 | 围栏风控 | 禁飞区、限高区自动判定，触发即产生告警事件并进入统一告警流 |
-| 合规内置 | 禁拍区、作业时段、飞行日志与操作审计作为配置与记录项随平台交付 |
+| 合规内置 | 飞行日志与操作审计随平台落库（`drone_control_audit` / `drone_command_audit`）；禁拍区、作业时段为规划项 |
 
 ### 现状与规划
 
 | 阶段 | 状态 |
 |---|---|
 | 三进程骨架（控制面 / 适配 / 网关）、设备注册与心跳、REST 网关、DB 驱动 RBAC | ✅ 完成 |
-| 真实 MAVLink 接入（PX4 / ArduPilot）、遥测上云与前端地图随动 | 🔄 进行中 |
-| 控制权仲裁（Redis Lua）、指令状态机、围栏风控 | ⏳ 待开始 |
-| 前端移动视点视图（2D 地图 + 3D 姿态）、模板化场景与演示 | ⏳ 待开始 |
+| 真实 MAVLink 飞控接入（PX4 / ArduPilot）、遥测去重与指令回执 | ✅ 完成 |
+| 移动眼前端：无人机档案、Cesium 3D 实时飞行、航线规划、电子围栏、告警审计、轨迹回放 | ✅ 完成 |
+| 控制权仲裁 / 围栏风控 / 指令状态机 / 审计留痕 | ✅ 完成（Redis Lua 租约跨实例互斥，Redis 不可用时降级为进程内锁） |
+| 模板化场景、移动眼与监控墙联动演示 | 🔄 进行中 |
+
+### 快速接入（PX4 / ArduPilot）
+
+```bash
+# 一键测试环境（无需真实飞控）：模拟器 + adapter + drone-service + rustcam-server + 前端
+pwsh -File testenv\start.ps1
+```
+
+手动启动：
+
+```bash
+cp adapter.toml.example adapter.toml
+# 按机型修改 mavlink_addr：
+#   PX4 SITL / 机载串流   udpin:0.0.0.0:14540
+#   ArduPilot SITL        udpin:0.0.0.0:14550
+#   数传电台              serial:COM3:57600 或 serial:/dev/ttyUSB0:57600
+
+cargo run -p rustcam-drone-service
+cargo run -p rustcam-drone-sim          # 无飞控时使用内置 MAVLink 模拟器
+cargo run -p rustcam-drone-adapter
+```
+
+适配器按 `HEARTBEAT.autopilot` 自动识别 PX4 / ArduPilot，并把两侧的模式编码统一成
+`AUTO.LOITER` / `GUIDED` 等名称；遥测经 gRPC 上行到 drone-service 并做去重与影子缓存，
+指令经 `ControlService.SendCommand` 下行，由 `COMMAND_ACK` 回执闭环。
+
+前端「移动眼」菜单包含：
+
+| 页面 | 能力 |
+|---|---|
+| 无人机 | 档案增删改查、机型/飞控/视频通道绑定 |
+| 控制权管理 | 飞行 / 云台控制权申请、抢占、续约与释放，租约时长与持有人可见 |
+| 实时飞行 | Cesium 3D 地球、实时遥测、控制权申请/释放、起飞/降落/返航/定点/云台/拍照、指令回执 |
+| 航线规划 | 地球点击添加航点、排序/高度/速度/悬停、保存与执行 |
+| 电子围栏 | 多边形/圆形、禁飞区/允许区、高度区间、越界告警、goto 预检 |
+| 告警与审计 | 围栏越界、上下线、指令与控制权操作留痕 |
+| 轨迹回放 | 按时间段查询历史轨迹，2D/3D 视图切换与播放进度 |
+
+> Cesium 底图默认使用离线 NaturalEarth，内网/演示环境不依赖外部瓦片；
+> 生产可在前端构建时设置 `VITE_CESIUM_TMS=<内网瓦片模板>`，或 `VITE_CESIUM_ONLINE=true` 使用在线底图。
+> 无外网时离线底图分辨率有限，高清影像接入由后续配置完成。
+>
+> 当前限制：控制权仲裁走 Redis Lua 脚本（跨实例互斥；Redis 不可用时降级为进程内锁，只保证单实例互斥）；
+> 档案、航线、围栏、审计已落 PostgreSQL（`drone_*` 表由 drone-service 启动时自建），
+> `drone-state.json` 仅作快照兜底与旧数据回填；drone gRPC 尚未启用 mTLS/token。
 
 ## 截图预览
 
@@ -306,11 +352,13 @@ curl -s "http://127.0.0.1:8081/api/v1/devices?limit=20" \
 | **认证** | 角色继承 | ✅ 完成 | 策略存数据库，支持角色继承与环检测 |
 | **移动眼** | 三进程骨架 | ✅ 完成 | drone-service / drone-adapter / 网关 |
 | **移动眼** | 设备注册与心跳 | ✅ 完成 | adapter 注册、心跳、指数退避重连 |
-| **移动眼** | 遥测与前端地图 | 🔄 进行中 | MAVLink 接入、位置随动 |
-| **移动眼** | 控制权与指令 | ⏳ 待开始 | Redis Lua 租约、指令状态机、围栏风控 |
+| **移动眼** | MAVLink 飞控接入 | ✅ 完成 | PX4 / ArduPilot 自动识别、遥测聚合、指令与 ACK |
+| **移动眼** | 遥测影子与事件流 | ✅ 完成 | 去重/乱序过滤、EventService 广播、指令超时回收 |
+| **移动眼** | 前端地图随动 | ✅ 完成 | 2D/3D 视图与轨迹回放 |
+| **移动眼** | 控制权仲裁与围栏 | ✅ 完成 | Redis Lua 租约跨实例互斥、指令状态机、围栏风控与告警去抖 |
 | **传输** | TCP Server | ✅ 完成 | TCP传输模式 |
 | **传输** | UDP Server | ✅ 完成 | UDP传输模式 |
-| **传输** | TLS/SSL | ✅ 完成 | HTTPS/WSS 支持，rustls 实现 |
+| **传输** | TLS/SSL | 🔄 部分 | 客户端（ONVIF 设备侧、桌面端）支持 https/wss；服务端未内置 TLS 监听，需前置反代终止 |
 
 ## 项目结构
 
@@ -322,10 +370,16 @@ RUSTCAM/
 │   ├── rustcam-server/         # 服务端可执行程序
 │   ├── rustcam-drone-service/  # 移动视点控制面（独立进程）
 │   ├── rustcam-drone-adapter/  # 机载适配：飞控桥接与注册
+│   ├── rustcam-drone-sim/      # MAVLink 机体模拟器（测试/演示）
 │   ├── rustcam-drone-proto/    # 移动视点 gRPC 契约
 │   └── rustcam-drone-core/     # 共享类型与常量
 ├── frontend/                   # Vue 前端
 │   └── src/
+│       └── views/drone/        # 无人机 / 实时飞行 / 航线 / 围栏 / 告警审计
+├── testenv/                    # 移动眼测试环境（启动/停止脚本、截图）
+│   ├── start.ps1
+│   ├── stop.ps1
+│   └── README.txt
 ├── clientapp/                  # Qt 桌面版
 │   └── src/
 ├── public/                     # 对外文档
@@ -342,22 +396,22 @@ RUSTCAM/
 
 | 组件 | 要求 |
 |------|------|
-| Rust | 1.70+ |
-| PostgreSQL | 14+ |
+| Rust | 1.95+（依赖树 MSRV：`parking_lot 0.13` / `lock_api 0.5` 为 1.95，`tonic` / `redis` / `config` 为 1.88） |
+| PostgreSQL | 14+（**需 PostGIS 扩展**，通道坐标依赖 `geometry` 类型） |
 | Redis | 6+ |
 | Node.js | 18+ (前端构建) |
+| ZLMediaKit | 任意近期版本（推流 / 拉流 / 转推必需，配置模板见 `conf/config.ini`） |
+| Qt + CMake | Qt 5.15.2（推荐）/ Qt 6.2+、CMake 3.16+、Visual Studio 2019（仅桌面客户端） |
 
 ### 配置文件
 
-编辑 `config.toml`:
+`config.toml` 从**工作目录**读取；文件不存在时后端会自动生成一份默认配置。下面是**可启动的最小完整配置**：
 
 ```toml
 [server]
 host = "0.0.0.0"
 port = 8081
-tls_enabled = false                    # 启用 TLS
-tls_cert = "/path/to/cert.pem"        # TLS 证书
-tls_key = "/path/to/key.pem"          # TLS 私钥
+tls_enabled = false
 
 [database]
 url = "postgres://user:pass@localhost:5432/rustcam"
@@ -370,36 +424,104 @@ pool_size = 5
 [[media_servers.servers]]
 name = "zlmediakit"
 url = "http://127.0.0.1:80"
-api_key = "your_api_key"
-server_type = "zlmediakit"            # zlmediakit / srs / xiu
+api_key = "your_api_key"               # 须与 ZLMediaKit config.ini 的 [api]secret 一致
+server_type = "zlmediakit"             # zlmediakit / srs / xiu
 weight = 100
 enabled = true
 server_tag = "default"
 
+[cluster]
+strategy = "round_robin"
+health_check_interval_secs = 30
+max_session_per_server = 1000
+
+[session]
+expiration_secs = 300
+max_per_user = 10
+
+[onvif]
+discovery_enabled = false
+scopes = ["onvif://www.onvif.org/Profile/Streaming", "onvif://www.onvif.org/Profile/PTZ"]
+
+[rtsp_auth]
+enabled = true
+realm = "RustCam"
+
+[signaling_server]
+server_gb_id = "31011500001000000001"
+server_gb_domain = "3101150000"
+bind_ip = "0.0.0.0"                    # GB28181 联调填本机内网 IP，否则设备回推 RTP 失败
+tcp_signaling_port = 5060
+udp_signaling_port = 5061
+rtp_port_start = 15000
+rtp_port_end = 15100
+rtp_bind_addr = "0.0.0.0"              # 同上，填本机内网 IP
+
 [jwt]
 secret = "change-me-in-production"     # 生产环境务必修改
+access_token_expire_minutes = 60
+refresh_token_expire_days = 30
+
+# 移动眼控制面地址（缺省 http://127.0.0.1:50051）
+[drone]
+service_addr = "http://127.0.0.1:50051"
 ```
+
+> `[cluster]` / `[session]` / `[onvif]` / `[rtsp_auth]` / `[signaling_server]` / `[jwt]` 六段为**必填**，
+> 缺任一段后端启动即报 `Failed to deserialize config: missing configuration field "..."`。
+>
+> 可选段：`[log]`（级别与目录，默认 `./logs`）、`[rtsp_server]`（TCP RTSP 信令，默认 `0.0.0.0:554`）、
+> `[recovery]`（流恢复退避策略）、`[media_servers.servers.protocol_ports]`（各协议端口，须与 ZLMediaKit
+> `config.ini` 保持一致）。
 
 ### 数据库初始化
 
 ```bash
-# 创建数据库
+# 创建数据库（通道坐标依赖 PostGIS：schema.sql 内含 CREATE EXTENSION postgis，
+# 需要超级用户权限，或由 DBA 预先装好扩展）
 psql -U postgres -c "CREATE DATABASE rustcam;"
 psql -U postgres -d rustcam -f sql/schema.sql
+
+# 角色继承（角色层级授权）：role_inheritance 表不在 schema.sql 中，需单独执行
+psql -U postgres -d rustcam -f sql/migrate_role_inheritance.sql
 ```
+
+> - `sql/schema.sql` 是唯一的建库脚本；后续结构变更以 `sql/migrate_*.py` 追加，在 `sql/` 目录按需执行。
+> - 移动眼相关表（`drone_device`、`drone_geofence`、`drone_control_audit` 等）由 `rustcam-drone-service`
+>   启动时自动执行 `crates/rustcam-drone-service/migrations.sql` 创建，无需手工建表。
 
 ### 构建与运行
 
 ```bash
-# 构建后端
-cargo build --release
+# 构建后端（仓库根目录是虚拟 workspace，需用 -p 指定包）
+cargo build --release -p rustcam-server
 ./target/release/rustcam-media
 
 # 或开发模式
-cargo run
+cargo run -p rustcam-server
 ```
 
+> 在仓库根目录直接执行 `cargo run` 会失败：`could not determine which binary to run`，
+> 因为 workspace 内有多个二进制目标，须用 `-p` / `--bin` 指定。
+
+移动眼（可选，独立进程）：
+
+```bash
+# 控制面：读取工作目录的 drone.toml，gRPC :50051 / metrics :50052
+cargo run -p rustcam-drone-service
+
+# 机载适配：读取工作目录的 adapter.toml（示例见 adapter.toml.example）
+# 默认连接 udpin:0.0.0.0:14540（PX4 SITL）
+cargo run -p rustcam-drone-adapter
+```
+
+> 主服务需通过 `config.toml` 的 `[drone].service_addr` 指向控制面；控制面未启动时主服务仍可正常启动，
+> 仅 `/api/v1/drone/*` 返回 503（`drone-service 未配置`）。
+
 ### TLS/HTTPS 部署
+
+平台后端**不内置 TLS 监听**：`config.toml` 里的 `tls_enabled` / `tls_cert` / `tls_key` 目前只是预留字段，
+HTTP 服务为明文（`crates/rustcam-server/src/main.rs` 直接 `axum::serve`）。HTTPS / WSS 请由前置反向代理终止。
 
 1. 生成自签名证书（测试用）:
 ```bash
@@ -412,39 +534,66 @@ openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -node
 certbot certonly --nginx -d yourdomain.com
 ```
 
-3. 配置 `config.toml`:
-```toml
-[server]
-tls_enabled = true
-tls_cert = "/etc/letsencrypt/live/yourdomain.com/fullchain.pem"
-tls_key = "/etc/letsencrypt/live/yourdomain.com/privkey.pem"
+3. 由反向代理加载证书，并反代到后端 `8081`。前端控制台需先构建（`cd frontend && npm install && npm run build`，
+产物在 `frontend/dist`），后端不提供静态文件服务：
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name yourdomain.com;
+
+    ssl_certificate     /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
+
+    root /opt/rustcam/frontend/dist;      # 前端静态产物
+    index index.html;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /ws {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 3600s;
+    }
+}
 ```
+
+> 页面以 HTTPS 提供时，浏览器会自动使用 `wss://` 连接 `/ws`（见 `frontend/src/composables/useWsConnection.js`），
+> 因此代理必须支持 WebSocket 升级；桌面客户端在登录框勾选「Use HTTPS」即可走同一入口。
 
 ### Docker 部署（可选）
 
+仓库当前**不提供 Dockerfile 与镜像**，平台本体按「二进制 + 配置文件」方式部署；依赖服务可用容器运行。
+注意官方 `postgres` 镜像不含 PostGIS，需改用 `postgis/postgis` 镜像（tag 形如 `<PG大版本>-<PostGIS版本>`）：
+
 ```bash
-# PostgreSQL
-docker run -d --name postgres \
+# 自定义网络，便于容器间按主机名互访
+docker network create rustcam-net
+
+# PostgreSQL + PostGIS
+docker run -d --name postgres --network rustcam-net \
   -e POSTGRES_DB=rustcam \
   -e POSTGRES_USER=postgres \
   -e POSTGRES_PASSWORD=your_password \
   -v postgres_data:/var/lib/postgresql/data \
-  postgres:14
+  postgis/postgis:16-3.4
 
 # Redis
-docker run -d --name redis \
+docker run -d --name redis --network rustcam-net \
   -v redis_data:/data \
   redis:7-alpine
-
-# RustCam
-docker build -t rustcam .
-docker run -d --name rustcam \
-  --link postgres \
-  --link redis \
-  -p 8081:8081 \
-  -v $(pwd)/config.toml:/app/config.toml \
-  rustcam
 ```
+
+此时 `config.toml` 中数据库地址写 `postgres://postgres:your_password@postgres:5432/rustcam`，
+Redis 写 `redis://redis:6379`。
 
 ## 项目进度
 
@@ -457,12 +606,12 @@ docker run -d --name rustcam \
 - [x] 电子地图 (MapLibre GL JS + GeoServer)
 - [ ] SRS 流媒体支持
 - [ ] XIU 流媒体支持
-- [x] HTTPS/WSS 加密传输
+- [ ] HTTPS/WSS 加密传输（TLS 需由前置反代终止，服务端未内置 TLS 监听）
 - [x] 移动眼三进程骨架 (drone-service / drone-adapter / 网关)
 - [x] 角色继承与数据库驱动的权限策略
-- [ ] 真实 MAVLink 接入与位置遥测上云
-- [ ] 控制权仲裁、指令状态机、围栏风控
-- [ ] 移动眼前端视图 (2D 地图 + 3D 姿态)
+- [x] 真实 MAVLink 飞控接入（PX4 / ArduPilot，遥测 + 指令 + ACK）
+- [x] 移动眼前端视图 (2D 地图 + 3D 姿态)
+- [x] 控制权仲裁、指令状态机、围栏风控
 
 ## 贡献指南
 
@@ -472,7 +621,7 @@ docker run -d --name rustcam \
 
 ```bash
 # 后端
-cargo build && cargo run
+cargo build && cargo run -p rustcam-server
 
 # 前端
 cd frontend && npm install && npm run dev

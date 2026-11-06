@@ -1,0 +1,38 @@
+# rustcam-drone-adapter 示例配置：复制为 adapter.toml 后按机型修改。
+# 环境变量优先级高于本文件：ADAPTER_ID / PROTOCOL / SERVICE_ADDR / DEVICES /
+# DEVICE_ID / MAVLINK_ADDR / MAVLINK_AUTOPILOT / TELEMETRY_HZ。
+
+[adapter]
+adapter_id = "adapter-mavlink-1"
+protocol = "mavlink"
+service_addr = "http://127.0.0.1:50051"
+
+# 注册到 drone-service 的机体列表；device_id 省略时取 devices[0]。
+devices = ["drone-001"]
+device_id = "drone-001"
+
+# 飞控连接串（支持 udpin / udpout / udpbcast / tcpin / tcpout / serial，兼容 udp://）：
+#   PX4 SITL / 机载串流：      udpin:0.0.0.0:14540
+#   ArduPilot SITL：           udpin:0.0.0.0:14550
+#   数传电台（Windows）：      serial:COM3:57600
+#   数传电台（Linux）：        serial:/dev/ttyUSB0:57600
+#   以太网飞控：               tcpout:192.168.1.10:5760
+mavlink_addr = "udpin:0.0.0.0:14540"
+
+# auto = 按 HEARTBEAT 自动识别 PX4 / ArduPilot；也可固定为 px4 / ardupilot。
+autopilot = "auto"
+
+# 本机作为地面站的 MAVLink 身份（255/190 = 通用 GCS）。
+source_system = 255
+source_component = 190
+
+# 遥测上报频率与链路判定
+telemetry_hz = 10
+heartbeat_timeout_ms = 5000
+command_timeout_ms = 10000
+heartbeat_interval_secs = 10
+
+# gRPC 断线重连退避（秒）与本地待发队列长度
+reconnect_min_secs = 1
+reconnect_max_secs = 30
+buffer_size = 10000

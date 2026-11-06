@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use roxmltree::Document;
 
 use crate::protocol::gb28181::GB28181_USER_AGENT;
+use super::ptz as ptz_codec;
 
 #[derive(Debug, Clone)]
 pub enum PlaybackError {
@@ -59,6 +60,9 @@ use crate::protocol::gb28181::auth::{
 use crate::protocol::gb28181::sip::{SipMessage, SipMessageBuffer, SipMethod, SipNameAddr, SipUri};
 use crate::protocol::gb28181::sip_log;
 use crate::protocol::traits::ProtocolDeps;
+
+/// Default lifetime of the platform side alarm subscription.
+const DEFAULT_ALARM_SUBSCRIBE_EXPIRES: u32 = 3600;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Gb28181Version {
@@ -269,11 +273,26 @@ const TX_CACHE_TTL_SECS: i64 = 120;
 /// Upper bound of cached transactions (one device re-registers ~once a minute).
 const TX_CACHE_MAX_ENTRIES: usize = 512;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubscriptionDirection {
+    Inbound,
+    Outbound,
+}
+
 #[derive(Debug, Clone)]
 pub struct Subscription {
     pub event_type: String,
     pub expires: u32,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    pub direction: SubscriptionDirection,
+    pub call_id: String,
+    pub from_tag: Option<String>,
+    pub to_tag: Option<String>,
+    pub cseq: u32,
+    /// Address of the remote peer, used when the platform refreshes its own
+    /// subscription.
+    pub remote_host: String,
+    pub remote_port: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -740,56 +759,17 @@ impl Gb28181Adapter {
     }
 
     fn encode_ptz_cmd_compound(pan: f64, tilt: f64, zoom: f64) -> String {
-        let pan_speed = ((pan.abs() * 255.0) as u8).max(1);
-        let tilt_speed = ((tilt.abs() * 255.0) as u8).max(1);
-        let zoom_speed = ((zoom.abs() * 255.0) as u8).max(1);
-
-        let cmd1: u8 = 0x00;
-        let cmd1 = if tilt > 0.01 { cmd1 | 0x08 } else { cmd1 };
-        let cmd1 = if tilt < -0.01 { cmd1 | 0x10 } else { cmd1 };
-        let cmd1 = if pan < -0.01 { cmd1 | 0x02 } else { cmd1 };
-        let cmd1 = if pan > 0.01 { cmd1 | 0x20 } else { cmd1 };
-
-        let cmd2: u8 = 0x00;
-        let cmd2 = if zoom > 0.01 { cmd2 | 0x80 } else { cmd2 };
-        let cmd2 = if zoom < -0.01 { cmd2 | 0x40 } else { cmd2 };
-
-        let p_byte = if pan.abs() > 0.01 { pan_speed } else { 0 };
-        let t_byte = if tilt.abs() > 0.01 { tilt_speed } else { 0 };
-        let z_byte = if zoom.abs() > 0.01 { zoom_speed } else { 0 };
-
-        format!(
-            "80 01 {:02X} {:02X} {:02X} {:02X} {:02X} 00",
-            cmd1, cmd2, p_byte, t_byte, z_byte
-        )
+        ptz_codec::encode_compound(pan, tilt, zoom)
     }
 
     fn encode_ptz_cmd(direction: &str, speed: u8) -> String {
-        let spd = ((speed as f64 / 100.0) * 255.0) as u8;
-        match direction {
-            "up" => format!("80 01 04 08 00 {:02X} 00 {:02X} 00 00 00 00", spd, spd),
-            "down" => format!("80 01 04 10 00 {:02X} 00 {:02X} 00 00 00 00", spd, spd),
-            "left" => format!("80 01 04 20 00 {:02X} 00 {:02X} 00 00 00 00", spd, spd),
-            "right" => format!("80 01 04 40 00 {:02X} 00 {:02X} 00 00 00 00", spd, spd),
-            "zoom_in" => format!("80 01 04 80 00 {:02X} 00 00 00 00 00 00", spd),
-            "zoom_out" => format!("80 01 04 00 01 {:02X} 00 00 00 00 00 00", spd),
-            "focus_in" | "focus_near" => format!("80 01 47 00 00 {:02X} 00 00 00 00 00 00", spd),
-            "focus_out" | "focus_far" => format!("80 01 46 00 00 {:02X} 00 00 00 00 00 00", spd),
-            "iris_in" | "iris_open" => format!("80 01 49 00 00 {:02X} 00 00 00 00 00 00", spd),
-            "iris_out" | "iris_close" => format!("80 01 48 00 00 {:02X} 00 00 00 00 00 00", spd),
-            "stop" => "80 01 04 00 00 00 00 00 00 00 00 00".to_string(),
-            _ => "80 01 04 00 00 00 00 00 00 00 00 00".to_string(),
-        }
+        ptz_codec::encode_direction(direction, ptz_codec::speed_from_percent(speed))
     }
 
     fn build_ptz_xml(channel_id: &str, direction: &str, speed: u8) -> String {
         let ptz_cmd = Self::encode_ptz_cmd(direction, speed);
-        let sn = chrono::Utc::now().timestamp_millis() % 1000000;
-        format!(
-            r#"<?xml version="1.0" encoding="UTF-8"?>
-<Notify><CmdType>PTZCmd</CmdType><SN>{}</SN><DeviceID>{}</DeviceID><PTZCmd>{}</PTZCmd></Notify>"#,
-            sn, channel_id, ptz_cmd
-        )
+        let sn = (chrono::Utc::now().timestamp_millis() % 1_000_000) as u32;
+        ptz_codec::build_device_control_xml(channel_id, sn, &ptz_cmd)
     }
 
     fn build_ptz_xml_compound(
@@ -799,52 +779,58 @@ impl Gb28181Adapter {
         zoom: f64,
     ) -> String {
         let ptz_cmd = Self::encode_ptz_cmd_compound(pan, tilt, zoom);
-        let sn = chrono::Utc::now().timestamp_millis() % 1000000;
-        format!(
-            r#"<?xml version="1.0" encoding="UTF-8"?>
-<Notify><CmdType>PTZCmd</CmdType><SN>{}</SN><DeviceID>{}</DeviceID><PTZCmd>{}</PTZCmd></Notify>"#,
-            sn, channel_id, ptz_cmd
-        )
+        let sn = (chrono::Utc::now().timestamp_millis() % 1_000_000) as u32;
+        ptz_codec::build_device_control_xml(channel_id, sn, &ptz_cmd)
+    }
+
+    fn build_ptz_xml_preset(
+        channel_id: &str,
+        action: ptz_codec::PresetAction,
+        index: u8,
+    ) -> String {
+        let ptz_cmd = ptz_codec::encode_preset(action, index);
+        let sn = (chrono::Utc::now().timestamp_millis() % 1_000_000) as u32;
+        ptz_codec::build_device_control_xml(channel_id, sn, &ptz_cmd)
     }
 
     fn build_ptz_message(&self, channel_id: &str, body: &str) -> String {
         let sn = self.seq.fetch_add(1, Ordering::SeqCst);
         let call_id = uuid::Uuid::new_v4().to_string().replace("-", "");
-        let server_port = self.deps.config.server.port;
-        let server_ip = self
-            .remote_addr
-            .map(|a| a.ip().to_string())
-            .unwrap_or_else(|| "0.0.0.0".to_string());
+        let server_port = match self.transport {
+            TransportType::Tcp => self.deps.config.signaling_server.tcp_signaling_port,
+            TransportType::Udp => self.deps.config.signaling_server.udp_signaling_port,
+            _ => unreachable!("GB28181 only supports TCP and UDP transport"),
+        };
+        let server_ip = &self.deps.config.signaling_server.bind_ip;
+        let server_gb_id = &self.deps.config.signaling_server.server_gb_id;
+        let server_gb_domain = &self.deps.config.signaling_server.server_gb_domain;
         let branch = format!("z9hG4bK{}", &call_id[..7]);
 
-        let via = if self.transport == TransportType::Tcp {
-            format!(
-                "SIP/2.0/TCP {}:{};branch={};rport",
-                server_ip, server_port, branch
-            )
+        let transport = if self.transport == TransportType::Tcp {
+            "TCP"
         } else {
-            format!(
-                "SIP/2.0/UDP {}:{};branch={};rport",
-                server_ip, server_port, branch
-            )
+            "UDP"
         };
+        let via = format!(
+            "SIP/2.0/{} {}:{};branch={};rport",
+            transport, server_ip, server_port, branch
+        );
 
         let body_len = body.len();
-        let to_uri = format!(
-            "sip:{}@{}",
-            channel_id,
-            self.remote_addr
-                .map(|a| a.to_string())
-                .unwrap_or_else(|| "0.0.0.0:5060".to_string())
-        );
-        let from_uri = format!("sip:rustcam@{}:{}", server_ip, server_port);
+        let device_addr = self
+            .udp_peer
+            .or(self.remote_addr)
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "0.0.0.0:5060".to_string());
+        let to_uri = format!("{}@{}", channel_id, device_addr);
+        let from_uri = format!("{}@{}:{}", server_gb_id, server_ip, server_port);
         let from_tag = uuid::Uuid::new_v4().to_string().replace("-", "");
 
         format!(
-            "MESSAGE {to_uri} SIP/2.0\r\n\
+            "MESSAGE sip:{to_uri} SIP/2.0\r\n\
              Via: {via}\r\n\
-             From: <{from_uri}>;tag={from_tag}\r\n\
-             To: <{to_uri}>\r\n\
+             From: <sip:{from_uri}>;domain={server_gb_domain};tag={from_tag}\r\n\
+             To: <sip:{to_uri}>\r\n\
              Call-ID: {call_id}\r\n\
              CSeq: {sn} MESSAGE\r\n\
              Content-Type: Application/MANSCDP+xml\r\n\
@@ -857,6 +843,7 @@ impl Gb28181Adapter {
             via = via,
             from_uri = from_uri,
             from_tag = from_tag,
+            server_gb_domain = server_gb_domain,
             call_id = call_id,
             sn = sn,
             body_len = body_len,
@@ -1875,6 +1862,13 @@ impl Gb28181Adapter {
                     let query = self.build_catalog_query();
                     let _ = self.send(&query).await;
                     self.start_wait_timer(30, 3);
+                    if let Err(e) = self.subscribe_alarm().await {
+                        tracing::warn!(
+                            "[GB28181] Failed to subscribe alarm events for {}: {}",
+                            device_id,
+                            e
+                        );
+                    }
                     SignalEvent::DeviceRegister {
                         device_id: internal_id,
                         device_tag,
@@ -2054,24 +2048,9 @@ impl Gb28181Adapter {
             );
         }
 
-        if body.contains("<CmdType>Alarm</CmdType>")
-            || body.contains("<AlarmNotify>")
-            || body.contains("<Alarm>")
-        {
-            let alarm_type =
-                Self::parse_xml_field(body, "AlarmType").unwrap_or_else(|| "unknown".to_string());
-            let alarm_msg = Self::parse_xml_field(body, "AlarmDescription").unwrap_or_default();
-            let device_id_val = self.device_id_i64();
-            let channel_tag = Self::parse_channel_id(body);
+        if let Some(alarm_event) = self.parse_alarm_event(body) {
             return (
-                Some(SignalEvent::Alarm {
-                    device_id: device_id_val.to_string(),
-                    device_tag: self.device_tag.clone(),
-                    channel_tag,
-                    alarm_type,
-                    message: alarm_msg,
-                    timestamp: chrono::Utc::now(),
-                }),
+                Some(alarm_event),
                 Some(self.build_sip_response_only_headers_with_to(200, "OK", &via_branch, &cseq, Some(&request_from_uri), request_from_tag.as_deref(), Some(&request_to_uri), None, None, Some(&call_id), None)),
             );
         }
@@ -2253,6 +2232,40 @@ impl Gb28181Adapter {
         )
     }
 
+    async fn handle_notify(
+        &mut self,
+        headers: &[(String, String)],
+        body: &str,
+    ) -> (Option<SignalEvent>, Option<String>) {
+        let req = self.build_request_headers(headers);
+
+        let event = self.parse_alarm_event(body);
+
+        let subscription_state = Self::get_header(headers, "Subscription-State")
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if subscription_state.contains("terminated") {
+            let call_id = req.call_id.clone();
+            self.subscriptions.write().await.retain(|_, sub| sub.call_id != call_id);
+        }
+
+        let response = self.build_sip_response_only_headers_with_to(
+            200,
+            "OK",
+            &req.via_branch,
+            &req.cseq,
+            Some(&req.from_uri),
+            req.from_tag.as_deref(),
+            Some(&req.to_uri),
+            Some(&req.to_tag),
+            None,
+            Some(&req.call_id),
+            None,
+        );
+
+        (event, Some(response))
+    }
+
     async fn handle_bye(
         &mut self,
         headers: &[(String, String)],
@@ -2378,6 +2391,48 @@ impl Gb28181Adapter {
         let call_id = Self::get_header(headers, "Call-ID").unwrap_or_default();
         let cseq_line = Self::get_header(headers, "CSeq").unwrap_or_default();
         let is_invite_response = cseq_line.to_lowercase().contains("invite");
+
+        if cseq_line.to_lowercase().contains("subscribe") {
+            let code: u16 = first_line
+                .split_whitespace()
+                .nth(1)
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0);
+            if (200..300).contains(&code) {
+                if let Some(to_header) = Self::get_header(headers, "To") {
+                    let (_, to_tag) = Self::parse_from_to_uri_and_tag(&to_header);
+                    if let Some(to_tag) = to_tag {
+                        let mut subs = self.subscriptions.write().await;
+                        Self::apply_subscribe_response(&mut subs, &call_id, &to_tag);
+                    }
+                }
+            }
+        }
+
+        if !is_invite_response {
+            let code: u16 = first_line
+                .split_whitespace()
+                .nth(1)
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0);
+            if (200..300).contains(&code) {
+                tracing::debug!(
+                    "[GB28181] SIP 2xx response: device={:?} call_id={} cseq={} status={}",
+                    self.device_tag,
+                    call_id,
+                    cseq_line,
+                    first_line
+                );
+            } else {
+                tracing::warn!(
+                    "[GB28181] SIP non-2xx response: device={:?} call_id={} cseq={} status={}",
+                    self.device_tag,
+                    call_id,
+                    cseq_line,
+                    first_line
+                );
+            }
+        }
 
         let sub_session = self
             .sessions
@@ -2704,7 +2759,7 @@ impl Gb28181Adapter {
     async fn handle_subscribe(
         &mut self,
         headers: &[(String, String)],
-        body: &str,
+        _body: &str,
     ) -> (Option<SignalEvent>, Option<String>) {
         let via_branch = Self::parse_via_branch(headers);
         let cseq = Self::parse_cseq_line(headers);
@@ -2715,11 +2770,17 @@ impl Gb28181Adapter {
             return (None, Some(self.build_403_response(&req)));
         }
 
-        let event_type = if body.contains("Event") {
-            Self::parse_xml_field(body, "Event").unwrap_or_else(|| "presence".to_string())
-        } else {
-            "presence".to_string()
-        };
+        let event_type = Self::get_header(headers, "Event")
+            .map(|value| {
+                value
+                    .split(';')
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string()
+            })
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "presence".to_string());
 
         let expires = Self::get_header(headers, "Expires")
             .and_then(|v| v.parse::<u32>().ok())
@@ -2727,12 +2788,27 @@ impl Gb28181Adapter {
 
         let device_tag = self.device_tag_str();
         let device_id = self.device_id_i64();
+        let call_id = Self::get_header(headers, "Call-ID").unwrap_or_default();
+        let from_tag = Self::get_header(headers, "From")
+            .and_then(|value| Self::parse_from_to_uri_and_tag(&value).1);
+        let cseq = cseq
+            .split_whitespace()
+            .next()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
 
-        let sub_key = format!("{}:{}", device_id, event_type);
+        let sub_key = format!("in:{}:{}", device_id, event_type);
         let subscription = Subscription {
             event_type: event_type.clone(),
             expires,
             created_at: chrono::Utc::now(),
+            direction: SubscriptionDirection::Inbound,
+            call_id,
+            from_tag,
+            to_tag: None,
+            cseq,
+            remote_host: String::new(),
+            remote_port: 0,
         };
         self.subscriptions
             .write()
@@ -3301,6 +3377,292 @@ impl Gb28181Adapter {
     }
 }
 
+impl Gb28181Adapter {
+    fn parse_preset_index(token: &str) -> Result<u8> {
+        token
+            .trim()
+            .parse::<u8>()
+            .ok()
+            .filter(|index| *index > 0)
+            .ok_or_else(|| AppError::BadRequest(format!("Invalid GB28181 preset index: {}", token)))
+    }
+
+    async fn send_ptz_command(
+        &mut self,
+        channel_id: &str,
+        ptz_cmd: &str,
+        command_label: &str,
+        device_id: Option<i64>,
+        speed: u8,
+    ) -> Result<()> {
+        let sn = self.seq.fetch_add(1, Ordering::SeqCst);
+        let body = ptz_codec::build_device_control_xml(channel_id, sn, ptz_cmd);
+        let message = self.build_ptz_message(channel_id, &body);
+        self.send(message.as_bytes()).await?;
+
+        if let Some(id) = device_id {
+            let _ = self
+                .deps
+                .device_lookup
+                .log_ptz_control(None, id, command_label, speed, true, None, None)
+                .await;
+        }
+
+        Ok(())
+    }
+
+    fn build_alarm_subscribe_request(
+        &self,
+        device_tag: &str,
+        device_host: &str,
+        device_port: u16,
+        call_id: &str,
+        from_tag: &str,
+        to_tag: Option<&str>,
+        cseq: u32,
+        expires: u32,
+    ) -> String {
+        let body = format!(
+            "<?xml version=\"1.0\" encoding=\"GB2312\"?>\r\n\
+             <Query>\r\n\
+             <CmdType>Alarm</CmdType>\r\n\
+             <SN>{sn}</SN>\r\n\
+             <DeviceID>{device_tag}</DeviceID>\r\n\
+             </Query>",
+            sn = cseq,
+            device_tag = device_tag
+        );
+
+        let server_port = match self.transport {
+            TransportType::Tcp => self.deps.config.signaling_server.tcp_signaling_port,
+            TransportType::Udp => self.deps.config.signaling_server.udp_signaling_port,
+            _ => unreachable!("GB28181 only supports TCP and UDP transport"),
+        };
+        let server_ip = &self.deps.config.signaling_server.bind_ip;
+        let server_gb_id = &self.deps.config.signaling_server.server_gb_id;
+        let server_gb_domain = &self.deps.config.signaling_server.server_gb_domain;
+
+        let branch = format!("z9hG4bK{}", uuid::Uuid::new_v4().to_string().replace("-", ""));
+        let via = format!(
+            "SIP/2.0/{} {server_ip}:{server_port};branch={branch};rport",
+            if self.transport == TransportType::Tcp { "TCP" } else { "UDP" }
+        );
+        let from_uri = format!("{server_gb_id}@{server_ip}:{server_port}");
+        let to_uri = format!("{device_tag}@{device_host}:{device_port}");
+        let to_header = match to_tag {
+            Some(tag) => format!("<sip:{to_uri}>;tag={tag}"),
+            None => format!("<sip:{to_uri}>"),
+        };
+
+        format!(
+            "SUBSCRIBE sip:{to_uri} SIP/2.0\r\n\
+             Via: {via}\r\n\
+             Max-Forwards: 70\r\n\
+             From: <sip:{from_uri}>;domain={server_gb_domain};tag={from_tag}\r\n\
+             To: {to_header}\r\n\
+             Call-ID: {call_id}\r\n\
+             CSeq: {cseq} SUBSCRIBE\r\n\
+             Contact: <sip:{from_uri}>\r\n\
+             Event: presence\r\n\
+             Accept: Application/MANSCDP+xml\r\n\
+             Expires: {expires}\r\n\
+             User-Agent: {user_agent}\r\n\
+             Content-Type: Application/MANSCDP+xml\r\n\
+             Content-Length: {content_len}\r\n\
+             \r\n\
+             {body}",
+            to_uri = to_uri,
+            via = via,
+            from_uri = from_uri,
+            server_gb_domain = server_gb_domain,
+            from_tag = from_tag,
+            to_header = to_header,
+            call_id = call_id,
+            cseq = cseq,
+            expires = expires,
+            user_agent = GB28181_USER_AGENT,
+            content_len = body.len(),
+            body = body
+        )
+    }
+
+    /// Subscribe to the alarm event of the device.
+    ///
+    /// GB28181 alarm subscriptions use `Event: presence` together with an
+    /// `Alarm` query body; the device answers with `NOTIFY` messages that carry
+    /// an `Alarm` notification body.
+    async fn subscribe_alarm(&mut self) -> Result<()> {
+        let device_tag = self.device_tag_str();
+        if device_tag.is_empty() {
+            return Err(AppError::Internal("device tag missing".to_string()));
+        }
+
+        let device = self
+            .deps
+            .device_lookup
+            .find_by_tag(&device_tag)
+            .await
+            .ok_or_else(|| AppError::NotFound(format!("Device not found: {}", device_tag)))?;
+
+        let sn = self.seq.fetch_add(1, Ordering::SeqCst);
+        let call_id = uuid::Uuid::new_v4().to_string().replace("-", "");
+        let from_tag = uuid::Uuid::new_v4().to_string().replace("-", "");
+        let expires = DEFAULT_ALARM_SUBSCRIBE_EXPIRES;
+
+        let request = self.build_alarm_subscribe_request(
+            &device_tag,
+            &device.host,
+            device.port,
+            &call_id,
+            &from_tag,
+            None,
+            sn,
+            expires,
+        );
+        self.send(request.as_bytes()).await?;
+
+        let subscription = Subscription {
+            event_type: "alarm".to_string(),
+            expires,
+            created_at: chrono::Utc::now(),
+            direction: SubscriptionDirection::Outbound,
+            call_id,
+            from_tag: Some(from_tag),
+            to_tag: None,
+            cseq: sn,
+            remote_host: device.host.clone(),
+            remote_port: device.port,
+        };
+        let key = Self::subscription_key(
+            SubscriptionDirection::Outbound,
+            self.device_id_i64(),
+            "alarm",
+        );
+        self.subscriptions.write().await.insert(key, subscription);
+        Ok(())
+    }
+
+    /// Refresh the platform side subscriptions that reached half of their lifetime.
+    pub async fn refresh_expiring_subscriptions(&mut self) -> usize {
+        let now = chrono::Utc::now();
+        let due = {
+            let subs = self.subscriptions.read().await;
+            Self::due_subscriptions(&subs, now)
+        };
+        if due.is_empty() {
+            return 0;
+        }
+
+        let device_tag = self.device_tag_str();
+        let mut refreshed = 0;
+        for (key, sub) in due {
+            let Some(from_tag) = sub.from_tag.clone() else {
+                continue;
+            };
+            if sub.remote_host.is_empty() || sub.remote_port == 0 {
+                continue;
+            }
+            let cseq = sub.cseq + 1;
+            let request = self.build_alarm_subscribe_request(
+                &device_tag,
+                &sub.remote_host,
+                sub.remote_port,
+                &sub.call_id,
+                &from_tag,
+                sub.to_tag.as_deref(),
+                cseq,
+                sub.expires,
+            );
+            match self.send(request.as_bytes()).await {
+                Ok(()) => {
+                    let mut subs = self.subscriptions.write().await;
+                    if let Some(entry) = subs.get_mut(&key) {
+                        entry.created_at = now;
+                        entry.cseq = cseq;
+                    }
+                    refreshed += 1;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "[GB28181] Failed to refresh subscription {} for {}: {}",
+                        key,
+                        device_tag,
+                        e
+                    );
+                }
+            }
+        }
+        refreshed
+    }
+
+    fn parse_alarm_event(&self, body: &str) -> Option<SignalEvent> {
+        if !(body.contains("<CmdType>Alarm</CmdType>")
+            || body.contains("<AlarmNotify>")
+            || body.contains("<Alarm>"))
+        {
+            return None;
+        }
+
+        let alarm_type =
+            Self::parse_xml_field(body, "AlarmType").unwrap_or_else(|| "unknown".to_string());
+        let alarm_msg = Self::parse_xml_field(body, "AlarmDescription").unwrap_or_default();
+        Some(SignalEvent::Alarm {
+            device_id: self.device_id_i64().to_string(),
+            device_tag: self.device_tag.clone(),
+            channel_tag: Self::parse_channel_id(body),
+            alarm_type,
+            message: alarm_msg,
+            timestamp: chrono::Utc::now(),
+        })
+    }
+
+    fn subscription_needs_refresh(
+        sub: &Subscription,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> bool {
+        if sub.direction != SubscriptionDirection::Outbound || sub.expires == 0 {
+            return false;
+        }
+        let age = now.signed_duration_since(sub.created_at).num_seconds();
+        age >= 0 && age as u64 >= (sub.expires as u64 / 2)
+    }
+
+    fn subscription_key(
+        direction: SubscriptionDirection,
+        device_id: i64,
+        event_type: &str,
+    ) -> String {
+        let prefix = match direction {
+            SubscriptionDirection::Inbound => "in",
+            SubscriptionDirection::Outbound => "out",
+        };
+        format!("{}:{}:{}", prefix, device_id, event_type)
+    }
+
+    fn apply_subscribe_response(
+        subs: &mut HashMap<String, Subscription>,
+        call_id: &str,
+        to_tag: &str,
+    ) {
+        for sub in subs.values_mut() {
+            if sub.direction == SubscriptionDirection::Outbound && sub.call_id == call_id {
+                sub.to_tag = Some(to_tag.to_string());
+            }
+        }
+    }
+
+    fn due_subscriptions(
+        subs: &HashMap<String, Subscription>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Vec<(String, Subscription)> {
+        subs.iter()
+            .filter(|(_, sub)| Self::subscription_needs_refresh(sub, now))
+            .map(|(key, sub)| (key.clone(), sub.clone()))
+            .collect()
+    }
+
+}
+
 #[async_trait]
 impl SignalAdapter for Gb28181Adapter {
     async fn parse(&mut self, data: &[u8]) -> Result<Vec<SignalEvent>> {
@@ -3352,6 +3714,8 @@ impl SignalAdapter for Gb28181Adapter {
                 (None, resp)
             } else if first_line.starts_with("SUBSCRIBE") {
                 self.handle_subscribe(&headers, &body).await
+            } else if first_line.starts_with("NOTIFY") {
+                self.handle_notify(&headers, &body).await
             } else if first_line.starts_with("INVITE") {
                 if body.contains("m=audio") && !body.contains("m=video") {
                     let via_branch = Self::parse_via_branch(&headers);
@@ -3838,57 +4202,91 @@ impl SignalAdapter for Gb28181Adapter {
         Ok(())
     }
 
+
     async fn ptz_control(
         &mut self,
         channel_id: &str,
         command: &crate::protocol::event::PtzCommand,
         speed: Option<u8>,
     ) -> Result<()> {
-        let _device = self
+        let device = self
             .deps
             .device_lookup
             .find_by_tag(channel_id)
             .await
             .ok_or_else(|| AppError::NotFound(format!("Device not found: {}", channel_id)))?;
-
+        let device_id = Some(device.id);
         let spd = speed.unwrap_or(50);
+        let speed_byte = ptz_codec::speed_from_percent(spd);
 
         match command {
             PtzCommand::ContinuousMove { pan, tilt, zoom } => {
-                if pan.abs() < 0.01 && tilt.abs() < 0.01 && zoom.abs() < 0.01 {
-                    let ptz_body = Self::build_ptz_xml(channel_id, "stop", 0);
-                    let msg = self.build_ptz_message(channel_id, &ptz_body);
-                    self.send(msg.as_bytes()).await?;
+                let ptz_cmd = if pan.abs() < 0.01 && tilt.abs() < 0.01 && zoom.abs() < 0.01 {
+                    ptz_codec::encode_direction("stop", 0)
                 } else {
-                    let ptz_body =
-                        Self::build_ptz_xml_compound(channel_id, *pan, *tilt, *zoom);
-                    let msg = self.build_ptz_message(channel_id, &ptz_body);
-                    self.send(msg.as_bytes()).await?;
-                }
+                    ptz_codec::encode_compound(*pan, *tilt, *zoom)
+                };
+                self.send_ptz_command(channel_id, &ptz_cmd, "continuous_move", device_id, spd)
+                    .await?;
             }
             PtzCommand::Stop => {
-                let ptz_body = Self::build_ptz_xml(channel_id, "stop", 0);
-                let msg = self.build_ptz_message(channel_id, &ptz_body);
-                self.send(msg.as_bytes()).await?;
+                let ptz_cmd = ptz_codec::encode_direction("stop", 0);
+                self.send_ptz_command(channel_id, &ptz_cmd, "stop", device_id, 0)
+                    .await?;
             }
-            _ => {
-                let (direction, spd_val) = match command {
-                    PtzCommand::Up => ("up", spd),
-                    PtzCommand::Down => ("down", spd),
-                    PtzCommand::Left => ("left", spd),
-                    PtzCommand::Right => ("right", spd),
-                    PtzCommand::ZoomIn => ("zoom_in", spd),
-                    PtzCommand::ZoomOut => ("zoom_out", spd),
-                    PtzCommand::FocusIn => ("focus_in", spd),
-                    PtzCommand::FocusOut => ("focus_out", spd),
-                    PtzCommand::IrisIn => ("iris_in", spd),
-                    PtzCommand::IrisOut => ("iris_out", spd),
-                    _ => return Ok(()),
+            PtzCommand::Up
+            | PtzCommand::Down
+            | PtzCommand::Left
+            | PtzCommand::Right
+            | PtzCommand::ZoomIn
+            | PtzCommand::ZoomOut
+            | PtzCommand::FocusIn
+            | PtzCommand::FocusOut
+            | PtzCommand::IrisIn
+            | PtzCommand::IrisOut => {
+                let (direction, label) = match command {
+                    PtzCommand::Up => ("up", "up"),
+                    PtzCommand::Down => ("down", "down"),
+                    PtzCommand::Left => ("left", "left"),
+                    PtzCommand::Right => ("right", "right"),
+                    PtzCommand::ZoomIn => ("zoom_in", "zoom_in"),
+                    PtzCommand::ZoomOut => ("zoom_out", "zoom_out"),
+                    PtzCommand::FocusIn => ("focus_near", "focus_in"),
+                    PtzCommand::FocusOut => ("focus_far", "focus_out"),
+                    PtzCommand::IrisIn => ("iris_open", "iris_in"),
+                    PtzCommand::IrisOut => ("iris_close", "iris_out"),
+                    _ => unreachable!(),
                 };
-
-                let ptz_body = Self::build_ptz_xml(channel_id, direction, spd_val);
-                let msg = self.build_ptz_message(channel_id, &ptz_body);
-                self.send(msg.as_bytes()).await?;
+                let ptz_cmd = ptz_codec::encode_direction(direction, speed_byte);
+                self.send_ptz_command(channel_id, &ptz_cmd, label, device_id, spd)
+                    .await?;
+            }
+            PtzCommand::GotoPreset { preset_token } => {
+                let index = Self::parse_preset_index(preset_token)?;
+                let ptz_cmd = ptz_codec::encode_preset(ptz_codec::PresetAction::Call, index);
+                self.send_ptz_command(channel_id, &ptz_cmd, "goto_preset", device_id, 0)
+                    .await?;
+            }
+            PtzCommand::SetPreset { preset_index, .. } => {
+                let index = preset_index.ok_or_else(|| {
+                    AppError::BadRequest(
+                        "Missing numeric preset_index for GB28181 SetPreset".to_string(),
+                    )
+                })?;
+                let ptz_cmd = ptz_codec::encode_preset(ptz_codec::PresetAction::Set, index);
+                self.send_ptz_command(channel_id, &ptz_cmd, "set_preset", device_id, 0)
+                    .await?;
+            }
+            PtzCommand::RemovePreset { preset_token } => {
+                let index = Self::parse_preset_index(preset_token)?;
+                let ptz_cmd = ptz_codec::encode_preset(ptz_codec::PresetAction::Remove, index);
+                self.send_ptz_command(channel_id, &ptz_cmd, "remove_preset", device_id, 0)
+                    .await?;
+            }
+            PtzCommand::AbsoluteMove { .. } | PtzCommand::RelativeMove { .. } => {
+                return Err(AppError::BadRequest(
+                    "GB28181 does not support absolute/relative PTZ move".to_string(),
+                ));
             }
         }
         Ok(())
@@ -3962,6 +4360,14 @@ impl SignalAdapter for Gb28181Adapter {
 
         self.send(notify.as_bytes()).await?;
         Ok(())
+    }
+
+    async fn cleanup_expired_subscriptions(&self) -> usize {
+        Gb28181Adapter::cleanup_expired_subscriptions(self).await
+    }
+
+    async fn refresh_expiring_subscriptions(&mut self) -> usize {
+        Gb28181Adapter::refresh_expiring_subscriptions(self).await
     }
 
     async fn start_audio_talk_internal(&mut self, device_tag: &str, node_id: MediaNodeId) -> Result<()> {
@@ -4867,72 +5273,54 @@ mod tests {
     #[test]
     fn test_encode_ptz_cmd_compound_up_right() {
         let result = Gb28181Adapter::encode_ptz_cmd_compound(0.5, 0.5, 0.0);
-        assert!(
-            result.contains("28"),
-            "Up(0x08)+Right(0x20)=0x28, got: {}",
-            result
-        );
-        assert!(result.contains("00 7F"), "No zoom (0), got: {}", result);
+        assert_eq!(&result[6..8], "09", "Up(0x08)+Right(0x01)");
+        assert_eq!(&result[8..10], "7F", "pan speed");
+        assert_eq!(&result[10..12], "7F", "tilt speed");
+        assert_eq!(&result[12..14], "00", "no zoom");
     }
 
     #[test]
     fn test_encode_ptz_cmd_compound_down_left() {
         let result = Gb28181Adapter::encode_ptz_cmd_compound(-0.5, -0.5, 0.0);
-        assert!(
-            result.contains("12"),
-            "Down(0x10)+Left(0x02)=0x12, got: {}",
-            result
-        );
+        assert_eq!(&result[6..8], "06", "Down(0x04)+Left(0x02)");
     }
 
     #[test]
     fn test_encode_ptz_cmd_compound_with_zoom() {
         let result = Gb28181Adapter::encode_ptz_cmd_compound(0.5, 0.0, 0.3);
-        assert!(result.contains("20"), "Right(0x20), got: {}", result);
-        assert!(
-            result.contains("80"),
-            "ZoomIn(0x80) in cmd2, got: {}",
-            result
-        );
+        assert_eq!(&result[6..8], "11", "Right(0x01)+ZoomIn(0x10)");
+        assert_eq!(&result[12..14], "40", "zoom speed in byte 7 high nibble");
     }
 
     #[test]
     fn test_encode_ptz_cmd_compound_all_stop() {
-        let result = Gb28181Adapter::encode_ptz_cmd_compound(0.0, 0.0, 0.0);
-        assert!(
-            result.contains("00 00 00 00 00"),
-            "All stop should be 00s, got: {}",
-            result
+        assert_eq!(
+            Gb28181Adapter::encode_ptz_cmd_compound(0.0, 0.0, 0.0),
+            "A50F0100000000B5"
         );
     }
 
     #[test]
     fn test_encode_ptz_cmd_single_up() {
-        let result = Gb28181Adapter::encode_ptz_cmd("up", 50);
-        assert!(
-            result.contains("08"),
-            "Up should set cmd1=0x08, got: {}",
-            result
+        assert_eq!(
+            Gb28181Adapter::encode_ptz_cmd("up", 50),
+            "A50F01080080003D"
         );
     }
 
     #[test]
     fn test_encode_ptz_cmd_single_right() {
-        let result = Gb28181Adapter::encode_ptz_cmd("right", 50);
-        assert!(
-            result.contains("40"),
-            "Right should set cmd1=0x40, got: {}",
-            result
+        assert_eq!(
+            Gb28181Adapter::encode_ptz_cmd("right", 50),
+            "A50F010180000036"
         );
     }
 
     #[test]
     fn test_encode_ptz_cmd_zoom_in() {
-        let result = Gb28181Adapter::encode_ptz_cmd("zoom_in", 50);
-        assert!(
-            result.contains("80"),
-            "ZoomIn should set cmd2=0x80, got: {}",
-            result
+        assert_eq!(
+            Gb28181Adapter::encode_ptz_cmd("zoom_in", 50),
+            "A50F011000008045"
         );
     }
 
@@ -5910,68 +6298,63 @@ mod tests {
         assert!(channels[0].parental);
     }
 
+    fn assert_ptz_xml(direction: &str, expected: &str) {
+        let result = Gb28181Adapter::build_ptz_xml("34020000001110000001", direction, 50);
+        assert!(result.contains("<CmdType>DeviceControl</CmdType>"), "{}", result);
+        assert!(result.contains("<DeviceID>34020000001110000001</DeviceID>"));
+        assert!(
+            result.contains(&format!("<PTZCmd>{}</PTZCmd>", expected)),
+            "direction={} expected={} body={}",
+            direction,
+            expected,
+            result
+        );
+        assert!(!result.contains("<Notify>"));
+    }
+
     #[test]
     fn test_build_ptz_xml_up() {
-        let result = Gb28181Adapter::build_ptz_xml("34020000001110000001", "up", 50);
-        assert!(result.contains("<CmdType>PTZCmd</CmdType>"));
-        assert!(result.contains("<DeviceID>34020000001110000001</DeviceID>"));
-        assert!(result.contains("PTZCmd>80 01 04 08"));
+        assert_ptz_xml("up", "A50F01080080003D");
     }
 
     #[test]
     fn test_build_ptz_xml_down() {
-        let result = Gb28181Adapter::build_ptz_xml("34020000001110000001", "down", 50);
-        assert!(result.contains("<CmdType>PTZCmd</CmdType>"));
-        assert!(result.contains("PTZCmd>80 01 04 10"));
+        assert_ptz_xml("down", "A50F010400800039");
     }
 
     #[test]
     fn test_build_ptz_xml_left() {
-        let result = Gb28181Adapter::build_ptz_xml("34020000001110000001", "left", 50);
-        assert!(result.contains("<CmdType>PTZCmd</CmdType>"));
-        assert!(result.contains("PTZCmd>80 01 04 20"));
+        assert_ptz_xml("left", "A50F010280000037");
     }
 
     #[test]
     fn test_build_ptz_xml_right() {
-        let result = Gb28181Adapter::build_ptz_xml("34020000001110000001", "right", 50);
-        assert!(result.contains("<CmdType>PTZCmd</CmdType>"));
-        assert!(result.contains("PTZCmd>80 01 04 40"));
+        assert_ptz_xml("right", "A50F010180000036");
     }
 
     #[test]
     fn test_build_ptz_xml_zoom_in() {
-        let result = Gb28181Adapter::build_ptz_xml("34020000001110000001", "zoom_in", 50);
-        assert!(result.contains("<CmdType>PTZCmd</CmdType>"));
-        assert!(result.contains("PTZCmd>80 01 04 80"));
+        assert_ptz_xml("zoom_in", "A50F011000008045");
     }
 
     #[test]
     fn test_build_ptz_xml_zoom_out() {
-        let result = Gb28181Adapter::build_ptz_xml("34020000001110000001", "zoom_out", 50);
-        assert!(result.contains("<CmdType>PTZCmd</CmdType>"));
-        assert!(result.contains("PTZCmd>80 01 04 00 01"));
+        assert_ptz_xml("zoom_out", "A50F012000008055");
     }
 
     #[test]
     fn test_build_ptz_xml_iris_in() {
-        let result = Gb28181Adapter::build_ptz_xml("34020000001110000001", "iris_in", 50);
-        assert!(result.contains("<CmdType>PTZCmd</CmdType>"));
-        assert!(result.contains("PTZCmd>80 01 49"));
+        assert_ptz_xml("iris_in", "A50F014400800079");
     }
 
     #[test]
     fn test_build_ptz_xml_iris_out() {
-        let result = Gb28181Adapter::build_ptz_xml("34020000001110000001", "iris_out", 50);
-        assert!(result.contains("<CmdType>PTZCmd</CmdType>"));
-        assert!(result.contains("PTZCmd>80 01 48"));
+        assert_ptz_xml("iris_out", "A50F01480080007D");
     }
 
     #[test]
     fn test_build_ptz_xml_stop() {
-        let result = Gb28181Adapter::build_ptz_xml("34020000001110000001", "stop", 50);
-        assert!(result.contains("<CmdType>PTZCmd</CmdType>"));
-        assert!(result.contains("PTZCmd>80 01 04 00 00"));
+        assert_ptz_xml("stop", "A50F0100000000B5");
     }
 
     #[test]
@@ -6262,5 +6645,351 @@ mod tests {
             channels[1].parent_id,
             Some("12010100001320000011".to_string())
         );
+    }
+
+    #[test]
+    fn test_build_alarm_subscribe_request() {
+        use std::sync::Once;
+        static SETUP: Once = Once::new();
+        SETUP.call_once(|| {
+            crate::protocol::gb28181::set_gb28181_platform_config(
+                "31011500001000000001".to_string(),
+                "3101150000".to_string(),
+                "192.168.1.100".to_string(),
+                5060,
+            );
+        });
+
+        let deps = ProtocolDeps::for_test();
+        let adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+
+        let request = adapter.build_alarm_subscribe_request(
+            "12010100001320000011",
+            "192.168.1.211",
+            5060,
+            "call-id-123",
+            "from-tag-1",
+            None,
+            7,
+            3600,
+        );
+
+        assert!(request.starts_with(
+            "SUBSCRIBE sip:12010100001320000011@192.168.1.211:5060 SIP/2.0\r\n"
+        ));
+        assert!(request.contains("Call-ID: call-id-123\r\n"));
+        assert!(request.contains("CSeq: 7 SUBSCRIBE\r\n"));
+        assert!(request.contains("Event: presence\r\n"));
+        assert!(request.contains("Expires: 3600\r\n"));
+        assert!(request.contains("Content-Type: Application/MANSCDP+xml\r\n"));
+        assert!(request.contains("<CmdType>Alarm</CmdType>"));
+        assert!(!request.contains("Event: alarm\r\n"));
+    }
+
+    #[test]
+    fn test_parse_alarm_event_motion_detection() {
+        let deps = ProtocolDeps::for_test();
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+        adapter.device_tag = Some("12010100001320000011".to_string());
+        adapter.device_id = Some(42);
+
+        let body = r#"<?xml version="1.0" encoding="GB2312"?>
+<Notify>
+  <CmdType>Alarm</CmdType>
+  <SN>1</SN>
+  <DeviceID>12010100001310000011</DeviceID>
+  <AlarmPriority>4</AlarmPriority>
+  <AlarmTime>2026-11-04T10:00:00</AlarmTime>
+  <AlarmMethod>5</AlarmMethod>
+  <AlarmDescription>Motion detected</AlarmDescription>
+  <Info><AlarmType>2</AlarmType></Info>
+</Notify>"#;
+
+        let event = adapter.parse_alarm_event(body).expect("alarm event");
+        match event {
+            SignalEvent::Alarm {
+                device_id,
+                channel_tag,
+                alarm_type,
+                message,
+                ..
+            } => {
+                assert_eq!(device_id, "42");
+                assert_eq!(channel_tag, Some("12010100001310000011".to_string()));
+                assert_eq!(alarm_type, "2");
+                assert_eq!(message, "Motion detected");
+            }
+            other => panic!("unexpected event: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_handle_notify_alarm_returns_event_and_200() {
+        let deps = ProtocolDeps::for_test();
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+        adapter.device_tag = Some("12010100001310000011".to_string());
+        adapter.device_id = Some(42);
+        adapter.transport = TransportType::Udp;
+
+        let headers = vec![
+            (
+                "Via".to_string(),
+                "SIP/2.0/UDP 192.168.1.211:5060;branch=z9hG4bKnotify".to_string(),
+            ),
+            (
+                "From".to_string(),
+                "<sip:12010100001310000011@192.168.1.211:5060>;tag=devtag".to_string(),
+            ),
+            (
+                "To".to_string(),
+                "<sip:31011500001000000001@192.168.1.100:5060>;tag=platform".to_string(),
+            ),
+            ("Call-ID".to_string(), "notify-call-1".to_string()),
+            ("CSeq".to_string(), "1 NOTIFY".to_string()),
+            ("Event".to_string(), "presence".to_string()),
+            (
+                "Subscription-State".to_string(),
+                "active;expires=3600".to_string(),
+            ),
+        ];
+        let body = r#"<?xml version="1.0" encoding="GB2312"?>
+<Notify>
+  <CmdType>Alarm</CmdType>
+  <SN>1</SN>
+  <DeviceID>12010100001310000011</DeviceID>
+  <AlarmPriority>4</AlarmPriority>
+  <AlarmMethod>5</AlarmMethod>
+  <AlarmDescription>Motion detected</AlarmDescription>
+  <Info><AlarmType>2</AlarmType></Info>
+</Notify>"#;
+
+        let (event, response) = adapter.handle_notify(&headers, body).await;
+        let response = response.expect("NOTIFY must be acknowledged");
+        assert!(response.starts_with("SIP/2.0 200 OK\r\n"));
+        assert!(response.contains("Call-ID: notify-call-1\r\n"));
+        assert!(response.contains("CSeq: 1 NOTIFY\r\n"));
+
+        match event.expect("alarm event") {
+            SignalEvent::Alarm { alarm_type, .. } => assert_eq!(alarm_type, "2"),
+            other => panic!("unexpected event: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_subscription_key_distinguishes_direction() {
+        assert_eq!(
+            Gb28181Adapter::subscription_key(SubscriptionDirection::Outbound, 42, "alarm"),
+            "out:42:alarm"
+        );
+        assert_eq!(
+            Gb28181Adapter::subscription_key(SubscriptionDirection::Inbound, 42, "presence"),
+            "in:42:presence"
+        );
+    }
+
+    #[test]
+    fn test_apply_subscribe_response_sets_to_tag() {
+        use std::collections::HashMap;
+
+        let mut subs = HashMap::new();
+        let key = Gb28181Adapter::subscription_key(SubscriptionDirection::Outbound, 42, "alarm");
+        subs.insert(
+            key.clone(),
+            Subscription {
+                event_type: "alarm".to_string(),
+                expires: 3600,
+                created_at: chrono::Utc::now(),
+                direction: SubscriptionDirection::Outbound,
+                call_id: "cid-1".to_string(),
+                from_tag: Some("ftag".to_string()),
+                to_tag: None,
+                cseq: 1,
+                remote_host: "192.168.1.211".to_string(),
+                remote_port: 5060,
+            },
+        );
+
+        Gb28181Adapter::apply_subscribe_response(&mut subs, "cid-1", "devtag");
+        assert_eq!(
+            subs.get(&key).and_then(|sub| sub.to_tag.clone()),
+            Some("devtag".to_string())
+        );
+
+        Gb28181Adapter::apply_subscribe_response(&mut subs, "other-call", "ignored");
+        assert_eq!(
+            subs.get(&key).and_then(|sub| sub.to_tag.clone()),
+            Some("devtag".to_string())
+        );
+    }
+
+    #[test]
+    fn test_due_subscriptions_only_returns_outbound_and_expired_half() {
+        use std::collections::HashMap;
+        use chrono::{Duration, Utc};
+
+        let now = Utc::now();
+        let mut subs = HashMap::new();
+        subs.insert(
+            "out:1:alarm".to_string(),
+            Subscription {
+                event_type: "alarm".to_string(),
+                expires: 3600,
+                created_at: now - Duration::seconds(1900),
+                direction: SubscriptionDirection::Outbound,
+                call_id: "cid-1".to_string(),
+                from_tag: Some("ftag".to_string()),
+                to_tag: Some("dtag".to_string()),
+                cseq: 1,
+                remote_host: "192.168.1.211".to_string(),
+                remote_port: 5060,
+            },
+        );
+        subs.insert(
+            "out:1:catalog".to_string(),
+            Subscription {
+                event_type: "catalog".to_string(),
+                expires: 3600,
+                created_at: now - Duration::seconds(10),
+                direction: SubscriptionDirection::Outbound,
+                call_id: "cid-2".to_string(),
+                from_tag: Some("ftag".to_string()),
+                to_tag: Some("dtag".to_string()),
+                cseq: 1,
+                remote_host: "192.168.1.211".to_string(),
+                remote_port: 5060,
+            },
+        );
+        subs.insert(
+            "in:1:presence".to_string(),
+            Subscription {
+                event_type: "presence".to_string(),
+                expires: 3600,
+                created_at: now - Duration::seconds(1900),
+                direction: SubscriptionDirection::Inbound,
+                call_id: "cid-3".to_string(),
+                from_tag: Some("ftag".to_string()),
+                to_tag: None,
+                cseq: 1,
+                remote_host: "192.168.1.211".to_string(),
+                remote_port: 5060,
+            },
+        );
+
+        let due = Gb28181Adapter::due_subscriptions(&subs, now);
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].0, "out:1:alarm");
+    }
+
+    #[tokio::test]
+    async fn test_trait_cleanup_expired_subscriptions_removes_expired() {
+        use chrono::{Duration, Utc};
+
+        let deps = ProtocolDeps::for_test();
+        let adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+
+        adapter
+            .subscriptions
+            .write()
+            .await
+            .insert(
+                "out:1:alarm".to_string(),
+                Subscription {
+                    event_type: "alarm".to_string(),
+                    expires: 10,
+                    created_at: Utc::now() - Duration::seconds(30),
+                    direction: SubscriptionDirection::Outbound,
+                    call_id: "cid".to_string(),
+                    from_tag: Some("ftag".to_string()),
+                    to_tag: Some("dtag".to_string()),
+                    cseq: 1,
+                    remote_host: "192.168.1.211".to_string(),
+                    remote_port: 5060,
+                },
+            );
+
+        let removed = SignalAdapter::cleanup_expired_subscriptions(&adapter).await;
+        assert_eq!(removed, 1);
+        assert!(adapter.subscriptions.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_refresh_expiring_subscriptions_sends_refresh_request() {
+        use chrono::{Duration, Utc};
+        use tokio::io::AsyncReadExt;
+
+        let deps = ProtocolDeps::for_test();
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+        adapter.device_tag = Some("12010100001320000011".to_string());
+        adapter.device_id = Some(42);
+        adapter.transport = TransportType::Tcp;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (connect_result, accept_result) = tokio::join!(
+            tokio::net::TcpStream::connect(addr),
+            listener.accept()
+        );
+        let client = connect_result.unwrap();
+        let (mut server, _) = accept_result.unwrap();
+        let (_read_half, write_half) = client.into_split();
+        adapter.write = Some(Arc::new(tokio::sync::RwLock::new(write_half)));
+
+        adapter
+            .subscriptions
+            .write()
+            .await
+            .insert(
+                Gb28181Adapter::subscription_key(SubscriptionDirection::Outbound, 42, "alarm"),
+                Subscription {
+                    event_type: "alarm".to_string(),
+                    expires: 3600,
+                    created_at: Utc::now() - Duration::seconds(1800),
+                    direction: SubscriptionDirection::Outbound,
+                    call_id: "cid".to_string(),
+                    from_tag: Some("ftag".to_string()),
+                    to_tag: Some("dtag".to_string()),
+                    cseq: 3,
+                    remote_host: "192.168.1.211".to_string(),
+                    remote_port: 5060,
+                },
+            );
+
+        let refreshed = SignalAdapter::refresh_expiring_subscriptions(&mut adapter).await;
+        assert_eq!(refreshed, 1);
+
+        let mut buf = vec![0u8; 2048];
+        let read = server.read(&mut buf).await.unwrap();
+        let text = String::from_utf8_lossy(&buf[..read]);
+        assert!(text.starts_with("SUBSCRIBE sip:"), "got: {}", text);
+        assert!(text.contains("CSeq: 4 SUBSCRIBE\r\n"), "got: {}", text);
+        assert!(text.contains("Call-ID: cid\r\n"), "got: {}", text);
+        assert!(text.contains(";tag=dtag\r\n"), "got: {}", text);
+    }
+
+    #[test]
+    fn test_subscription_needs_refresh_at_half_life() {
+        use chrono::{Duration, Utc};
+
+        let now = Utc::now();
+        let sub = Subscription {
+            event_type: "alarm".to_string(),
+            expires: 3600,
+            created_at: now - Duration::seconds(1799),
+            direction: SubscriptionDirection::Outbound,
+            call_id: "call-id".to_string(),
+            from_tag: Some("from-tag".to_string()),
+            to_tag: Some("to-tag".to_string()),
+            cseq: 1,
+                remote_host: "192.168.1.211".to_string(),
+                remote_port: 5060,
+        };
+
+        assert!(!Gb28181Adapter::subscription_needs_refresh(&sub, now));
+
+        let due = Subscription {
+            created_at: now - Duration::seconds(1800),
+            ..sub
+        };
+        assert!(Gb28181Adapter::subscription_needs_refresh(&due, now));
     }
 }

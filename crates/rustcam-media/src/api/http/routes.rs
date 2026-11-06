@@ -44,15 +44,19 @@ async fn trace_layer(request: Request, next: Next) -> axum::response::Response {
 
 pub fn create_routes(state: FullState) -> Router {
     let state = Arc::new(state);
+    let tickets = Arc::new(crate::drone_gateway::ticket::TicketStore::new(60));
 
-    let protected: Router = protected_routes(state.clone());
-    let public: Router = public_routes(state);
+    let protected: Router = protected_routes(state.clone(), tickets.clone());
+    let public: Router = public_routes(state, tickets);
 
     protected.merge(public)
 
 }
 
-fn protected_routes(state: Arc<FullState>) -> Router {
+fn protected_routes(
+    state: Arc<FullState>,
+    tickets: Arc<crate::drone_gateway::ticket::TicketStore>,
+) -> Router {
     Router::new()
 
         .route("/api/v1/dashboard", get(dashboard::dashboard_handler))
@@ -188,6 +192,9 @@ fn protected_routes(state: Arc<FullState>) -> Router {
                 Arc::new(crate::drone_gateway::client::NoopDroneApi)
                     as Arc<dyn crate::drone_gateway::client::DroneApi>
             }),
+            tickets,
+            state.auth.casbin.clone(),
+            Some(state.app.registry.infra.db.clone()),
         ))
 
         .layer(axum::middleware::from_fn(trace_layer))
@@ -200,7 +207,14 @@ fn protected_routes(state: Arc<FullState>) -> Router {
         .with_state(state)
 }
 
-fn public_routes(state: Arc<FullState>) -> Router {
+fn public_routes(
+    state: Arc<FullState>,
+    tickets: Arc<crate::drone_gateway::ticket::TicketStore>,
+) -> Router {
+    let drone_api = state.app.drone.clone().unwrap_or_else(|| {
+        Arc::new(crate::drone_gateway::client::NoopDroneApi)
+            as Arc<dyn crate::drone_gateway::client::DroneApi>
+    });
     Router::new()
         .route("/", get(root_handler))
         .route("/api/v1/health", get(health_handler))
@@ -219,11 +233,8 @@ fn public_routes(state: Arc<FullState>) -> Router {
         .route("/api/v1/proxy/wfs", get(proxy_handler::wfs_proxy_handler))
         .route("/ws", get(crate::api::websocket::ws_handler))
         .route("/ws/audio-talk/{device_id}/{channel_id}", get(crate::api::websocket::audio_talk_handler))
-        // drone WS 不读 Authorization header；占位路由，ticket 校验与事件转发在后续计划。
-        .route(
-            "/ws/drone/telemetry",
-            get(crate::drone_gateway::ws::telemetry_handler),
-        )
+        // drone WS 不读 Authorization header，用一次性 ticket 鉴权。
+        .merge(crate::drone_gateway::ws::router(drone_api, tickets))
 
         .layer(axum::middleware::from_fn(trace_layer))
 

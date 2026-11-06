@@ -19,6 +19,7 @@ useSeoMeta({
     <HomeHeroSection :data="data.hero" />
     <HomeProtocolStrip :data="data.protocols" />
     <HomeFeatureGrid :data="data.features" />
+    <HomeMobileEyeSection :data="data.mobileEye" />
     <HomeArchitectureSection :data="data.architecture" />
     <HomeScreenshotGallery :data="data.gallery" />
     <HomeScenarioGrid :data="data.scenarios" />

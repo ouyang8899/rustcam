@@ -24,6 +24,18 @@ message Telemetry {
   double voltage = 18;
   uint32 link_quality = 19;
   uint32 seq = 20;
+
+  // 飞控信息：适配层把 PX4 / ArduPilot 差异抹平后上报
+  string autopilot = 21;   // px4 / ardupilot / generic / unknown
+  bool   armed = 22;
+  string mode = 23;
+  uint32 satellites = 24;
+  uint32 gps_fix = 25;
+  double hdop = 26;
+  double home_lat = 27;
+  double home_lon = 28;
+  double home_alt = 29;
+  string unique_id = 30;   // 该帧所属飞控的唯一标识（AUTOPILOT_VERSION.uid）；空 = 飞控未提供
 }
 
 message Command {

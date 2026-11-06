@@ -1,5 +1,16 @@
+pub mod admin;
+pub mod commands;
 pub mod config;
+pub mod control;
+pub mod geofence;
 pub mod grpc;
 pub mod infra;
+pub mod lease;
+pub mod presence;
 pub mod registry;
+pub mod risk;
+pub mod secret;
+pub mod shadow;
 pub mod state;
+pub mod store;
+pub mod supervisor;

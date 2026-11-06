@@ -150,6 +150,20 @@ CREATE INDEX IF NOT EXISTS idx_devices_region ON devices USING btree (((extended
 CREATE INDEX IF NOT EXISTS idx_devices_status ON devices USING btree (status);
 
 -- ============================================
+-- Table: drone_camera
+-- 无人机与摄像头设备的关联；通道按摄像头实时解析，不落表
+-- ============================================
+CREATE TABLE IF NOT EXISTS drone_camera (
+    id bigserial PRIMARY KEY,
+    drone_tag text NOT NULL,
+    camera_device_tag text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (drone_tag, camera_device_tag)
+);
+CREATE INDEX IF NOT EXISTS idx_drone_camera_drone_tag ON drone_camera USING btree (drone_tag);
+CREATE INDEX IF NOT EXISTS idx_drone_camera_camera_tag ON drone_camera USING btree (camera_device_tag);
+
+-- ============================================
 -- Table: gb28181_regions
 -- ============================================
 CREATE TABLE IF NOT EXISTS gb28181_regions (

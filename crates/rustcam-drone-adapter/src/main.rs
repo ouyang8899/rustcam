@@ -1,7 +1,9 @@
 mod config;
+mod fc;
 mod link;
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
@@ -10,11 +12,12 @@ fn main() -> anyhow::Result<()> {
     tracing::info!(
         adapter = %cfg.adapter_id,
         service = %cfg.service_addr,
+        mavlink = %cfg.mavlink_addr,
+        autopilot = %cfg.autopilot,
+        device = %cfg.effective_device_id(),
         telemetry_hz = cfg.telemetry_hz,
-        buffer_size = cfg.buffer_size,
         "adapter starting"
     );
 
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(link::run(cfg))
+    link::run(cfg).await
 }

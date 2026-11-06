@@ -232,7 +232,8 @@ async fn main() -> anyhow::Result<()> {
         loop {
             interval.tick().await;
             let removed = rustcam_media::protocol::cleanup_expired_subscriptions_all().await;
-            if removed > 0 {
+            let refreshed = rustcam_media::protocol::refresh_expiring_subscriptions_all().await;
+            if removed > 0 || refreshed > 0 {
             }
         }
     });

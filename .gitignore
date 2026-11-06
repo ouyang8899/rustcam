@@ -8,7 +8,13 @@ Cargo.lock
 node_modules/
 /frontend/dist/
 /frontend/.vite/
+/frontend/.tmp/
+/frontend/.npm-cache/
 /vite/
+
+# drone-service 本地状态快照
+/drone-state.json
+/drone-state.json.tmp
 
 # Markdown：默认忽略，保留贡献指南与 API 文档
 *.md
@@ -63,6 +69,8 @@ logs/
 
 # 测试：默认忽略，但保留时间轴单元测试
 **/tests/
+# Rust crate 的集成测试目录需要入库（cargo test 会执行）
+!crates/*/tests/
 
 # 本地 git 辅助脚本
 /squash-unpushed.bat

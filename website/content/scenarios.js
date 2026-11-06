@@ -2,7 +2,7 @@ export default {
   zh: {
     meta: {
       title: '应用场景 · RustCam',
-      description: 'RustCam 在园区安防、城市治理、工业安防与交通枢纽中的落地方式：痛点、能力映射与收益指标。'
+      description: 'RustCam 在园区安防、城市治理、工业安防、移动巡检与交通枢纽中的落地方式：痛点、能力映射与收益指标。'
     },
     items: [
       {
@@ -30,6 +30,14 @@ export default {
         outcome: '告警从「发生」到「处理」全程留痕，事后取证链路完整。'
       },
       {
+        id: 'mobile',
+        icon: 'navigation',
+        title: '移动巡检（移动眼）',
+        pain: '固定点位覆盖不到的盲区与临时布防靠人工处理，巡查记录与取证材料散落在纸面和个人设备里。',
+        mapping: ['无人机飞控接入（MAVLink / PX4 / ArduPilot）', 'Cesium 3D 地球上的实时位置与姿态', '航线规划、保存与顺序执行', '电子围栏与越界告警阻断', '无人机关联平台摄像头，通道动态解析并自动出流', '控制权租约与飞行日志审计'],
+        outcome: '需要时再飞过去看，巡查与取证自动留在平台内，不再产生第二套数据。'
+      },
+      {
         id: 'transport',
         icon: 'route',
         title: '交通枢纽',
@@ -43,7 +51,7 @@ export default {
   en: {
     meta: {
       title: 'Scenarios · RustCam',
-      description: 'How RustCam is applied to campus security, city operations, industrial safety and transport hubs: pain points, capability mapping and measurable outcomes.'
+      description: 'How RustCam is applied to campus security, city operations, industrial safety, mobile patrol and transport hubs: pain points, capability mapping and measurable outcomes.'
     },
     items: [
       {
@@ -69,6 +77,14 @@ export default {
         pain: 'Production floors and offices share permissions, alarms have no closed loop, and responsibility cannot be traced.',
         mapping: ['Alarm intake and processing status', 'Per-channel status monitoring', 'Exception recording policies and playback', 'Local live preview on the desktop client'],
         outcome: 'Every alarm is traceable from occurrence to resolution, with a complete chain for later evidence.'
+      },
+      {
+        id: 'mobile',
+        icon: 'navigation',
+        title: 'Mobile patrol (Mobile Eye)',
+        pain: 'Blind spots and temporary deployments beyond fixed points are handled manually; patrol records and evidence end up on paper and personal devices.',
+        mapping: ['Drone flight-control integration (MAVLink / PX4 / ArduPilot)', 'Live position and attitude on a Cesium 3D globe', 'Route planning, saving and sequential execution', 'Geofences with breach alarms and command blocking', 'Drones link platform cameras; channels resolve live and stream automatically', 'Control leases plus flight-log audit'],
+        outcome: 'Fly there when it is needed; patrol and evidence stay inside the platform instead of spawning a second system.'
       },
       {
         id: 'transport',

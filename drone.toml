@@ -1,0 +1,14 @@
+grpc_addr = "0.0.0.0:50051"
+metrics_addr = "0.0.0.0:50052"
+adapter_heartbeat_sec = 10
+default_lease_sec = 30
+risk_enabled = false
+max_inflight_commands = 1024
+default_command_timeout_sec = 30
+require_control = true
+# 航线未显式配置结束动作时的默认值：hold / rtl / land。
+route_default_end_action = "hold"
+state_file = "drone-state.json"
+redis_url = "redis://127.0.0.1:6379"
+database_url = "postgres://postgres:123456@192.168.1.7:5435/rustcam"
+

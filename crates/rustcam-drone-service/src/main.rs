@@ -1,5 +1,11 @@
+use std::sync::Arc;
+
 use rustcam_drone_service::config::DroneConfig;
+use rustcam_drone_service::infra::db::DroneDb;
+use rustcam_drone_service::infra::redis::DroneRedis;
+use rustcam_drone_service::lease::LeaseScripts;
 use rustcam_drone_service::state::DroneState;
+use rustcam_drone_service::supervisor::spawn_supervised;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -14,12 +20,94 @@ async fn main() -> anyhow::Result<()> {
         "drone-service starting"
     );
 
-    let state = DroneState::new(cfg);
+    // Redis：控制权仲裁的权威源。连不上不阻断启动，仲裁降级为进程内锁（规则 §11.6）。
+    let redis = match DroneRedis::connect(&cfg.redis_url).await {
+        Ok(client) => {
+            let client = Arc::new(client);
+            if let Err(e) = LeaseScripts::new().preload(&client).await {
+                tracing::warn!(error = %e, "[Drone] lua scripts preload failed");
+            }
+            Some(client)
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "[Drone] redis unavailable, control arbitration degrades to in-process lock"
+            );
+            None
+        }
+    };
 
-    // gRPC 服务端（AdapterLink 面向 adapter；Control/Query/Geofence/Event 随后续任务注册）
+    // PostgreSQL：drone_* 表与审计的权威存储。连不上不阻断启动（规则 §11.6）。
+    let db = match DroneDb::connect(&cfg.database_url).await {
+        Ok(client) => {
+            let client = Arc::new(client);
+            if let Err(e) = client.run_migrations().await {
+                tracing::error!(error = %e, "[Drone] migrations failed, drone_* tables may be missing");
+            }
+            Some(client)
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "[Drone] postgres unavailable, audits stay in memory until it recovers"
+            );
+            None
+        }
+    };
+
+    let state = DroneState::new(cfg).with_redis(redis).with_db(db);
+
+    // 航线/围栏以 PostgreSQL 为权威源；空库时把 state_file 的旧数据回填。
+    if let Err(e) = state.load_persistent().await {
+        tracing::error!(error = %e, "[Drone] failed to load routes/fences from PostgreSQL");
+    }
+
+    // 状态快照写入任务：合并写入，磁盘 IO 走阻塞线程池。
+    if let Some(rx) = state.take_persist_receiver() {
+        let writer_state = state.clone();
+        spawn_supervised("snapshot-writer", async move {
+            rustcam_drone_service::store::run_writer(writer_state, rx).await;
+        });
+    }
+
+    // 指令超时回收器：没有回执的指令按 deadline 置为 timeout。
+    let reaper_state = state.clone();
+    spawn_supervised("command-reaper", async move {
+        rustcam_drone_service::commands::run_reaper(reaper_state).await;
+    });
+
+    // 控制权租约过期回收。
+    let lease_state = state.clone();
+    spawn_supervised("lease-reaper", async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(1));
+        loop {
+            ticker.tick().await;
+            rustcam_drone_service::control::reap_expired(&lease_state).await;
+        }
+    });
+
+    // adapter 心跳超时 → 设备离线（半开连接兜底）。
+    let presence_state = state.clone();
+    spawn_supervised("presence-reaper", async move {
+        rustcam_drone_service::presence::run_presence_reaper(presence_state).await;
+    });
+
+    // 内网 /metrics（Prometheus 文本），与业务 gRPC 分开端口。
+    let metrics_state = state.clone();
+    let metrics_addr = state.config.metrics_addr.clone();
+    spawn_supervised("metrics-server", async move {
+        if let Err(e) =
+            rustcam_drone_service::infra::metrics::serve(metrics_state, metrics_addr.as_str()).await
+        {
+            tracing::error!(error = %e, "drone metrics server stopped");
+        }
+    });
+
+    // gRPC 服务端（AdapterLink 面向 adapter；Control/Query/Geofence/Event 面向 rustcam-server）
     let grpc_addr = state.config.grpc_addr.clone();
     let s = state.clone();
-    tokio::spawn(async move {
+    spawn_supervised("grpc-server", async move {
         if let Err(e) = rustcam_drone_service::grpc::serve(s, grpc_addr.as_str()).await {
             tracing::error!(error = %e, "drone gRPC server stopped");
         }

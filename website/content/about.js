@@ -7,8 +7,7 @@ export default {
     intro: {
       title: '关于 RustCam',
       desc: 'RustCam-Media 是一个现代化的视频监控网关与信令控制平台：Rust 后端负责协议接入、媒体转发与信令控制，Vue 前端提供 Web 控制台，Qt 客户端面向桌面运维场景。项目以 MIT 协议开源。'
-    },
-    principles: {
+    },    principles: {
       title: '架构理念',
       items: [
         { title: '分层而非堆砌', desc: 'HTTP 处理器 → 应用服务 → 领域模型与端口 → 基础设施实现，业务规则不依赖具体协议或存储。' },
@@ -24,6 +23,7 @@ export default {
         { status: 'done', title: 'ONVIF 发现与控制', desc: 'WS-Discovery 探测、ContinuousMove / AbsoluteMove 与 Backchannel 对讲已完成。' },
         { status: 'done', title: 'RTSP 与媒体服务器', desc: 'RTSP 接入与媒体服务器集群已完成，Hook 事件链路打通。' },
         { status: 'progress', title: '媒体服务器适配', desc: '媒体服务器适配层已抽象完毕，部分实现仍在推进中。' },
+        { status: 'done', title: '移动眼', desc: '无人机作为会动的视点接入监控域：PX4 / ArduPilot 飞控、Cesium 3D 实时视图、机载摄像头关联与直播自动取流、航线、围栏、控制权与审计已落地，并内置 MAVLink 模拟器测试环境。' },
         { status: 'next', title: '能力持续演进', desc: '监控墙布局、录像策略、地图选点等能力持续迭代。' }
       ]
     },
@@ -64,6 +64,7 @@ export default {
         { status: 'done', title: 'ONVIF discovery and control', desc: 'WS-Discovery probing, ContinuousMove / AbsoluteMove and Backchannel talk are complete.' },
         { status: 'done', title: 'RTSP and media servers', desc: 'RTSP ingestion and the media server cluster are complete, with the hook event chain wired up.' },
         { status: 'progress', title: 'Media server adapters', desc: 'The adapter layer is finished; some integrations are still partially implemented.' },
+        { status: 'done', title: 'Mobile Eye', desc: 'Drones join the surveillance domain as moving vantage points: PX4 / ArduPilot flight control, a Cesium 3D live view, camera device association with automatic live streams, routes, geofences, control leases and audit are delivered, with a built-in MAVLink simulator for testing.' },
         { status: 'next', title: 'Continuous evolution', desc: 'Video wall layouts, recording policies and map pickers keep iterating.' }
       ]
     },

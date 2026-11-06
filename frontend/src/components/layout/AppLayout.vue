@@ -43,6 +43,13 @@ const routeNames = {
   '/video-wall/designer': '布局设计',
   '/users': '用户管理',
   '/settings': '系统设置',
+  '/drone/drones': '无人机',
+  '/drone/control': '控制权管理',
+  '/drone/live': '实时飞行',
+  '/drone/routes': '航线规划',
+  '/drone/fences': '电子围栏',
+  '/drone/alerts': '告警与审计',
+  '/drone/replay': '轨迹回放',
 }
 
 const pageTitle = computed(() => {

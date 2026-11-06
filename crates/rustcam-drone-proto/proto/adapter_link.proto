@@ -11,11 +11,12 @@ service AdapterLink {
 
 message AdapterMessage {
   oneof payload {
-    Register            register      = 1;
-    Heartbeat           heartbeat     = 2;
-    common.Telemetry    telemetry     = 3;
-    common.CommandReply command_reply = 4;
-    common.DeviceEvent  event         = 5;
+    Register            register        = 1;
+    Heartbeat           heartbeat       = 2;
+    common.Telemetry    telemetry       = 3;
+    common.CommandReply command_reply   = 4;
+    common.DeviceEvent  event           = 5;
+    IdentityReport      identity_report = 6;  // 建链后上报实测唯一标识
   }
 }
 
@@ -31,7 +32,27 @@ message Register {
   string adapter_id = 1;
   string protocol   = 2;
   string version    = 3;
-  repeated string devices = 4;
+  repeated string devices = 4;      // 保留：adapter 本地引导值，生产以服务端分配为准
+  repeated DeviceIdentity identities = 5;  // 每设备的唯一标识，与 devices 同序一一对应
+}
+
+message DeviceIdentity {
+  string device_id = 1;    // adapter 侧本地设备 ID
+  string unique_id = 2;    // 该设备对应飞控的唯一标识；空 = 未读到
+}
+
+message IdentityReport {
+  repeated DeviceIdentity identities = 1;  // adapter 建链后实测的飞控唯一标识
+}
+
+message DeviceAssignment {
+  string device_id = 1;      // 服务端分配给本 adapter 的设备 ID
+  string mavlink_addr = 2;   // 该机的 MAVLink 端点（隧道内地址）
+  string signing_secret = 3; // 该机的 MAVLink 2 签名密钥（32 字节 hex）；空 = 不启用签名
+  bool allow_unsigned = 4;   // 是否放行未签名帧（含 MAVLink 1 帧）；仅在有密钥时生效
+  int32 mavlink_version = 5; // 该机的 MAVLink 协议版本：1 / 2；adapter 按此固定收发版本
+  int32 mavlink_sysid = 6;   // 该机的 system id；adapter 用作出站 target_system
+  int32 mavlink_compid = 7;  // 该机的 component id；adapter 用作出站 target_component
 }
 
 message RegisterAck {
@@ -39,6 +60,7 @@ message RegisterAck {
   string reason = 2;
   repeated string assigned_devices = 3;
   int32 heartbeat_interval_sec = 4;
+  repeated DeviceAssignment assignments = 5;  // 每设备的端点与密钥；与 assigned_devices 同序
 }
 
 message Heartbeat {

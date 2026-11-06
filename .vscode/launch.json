@@ -8,7 +8,7 @@
             "program": "${workspaceFolder}/target/debug/rustcam-media.exe",
             "args": [],
             "cwd": "${workspaceFolder}",
-            "preLaunchTask": "rust: cargo build"
+            "preLaunchTask": "rust: cargo build -p rustcam-server"
         }
     ]
 }

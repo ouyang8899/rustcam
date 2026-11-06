@@ -52,7 +52,11 @@ fn build_command(req: &PtzControlRequest) -> Result<PtzCommand, AppError> {
                 Ok(PtzCommand::GotoPreset { preset_token: token })
             }
             PtzMoveType::SetPreset => {
-                Ok(PtzCommand::SetPreset { preset_name: req.preset_name.clone() })
+                let preset_index = req.preset_token.as_ref().and_then(|t| t.parse::<u8>().ok());
+                Ok(PtzCommand::SetPreset {
+                    preset_name: req.preset_name.clone(),
+                    preset_index,
+                })
             }
             PtzMoveType::RemovePreset => {
                 let token = req.preset_token.clone()

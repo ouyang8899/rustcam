@@ -15,6 +15,15 @@ fn default_lease() -> u32 {
 fn default_max_inflight() -> usize {
     1024
 }
+fn default_command_timeout_sec() -> u32 {
+    30
+}
+fn default_require_control() -> bool {
+    true
+}
+fn default_route_default_end_action() -> String {
+    "hold".into()
+}
 fn default_redis_url() -> String {
     "redis://127.0.0.1:6379".into()
 }
@@ -34,12 +43,32 @@ pub struct DroneConfig {
     pub default_lease_sec: u32,
     #[serde(default)]
     pub risk_enabled: bool,
+    /// 超速阈值（米/秒）；0 表示使用默认值 30。
+    #[serde(default)]
+    pub risk_max_speed_mps: f64,
     #[serde(default = "default_max_inflight")]
     pub max_inflight_commands: usize,
+    /// 指令未显式给 deadline 时使用的默认超时。
+    #[serde(default = "default_command_timeout_sec")]
+    pub default_command_timeout_sec: u32,
+    /// 飞行指令是否必须先持有控制权租约（产品默认开启）。
+    #[serde(default = "default_require_control")]
+    pub require_control: bool,
+    /// 航线执行完成后是否由服务端自动返航（RTL）。
+    #[serde(default = "default_route_default_end_action")]
+    pub route_default_end_action: String,
+    /// 状态快照文件；设置后重启可恢复档案/航线/围栏/审计。为空表示不持久化。
+    #[serde(default)]
+    pub state_file: Option<String>,
     #[serde(default = "default_redis_url")]
     pub redis_url: String,
     #[serde(default = "default_database_url")]
     pub database_url: String,
+    /// 签名密钥的主密钥（64 位十六进制 = 32 字节）。
+    ///
+    /// 未配置时不下发签名密钥（该机按"不需要签名"处理），并记录告警。
+    #[serde(default)]
+    pub signing_master_key: Option<String>,
 }
 
 impl Default for DroneConfig {
@@ -50,9 +79,15 @@ impl Default for DroneConfig {
             adapter_heartbeat_sec: default_heartbeat(),
             default_lease_sec: default_lease(),
             risk_enabled: false,
+            risk_max_speed_mps: 0.0,
             max_inflight_commands: default_max_inflight(),
+            default_command_timeout_sec: default_command_timeout_sec(),
+            require_control: default_require_control(),
+            route_default_end_action: default_route_default_end_action(),
+            state_file: None,
             redis_url: default_redis_url(),
             database_url: default_database_url(),
+            signing_master_key: None,
         }
     }
 }
@@ -89,6 +124,24 @@ impl DroneConfig {
         if let Ok(v) = std::env::var("DRONE_RISK_ENABLED") {
             self.risk_enabled = matches!(v.as_str(), "1" | "true" | "yes");
         }
+        if let Ok(v) = std::env::var("DRONE_COMMAND_TIMEOUT_SEC") {
+            if let Ok(sec) = v.parse() {
+                self.default_command_timeout_sec = sec;
+            }
+        }
+        if let Ok(v) = std::env::var("DRONE_SIGNING_MASTER_KEY") {
+            let v = v.trim().to_string();
+            self.signing_master_key = if v.is_empty() { None } else { Some(v) };
+        }
+    }
+
+    /// 校验配置；主密钥格式错误时直接拒绝启动。
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if let Some(key) = &self.signing_master_key {
+            crate::secret::SecretBox::from_hex(key)
+                .map_err(|e| anyhow::anyhow!("DRONE_SIGNING_MASTER_KEY invalid: {e}"))?;
+        }
+        Ok(())
     }
 
     /// 读工作目录下的 drone.toml（不存在则用默认值）。
@@ -101,6 +154,7 @@ impl DroneConfig {
             }
         };
         cfg.apply_env();
+        cfg.validate()?;
         Ok(cfg)
     }
 }
@@ -118,6 +172,7 @@ mod tests {
         assert_eq!(cfg.default_lease_sec, 30);
         assert!(!cfg.risk_enabled);
         assert_eq!(cfg.max_inflight_commands, 1024);
+        assert_eq!(cfg.default_command_timeout_sec, 30);
     }
 
     #[test]

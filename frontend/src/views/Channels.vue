@@ -199,7 +199,9 @@ function openEditDialog(channel) {
 }
 
 function openCreateDialog() {
-  editingChannel.value = null
+  editingChannel.value = deviceTagFilter.value
+    ? { device_tag: deviceTagFilter.value }
+    : null
   editMode.value = 'create'
   editVisible.value = true
 }
