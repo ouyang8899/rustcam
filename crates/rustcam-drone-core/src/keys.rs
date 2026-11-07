@@ -12,20 +12,20 @@ pub const STREAM_RISK_ALERTS: &str = "risk:alerts";
 pub const STREAM_ARCHIVE_TELEMETRY: &str = "archive:telemetry";
 pub const STREAM_GEOFENCE_UPDATED: &str = "geofence:updated";
 
-pub fn control_key(device_id: &str, control_type: &str) -> String {
-    format!("{CONTROL_KEY_PREFIX}{device_id}:{control_type}")
+pub fn control_key(drone_tag: &str, control_type: &str) -> String {
+    format!("{CONTROL_KEY_PREFIX}{drone_tag}:{control_type}")
 }
 
 pub fn adapter_instance_key(adapter_id: &str) -> String {
     format!("{ADAPTER_INSTANCE_PREFIX}{adapter_id}")
 }
 
-pub fn adapter_device_key(device_id: &str) -> String {
-    format!("{ADAPTER_DEVICE_PREFIX}{device_id}")
+pub fn adapter_device_key(drone_tag: &str) -> String {
+    format!("{ADAPTER_DEVICE_PREFIX}{drone_tag}")
 }
 
-pub fn shadow_key(device_id: &str) -> String {
-    format!("{SHADOW_PREFIX}{device_id}")
+pub fn shadow_key(drone_tag: &str) -> String {
+    format!("{SHADOW_PREFIX}{drone_tag}")
 }
 
 pub fn cmd_idem_key(cmd_id: &str) -> String {
@@ -35,6 +35,13 @@ pub fn cmd_idem_key(cmd_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keys_are_built_from_drone_tag() {
+        assert_eq!(control_key("drone-a", "flight"), "control:drone-a:flight");
+        assert_eq!(shadow_key("drone-a"), "shadow:drone-a");
+        assert_eq!(adapter_device_key("drone-a"), "adapter:device:drone-a");
+    }
 
     #[test]
     fn keys_are_namespaced() {

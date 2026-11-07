@@ -36,64 +36,48 @@ impl Registry {
     /// adapter 注册：分配设备、记录代次、返回 RegisterAck。
     /// 同一 adapter_id 重复注册时新连接胜出（代次自增，旧连接失效）。
     ///
-    /// 设备来源：优先按 `adapter_id` 查 `drone_device`（drone.md §9.1），
-    /// 查不到时回落到 adapter 自报的 `devices`（引导模式）。
+    /// 设备来源：**只**按 `adapter_id` 查 `drone_device`（drone.md §9.1）。
+    /// 引导模式已取消——adapter 不再自报设备，平台未绑定则该 adapter 无 assignment。
     pub async fn register(&self, reg: &Register, tx: AdapterTx) -> RegisterAck {
+        let link_rows = self.load_link_rows(&reg.adapter_id).await;
+        self.register_with_rows(reg, tx, link_rows).await
+    }
+
+    /// 按给定的链路行做分配（生产走 `register` 查库；测试直接注入行）。
+    async fn register_with_rows(
+        &self,
+        reg: &Register,
+        tx: AdapterTx,
+        link_rows: Vec<DeviceLinkRow>,
+    ) -> RegisterAck {
         let generation = self.state.next_generation(&reg.adapter_id);
         let now = chrono::Utc::now().timestamp_millis();
         let mut assigned = Vec::new();
         let mut assignments: Vec<DeviceAssignment> = Vec::new();
 
-        // 上报的唯一标识：按 device_id 建索引。
-        let observed: std::collections::HashMap<&str, &str> = reg
-            .identities
-            .iter()
-            .map(|i| (i.device_id.as_str(), i.unique_id.as_str()))
-            .collect();
-
-        let link_rows = self.load_link_rows(&reg.adapter_id).await;
         let candidates: Vec<String> = if link_rows.is_empty() {
             tracing::warn!(
                 adapter = %reg.adapter_id,
-                "[Registry] no device rows for adapter, falling back to reported devices"
+                "[Registry] adapter has no device rows in platform, nothing assigned"
             );
-            reg.devices.clone()
+            Vec::new()
         } else {
             link_rows
                 .iter()
-                .map(|r| r.device_id.clone())
+                .map(|r| r.drone_tag.clone())
                 .collect::<Vec<String>>()
         };
 
-        for device_id in &candidates {
-            // 唯一标识校验（drone.md §12.4 L3）。
-            // 只有 adapter **明确上报了该设备的**唯一标识时才在这里校验；
-            // DB 驱动的流程里 adapter 注册时尚未连飞控（拿不到 uid），真正的校验
-            // 发生在建链后的 `IdentityReport`。
-            if let Some(&reported) = observed.get(device_id.as_str()) {
-                if let Some(profile) = self.state.profiles.get(device_id.as_str()) {
-                    if !identity_matches(&profile.unique_id, reported) {
-                        tracing::warn!(
-                            device = %device_id,
-                            adapter = %reg.adapter_id,
-                            registered = %profile.unique_id,
-                            observed = %reported,
-                            "[Registry] unique_id mismatch, device not assigned"
-                        );
-                        continue;
-                    }
-                }
-            }
-
+        for drone_tag in &candidates {
             let owner = self
                 .state
                 .device_to_adapter
-                .get(device_id.as_str())
+                .get(drone_tag.as_str())
                 .map(|v| v.clone());
             if let Some(owner) = owner {
                 if owner != reg.adapter_id {
                     tracing::warn!(
-                        device = %device_id,
+                        device = %drone_tag,
                         owner = %owner,
                         adapter = %reg.adapter_id,
                         "[Registry] device is owned by another adapter, skipping"
@@ -104,16 +88,16 @@ impl Registry {
 
             self.state
                 .device_to_adapter
-                .insert(device_id.clone(), reg.adapter_id.clone());
-            assigned.push(device_id.clone());
+                .insert(drone_tag.clone(), reg.adapter_id.clone());
+            assigned.push(drone_tag.clone());
 
             // 下发该机的端点与签名密钥。
-            if let Some(row) = link_rows.iter().find(|r| r.device_id == *device_id) {
+            if let Some(row) = link_rows.iter().find(|r| r.drone_tag == *drone_tag) {
                 assignments.push(self.build_assignment(row));
             }
 
 
-            match self.state.devices.get_mut(device_id) {
+            match self.state.devices.get_mut(drone_tag) {
                 Some(mut entry) => {
                     entry.adapter_id = reg.adapter_id.clone();
                     entry.protocol = reg.protocol.clone();
@@ -121,33 +105,33 @@ impl Registry {
                 }
                 None => {
                     let mut entry =
-                        DeviceEntry::new(device_id, &reg.protocol, &reg.adapter_id, now);
+                        DeviceEntry::new(drone_tag, &reg.protocol, &reg.adapter_id, now);
                     entry.online = false;
-                    self.state.devices.insert(device_id.clone(), entry);
+                    self.state.devices.insert(drone_tag.clone(), entry);
                 }
             }
 
             presence::set_device_link_state(
                 &self.state,
-                device_id,
+                drone_tag,
                 true,
                 &format!("adapter `{}` connected", reg.adapter_id),
             )
             .await;
 
             if let Some(redis) = &self.redis {
-                let key = keys::adapter_device_key(device_id);
+                let key = keys::adapter_device_key(drone_tag);
                 match redis.set_nx_ex(&key, &reg.adapter_id, 30).await {
                     Ok(true) => {}
                     Ok(false) => {
                         tracing::warn!(
-                            device = %device_id,
+                            device = %drone_tag,
                             adapter = %reg.adapter_id,
                             "[Registry] redis claim already held (stale key?), continuing"
                         );
                     }
                     Err(e) => {
-                        tracing::warn!(error = %e, device = %device_id, "[Registry] redis claim failed");
+                        tracing::warn!(error = %e, device = %drone_tag, "[Registry] redis claim failed");
                     }
                 }
             }
@@ -186,7 +170,7 @@ impl Registry {
         RegisterAck {
             accepted: true,
             reason: String::new(),
-            assigned_devices: assigned,
+            assigned_drone_tags: assigned,
             heartbeat_interval_sec: self.state.config.adapter_heartbeat_sec as i32,
             assignments,
         }
@@ -213,7 +197,7 @@ impl Registry {
     /// 构造下发给 adapter 的分配信息（端点 + 密钥 + 版本 + 寻址地址）。
     fn build_assignment(&self, row: &DeviceLinkRow) -> DeviceAssignment {
         DeviceAssignment {
-            device_id: row.device_id.clone(),
+            drone_tag: row.drone_tag.clone(),
             mavlink_addr: row.mavlink_addr.clone(),
             signing_secret: self.decrypt_secret(&row.signing_secret),
             allow_unsigned: row.signing_allow_unsigned,
@@ -254,38 +238,38 @@ impl Registry {
     ) -> Vec<(String, bool, String)> {
         let mut out = Vec::new();
         for id in identities {
-            let device_id = id.device_id.trim().to_string();
+            let drone_tag = id.drone_tag.trim().to_string();
             let observed = id.unique_id.trim();
             let registered = self
                 .state
                 .profiles
-                .get(device_id.as_str())
+                .get(drone_tag.as_str())
                 .map(|p| p.unique_id.trim().to_string())
                 .unwrap_or_default();
 
             if identity_matches(&registered, observed) {
                 if registered.is_empty() {
                     tracing::warn!(
-                        device = %device_id,
+                        device = %drone_tag,
                         adapter = %adapter_id,
                         observed = %observed,
                         "[Registry] device has no registered unique_id, accepted with warning"
                     );
                 }
-                out.push((device_id, true, String::new()));
+                out.push((drone_tag, true, String::new()));
                 continue;
             }
 
             tracing::warn!(
-                device = %device_id,
+                device = %drone_tag,
                 adapter = %adapter_id,
                 registered = %registered,
                 observed = %observed,
                 "[Registry] unique_id mismatch, revoking assignment"
             );
-            self.revoke_device(&device_id).await;
+            self.revoke_device(&drone_tag).await;
             out.push((
-                device_id,
+                drone_tag,
                 false,
                 format!("unique_id mismatch: registered `{registered}`, observed `{observed}`"),
             ));
@@ -294,19 +278,19 @@ impl Registry {
     }
 
     /// 撤销设备分配：清掉归属、置离线、释放 Redis 独占键。
-    async fn revoke_device(&self, device_id: &str) {
-        self.state.device_to_adapter.remove(device_id);
-        if let Some(mut entry) = self.state.devices.get_mut(device_id) {
+    async fn revoke_device(&self, drone_tag: &str) {
+        self.state.device_to_adapter.remove(drone_tag);
+        if let Some(mut entry) = self.state.devices.get_mut(drone_tag) {
             entry.online = false;
             entry.adapter_id = String::new();
         }
         if let Some(redis) = &self.redis {
             // 与 unregister 保持一致：把独占键 TTL 压到 1s，而不是直接删。
             let _ = redis
-                .expire(&keys::adapter_device_key(device_id), 1)
+                .expire(&keys::adapter_device_key(drone_tag), 1)
                 .await;
         }
-        tracing::warn!(device = %device_id, "[Registry] device assignment revoked");
+        tracing::warn!(device = %drone_tag, "[Registry] device assignment revoked");
     }
 
     /// 断开清理：仅当仍是当前代次时才清理。
@@ -358,13 +342,26 @@ mod tests {
         Registry::new(DroneState::new(DroneConfig::default()), None)
     }
 
-    fn register_msg(adapter_id: &str, devices: Vec<&str>) -> Register {
+    fn register_msg(adapter_id: &str) -> Register {
         Register {
             adapter_id: adapter_id.into(),
             protocol: "mavlink".into(),
             version: "0.1.0".into(),
-            devices: devices.into_iter().map(|s| s.to_string()).collect(),
-            identities: Vec::new(),
+        }
+    }
+
+    /// 模拟平台侧 `drone_device` 行：该 adapter 名下的机体及其链路参数。
+    fn link_row(drone_tag: &str, adapter_id: &str) -> DeviceLinkRow {
+        DeviceLinkRow {
+            drone_tag: drone_tag.into(),
+            unique_id: String::new(),
+            mavlink_addr: format!("udpin:127.0.0.1:14540:{drone_tag}"),
+            signing_secret: String::new(),
+            signing_allow_unsigned: true,
+            mavlink_version: 2,
+            mavlink_sysid: 1,
+            mavlink_compid: 1,
+            adapter_id: adapter_id.into(),
         }
     }
 
@@ -373,30 +370,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn register_assigns_devices_and_creates_shadow() {
+    async fn register_assigns_drone_tags_from_platform_rows() {
         let r = registry();
         let (tx, _rx) = channel();
-        let ack = r
-            .register(&register_msg("a-1", vec!["drone-001", "drone-002"]), tx)
-            .await;
+        let rows = vec![link_row("drone-001", "a-1"), link_row("drone-002", "a-1")];
+        let ack = r.register_with_rows(&register_msg("a-1"), tx, rows).await;
         assert!(ack.accepted);
-        assert_eq!(ack.assigned_devices.len(), 2);
+        assert_eq!(ack.assigned_drone_tags.len(), 2);
         assert_eq!(r.devices_of("a-1").len(), 2);
         assert!(ack.heartbeat_interval_sec > 0);
         let device = r.state.devices.get("drone-001").unwrap();
         assert!(device.online);
         assert_eq!(device.adapter_id, "a-1");
+        assert_eq!(ack.assignments.len(), 2);
+        assert_eq!(ack.assignments[0].drone_tag, "drone-001");
+    }
+
+    #[tokio::test]
+    async fn register_without_platform_rows_assigns_nothing() {
+        // 引导模式已取消：adapter 不再自报设备，平台未绑定则无 assignment。
+        let r = registry();
+        let (tx, _rx) = channel();
+        let ack = r
+            .register_with_rows(&register_msg("a-1"), tx, Vec::new())
+            .await;
+        assert!(ack.accepted);
+        assert!(ack.assigned_drone_tags.is_empty());
+        assert!(ack.assignments.is_empty());
     }
 
     #[tokio::test]
     async fn re_register_invalidates_old_generation() {
         let r = registry();
-        let reg = register_msg("a-1", vec!["drone-001"]);
+        let reg = register_msg("a-1");
+        let rows = vec![link_row("drone-001", "a-1")];
         let (tx1, _rx1) = channel();
-        r.register(&reg, tx1).await;
+        r.register_with_rows(&reg, tx1, rows.clone()).await;
         let gen1 = r.state.generation_of("a-1").unwrap();
         let (tx2, _rx2) = channel();
-        r.register(&reg, tx2).await;
+        r.register_with_rows(&reg, tx2, rows).await;
         let gen2 = r.state.generation_of("a-1").unwrap();
         assert!(gen2 > gen1);
         assert!(r.is_current("a-1", gen2));
@@ -407,8 +419,8 @@ mod tests {
     async fn unregister_clears_mapping_and_marks_offline() {
         let r = registry();
         let (tx, _rx) = channel();
-        r.register(&register_msg("a-1", vec!["drone-001"]), tx)
-            .await;
+        let rows = vec![link_row("drone-001", "a-1")];
+        r.register_with_rows(&register_msg("a-1"), tx, rows).await;
         let gen = r.state.generation_of("a-1").unwrap();
         r.unregister("a-1", gen).await;
         assert!(r.devices_of("a-1").is_empty());
@@ -420,38 +432,48 @@ mod tests {
     async fn device_owned_by_other_adapter_is_not_assigned() {
         let r = registry();
         let (tx1, _rx1) = channel();
-        r.register(&register_msg("a-1", vec!["drone-001"]), tx1)
-            .await;
+        r.register_with_rows(
+            &register_msg("a-1"),
+            tx1,
+            vec![link_row("drone-001", "a-1")],
+        )
+        .await;
         let (tx2, _rx2) = channel();
         let ack = r
-            .register(&register_msg("a-2", vec!["drone-001"]), tx2)
+            .register_with_rows(
+                &register_msg("a-2"),
+                tx2,
+                vec![link_row("drone-001", "a-2")],
+            )
             .await;
-        assert!(ack.assigned_devices.is_empty());
+        assert!(ack.assigned_drone_tags.is_empty());
         assert_eq!(r.devices_of("a-2").len(), 0);
     }
 
     #[tokio::test]
     async fn same_adapter_reclaims_its_devices() {
         let r = registry();
+        let rows = vec![link_row("drone-001", "a-1")];
         let (tx1, _rx1) = channel();
-        r.register(&register_msg("a-1", vec!["drone-001"]), tx1)
+        r.register_with_rows(&register_msg("a-1"), tx1, rows.clone())
             .await;
         let (tx2, _rx2) = channel();
         let ack = r
-            .register(&register_msg("a-1", vec!["drone-001"]), tx2)
+            .register_with_rows(&register_msg("a-1"), tx2, rows)
             .await;
-        assert_eq!(ack.assigned_devices, vec!["drone-001".to_string()]);
+        assert_eq!(ack.assigned_drone_tags, vec!["drone-001".to_string()]);
     }
 
     #[tokio::test]
     async fn unregister_from_stale_generation_does_not_cleanup() {
         let r = registry();
-        let reg = register_msg("a-1", vec!["drone-001"]);
+        let reg = register_msg("a-1");
+        let rows = vec![link_row("drone-001", "a-1")];
         let (tx1, _rx1) = channel();
-        r.register(&reg, tx1).await;
+        r.register_with_rows(&reg, tx1, rows.clone()).await;
         let gen1 = r.state.generation_of("a-1").unwrap();
         let (tx2, _rx2) = channel();
-        r.register(&reg, tx2).await;
+        r.register_with_rows(&reg, tx2, rows).await;
         r.unregister("a-1", gen1).await;
         assert_eq!(r.devices_of("a-1").len(), 1);
     }
@@ -468,62 +490,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn register_falls_back_to_reported_devices_without_db() {
-        let r = registry();
-        let (tx, _rx) = channel();
-        let ack = r
-            .register(&register_msg("a-1", vec!["drone-001"]), tx)
-            .await;
-        assert!(ack.accepted);
-        assert_eq!(ack.assigned_devices, vec!["drone-001".to_string()]);
-        // 无库时 assignments 为空，老 adapter 行为不变。
-        assert!(ack.assignments.is_empty());
-    }
-
-    #[tokio::test]
-    async fn register_rejects_device_when_identity_mismatch() {
-        let r = registry();
-        r.state.profiles.insert(
-            "drone-001".into(),
-            crate::state::DroneProfileRecord {
-                device_id: "drone-001".into(),
-                unique_id: "registered".into(),
-                ..crate::state::DroneProfileRecord::new("drone-001", 0)
-            },
-        );
-        let mut reg = register_msg("a-1", vec!["drone-001"]);
-        reg.identities = vec![DeviceIdentity {
-            device_id: "drone-001".into(),
-            unique_id: "observed".into(),
-        }];
-        let (tx, _rx) = channel();
-        let ack = r.register(&reg, tx).await;
-        assert!(ack.accepted);
-        assert!(
-            ack.assigned_devices.is_empty(),
-            "唯一标识不一致的设备不应被分配"
-        );
-    }
-
-    #[tokio::test]
     async fn identity_report_accepts_matching_unique_id() {
         let r = registry();
         r.state.profiles.insert(
             "drone-001".into(),
             crate::state::DroneProfileRecord {
-                device_id: "drone-001".into(),
+                drone_tag: "drone-001".into(),
                 unique_id: "registered".into(),
                 ..crate::state::DroneProfileRecord::new("drone-001", 0)
             },
         );
         let (tx, _rx) = channel();
-        r.register(&register_msg("a-1", vec!["drone-001"]), tx)
-            .await;
+        r.register_with_rows(
+            &register_msg("a-1"),
+            tx,
+            vec![link_row("drone-001", "a-1")],
+        )
+        .await;
         let results = r
             .apply_identity_report(
                 "a-1",
                 &[DeviceIdentity {
-                    device_id: "drone-001".into(),
+                    drone_tag: "drone-001".into(),
                     unique_id: "registered".into(),
                 }],
             )
@@ -539,19 +527,23 @@ mod tests {
         r.state.profiles.insert(
             "drone-001".into(),
             crate::state::DroneProfileRecord {
-                device_id: "drone-001".into(),
+                drone_tag: "drone-001".into(),
                 unique_id: "registered".into(),
                 ..crate::state::DroneProfileRecord::new("drone-001", 0)
             },
         );
         let (tx, _rx) = channel();
-        r.register(&register_msg("a-1", vec!["drone-001"]), tx)
-            .await;
+        r.register_with_rows(
+            &register_msg("a-1"),
+            tx,
+            vec![link_row("drone-001", "a-1")],
+        )
+        .await;
         let results = r
             .apply_identity_report(
                 "a-1",
                 &[DeviceIdentity {
-                    device_id: "drone-001".into(),
+                    drone_tag: "drone-001".into(),
                     unique_id: "observed".into(),
                 }],
             )

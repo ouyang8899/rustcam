@@ -325,7 +325,7 @@ function fitTrack() {
 function fitRoute() {
   if (!map || !map.getSource('drone-route') || props.route.length === 0) return
   const coords = toLngLat(props.route)
-  const d = props.drones.find((x) => x.device_id === props.selectedId)
+  const d = props.drones.find((x) => x.drone_tag === props.selectedId)
   const t = d?.last_telemetry
   if (t && Number.isFinite(Number(t.lon)) && Number.isFinite(Number(t.lat))) {
     coords.push([Number(t.lon), Number(t.lat)])
@@ -518,10 +518,10 @@ function createDroneMarker(d, color, selected) {
   el.style.cssText =
     'width:44px;height:44px;cursor:pointer;user-select:none;filter:drop-shadow(0 2px 4px rgba(0,0,0,.45))'
   el.innerHTML = droneSvg(color, selected)
-  el.title = d.name || d.device_id
+  el.title = d.name || d.drone_tag
   el.addEventListener('click', (ev) => {
     ev.stopPropagation()
-    emit('select', d.device_id)
+    emit('select', d.drone_tag)
   })
   const marker = new Marker({ element: el, anchor: 'center', rotationAlignment: 'map' })
   marker.setLngLat([d.last_telemetry.lon, d.last_telemetry.lat]).addTo(map)
@@ -536,14 +536,14 @@ function syncDrones() {
     const lat = Number(t.lat || d.home_lat)
     const lon = Number(t.lon || d.home_lon)
     if (!Number.isFinite(lat) || !Number.isFinite(lon) || (!lat && !lon)) continue
-    seen.add(d.device_id)
+    seen.add(d.drone_tag)
     const color = statusColor(d, t)
-    const selected = d.device_id === props.selectedId
+    const selected = d.drone_tag === props.selectedId
     const key = `${color}|${selected}`
-    let entry = droneMarkers.get(d.device_id)
+    let entry = droneMarkers.get(d.drone_tag)
     if (!entry) {
       entry = createDroneMarker({ ...d, last_telemetry: { lat, lon } }, color, selected)
-      droneMarkers.set(d.device_id, entry)
+      droneMarkers.set(d.drone_tag, entry)
     } else {
       if (entry.key !== key) {
         entry.el.innerHTML = droneSvg(color, selected)
@@ -568,7 +568,7 @@ function flyTo(lon, lat, zoom = 14) {
 }
 
 function selectedTelemetry() {
-  const d = props.drones.find((x) => x.device_id === props.selectedId)
+  const d = props.drones.find((x) => x.drone_tag === props.selectedId)
   const t = d && (d.last_telemetry || {})
   return t && Number.isFinite(Number(t.lat)) && Number.isFinite(Number(t.lon)) ? t : null
 }

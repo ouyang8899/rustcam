@@ -7,7 +7,7 @@ use crate::state::{AuditRecord, FenceRecord, RouteRecord, WaypointRecord};
 
 #[derive(Debug, Clone)]
 pub struct DroneDeviceRow {
-    pub device_id: String,
+    pub drone_tag: String,
     pub protocol: String,
     pub adapter_id: Option<String>,
     pub online: bool,
@@ -21,7 +21,7 @@ pub struct DroneDeviceRow {
 /// 不另起 link 表，也不引入 adapter 侧表。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeviceLinkRow {
-    pub device_id: String,
+    pub drone_tag: String,
     pub unique_id: String,
     pub mavlink_addr: String,
     /// 密文（`v1:<hex>`）；为空表示该机不需要签名。
@@ -34,8 +34,6 @@ pub struct DeviceLinkRow {
     /// 该机的 component id；adapter 用作出站 target_component。
     pub mavlink_compid: i32,
     pub adapter_id: String,
-    /// 平台内唯一的无人机标识（档案自动生成，创建后不可改）。
-    pub drone_tag: String,
 }
 
 /// drone-service 自有的 PG 连接池；只操作 drone_* 表。
@@ -89,18 +87,18 @@ impl DroneDb {
 
     pub async fn query_one_device(
         &self,
-        device_id: &str,
+        drone_tag: &str,
     ) -> anyhow::Result<Option<DroneDeviceRow>> {
         let rows: Vec<Value> = self
             .rb
             .exec_decode(
-                "SELECT device_id, protocol, adapter_id, online, device_tag, channel_tag \
-                 FROM drone_device WHERE device_id = $1 LIMIT 1",
-                vec![rbs::value![device_id]],
+                "SELECT drone_tag, protocol, adapter_id, online, device_tag, channel_tag \
+                 FROM drone_device WHERE drone_tag = $1 LIMIT 1",
+                vec![rbs::value![drone_tag]],
             )
             .await?;
         Ok(rows.into_iter().next().map(|r| DroneDeviceRow {
-            device_id: r["device_id"].as_str().unwrap_or_default().to_string(),
+            drone_tag: r["drone_tag"].as_str().unwrap_or_default().to_string(),
             protocol: r["protocol"].as_str().unwrap_or_default().to_string(),
             adapter_id: r["adapter_id"].as_str().map(|s| s.to_string()),
             online: r["online"].as_bool().unwrap_or(false),
@@ -113,7 +111,7 @@ impl DroneDb {
     pub async fn load_device_links(&self, adapter_id: &str) -> anyhow::Result<Vec<DeviceLinkRow>> {
         let rows = self
             .query_decode(
-                "SELECT device_id, \
+                "SELECT drone_tag, \
                         COALESCE(unique_id, '') AS unique_id, \
                         COALESCE(mavlink_addr, '') AS mavlink_addr, \
                         COALESCE(signing_secret, '') AS signing_secret, \
@@ -123,18 +121,18 @@ impl DroneDb {
                         mavlink_compid, \
                         COALESCE(adapter_id, '') AS adapter_id, \
                         COALESCE(drone_tag, '') AS drone_tag \
-                 FROM drone_device WHERE adapter_id = $1 ORDER BY device_id",
+                 FROM drone_device WHERE adapter_id = $1 ORDER BY drone_tag",
                 vec![rbs::value![adapter_id]],
             )
             .await?;
         Ok(rows.into_iter().map(|r| device_link_from_row(&r)).collect())
     }
 
-    /// 按 device_id 取单台无人机的链路参数。
-    pub async fn load_device_link(&self, device_id: &str) -> anyhow::Result<Option<DeviceLinkRow>> {
+    /// 按 drone_tag 取单台无人机的链路参数。
+    pub async fn load_device_link(&self, drone_tag: &str) -> anyhow::Result<Option<DeviceLinkRow>> {
         let rows = self
             .query_decode(
-                "SELECT device_id, \
+                "SELECT drone_tag, \
                         COALESCE(unique_id, '') AS unique_id, \
                         COALESCE(mavlink_addr, '') AS mavlink_addr, \
                         COALESCE(signing_secret, '') AS signing_secret, \
@@ -144,8 +142,8 @@ impl DroneDb {
                         mavlink_compid, \
                         COALESCE(adapter_id, '') AS adapter_id, \
                         COALESCE(drone_tag, '') AS drone_tag \
-                 FROM drone_device WHERE device_id = $1 LIMIT 1",
-                vec![rbs::value![device_id]],
+                 FROM drone_device WHERE drone_tag = $1 LIMIT 1",
+                vec![rbs::value![drone_tag]],
             )
             .await?;
         Ok(rows.into_iter().next().map(|r| device_link_from_row(&r)))
@@ -157,14 +155,13 @@ impl DroneDb {
     pub async fn upsert_device_link(&self, row: &DeviceLinkRow) -> anyhow::Result<()> {
         self.exec_with_args(
             "INSERT INTO drone_device \
-                 (device_id, protocol, adapter_id, drone_tag, unique_id, mavlink_addr, \
+                 (drone_tag, protocol, adapter_id, unique_id, mavlink_addr, \
                   signing_secret, signing_allow_unsigned, mavlink_version, \
                   mavlink_sysid, mavlink_compid) \
              VALUES ($1, 'mavlink', NULLIF($2, ''), NULLIF($3, ''), NULLIF($4, ''), \
-                     NULLIF($5, ''), NULLIF($6, ''), $7, $8, $9, $10) \
-             ON CONFLICT (device_id) DO UPDATE SET \
+                     NULLIF($5, ''), $6, $7, $8, $9) \
+             ON CONFLICT (drone_tag) DO UPDATE SET \
                  adapter_id = EXCLUDED.adapter_id, \
-                 drone_tag = EXCLUDED.drone_tag, \
                  unique_id = EXCLUDED.unique_id, \
                  mavlink_addr = EXCLUDED.mavlink_addr, \
                  signing_secret = EXCLUDED.signing_secret, \
@@ -173,9 +170,8 @@ impl DroneDb {
                  mavlink_sysid = EXCLUDED.mavlink_sysid, \
                  mavlink_compid = EXCLUDED.mavlink_compid",
             vec![
-                rbs::value![row.device_id.clone()],
-                rbs::value![row.adapter_id.clone()],
                 rbs::value![row.drone_tag.clone()],
+                rbs::value![row.adapter_id.clone()],
                 rbs::value![row.unique_id.clone()],
                 rbs::value![row.mavlink_addr.clone()],
                 rbs::value![row.signing_secret.clone()],
@@ -193,7 +189,7 @@ impl DroneDb {
     pub async fn load_routes(&self) -> anyhow::Result<Vec<RouteRecord>> {
         let rows: Vec<Value> = self
             .query_decode(
-                "SELECT id, name, device_ids::text AS device_ids, waypoints::text AS waypoints, \
+                "SELECT id, name, drone_tags::text AS drone_tags, waypoints::text AS waypoints, \
                  enabled, end_action, updated_ms FROM drone_route ORDER BY updated_ms DESC",
                 vec![],
             )
@@ -204,8 +200,8 @@ impl DroneDb {
             if id.is_empty() {
                 continue;
             }
-            let device_ids: Vec<String> =
-                serde_json::from_str(row["device_ids"].as_str().unwrap_or("[]"))
+            let drone_tags: Vec<String> =
+                serde_json::from_str(row["drone_tags"].as_str().unwrap_or("[]"))
                     .unwrap_or_default();
             let waypoints: Vec<WaypointRecord> =
                 serde_json::from_str(row["waypoints"].as_str().unwrap_or("[]"))
@@ -213,12 +209,12 @@ impl DroneDb {
             routes.push(RouteRecord {
                 id,
                 name: row["name"].as_str().unwrap_or_default().to_string(),
-                device_id: if device_ids.len() == 1 {
-                    device_ids[0].clone()
+                drone_tag: if drone_tags.len() == 1 {
+                    drone_tags[0].clone()
                 } else {
                     String::new()
                 },
-                device_ids,
+                drone_tags,
                 waypoints,
                 enabled: row["enabled"].as_bool().unwrap_or(true),
                 updated_ms: row["updated_ms"].as_i64().unwrap_or(0),
@@ -230,28 +226,28 @@ impl DroneDb {
 
     /// 航线入库（按 id 幂等 upsert）。
     pub async fn upsert_route(&self, route: &RouteRecord) -> anyhow::Result<()> {
-        // 兼容旧数据：只有 device_id 的航线，入库时转成 device_ids。
-        let effective_ids: Vec<String> = if route.device_ids.is_empty()
-            && !route.device_id.trim().is_empty()
+        // 兼容旧数据：只有 drone_tag 的航线，入库时转成 drone_tags。
+        let effective_ids: Vec<String> = if route.drone_tags.is_empty()
+            && !route.drone_tag.trim().is_empty()
         {
-            vec![route.device_id.clone()]
+            vec![route.drone_tag.clone()]
         } else {
-            route.device_ids.clone()
+            route.drone_tags.clone()
         };
-        let device_ids = serde_json::to_string(&effective_ids)?;
+        let drone_tags = serde_json::to_string(&effective_ids)?;
         let waypoints = serde_json::to_string(&route.waypoints)?;
         self.exec_with_args(
             "INSERT INTO drone_route \
-             (id, name, device_ids, waypoints, enabled, end_action, updated_ms, updated_at) \
+             (id, name, drone_tags, waypoints, enabled, end_action, updated_ms, updated_at) \
              VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7, now()) \
              ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, \
-             device_ids = EXCLUDED.device_ids, waypoints = EXCLUDED.waypoints, \
+             drone_tags = EXCLUDED.drone_tags, waypoints = EXCLUDED.waypoints, \
              enabled = EXCLUDED.enabled, end_action = EXCLUDED.end_action, \
              updated_ms = EXCLUDED.updated_ms, updated_at = now()",
             vec![
                 rbs::value![route.id.as_str()],
                 rbs::value![route.name.as_str()],
-                rbs::value![device_ids.as_str()],
+                rbs::value![drone_tags.as_str()],
                 rbs::value![waypoints.as_str()],
                 rbs::value![route.enabled],
                 rbs::value![route.end_action.as_str()],
@@ -274,7 +270,7 @@ impl DroneDb {
         let rows: Vec<Value> = self
             .query_decode(
                 "SELECT id, name, type, shape, geojson, center_lat, center_lon, radius_m, \
-                 min_alt, max_alt, device_ids::text AS device_ids, enabled, version, updated_ms \
+                 min_alt, max_alt, drone_tags::text AS drone_tags, enabled, version, updated_ms \
                  FROM drone_fence ORDER BY updated_ms DESC",
                 vec![],
             )
@@ -285,8 +281,8 @@ impl DroneDb {
             if id.is_empty() {
                 continue;
             }
-            let device_ids: Vec<String> =
-                serde_json::from_str(row["device_ids"].as_str().unwrap_or("[]"))
+            let drone_tags: Vec<String> =
+                serde_json::from_str(row["drone_tags"].as_str().unwrap_or("[]"))
                     .unwrap_or_default();
             fences.push(FenceRecord {
                 id,
@@ -299,12 +295,12 @@ impl DroneDb {
                 radius_m: row["radius_m"].as_f64().unwrap_or(0.0),
                 min_alt: row["min_alt"].as_f64().unwrap_or(0.0),
                 max_alt: row["max_alt"].as_f64().unwrap_or(120.0),
-                device_id: if device_ids.len() == 1 {
-                    device_ids[0].clone()
+                drone_tag: if drone_tags.len() == 1 {
+                    drone_tags[0].clone()
                 } else {
                     String::new()
                 },
-                device_ids,
+                drone_tags,
                 enabled: row["enabled"].as_bool().unwrap_or(true),
                 version: row["version"].as_i64().unwrap_or(1) as i32,
                 updated_ms: row["updated_ms"].as_i64().unwrap_or(0),
@@ -315,25 +311,25 @@ impl DroneDb {
 
     /// 围栏入库（按 id 幂等 upsert）。
     pub async fn upsert_fence(&self, fence: &FenceRecord) -> anyhow::Result<()> {
-        // 兼容旧数据：只有 device_id 的围栏，入库时转成 device_ids。
-        let effective_ids: Vec<String> = if fence.device_ids.is_empty()
-            && !fence.device_id.trim().is_empty()
+        // 兼容旧数据：只有 drone_tag 的围栏，入库时转成 drone_tags。
+        let effective_ids: Vec<String> = if fence.drone_tags.is_empty()
+            && !fence.drone_tag.trim().is_empty()
         {
-            vec![fence.device_id.clone()]
+            vec![fence.drone_tag.clone()]
         } else {
-            fence.device_ids.clone()
+            fence.drone_tags.clone()
         };
-        let device_ids = serde_json::to_string(&effective_ids)?;
+        let drone_tags = serde_json::to_string(&effective_ids)?;
         self.exec_with_args(
             "INSERT INTO drone_fence \
              (id, name, type, shape, geojson, center_lat, center_lon, radius_m, min_alt, max_alt, \
-              device_ids, enabled, version, updated_ms, updated_at) \
+              drone_tags, enabled, version, updated_ms, updated_at) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, now()) \
              ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, type = EXCLUDED.type, \
              shape = EXCLUDED.shape, geojson = EXCLUDED.geojson, center_lat = EXCLUDED.center_lat, \
              center_lon = EXCLUDED.center_lon, radius_m = EXCLUDED.radius_m, \
              min_alt = EXCLUDED.min_alt, max_alt = EXCLUDED.max_alt, \
-             device_ids = EXCLUDED.device_ids, enabled = EXCLUDED.enabled, \
+             drone_tags = EXCLUDED.drone_tags, enabled = EXCLUDED.enabled, \
              version = EXCLUDED.version, updated_ms = EXCLUDED.updated_ms, updated_at = now()",
             vec![
                 rbs::value![fence.id.as_str()],
@@ -346,7 +342,7 @@ impl DroneDb {
                 rbs::value![fence.radius_m],
                 rbs::value![fence.min_alt],
                 rbs::value![fence.max_alt],
-                rbs::value![device_ids.as_str()],
+                rbs::value![drone_tags.as_str()],
                 rbs::value![fence.enabled],
                 rbs::value![fence.version],
                 rbs::value![fence.updated_ms],
@@ -374,11 +370,11 @@ pub async fn write_audit(db: &DroneDb, audit: &AuditRecord) -> anyhow::Result<()
         "control" => {
             db.exec_with_args(
                 "INSERT INTO drone_control_audit \
-                 (ts, device_id, control_type, action, holder, priority, result, operator) \
+                 (ts, drone_tag, control_type, action, holder, priority, result, operator) \
                  VALUES (to_timestamp($1::double precision / 1000.0), $2, $3, $4, $5, $6, $7, $8)",
                 vec![
                     rbs::value![audit.ts_ms],
-                    rbs::value![audit.device_id.as_str()],
+                    rbs::value![audit.drone_tag.as_str()],
                     rbs::value![audit.control_type.as_str()],
                     rbs::value![audit.action.as_str()],
                     rbs::value![audit.operator.as_str()],
@@ -392,14 +388,14 @@ pub async fn write_audit(db: &DroneDb, audit: &AuditRecord) -> anyhow::Result<()
         "command" => {
             db.exec_with_args(
                 "INSERT INTO drone_command_audit \
-                 (ts, device_id, cmd_id, type, params, status, operator, finished_at) \
+                 (ts, drone_tag, cmd_id, type, params, status, operator, finished_at) \
                  VALUES (to_timestamp($1::double precision / 1000.0), $2, $3, $4, $5::jsonb, $6, $7, \
                  CASE WHEN $8::bigint > 0 THEN to_timestamp($8::double precision / 1000.0) ELSE NULL END) \
                  ON CONFLICT (cmd_id) DO UPDATE SET status = EXCLUDED.status, \
                  finished_at = EXCLUDED.finished_at",
                 vec![
                     rbs::value![audit.ts_ms],
-                    rbs::value![audit.device_id.as_str()],
+                    rbs::value![audit.drone_tag.as_str()],
                     rbs::value![audit.cmd_id.as_str()],
                     rbs::value![audit.action.as_str()],
                     rbs::value![if audit.params.is_empty() { "{}" } else { audit.params.as_str() }],
@@ -418,7 +414,7 @@ pub async fn write_audit(db: &DroneDb, audit: &AuditRecord) -> anyhow::Result<()
 /// 从查询结果行构造链路参数。
 fn device_link_from_row(r: &Value) -> DeviceLinkRow {
     DeviceLinkRow {
-        device_id: r["device_id"].as_str().unwrap_or_default().to_string(),
+        drone_tag: r["drone_tag"].as_str().unwrap_or_default().to_string(),
         unique_id: r["unique_id"].as_str().unwrap_or_default().to_string(),
         mavlink_addr: r["mavlink_addr"].as_str().unwrap_or_default().to_string(),
         signing_secret: r["signing_secret"].as_str().unwrap_or_default().to_string(),
@@ -427,7 +423,6 @@ fn device_link_from_row(r: &Value) -> DeviceLinkRow {
         mavlink_sysid: r["mavlink_sysid"].as_i64().unwrap_or(1) as i32,
         mavlink_compid: r["mavlink_compid"].as_i64().unwrap_or(1) as i32,
         adapter_id: r["adapter_id"].as_str().unwrap_or_default().to_string(),
-        drone_tag: r["drone_tag"].as_str().unwrap_or_default().to_string(),
     }
 }
 
@@ -483,14 +478,21 @@ mod tests {
         assert!(sql.contains("mavlink_sysid"));
         assert!(sql.contains("mavlink_compid"));
         assert!(sql.contains("CREATE INDEX IF NOT EXISTS idx_drone_device_adapter_id"));
-        assert!(sql.contains("ADD COLUMN IF NOT EXISTS drone_tag"));
-        assert!(sql.contains("uq_drone_device_drone_tag"));
+        assert!(sql.contains("uq_drone_device_adapter_sysid"));
+    }
+
+    #[test]
+    fn schema_uses_drone_tag_and_no_device_id() {
+        let sql = include_str!("../../migrations.sql");
+        assert!(sql.contains("drone_tag"));
+        assert!(!sql.contains("device_id"));
+        assert!(sql.contains("uq_drone_device_adapter_sysid"));
     }
 
     #[test]
     fn device_link_row_serializes_identity_fields() {
         let row = DeviceLinkRow {
-            device_id: "drone-001".into(),
+            drone_tag: "drone-001".into(),
             unique_id: "0123456789abcdef".into(),
             mavlink_addr: "udpin:10.88.0.2:14540".into(),
             signing_secret: String::new(),
@@ -499,15 +501,13 @@ mod tests {
             mavlink_sysid: 1,
             mavlink_compid: 1,
             adapter_id: "adapter-1".into(),
-            drone_tag: "drone-abc".into(),
         };
         let json = serde_json::to_value(&row).expect("serialize");
-        assert_eq!(json["device_id"], "drone-001");
+        assert_eq!(json["drone_tag"], "drone-001");
         assert_eq!(json["unique_id"], "0123456789abcdef");
         assert_eq!(json["signing_allow_unsigned"], true);
         assert_eq!(json["mavlink_version"], 2);
         assert_eq!(json["mavlink_sysid"], 1);
         assert_eq!(json["mavlink_compid"], 1);
-        assert_eq!(json["drone_tag"], "drone-abc");
     }
 }

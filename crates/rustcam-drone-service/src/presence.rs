@@ -12,23 +12,23 @@ fn now_ms() -> i64 {
 /// 更新设备在线状态；只在状态变化时广播告警，避免心跳刷屏。
 pub async fn set_device_link_state(
     state: &DroneState,
-    device_id: &str,
+    drone_tag: &str,
     online: bool,
     message: &str,
 ) -> bool {
     let changed = if online {
-        state.mark_device_online(device_id, now_ms())
+        state.mark_device_online(drone_tag, now_ms())
     } else {
-        state.mark_device_offline(device_id)
+        state.mark_device_offline(drone_tag)
     };
     if !changed {
         return false;
     }
     if !online {
-        commands::fail_inflight_for_device(state, device_id, message).await;
+        commands::fail_inflight_for_device(state, drone_tag, message).await;
     }
     let alert = AlertRecord {
-        device_id: device_id.to_string(),
+        drone_tag: drone_tag.to_string(),
         rule: if online {
             "device_online"
         } else {
@@ -43,7 +43,7 @@ pub async fn set_device_link_state(
     state.push_alert(alert.clone());
     state.push_audit(AuditRecord {
         ts_ms: now_ms(),
-        device_id: device_id.to_string(),
+        drone_tag: drone_tag.to_string(),
         category: "device".into(),
         action: if online { "online" } else { "offline" }.to_string(),
         operator: "system".into(),
@@ -52,7 +52,7 @@ pub async fn set_device_link_state(
         ..Default::default()
     });
     let _ = state.event_tx.send(DroneEvent::Alert {
-        device_id: alert.device_id,
+        drone_tag: alert.drone_tag,
         rule: alert.rule,
         level: alert.level,
         message: alert.message,
@@ -85,10 +85,10 @@ pub async fn reap_stale_adapters(state: &DroneState) -> usize {
             .filter(|e| e.value() == &adapter_id)
             .map(|e| e.key().clone())
             .collect();
-        for device_id in devices {
+        for drone_tag in devices {
             if set_device_link_state(
                 state,
-                &device_id,
+                &drone_tag,
                 false,
                 &format!("adapter `{adapter_id}` heartbeat timeout"),
             )

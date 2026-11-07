@@ -17,9 +17,9 @@
         >
           <el-option
             v-for="d in executeCandidates"
-            :key="d.device_id"
-            :label="d.name || d.device_id"
-            :value="d.device_id"
+            :key="d.drone_tag"
+            :label="d.name || d.drone_tag"
+            :value="d.drone_tag"
           />
         </el-select>
         <el-input-number
@@ -62,7 +62,7 @@
           </el-form-item>
           <el-form-item label="适用无人机（用于分发，可多选）">
             <el-select
-              v-model="form.device_ids"
+              v-model="form.drone_tags"
               multiple
               collapse-tags
               clearable
@@ -71,9 +71,9 @@
             >
               <el-option
                 v-for="d in store.drones"
-                :key="d.device_id"
-                :label="d.name || d.device_id"
-                :value="d.device_id"
+                :key="d.drone_tag"
+                :label="d.name || d.drone_tag"
+                :value="d.drone_tag"
               />
             </el-select>
           </el-form-item>
@@ -148,7 +148,7 @@ const form = reactive({
   id: '',
   name: '',
   /** 适用无人机列表；空 = 全部（航线模板）。 */
-  device_ids: [],
+  drone_tags: [],
   enabled: true,
   /** 任务结束动作：hold / rtl / land。 */
   end_action: 'hold',
@@ -159,58 +159,58 @@ const executeTarget = ref('')
 /** 本次执行的横向偏移（米，正=右，负=左），用于同航线多机分道。 */
 const executeOffset = ref(0)
 const executeCandidates = computed(() => {
-  if (form.device_ids.length === 0) return store.drones
-  return store.drones.filter((d) => form.device_ids.includes(d.device_id))
+  if (form.drone_tags.length === 0) return store.drones
+  return store.drones.filter((d) => form.drone_tags.includes(d.drone_tag))
 })
 
 const canSave = computed(() => !!form.name.trim() && waypoints.value.length > 0)
 
 function droneName(deviceId) {
-  return store.drones.find((d) => d.device_id === deviceId)?.name || deviceId
+  return store.drones.find((d) => d.drone_tag === deviceId)?.name || deviceId
 }
 
 function routeScope(route) {
-  const ids = route.device_ids?.length
-    ? route.device_ids
-    : route.device_id
-      ? [route.device_id]
+  const ids = route.drone_tags?.length
+    ? route.drone_tags
+    : route.drone_tag
+      ? [route.drone_tag]
       : []
   if (ids.length === 0) return '全部无人机'
   return `适用 ${ids.map(droneName).join('、')}`
 }
 
-watch(() => form.device_ids, () => pickExecuteTarget(), { deep: true })
+watch(() => form.drone_tags, () => pickExecuteTarget(), { deep: true })
 
 function pickExecuteTarget() {
-  if (executeCandidates.value.some((d) => d.device_id === executeTarget.value)) return
-  executeTarget.value = executeCandidates.value[0]?.device_id || ''
+  if (executeCandidates.value.some((d) => d.drone_tag === executeTarget.value)) return
+  executeTarget.value = executeCandidates.value[0]?.drone_tag || ''
 }
 
 function newRoute() {
   form.id = ''
   form.name = ''
-  form.device_ids = []
+  form.drone_tags = []
   form.enabled = true
   form.end_action = 'hold'
   waypoints.value = []
-  executeTarget.value = store.drones[0]?.device_id || ''
+  executeTarget.value = store.drones[0]?.drone_tag || ''
 }
 
 function loadRoute(route) {
   form.id = route.id
   form.name = route.name
-  form.device_ids = route.device_ids?.length
-    ? [...route.device_ids]
-    : route.device_id
-      ? [route.device_id]
+  form.drone_tags = route.drone_tags?.length
+    ? [...route.drone_tags]
+    : route.drone_tag
+      ? [route.drone_tag]
       : []
   form.enabled = route.enabled
   form.end_action = route.end_action || 'hold'
   waypoints.value = route.waypoints.map(w => ({ ...w }))
-  const candidates = form.device_ids.length
-    ? store.drones.filter((d) => form.device_ids.includes(d.device_id))
+  const candidates = form.drone_tags.length
+    ? store.drones.filter((d) => form.drone_tags.includes(d.drone_tag))
     : store.drones
-  executeTarget.value = candidates[0]?.device_id || ''
+  executeTarget.value = candidates[0]?.drone_tag || ''
   const first = waypoints.value[0]
   if (first) globeRef.value?.flyTo(first.lon, first.lat, 30000)
 }
@@ -246,7 +246,7 @@ async function save() {
   const payload = {
     id: form.id,
     name: form.name,
-    device_ids: [...form.device_ids],
+    drone_tags: [...form.drone_tags],
     enabled: form.enabled,
     end_action: form.end_action,
     waypoints: waypoints.value.map(w => ({

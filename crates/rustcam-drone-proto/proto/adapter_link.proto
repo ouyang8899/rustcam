@@ -32,12 +32,10 @@ message Register {
   string adapter_id = 1;
   string protocol   = 2;
   string version    = 3;
-  repeated string devices = 4;      // 保留：adapter 本地引导值，生产以服务端分配为准
-  repeated DeviceIdentity identities = 5;  // 每设备的唯一标识，与 devices 同序一一对应
 }
 
 message DeviceIdentity {
-  string device_id = 1;    // adapter 侧本地设备 ID
+  string drone_tag = 1;    // adapter 侧本地设备 ID
   string unique_id = 2;    // 该设备对应飞控的唯一标识；空 = 未读到
 }
 
@@ -46,7 +44,7 @@ message IdentityReport {
 }
 
 message DeviceAssignment {
-  string device_id = 1;      // 服务端分配给本 adapter 的设备 ID
+  string drone_tag = 1;      // 服务端分配给本 adapter 的设备 ID
   string mavlink_addr = 2;   // 该机的 MAVLink 端点（隧道内地址）
   string signing_secret = 3; // 该机的 MAVLink 2 签名密钥（32 字节 hex）；空 = 不启用签名
   bool allow_unsigned = 4;   // 是否放行未签名帧（含 MAVLink 1 帧）；仅在有密钥时生效
@@ -58,9 +56,9 @@ message DeviceAssignment {
 message RegisterAck {
   bool accepted = 1;
   string reason = 2;
-  repeated string assigned_devices = 3;
+  repeated string assigned_drone_tags = 3;
   int32 heartbeat_interval_sec = 4;
-  repeated DeviceAssignment assignments = 5;  // 每设备的端点与密钥；与 assigned_devices 同序
+  repeated DeviceAssignment assignments = 5;  // 每设备的端点与密钥；与 assigned_drone_tags 同序
 }
 
 message Heartbeat {
@@ -71,7 +69,7 @@ message Heartbeat {
 }
 
 message ControlState {
-  string device_id = 1;
+  string drone_tag = 1;
   string control_type = 2;
   string holder = 3;
   int32  priority = 4;

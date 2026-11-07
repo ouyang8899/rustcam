@@ -522,7 +522,7 @@ fn reply(
 ) -> proto::CommandReply {
     proto::CommandReply {
         cmd_id: cmd.cmd_id.clone(),
-        device_id: cmd.device_id.clone(),
+        drone_tag: cmd.drone_tag.clone(),
         status: status.to_string(),
         code,
         message: message.into(),

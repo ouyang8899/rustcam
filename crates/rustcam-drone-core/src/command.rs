@@ -33,7 +33,7 @@ pub fn is_terminal_status(status: &str) -> bool {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Command {
     pub cmd_id: String,
-    pub device_id: String,
+    pub drone_tag: String,
     pub kind: String,
     pub params: BTreeMap<String, String>,
     pub deadline_ms: i64,

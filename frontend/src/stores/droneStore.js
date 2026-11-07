@@ -43,8 +43,8 @@ export const useDroneStore = defineStore('drone', {
 
   getters: {
     onlineCount: (state) => state.drones.filter(d => d.online).length,
-    getDrone: (state) => (deviceId) => state.drones.find(d => d.device_id === deviceId),
-    getTelemetry: (state) => (deviceId) => state.telemetry[deviceId] || state.drones.find(d => d.device_id === deviceId)?.last_telemetry,
+    getDrone: (state) => (deviceId) => state.drones.find(d => d.drone_tag === deviceId),
+    getTelemetry: (state) => (deviceId) => state.telemetry[deviceId] || state.drones.find(d => d.drone_tag === deviceId)?.last_telemetry,
     getControl: (state) => (deviceId, type = 'flight') => state.controls[`${deviceId}:${type}`],
   },
 
@@ -57,7 +57,7 @@ export const useDroneStore = defineStore('drone', {
         this.drones = Array.isArray(list) ? list.filter(isDrone) : []
         for (const d of this.drones) {
           if (d.last_telemetry && isTelemetry(d.last_telemetry)) {
-            this.telemetry[d.device_id] = d.last_telemetry
+            this.telemetry[d.drone_tag] = d.last_telemetry
           }
         }
       } finally {
@@ -66,8 +66,8 @@ export const useDroneStore = defineStore('drone', {
     },
 
     async saveDrone(drone) {
-      const saved = drone.device_id && this.drones.some(d => d.device_id === drone.device_id)
-        ? await api.updateDrone(drone.device_id, drone)
+      const saved = drone.drone_tag && this.drones.some(d => d.drone_tag === drone.drone_tag)
+        ? await api.updateDrone(drone.drone_tag, drone)
         : await api.createDrone(drone)
       await this.fetchDrones()
       ElMessage.success('无人机档案已保存')
@@ -76,7 +76,7 @@ export const useDroneStore = defineStore('drone', {
 
     async removeDrone(deviceId) {
       await api.deleteDrone(deviceId)
-      this.drones = this.drones.filter(d => d.device_id !== deviceId)
+      this.drones = this.drones.filter(d => d.drone_tag !== deviceId)
       ElMessage.success('无人机档案已删除')
     },
 
@@ -99,7 +99,7 @@ export const useDroneStore = defineStore('drone', {
 
     async saveRoute(route) {
       const saved = route.id ? await api.updateRoute(route.id, route) : await api.createRoute(route)
-      await this.fetchRoutes(route.device_id || '')
+      await this.fetchRoutes(route.drone_tag || '')
       ElMessage.success('航线已保存')
       return saved
     },
@@ -399,13 +399,13 @@ export const useDroneStore = defineStore('drone', {
         return
       }
       if (msg.msg_type === 'telemetry') {
-        const id = data.device_id
+        const id = data.drone_tag
         if (!id) return
         this.telemetry[id] = data
-        const idx = this.drones.findIndex(d => d.device_id === id)
+        const idx = this.drones.findIndex(d => d.drone_tag === id)
         if (idx === -1) {
           this.drones.push({
-            device_id: id,
+            drone_tag: id,
             name: id,
             online: true,
             last_telemetry: data,
@@ -425,7 +425,7 @@ export const useDroneStore = defineStore('drone', {
         }
       } else if (msg.msg_type === 'alert') {
         this.alerts.unshift({
-          device_id: data.device_id,
+          drone_tag: data.drone_tag,
           rule: data.rule,
           level: data.level,
           message: data.message,
@@ -436,7 +436,7 @@ export const useDroneStore = defineStore('drone', {
           this.lastAlertTs = msg.timestamp
           ElNotification({
             title: '围栏告警',
-            message: `${data.device_id}: ${data.message}`,
+            message: `${data.drone_tag}: ${data.message}`,
             type: 'error',
             duration: 6000,
           })
@@ -444,13 +444,13 @@ export const useDroneStore = defineStore('drone', {
       } else if (msg.msg_type === 'command') {
         this.commands[data.cmd_id] = { ...(this.commands[data.cmd_id] || {}), ...data }
       } else if (msg.msg_type === 'control') {
-        this.controls[`${data.device_id}:${data.control_type}`] = {
-          ...(this.controls[`${data.device_id}:${data.control_type}`] || {}),
+        this.controls[`${data.drone_tag}:${data.control_type}`] = {
+          ...(this.controls[`${data.drone_tag}:${data.control_type}`] || {}),
           ...data,
           held: data.action !== 'released' && data.action !== 'expired',
         }
         if (data.action === 'released' || data.action === 'expired') {
-          this.stopLeaseRenewal(data.device_id, data.control_type)
+          this.stopLeaseRenewal(data.drone_tag, data.control_type)
         }
       }
     },

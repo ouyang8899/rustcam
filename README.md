@@ -121,19 +121,40 @@ pwsh -File testenv\start.ps1
 
 ```bash
 cp adapter.toml.example adapter.toml
-# 按机型修改 mavlink_addr：
-#   PX4 SITL / 机载串流   udpin:0.0.0.0:14540
-#   ArduPilot SITL        udpin:0.0.0.0:14550
-#   数传电台              serial:COM3:57600 或 serial:/dev/ttyUSB0:57600
+# adapter.toml 只保留进程级配置：adapter_id / service_addr / autopilot。
+# 设备清单、MAVLink 端点、签名密钥与 sysid 由平台档案分配下发，本地不再配置。
 
 cargo run -p rustcam-drone-service
 cargo run -p rustcam-drone-sim          # 无飞控时使用内置 MAVLink 模拟器
 cargo run -p rustcam-drone-adapter
 ```
 
+> 标识模型：`drone_tag` 是平台主键（建档时自动生成 `drone-<uuid4>`，REST/前端/Redis/审计统一
+> 使用）；`unique_id` 是飞控自述的物理标识；`(adapter_id, mavlink_sysid)` 是链路绑定。
+> 首次接入请在「移动眼 → 无人机」新增档案，填写唯一标识、`adapter_id`、MAVLink 端点与 sysid；
+> adapter 注册后由 drone-service 按 `adapter_id` 分配，不再使用本地设备 ID。
+
 适配器按 `HEARTBEAT.autopilot` 自动识别 PX4 / ArduPilot，并把两侧的模式编码统一成
 `AUTO.LOITER` / `GUIDED` 等名称；遥测经 gRPC 上行到 drone-service 并做去重与影子缓存，
 指令经 `ControlService.SendCommand` 下行，由 `COMMAND_ACK` 回执闭环。
+
+#### 唯一标识核验
+
+平台按「档案登记的唯一标识 == 飞控实测的唯一标识」判定是否放行指令（[drone.md](./drone.md) §12.4 L3）。
+模拟器通过 `AUTOPILOT_VERSION.uid` 上报实测值（十六进制，≤16 位）：
+
+```bash
+# 指定模拟器的唯一标识（默认 0011223344556677，也可用环境变量 DRONE_SIM_UID）
+cargo run -p rustcam-drone-sim -- --uid 0011223344556677
+```
+
+在「无人机」档案的**唯一标识**字段填入同一个值（小写十六进制）即可正常下发指令；
+填成别的值时，指令会被判 `unique_id mismatch` 拒绝，该机的分配也会被撤销并留告警。
+档案留空则不做判定（放行）。
+
+> 实机边界：MAVLink 2 的 `AUTOPILOT_VERSION.uid2`（18 字节）不在 ardupilotmega v1.0 方言内，
+> 真实 PX4 / ArduPilot 把 UUID 放在 uid2，因此实机当前读不到唯一标识；模拟器用 `uid`（u64）承载，
+> 与平台登记值一一对应。
 
 前端「移动眼」菜单包含：
 

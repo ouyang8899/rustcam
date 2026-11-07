@@ -31,7 +31,7 @@ pub struct AdapterEntry {
 
 #[derive(Clone, Debug)]
 pub struct DeviceEntry {
-    pub device_id: String,
+    pub drone_tag: String,
     pub protocol: String,
     pub adapter_id: String,
     pub online: bool,
@@ -44,9 +44,9 @@ pub struct DeviceEntry {
 }
 
 impl DeviceEntry {
-    pub fn new(device_id: &str, protocol: &str, adapter_id: &str, now_ms: i64) -> DeviceEntry {
+    pub fn new(drone_tag: &str, protocol: &str, adapter_id: &str, now_ms: i64) -> DeviceEntry {
         DeviceEntry {
-            device_id: device_id.to_string(),
+            drone_tag: drone_tag.to_string(),
             protocol: protocol.to_string(),
             adapter_id: adapter_id.to_string(),
             online: true,
@@ -62,7 +62,7 @@ impl DeviceEntry {
 #[derive(Clone, Debug)]
 pub struct CommandRecord {
     pub cmd_id: String,
-    pub device_id: String,
+    pub drone_tag: String,
     pub kind: String,
     pub operator: String,
     pub status: String,
@@ -76,7 +76,7 @@ pub struct CommandRecord {
 /// 无人机业务档案：与实时设备影子分开，允许“先建档、后上线”。
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DroneProfileRecord {
-    pub device_id: String,
+    pub drone_tag: String,
     pub name: String,
     pub model: String,
     pub autopilot: String,
@@ -111,9 +111,6 @@ pub struct DroneProfileRecord {
     /// 该机归属的 adapter（决定谁拿到分配）；空 = 未归属。
     #[serde(default)]
     pub adapter_id: String,
-    /// 平台内唯一的无人机标识（自动生成，创建后不可改）。
-    #[serde(default)]
-    pub drone_tag: String,
 }
 
 fn default_true() -> bool {
@@ -129,10 +126,10 @@ fn default_mavlink_address() -> i32 {
 }
 
 impl DroneProfileRecord {
-    pub fn new(device_id: &str, now_ms: i64) -> DroneProfileRecord {
+    pub fn new(drone_tag: &str, now_ms: i64) -> DroneProfileRecord {
         DroneProfileRecord {
-            device_id: device_id.to_string(),
-            name: device_id.to_string(),
+            drone_tag: drone_tag.to_string(),
+            name: drone_tag.to_string(),
             model: String::new(),
             autopilot: "auto".into(),
             device_tag: String::new(),
@@ -150,7 +147,6 @@ impl DroneProfileRecord {
             mavlink_sysid: default_mavlink_address(),
             mavlink_compid: default_mavlink_address(),
             adapter_id: String::new(),
-            drone_tag: format!("drone-{}", uuid::Uuid::new_v4()),
         }
     }
 }
@@ -169,10 +165,10 @@ pub struct WaypointRecord {
 pub struct RouteRecord {
     pub id: String,
     pub name: String,
-    pub device_id: String,
+    pub drone_tag: String,
     /// 适用无人机列表；为空表示所有无人机都可用（航线模板）。
     #[serde(default)]
-    pub device_ids: Vec<String>,
+    pub drone_tags: Vec<String>,
     pub waypoints: Vec<WaypointRecord>,
     pub enabled: bool,
     pub updated_ms: i64,
@@ -194,10 +190,10 @@ pub struct FenceRecord {
     pub radius_m: f64,
     pub min_alt: f64,
     pub max_alt: f64,
-    pub device_id: String,
+    pub drone_tag: String,
     /// 适用无人机列表；为空表示全部。
     #[serde(default)]
-    pub device_ids: Vec<String>,
+    pub drone_tags: Vec<String>,
     pub enabled: bool,
     pub version: i32,
     pub updated_ms: i64,
@@ -205,7 +201,7 @@ pub struct FenceRecord {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct AlertRecord {
-    pub device_id: String,
+    pub drone_tag: String,
     pub rule: String,
     pub level: String,
     pub message: String,
@@ -215,7 +211,7 @@ pub struct AlertRecord {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AuditRecord {
     pub ts_ms: i64,
-    pub device_id: String,
+    pub drone_tag: String,
     pub category: String,
     pub action: String,
     pub operator: String,
@@ -252,7 +248,7 @@ pub struct FenceDebounce {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LeaseRecord {
-    pub device_id: String,
+    pub drone_tag: String,
     pub control_type: String,
     pub holder: String,
     pub priority: i32,
@@ -285,7 +281,7 @@ pub struct DroneState {
     pub fences: Arc<DashMap<String, FenceRecord>>,
     /// 控制权租约（Redis 为权威源时这里是本地缓存）。
     pub leases: Arc<DashMap<String, LeaseRecord>>,
-    /// 正在执行的航线任务（device_id → 任务），用于同空域互斥。
+    /// 正在执行的航线任务（drone_tag → 任务），用于同空域互斥。
     pub active_missions: Arc<DashMap<String, ActiveMission>>,
     /// 任务注册/冲突检查的临界区锁。
     pub mission_lock: Arc<Mutex<()>>,
@@ -295,7 +291,7 @@ pub struct DroneState {
     pub commands: Arc<DashMap<String, CommandRecord>>,
     pub alerts: Arc<Mutex<VecDeque<AlertRecord>>>,
     pub audits: Arc<Mutex<VecDeque<AuditRecord>>>,
-    /// 轨迹回放用的遥测历史：`device_id` → 按时间递增的样本环。
+    /// 轨迹回放用的遥测历史：`drone_tag` → 按时间递增的样本环。
     pub telemetry_history: Arc<Mutex<HashMap<String, VecDeque<Telemetry>>>>,
     /// 围栏告警去抖状态：`{device}:{fence}` → 去抖记录。
     pub fence_debounce: Arc<Mutex<HashMap<String, FenceDebounce>>>,
@@ -451,16 +447,16 @@ impl DroneState {
         Some(chrono::Utc::now().timestamp_millis() - last)
     }
 
-    pub fn adapter_for(&self, device_id: &str) -> Option<String> {
-        self.device_to_adapter.get(device_id).map(|v| v.clone())
+    pub fn adapter_for(&self, drone_tag: &str) -> Option<String> {
+        self.device_to_adapter.get(drone_tag).map(|v| v.clone())
     }
 
     pub fn adapter_tx(&self, adapter_id: &str) -> Option<AdapterTx> {
         self.adapters.get(adapter_id).map(|e| e.tx.clone())
     }
 
-    pub fn mark_device_online(&self, device_id: &str, now_ms: i64) -> bool {
-        if let Some(mut entry) = self.devices.get_mut(device_id) {
+    pub fn mark_device_online(&self, drone_tag: &str, now_ms: i64) -> bool {
+        if let Some(mut entry) = self.devices.get_mut(drone_tag) {
             let was_offline = !entry.online;
             entry.online = true;
             entry.last_seen_ms = now_ms;
@@ -469,8 +465,8 @@ impl DroneState {
         false
     }
 
-    pub fn mark_device_offline(&self, device_id: &str) -> bool {
-        if let Some(mut entry) = self.devices.get_mut(device_id) {
+    pub fn mark_device_offline(&self, drone_tag: &str) -> bool {
+        if let Some(mut entry) = self.devices.get_mut(drone_tag) {
             let was_online = entry.online;
             entry.online = false;
             return was_online;
@@ -521,7 +517,7 @@ impl DroneState {
         }
     }
 
-    pub fn recent_alerts(&self, device_id: &str, limit: usize) -> Vec<AlertRecord> {
+    pub fn recent_alerts(&self, drone_tag: &str, limit: usize) -> Vec<AlertRecord> {
         let limit = limit.clamp(1, 500);
         let Ok(alerts) = self.alerts.lock() else {
             return vec![];
@@ -529,13 +525,13 @@ impl DroneState {
         alerts
             .iter()
             .rev()
-            .filter(|a| device_id.is_empty() || a.device_id == device_id)
+            .filter(|a| drone_tag.is_empty() || a.drone_tag == drone_tag)
             .take(limit)
             .cloned()
             .collect()
     }
 
-    pub fn recent_audits(&self, device_id: &str, limit: usize) -> Vec<AuditRecord> {
+    pub fn recent_audits(&self, drone_tag: &str, limit: usize) -> Vec<AuditRecord> {
         let limit = limit.clamp(1, 1000);
         let Ok(audits) = self.audits.lock() else {
             return vec![];
@@ -543,7 +539,7 @@ impl DroneState {
         audits
             .iter()
             .rev()
-            .filter(|a| device_id.is_empty() || a.device_id == device_id)
+            .filter(|a| drone_tag.is_empty() || a.drone_tag == drone_tag)
             .take(limit)
             .cloned()
             .collect()
@@ -555,7 +551,7 @@ impl DroneState {
             return;
         };
         let samples = history
-            .entry(telemetry.device_id.clone())
+            .entry(telemetry.drone_tag.clone())
             .or_insert_with(VecDeque::new);
         samples.push_back(telemetry.clone());
         while samples.len() > MAX_TELEMETRY_HISTORY {
@@ -568,7 +564,7 @@ impl DroneState {
     /// 匹配样本超过 `limit` 时按等步长降采样，保证首尾样本都在结果里。
     pub fn telemetry_history(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         start_ms: i64,
         end_ms: i64,
         limit: usize,
@@ -577,7 +573,7 @@ impl DroneState {
         let Ok(history) = self.telemetry_history.lock() else {
             return vec![];
         };
-        let Some(samples) = history.get(device_id) else {
+        let Some(samples) = history.get(drone_tag) else {
             return vec![];
         };
         let matched: Vec<Telemetry> = samples
@@ -716,7 +712,7 @@ mod tests {
         let state = test_state();
         for i in 0..3 {
             state.push_alert(AlertRecord {
-                device_id: if i == 0 { "d1" } else { "d2" }.into(),
+                drone_tag: if i == 0 { "d1" } else { "d2" }.into(),
                 rule: "geofence".into(),
                 level: "high".into(),
                 message: format!("m{i}"),
@@ -728,7 +724,7 @@ mod tests {
 
         state.push_audit(AuditRecord {
             ts_ms: 1,
-            device_id: "d1".into(),
+            drone_tag: "d1".into(),
             category: "command".into(),
             action: "takeoff".into(),
             operator: "alice".into(),

@@ -5,7 +5,7 @@ use rustcam_drone_proto::common::Telemetry as ProtoTelemetry;
 
 pub fn to_proto(t: &Telemetry) -> ProtoTelemetry {
     ProtoTelemetry {
-        device_id: t.device_id.clone(),
+        drone_tag: t.drone_tag.clone(),
         ts_ms: t.ts_ms,
         lat: t.lat,
         lon: t.lon,
@@ -45,7 +45,7 @@ mod tests {
     #[test]
     fn all_fields_are_carried_over() {
         let t = Telemetry {
-            device_id: "drone-001".into(),
+            drone_tag: "drone-001".into(),
             unique_id: "0123456789abcdef".into(),
             ts_ms: 42,
             lat: 31.2304,
@@ -77,7 +77,7 @@ mod tests {
             home_alt: 50.0,
         };
         let p = to_proto(&t);
-        assert_eq!(p.device_id, "drone-001");
+        assert_eq!(p.drone_tag, "drone-001");
         assert_eq!(p.seq, 7);
         assert!((p.qw - 0.9).abs() < 1e-9);
         assert_eq!(p.autopilot, "ardupilot");

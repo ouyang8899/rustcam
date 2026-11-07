@@ -140,12 +140,12 @@ function syncDrones() {
     const lon = t.lon || d.home_lon || props.center.lon
     const alt = t.alt_amsl || 30
     if (!lat || !lon) continue
-    seen.add(d.device_id)
+    seen.add(d.drone_tag)
     const position = Cesium.Cartesian3.fromDegrees(lon, lat, alt)
-    let entity = droneEntities.get(d.device_id)
+    let entity = droneEntities.get(d.drone_tag)
     if (!entity) {
       entity = v.entities.add({
-        id: `drone-${d.device_id}`,
+        id: `drone-${d.drone_tag}`,
         position,
         model: {
           uri: DRONE_MODEL_URI,
@@ -155,7 +155,7 @@ function syncDrones() {
           colorBlendAmount: 0,
         },
         label: {
-          text: d.name || d.device_id,
+          text: d.name || d.drone_tag,
           font: '12px "Noto Sans SC", sans-serif',
           fillColor: Cesium.Color.WHITE,
           showBackground: true,
@@ -164,10 +164,10 @@ function syncDrones() {
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
         },
       })
-      droneEntities.set(d.device_id, entity)
+      droneEntities.set(d.drone_tag, entity)
     } else {
       entity.position = position
-      if (entity.label) entity.label.text = d.name || d.device_id
+      if (entity.label) entity.label.text = d.name || d.drone_tag
     }
     // 姿态：遥测里的 yaw/pitch/roll 均为弧度，直接交给 HeadingPitchRoll（规则 §10.6）。
     const heading = t.yaw !== undefined ? Number(t.yaw) : 0
@@ -489,7 +489,7 @@ function flyTo(lon, lat, alt = 600000) {
 function fitRoute() {
   if (!viewer.value || props.route.length === 0) return
   const points = props.route.map((p) => ({ lon: Number(p.lon), lat: Number(p.lat) }))
-  const d = props.drones.find((x) => x.device_id === props.selectedId)
+  const d = props.drones.find((x) => x.drone_tag === props.selectedId)
   const t = d?.last_telemetry
   if (t && Number.isFinite(Number(t.lon)) && Number.isFinite(Number(t.lat))) {
     points.push({ lon: Number(t.lon), lat: Number(t.lat) })
@@ -530,7 +530,7 @@ watch(() => props.draftPoints, syncDraft, { deep: true })
 watch(() => props.drawMode, syncDraft)
 watch(() => props.draftCircle, syncDraft, { deep: true })
 watch(() => props.selectedId, (id) => {
-  const drone = props.drones.find((d) => d.device_id === id)
+  const drone = props.drones.find((d) => d.drone_tag === id)
   const t = drone?.last_telemetry
   if (t && t.lat && t.lon) flyTo(t.lon, t.lat, 600000)
 })

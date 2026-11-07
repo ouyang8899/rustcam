@@ -45,7 +45,7 @@ impl AdminService for AdminServiceImpl {
         };
         let record = admin::upsert_profile(&self.state, profile, &operator)
             .map_err(Status::invalid_argument)?;
-        // »úÔØÁ´Â·²ÎÊıÂä drone ±í£¨¶Ëµã / ÃÜÔ¿ / Î¨Ò»±êÊ¶µÄÎ¨Ò»ÕæÏàÔ´£©¡£
+        // æœºè½½é“¾è·¯å‚æ•°è½ drone è¡¨ï¼ˆç«¯ç‚¹ / å¯†é’¥ / å”¯ä¸€æ ‡è¯†çš„å”¯ä¸€çœŸç›¸æºï¼‰ã€‚
         admin::persist_link_params(&self.state, &record)
             .await
             .map_err(Status::internal)?;
@@ -56,8 +56,8 @@ impl AdminService for AdminServiceImpl {
         &self,
         request: Request<DeviceRequest>,
     ) -> Result<Response<DeleteReply>, Status> {
-        let device_id = request.into_inner().device_id;
-        let deleted = admin::delete_profile(&self.state, &device_id, "admin")
+        let drone_tag = request.into_inner().drone_tag;
+        let deleted = admin::delete_profile(&self.state, &drone_tag, "admin")
             .await
             .map_err(Status::internal)?;
         Ok(Response::new(DeleteReply {
@@ -65,7 +65,7 @@ impl AdminService for AdminServiceImpl {
             reason: if deleted {
                 String::new()
             } else {
-                format!("drone `{device_id}` not found")
+                format!("drone `{drone_tag}` not found")
             },
         }))
     }
@@ -74,8 +74,8 @@ impl AdminService for AdminServiceImpl {
         &self,
         request: Request<RouteListRequest>,
     ) -> Result<Response<RouteList>, Status> {
-        let device_id = request.into_inner().device_id;
-        let routes = admin::list_routes(&self.state, &device_id)
+        let drone_tag = request.into_inner().drone_tag;
+        let routes = admin::list_routes(&self.state, &drone_tag)
             .iter()
             .map(admin::route_to_proto)
             .collect();
@@ -126,14 +126,14 @@ impl AdminService for AdminServiceImpl {
         let reply = admin::execute_route(
             &self.state,
             &req.route_id,
-            &req.device_id,
+            &req.drone_tag,
             req.lateral_offset_m,
             &req.operator,
         )
         .await
         .map_err(|e| {
-            // ¿ÕÓò/ÈÎÎñ³åÍ»ÓÃ 409£¬ÈÃÇ°¶ËÄÜÃ÷È·ÌáÊ¾£»ÆäËû²ÎÊı´íÎóÈÔÊÇ 400¡£
-            if e.contains("¿ÕÓò³åÍ»") || e.contains("ÒÑÓĞÈÎÎñ") {
+            // ç©ºåŸŸ/ä»»åŠ¡å†²çªç”¨ 409ï¼Œè®©å‰ç«¯èƒ½æ˜ç¡®æç¤ºï¼›å…¶ä»–å‚æ•°é”™è¯¯ä»æ˜¯ 400ã€‚
+            if e.contains("ç©ºåŸŸå†²çª") || e.contains("å·²æœ‰ä»»åŠ¡") {
                 Status::already_exists(e)
             } else {
                 Status::failed_precondition(e)
@@ -154,11 +154,11 @@ impl AdminService for AdminServiceImpl {
         };
         let records = self
             .state
-            .recent_audits(&req.device_id, limit)
+            .recent_audits(&req.drone_tag, limit)
             .into_iter()
             .map(|a| ProtoAudit {
                 ts_ms: a.ts_ms,
-                device_id: a.device_id,
+                drone_tag: a.drone_tag,
                 category: a.category,
                 action: a.action,
                 operator: a.operator,

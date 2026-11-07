@@ -12,11 +12,9 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(
         adapter = %cfg.adapter_id,
         service = %cfg.service_addr,
-        mavlink = %cfg.mavlink_addr,
         autopilot = %cfg.autopilot,
-        device = %cfg.effective_device_id(),
         telemetry_hz = cfg.telemetry_hz,
-        "adapter starting"
+        "adapter starting (devices and endpoints are assigned by drone-service)"
     );
 
     link::run(cfg).await

@@ -6,7 +6,7 @@ risk_enabled = false
 max_inflight_commands = 1024
 default_command_timeout_sec = 30
 require_control = true
-# º½ÏßÎ´ÏÔÊ½ÅäÖÃ½áÊø¶¯×÷Ê±µÄÄ¬ÈÏÖµ£ºhold / rtl / land¡£
+# èˆªçº¿æœªæ˜¾å¼é…ç½®ç»“æŸåŠ¨ä½œæ—¶çš„é»˜è®¤å€¼ï¼šhold / rtl / landã€‚
 route_default_end_action = "hold"
 state_file = "drone-state.json"
 redis_url = "redis://127.0.0.1:6379"

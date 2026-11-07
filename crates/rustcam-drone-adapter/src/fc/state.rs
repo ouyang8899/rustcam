@@ -332,13 +332,13 @@ impl VehicleState {
     /// 生成一条可上报的规范遥测。
     pub fn to_telemetry(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         seq: u32,
         now_ms: i64,
         timeout_ms: u64,
     ) -> Telemetry {
         Telemetry {
-            device_id: device_id.to_string(),
+            drone_tag: drone_tag.to_string(),
             ts_ms: now_ms,
             lat: self.lat,
             lon: self.lon,

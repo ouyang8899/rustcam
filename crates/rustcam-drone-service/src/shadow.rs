@@ -36,7 +36,7 @@ pub fn ingest(state: &DroneState, telemetry: Telemetry) -> Ingest {
         chrono::Utc::now().timestamp_millis()
     };
 
-    if let Some(mut entry) = state.devices.get_mut(&telemetry.device_id) {
+    if let Some(mut entry) = state.devices.get_mut(&telemetry.drone_tag) {
         if telemetry.seq == entry.last_seq && ts <= entry.last_ts_ms {
             state.metrics_inc(names::TELEMETRY_DEDUP_DROPPED_TOTAL);
             return Ingest::Duplicate;
@@ -55,7 +55,7 @@ pub fn ingest(state: &DroneState, telemetry: Telemetry) -> Ingest {
         }
         entry.last_telemetry = Some(telemetry.clone());
     } else {
-        let (adapter_id, protocol) = match state.adapter_for(&telemetry.device_id) {
+        let (adapter_id, protocol) = match state.adapter_for(&telemetry.drone_tag) {
             Some(adapter_id) => {
                 let protocol = state
                     .adapters
@@ -66,12 +66,12 @@ pub fn ingest(state: &DroneState, telemetry: Telemetry) -> Ingest {
             }
             None => ("unknown".to_string(), "mavlink".to_string()),
         };
-        let mut entry = DeviceEntry::new(&telemetry.device_id, &protocol, &adapter_id, ts);
+        let mut entry = DeviceEntry::new(&telemetry.drone_tag, &protocol, &adapter_id, ts);
         entry.last_seq = telemetry.seq;
         entry.last_ts_ms = ts;
         entry.unique_id = telemetry.unique_id.trim().to_string();
         entry.last_telemetry = Some(telemetry.clone());
-        state.devices.insert(telemetry.device_id.clone(), entry);
+        state.devices.insert(telemetry.drone_tag.clone(), entry);
     }
 
     crate::geofence::evaluate(state, &telemetry);
@@ -93,14 +93,14 @@ pub fn ingest(state: &DroneState, telemetry: Telemetry) -> Ingest {
     state.metrics_set_labeled(
         names::TELEMETRY_LAG_SECONDS,
         lag_secs,
-        &[("device_id", telemetry.device_id.as_str())],
+        &[("drone_tag", telemetry.drone_tag.as_str())],
     );
     Ingest::Accepted
 }
 
 pub fn from_proto(t: &proto::Telemetry) -> Telemetry {
     Telemetry {
-        device_id: t.device_id.clone(),
+        drone_tag: t.drone_tag.clone(),
         ts_ms: t.ts_ms,
         lat: t.lat,
         lon: t.lon,
@@ -135,7 +135,7 @@ pub fn from_proto(t: &proto::Telemetry) -> Telemetry {
 
 pub fn to_proto(t: &Telemetry) -> proto::Telemetry {
     proto::Telemetry {
-        device_id: t.device_id.clone(),
+        drone_tag: t.drone_tag.clone(),
         ts_ms: t.ts_ms,
         lat: t.lat,
         lon: t.lon,
@@ -179,7 +179,7 @@ mod tests {
 
     fn telemetry(seq: u32, ts_ms: i64) -> Telemetry {
         Telemetry {
-            device_id: "drone-001".into(),
+            drone_tag: "drone-001".into(),
             ts_ms,
             lat: 31.2304,
             lon: 121.4737,
@@ -276,7 +276,7 @@ mod tests {
     fn invalid_telemetry_is_rejected() {
         let state = state_with_adapter();
         let mut bad = telemetry(1, 1_000);
-        bad.device_id.clear();
+        bad.drone_tag.clear();
         assert_eq!(ingest(&state, bad), Ingest::Invalid);
         assert!(state.devices.is_empty());
     }

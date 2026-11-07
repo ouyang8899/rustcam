@@ -25,10 +25,10 @@ async fn db() -> Option<DroneDb> {
     Some(client)
 }
 
-fn control_audit(device_id: &str, operator: &str) -> AuditRecord {
+fn control_audit(drone_tag: &str, operator: &str) -> AuditRecord {
     AuditRecord {
         ts_ms: 1_700_000_000_000,
-        device_id: device_id.to_string(),
+        drone_tag: drone_tag.to_string(),
         category: "control".into(),
         action: "acquire".into(),
         operator: operator.to_string(),
@@ -42,10 +42,10 @@ fn control_audit(device_id: &str, operator: &str) -> AuditRecord {
     }
 }
 
-fn command_audit(device_id: &str, cmd_id: &str) -> AuditRecord {
+fn command_audit(drone_tag: &str, cmd_id: &str) -> AuditRecord {
     AuditRecord {
         ts_ms: 1_700_000_000_000,
-        device_id: device_id.to_string(),
+        drone_tag: drone_tag.to_string(),
         category: "command".into(),
         action: "goto".into(),
         operator: "alice".into(),
@@ -64,16 +64,16 @@ async fn control_audit_is_persisted() {
     let Some(db) = db().await else {
         return;
     };
-    let device_id = "drone-pg-1";
-    write_audit(&db, &control_audit(device_id, "alice"))
+    let drone_tag = "drone-pg-1";
+    write_audit(&db, &control_audit(drone_tag, "alice"))
         .await
         .expect("控制权审计应写入 drone_control_audit");
 
     let rows: Vec<serde_json::Value> = db
         .query_decode(
-            "SELECT device_id, control_type, action, holder, priority, result, operator \
-             FROM drone_control_audit WHERE device_id = $1 ORDER BY id DESC LIMIT 1",
-            vec![rbs::value![device_id]],
+            "SELECT drone_tag, control_type, action, holder, priority, result, operator \
+             FROM drone_control_audit WHERE drone_tag = $1 ORDER BY id DESC LIMIT 1",
+            vec![rbs::value![drone_tag]],
         )
         .await
         .expect("应能查询 drone_control_audit");

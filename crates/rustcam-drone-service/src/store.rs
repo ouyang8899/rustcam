@@ -64,7 +64,7 @@ pub fn load(state: &DroneState) {
             p.drone_tag = format!("drone-{}", uuid::Uuid::new_v4());
             backfilled = true;
         }
-        state.profiles.insert(p.device_id.clone(), p);
+        state.profiles.insert(p.drone_tag.clone(), p);
     }
     if backfilled {
         state.persist();
@@ -79,7 +79,7 @@ pub fn load(state: &DroneState) {
         if l.expire_at_ms > chrono::Utc::now().timestamp_millis() {
             state
                 .leases
-                .insert(format!("{}:{}", l.device_id, l.control_type), l);
+                .insert(format!("{}:{}", l.drone_tag, l.control_type), l);
         }
     }
     if let Ok(mut audits) = state.audits.lock() {
@@ -107,13 +107,13 @@ pub fn build_snapshot(state: &DroneState) -> Option<(std::path::PathBuf, Vec<u8>
     };
 
     let mut profiles: Vec<_> = state.profiles.iter().map(|e| e.value().clone()).collect();
-    profiles.sort_by(|a, b| a.device_id.cmp(&b.device_id));
+    profiles.sort_by(|a, b| a.drone_tag.cmp(&b.drone_tag));
     let mut routes: Vec<_> = state.routes.iter().map(|e| e.value().clone()).collect();
     routes.sort_by(|a, b| a.id.cmp(&b.id));
     let mut fences: Vec<_> = state.fences.iter().map(|e| e.value().clone()).collect();
     fences.sort_by(|a, b| a.id.cmp(&b.id));
     let mut leases: Vec<_> = state.leases.iter().map(|e| e.value().clone()).collect();
-    leases.sort_by(|a, b| a.device_id.cmp(&b.device_id));
+    leases.sort_by(|a, b| a.drone_tag.cmp(&b.drone_tag));
 
     let audits = state
         .recent_audits("", MAX_SNAPSHOT_AUDITS)
@@ -219,8 +219,8 @@ mod tests {
             RouteRecord {
                 id: "route-1".into(),
                 name: "巡检".into(),
-                device_id: "drone-001".into(),
-                device_ids: vec!["drone-001".into()],
+                drone_tag: "drone-001".into(),
+                drone_tags: vec!["drone-001".into()],
                 waypoints: vec![WaypointRecord {
                     lat: 31.2,
                     lon: 121.4,
@@ -247,8 +247,8 @@ mod tests {
                 radius_m: 0.0,
                 min_alt: 0.0,
                 max_alt: 120.0,
-                device_id: String::new(),
-                device_ids: Vec::new(),
+                drone_tag: String::new(),
+                drone_tags: Vec::new(),
                 enabled: true,
                 version: 1,
                 updated_ms: 3,
@@ -285,7 +285,7 @@ mod tests {
             ..Default::default()
         };
         let state = DroneState::new(cfg);
-        let restored = state.profiles.get("drone-legacy").unwrap();
+        let restored = state.profiles.iter().next().unwrap();
         assert!(restored.drone_tag.starts_with("drone-"));
 
         let reread: Snapshot =

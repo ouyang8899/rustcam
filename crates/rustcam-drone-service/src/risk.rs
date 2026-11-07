@@ -73,7 +73,7 @@ pub fn evaluate(state: &DroneState, telemetry: &Telemetry) {
 fn emit(state: &DroneState, telemetry: &Telemetry, rule: &str, level: &str, message: String) {
     let now = chrono::Utc::now().timestamp_millis();
     let alert = AlertRecord {
-        device_id: telemetry.device_id.clone(),
+        drone_tag: telemetry.drone_tag.clone(),
         rule: rule.to_string(),
         level: level.to_string(),
         message: message.clone(),
@@ -81,7 +81,7 @@ fn emit(state: &DroneState, telemetry: &Telemetry, rule: &str, level: &str, mess
     };
     state.push_alert(alert.clone());
     let _ = state.event_tx.send(DroneEvent::Alert {
-        device_id: alert.device_id.clone(),
+        drone_tag: alert.drone_tag.clone(),
         rule: alert.rule,
         level: alert.level,
         message: alert.message,
@@ -104,7 +104,7 @@ mod tests {
 
     fn telemetry(battery: f64, vx: f64) -> Telemetry {
         Telemetry {
-            device_id: "d1".into(),
+            drone_tag: "d1".into(),
             battery_pct: battery,
             vx,
             vy: 0.0,

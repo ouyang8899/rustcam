@@ -5,7 +5,7 @@
       <div class="header-left">
         <h1 class="page-title">实时飞行</h1>
         <span class="header-sub">
-          {{ selected ? selected.name || selected.device_id : '未选择无人机' }}
+          {{ selected ? selected.name || selected.drone_tag : '未选择无人机' }}
           <el-tag v-if="selected" size="small" :type="selected.online ? 'success' : 'info'" style="margin-left: 8px">
             {{ selected.online ? '在线' : '离线' }}
           </el-tag>
@@ -46,14 +46,14 @@
         <div class="rail-title">机队</div>
         <div
           v-for="d in store.drones"
-          :key="d.device_id"
+          :key="d.drone_tag"
           class="rail-item"
-          :class="{ active: d.device_id === selectedId }"
-          @click="select(d.device_id)"
+          :class="{ active: d.drone_tag === selectedId }"
+          @click="select(d.drone_tag)"
         >
           <span class="status-dot" :class="d.online ? 'online' : 'offline'"></span>
           <div class="rail-main">
-            <div class="rail-name">{{ d.name || d.device_id }}</div>
+            <div class="rail-name">{{ d.name || d.drone_tag }}</div>
             <div class="rail-meta">
               {{ d.mode || '—' }}
               <span v-if="d.last_telemetry"> · {{ Math.round(d.last_telemetry.battery_pct || 0) }}%</span>
@@ -339,7 +339,7 @@ const leaseSeconds = ref(DEFAULT_LEASE_SECONDS)
 const leaseOptions = LEASE_OPTIONS
 
 const selected = computed(() =>
-  store.drones.find(d => d.device_id === selectedId.value) || null
+  store.drones.find(d => d.drone_tag === selectedId.value) || null
 )
 /** 可选摄像头：优先用关联的摄像头，旧档案回退到 device_tag。 */
 const cameraOptions = computed(() => {
@@ -359,7 +359,7 @@ const control = computed(() =>
 const liveRoute = computed(() => {
   const r = store.routes.find((x) => x.id === routeId.value)
   if (!r) return []
-  if (r.device_id && r.device_id !== selectedId.value) return []
+  if (r.drone_tag && r.drone_tag !== selectedId.value) return []
   return r.waypoints || []
 })
 /** 本次执行航线的横向偏移（米，正=右，负=左）。 */
@@ -406,14 +406,14 @@ const speed = computed(() => {
 })
 const recentCommands = computed(() =>
   Object.values(store.commands)
-    .filter(c => !c.device_id || c.device_id === selectedId.value)
+    .filter(c => !c.drone_tag || c.drone_tag === selectedId.value)
     .sort((a, b) => (b.ts_ms || 0) - (a.ts_ms || 0))
     .slice(0, 8)
 )
 
 watch(() => store.drones, () => {
   if (!selectedId.value && store.drones.length > 0) {
-    select(route.query.device || store.drones[0].device_id)
+    select(route.query.device || store.drones[0].drone_tag)
   }
 }, { immediate: true })
 
@@ -423,7 +423,7 @@ watch(() => route.query.device, (id) => {
 
 function telemetryFor(id) {
   if (!id) return null
-  return store.telemetry[id] || store.drones.find(d => d.device_id === id)?.last_telemetry || null
+  return store.telemetry[id] || store.drones.find(d => d.drone_tag === id)?.last_telemetry || null
 }
 
 function select(id) {
@@ -728,7 +728,7 @@ function statusType(status) {
 onMounted(async () => {
   await Promise.all([store.fetchDrones(), store.fetchFences()])
   store.connectWs()
-  const id = route.query.device || store.drones[0]?.device_id
+  const id = route.query.device || store.drones[0]?.drone_tag
   if (id) select(id)
 })
 </script>

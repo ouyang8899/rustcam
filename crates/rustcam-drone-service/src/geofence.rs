@@ -124,15 +124,15 @@ fn altitude_ok(fence: &FenceRecord, alt: f64) -> bool {
     alt >= min && alt <= max
 }
 
-fn applies(fence: &FenceRecord, device_id: &str) -> bool {
+fn applies(fence: &FenceRecord, drone_tag: &str) -> bool {
     if !fence.enabled {
         return false;
     }
-    // device_ids 优先；旧的单 device_id 字段继续兼容。
-    if !fence.device_ids.is_empty() {
-        return fence.device_ids.iter().any(|id| id == device_id);
+    // drone_tags 优先；旧的单 drone_tag 字段继续兼容。
+    if !fence.drone_tags.is_empty() {
+        return fence.drone_tags.iter().any(|id| id == drone_tag);
     }
-    fence.device_id.is_empty() || fence.device_id == device_id
+    fence.drone_tag.is_empty() || fence.drone_tag == drone_tag
 }
 
 /// 围栏类型归一化（规则 §5.4：`no_fly` / `work` / `height`；`allowed` 视作 `work`）。
@@ -175,11 +175,11 @@ pub fn evaluate(state: &DroneState, telemetry: &Telemetry) {
     let now = chrono::Utc::now().timestamp_millis();
     for entry in state.fences.iter() {
         let fence = entry.value();
-        if !applies(fence, &telemetry.device_id) {
+        if !applies(fence, &telemetry.drone_tag) {
             continue;
         }
         let breach = is_breach(fence, telemetry.lat, telemetry.lon, telemetry.alt_amsl);
-        let key = format!("{}:{}", telemetry.device_id, fence.id);
+        let key = format!("{}:{}", telemetry.drone_tag, fence.id);
 
         if !breach {
             // 离开后 3s 恢复（规则 §6.10）。
@@ -241,7 +241,7 @@ pub fn evaluate(state: &DroneState, telemetry: &Telemetry) {
             telemetry.alt_amsl
         );
         let alert = AlertRecord {
-            device_id: telemetry.device_id.clone(),
+            drone_tag: telemetry.drone_tag.clone(),
             rule: "geofence_breach".into(),
             level: level.into(),
             message: message.clone(),
@@ -249,14 +249,14 @@ pub fn evaluate(state: &DroneState, telemetry: &Telemetry) {
         };
         state.push_alert(alert.clone());
         let _ = state.event_tx.send(DroneEvent::Alert {
-            device_id: alert.device_id.clone(),
+            drone_tag: alert.drone_tag.clone(),
             rule: alert.rule,
             level: alert.level,
             message: alert.message,
         });
         state.push_audit(AuditRecord {
             ts_ms: now,
-            device_id: telemetry.device_id.clone(),
+            drone_tag: telemetry.drone_tag.clone(),
             category: "fence".into(),
             action: "breach".into(),
             operator: "system".into(),
@@ -276,14 +276,14 @@ pub fn evaluate(state: &DroneState, telemetry: &Telemetry) {
 /// `goto` 预检：目标点是否被围栏规则允许。
 pub fn check_target(
     state: &DroneState,
-    device_id: &str,
+    drone_tag: &str,
     lat: f64,
     lon: f64,
     alt: f64,
 ) -> Result<(), String> {
     for entry in state.fences.iter() {
         let fence = entry.value();
-        if !applies(fence, device_id) {
+        if !applies(fence, drone_tag) {
             continue;
         }
         if is_breach(fence, lat, lon, alt) {
@@ -314,8 +314,8 @@ mod tests {
             radius_m: 0.0,
             min_alt: 0.0,
             max_alt: 120.0,
-            device_id: String::new(),
-            device_ids: Vec::new(),
+            drone_tag: String::new(),
+            drone_tags: Vec::new(),
             enabled: true,
             version: 1,
             updated_ms: 0,
@@ -373,7 +373,7 @@ mod tests {
         let state = DroneState::new(DroneConfig::default());
         state.fences.insert("f1".into(), fence("no_fly", SQUARE));
         let telemetry = Telemetry {
-            device_id: "d1".into(),
+            drone_tag: "d1".into(),
             ts_ms: 1,
             lat: 31.25,
             lon: 121.45,

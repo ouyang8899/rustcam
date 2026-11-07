@@ -36,9 +36,9 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-/// 控制权键：`control:{device_id}:{control_type}`（规则 §8.2）。
-fn key(device_id: &str, control_type: &str) -> String {
-    keys::control_key(device_id, control_type)
+/// 控制权键：`control:{drone_tag}:{control_type}`（规则 §8.2）。
+fn key(drone_tag: &str, control_type: &str) -> String {
+    keys::control_key(drone_tag, control_type)
 }
 
 fn normalize_type(control_type: &str) -> String {
@@ -59,7 +59,7 @@ fn lease_secs(seconds: i32, default_secs: u32) -> i64 {
 
 fn broadcast(state: &DroneState, lease: &LeaseRecord, action: &str) {
     let _ = state.event_tx.send(DroneEvent::Control {
-        device_id: lease.device_id.clone(),
+        drone_tag: lease.drone_tag.clone(),
         control_type: lease.control_type.clone(),
         holder: lease.holder.clone(),
         priority: lease.priority,
@@ -72,7 +72,7 @@ fn broadcast(state: &DroneState, lease: &LeaseRecord, action: &str) {
 fn audit_record(lease: &LeaseRecord, action: &str, result: &str, detail: &str) -> AuditRecord {
     AuditRecord {
         ts_ms: now_ms(),
-        device_id: lease.device_id.clone(),
+        drone_tag: lease.drone_tag.clone(),
         category: "control".into(),
         action: action.to_string(),
         operator: lease.holder.clone(),
@@ -90,19 +90,19 @@ fn audit_record(lease: &LeaseRecord, action: &str, result: &str, detail: &str) -
 fn cache_lease(state: &DroneState, lease: LeaseRecord) {
     state
         .leases
-        .insert(key(&lease.device_id, &lease.control_type), lease);
+        .insert(key(&lease.drone_tag, &lease.control_type), lease);
 }
 
-fn cached_lease(state: &DroneState, device_id: &str, control_type: &str) -> Option<LeaseRecord> {
+fn cached_lease(state: &DroneState, drone_tag: &str, control_type: &str) -> Option<LeaseRecord> {
     state
         .leases
-        .get(&key(device_id, control_type))
+        .get(&key(drone_tag, control_type))
         .map(|l| l.clone())
 }
 
 /// 清理已过期的本地缓存并广播 `expired`（Redis 侧靠 TTL 自动消失）。
-async fn clean_expired(state: &DroneState, device_id: &str, control_type: &str) {
-    let k = key(device_id, control_type);
+async fn clean_expired(state: &DroneState, drone_tag: &str, control_type: &str) {
+    let k = key(drone_tag, control_type);
     let expired = state
         .leases
         .get(&k)
@@ -120,16 +120,16 @@ async fn clean_expired(state: &DroneState, device_id: &str, control_type: &str) 
 }
 
 /// 查询当前控制权。
-pub async fn get(state: &DroneState, device_id: &str, control_type: &str) -> Option<LeaseRecord> {
+pub async fn get(state: &DroneState, drone_tag: &str, control_type: &str) -> Option<LeaseRecord> {
     let control_type = normalize_type(control_type);
-    clean_expired(state, device_id, &control_type).await;
+    clean_expired(state, drone_tag, &control_type).await;
 
     if let Some(redis) = state.redis.clone() {
-        let k = key(device_id, &control_type);
+        let k = key(drone_tag, &control_type);
         match state.scripts.read(&redis, &k).await {
             Ok(Some(lease)) => {
                 let record = LeaseRecord {
-                    device_id: device_id.to_string(),
+                    drone_tag: drone_tag.to_string(),
                     control_type: control_type.clone(),
                     holder: lease.holder,
                     priority: lease.priority,
@@ -148,28 +148,28 @@ pub async fn get(state: &DroneState, device_id: &str, control_type: &str) -> Opt
         }
     }
 
-    cached_lease(state, device_id, &control_type)
+    cached_lease(state, drone_tag, &control_type)
 }
 
 /// 申请控制权：**只在无人持有或已过期时成功，不抢占**（规则 §6.7）。
 pub async fn acquire(
     state: &DroneState,
-    device_id: &str,
+    drone_tag: &str,
     control_type: &str,
     operator: &str,
     priority: i32,
     lease_seconds: i32,
 ) -> Result<LeaseOutcome, String> {
-    if device_id.trim().is_empty() {
-        return Err("device_id is required".into());
+    if drone_tag.trim().is_empty() {
+        return Err("drone_tag is required".into());
     }
     if operator.trim().is_empty() {
         return Err("operator is required".into());
     }
     let control_type = normalize_type(control_type);
-    clean_expired(state, device_id, &control_type).await;
+    clean_expired(state, drone_tag, &control_type).await;
 
-    let k = key(device_id, &control_type);
+    let k = key(drone_tag, &control_type);
     let now = now_ms();
     let lease_ms = lease_secs(lease_seconds, state.config.default_lease_sec) * 1000;
 
@@ -182,7 +182,7 @@ pub async fn acquire(
             Ok(result) => {
                 if result.granted {
                     let lease = LeaseRecord {
-                        device_id: device_id.to_string(),
+                        drone_tag: drone_tag.to_string(),
                         control_type: control_type.clone(),
                         holder: operator.to_string(),
                         priority,
@@ -222,7 +222,7 @@ pub async fn acquire(
 
     acquire_local(
         state,
-        device_id,
+        drone_tag,
         &control_type,
         operator,
         priority,
@@ -234,7 +234,7 @@ pub async fn acquire(
 /// 进程内降级仲裁：单实例互斥（Redis 不可用时）。
 async fn acquire_local(
     state: &DroneState,
-    device_id: &str,
+    drone_tag: &str,
     control_type: &str,
     operator: &str,
     priority: i32,
@@ -245,7 +245,7 @@ async fn acquire_local(
         let _guard = state.lease_lock.lock().unwrap_or_else(|e| e.into_inner());
         let now = now_ms();
 
-        if let Some(existing) = cached_lease(state, device_id, control_type) {
+        if let Some(existing) = cached_lease(state, drone_tag, control_type) {
             if existing.expire_at_ms > now {
                 state.metrics_inc_labeled(names::CONTROL_ACQUIRE_TOTAL, &[("result", "denied")]);
                 return Ok(LeaseOutcome {
@@ -258,7 +258,7 @@ async fn acquire_local(
         }
 
         let lease = LeaseRecord {
-            device_id: device_id.to_string(),
+            drone_tag: drone_tag.to_string(),
             control_type: control_type.to_string(),
             holder: operator.to_string(),
             priority,
@@ -288,22 +288,22 @@ async fn acquire_local(
 /// 抢占控制权：只有优先级**严格更高**才成功（规则 §6.7 / §17.2）。
 pub async fn preempt(
     state: &DroneState,
-    device_id: &str,
+    drone_tag: &str,
     control_type: &str,
     operator: &str,
     priority: i32,
     lease_seconds: i32,
 ) -> Result<LeaseOutcome, String> {
-    if device_id.trim().is_empty() {
-        return Err("device_id is required".into());
+    if drone_tag.trim().is_empty() {
+        return Err("drone_tag is required".into());
     }
     if operator.trim().is_empty() {
         return Err("operator is required".into());
     }
     let control_type = normalize_type(control_type);
-    clean_expired(state, device_id, &control_type).await;
+    clean_expired(state, drone_tag, &control_type).await;
 
-    let k = key(device_id, &control_type);
+    let k = key(drone_tag, &control_type);
     let now = now_ms();
     let lease_ms = lease_secs(lease_seconds, state.config.default_lease_sec) * 1000;
 
@@ -316,7 +316,7 @@ pub async fn preempt(
             Ok(result) => {
                 if result.granted {
                     let lease = LeaseRecord {
-                        device_id: device_id.to_string(),
+                        drone_tag: drone_tag.to_string(),
                         control_type: control_type.clone(),
                         holder: operator.to_string(),
                         priority,
@@ -362,7 +362,7 @@ pub async fn preempt(
 
     preempt_local(
         state,
-        device_id,
+        drone_tag,
         &control_type,
         operator,
         priority,
@@ -373,7 +373,7 @@ pub async fn preempt(
 
 async fn preempt_local(
     state: &DroneState,
-    device_id: &str,
+    drone_tag: &str,
     control_type: &str,
     operator: &str,
     priority: i32,
@@ -383,7 +383,7 @@ async fn preempt_local(
         let _guard = state.lease_lock.lock().unwrap_or_else(|e| e.into_inner());
         let now = now_ms();
 
-        if let Some(existing) = cached_lease(state, device_id, control_type) {
+        if let Some(existing) = cached_lease(state, drone_tag, control_type) {
             if existing.expire_at_ms > now && priority <= existing.priority {
                 state.metrics_inc_labeled(names::CONTROL_ACQUIRE_TOTAL, &[("result", "denied")]);
                 return Ok(LeaseOutcome {
@@ -416,7 +416,7 @@ async fn preempt_local(
             )
         } else {
             let lease = LeaseRecord {
-                device_id: device_id.to_string(),
+                drone_tag: drone_tag.to_string(),
                 control_type: control_type.to_string(),
                 holder: operator.to_string(),
                 priority,
@@ -447,19 +447,19 @@ async fn preempt_local(
 /// 释放控制权；`force` 为真时不受持有人限制（管理员强制释放）。
 pub async fn release(
     state: &DroneState,
-    device_id: &str,
+    drone_tag: &str,
     control_type: &str,
     operator: &str,
     force: bool,
 ) -> Result<LeaseRecord, String> {
     let control_type = normalize_type(control_type);
-    let k = key(device_id, &control_type);
+    let k = key(drone_tag, &control_type);
 
-    let existing = match get(state, device_id, &control_type).await {
+    let existing = match get(state, drone_tag, &control_type).await {
         Some(lease) => lease,
         None => {
             return Ok(LeaseRecord {
-                device_id: device_id.to_string(),
+                drone_tag: drone_tag.to_string(),
                 control_type,
                 holder: String::new(),
                 priority: 0,
@@ -490,7 +490,7 @@ pub async fn release(
         }
     } else if !force {
         let _guard = state.lease_lock.lock().unwrap_or_else(|e| e.into_inner());
-        let still_held = cached_lease(state, device_id, &control_type)
+        let still_held = cached_lease(state, drone_tag, &control_type)
             .map(|l| l.holder == operator)
             .unwrap_or(false);
         if !still_held {
@@ -518,13 +518,13 @@ pub async fn release(
 /// 续约：只允许当前持有人（规则 §6.7）。
 pub async fn renew(
     state: &DroneState,
-    device_id: &str,
+    drone_tag: &str,
     control_type: &str,
     operator: &str,
     lease_seconds: i32,
 ) -> Result<LeaseOutcome, String> {
     let control_type = normalize_type(control_type);
-    let k = key(device_id, &control_type);
+    let k = key(drone_tag, &control_type);
     let now = now_ms();
     let lease_ms = lease_secs(lease_seconds, state.config.default_lease_sec) * 1000;
 
@@ -536,10 +536,10 @@ pub async fn renew(
         {
             Ok(true) => {
                 let lease = LeaseRecord {
-                    device_id: device_id.to_string(),
+                    drone_tag: drone_tag.to_string(),
                     control_type: control_type.clone(),
                     holder: operator.to_string(),
-                    priority: cached_lease(state, device_id, &control_type)
+                    priority: cached_lease(state, drone_tag, &control_type)
                         .map(|l| l.priority)
                         .unwrap_or(0),
                     expire_at_ms: now + lease_ms,
@@ -559,7 +559,7 @@ pub async fn renew(
                 });
             }
             Ok(false) => {
-                let holder = cached_lease(state, device_id, &control_type)
+                let holder = cached_lease(state, drone_tag, &control_type)
                     .map(|l| l.holder)
                     .unwrap_or_default();
                 return Err(format!(
@@ -574,7 +574,7 @@ pub async fn renew(
 
     let (outcome, audit) = {
         let _guard = state.lease_lock.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(existing) = cached_lease(state, device_id, &control_type) else {
+        let Some(existing) = cached_lease(state, drone_tag, &control_type) else {
             return Err("控制权不存在".into());
         };
         if existing.holder != operator {
@@ -609,7 +609,7 @@ pub async fn renew(
 /// 飞行/云台指令下发前的控制权校验。
 pub async fn ensure_holder(
     state: &DroneState,
-    device_id: &str,
+    drone_tag: &str,
     control_type: &str,
     operator: &str,
 ) -> Result<(), String> {
@@ -617,7 +617,7 @@ pub async fn ensure_holder(
         return Ok(());
     }
     let control_type = normalize_type(control_type);
-    let Some(lease) = get(state, device_id, &control_type).await else {
+    let Some(lease) = get(state, drone_tag, &control_type).await else {
         return Err("未持有飞行控制权，请先申请控制权".into());
     };
     if lease.holder != operator {
@@ -664,7 +664,7 @@ fn read_lease_cache(
         return cached.clone();
     }
     LeaseRecord {
-        device_id: k.split(':').nth(1).unwrap_or_default().to_string(),
+        drone_tag: k.split(':').nth(1).unwrap_or_default().to_string(),
         control_type: k.split(':').nth(2).unwrap_or_default().to_string(),
         holder,
         priority,
@@ -726,7 +726,7 @@ mod tests {
     async fn expired_lease_is_reaped() {
         let s = state();
         let mut lease = LeaseRecord {
-            device_id: "d1".into(),
+            drone_tag: "d1".into(),
             control_type: "flight".into(),
             holder: "alice".into(),
             priority: 1,
@@ -824,7 +824,7 @@ mod tests {
         acquire(&s, "d1", "flight", "alice", 10, 30).await.unwrap();
         assert!(
             s.leases.contains_key("control:d1:flight"),
-            "控制权键必须为 control:device_id:control_type"
+            "控制权键必须为 control:drone_tag:control_type"
         );
     }
 }

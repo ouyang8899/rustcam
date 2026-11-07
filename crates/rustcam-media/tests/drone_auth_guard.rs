@@ -28,13 +28,13 @@ impl DroneApi for FakeDroneApi {
     }
     async fn list_drones(&self) -> Result<Vec<DroneDto>, DroneApiError> {
         Ok(vec![DroneDto {
-            device_id: "drone-001".into(),
+            drone_tag: "drone-a".into(),
             ..Default::default()
         }])
     }
-    async fn get_drone(&self, device_id: &str) -> Result<DroneDto, DroneApiError> {
+    async fn get_drone(&self, drone_tag: &str) -> Result<DroneDto, DroneApiError> {
         Ok(DroneDto {
-            device_id: device_id.into(),
+            drone_tag: drone_tag.into(),
             ..Default::default()
         })
     }
@@ -45,10 +45,10 @@ impl DroneApi for FakeDroneApi {
     ) -> Result<DroneDto, DroneApiError> {
         Ok(drone)
     }
-    async fn delete_drone(&self, _device_id: &str) -> Result<bool, DroneApiError> {
+    async fn delete_drone(&self, _drone_tag: &str) -> Result<bool, DroneApiError> {
         Ok(true)
     }
-    async fn list_routes(&self, _device_id: &str) -> Result<Vec<RouteDto>, DroneApiError> {
+    async fn list_routes(&self, _drone_tag: &str) -> Result<Vec<RouteDto>, DroneApiError> {
         Ok(vec![])
     }
     async fn save_route(
@@ -64,7 +64,7 @@ impl DroneApi for FakeDroneApi {
     async fn execute_route(
         &self,
         _id: &str,
-        _device_id: &str,
+        _drone_tag: &str,
         _lateral_offset_m: f64,
         _operator: &str,
     ) -> Result<CommandDto, DroneApiError> {
@@ -85,13 +85,13 @@ impl DroneApi for FakeDroneApi {
     }
     async fn send_command(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         req: CommandRequest,
         _operator: &str,
     ) -> Result<CommandDto, DroneApiError> {
         Ok(CommandDto {
             cmd_id: "cmd-1".into(),
-            device_id: device_id.into(),
+            drone_tag: drone_tag.into(),
             status: req.kind,
             ..Default::default()
         })
@@ -104,21 +104,21 @@ impl DroneApi for FakeDroneApi {
     }
     async fn list_alerts(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _limit: i32,
     ) -> Result<Vec<AlertDto>, DroneApiError> {
         Ok(vec![])
     }
     async fn list_audits(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _limit: i32,
     ) -> Result<Vec<AuditDto>, DroneApiError> {
         Ok(vec![])
     }
     async fn telemetry_history(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _start_ms: i64,
         _end_ms: i64,
         _limit: i32,
@@ -127,14 +127,14 @@ impl DroneApi for FakeDroneApi {
     }
     async fn acquire_control(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         control_type: &str,
         operator: &str,
         priority: i32,
         _lease_seconds: i32,
     ) -> Result<ControlDto, DroneApiError> {
         Ok(ControlDto {
-            device_id: device_id.into(),
+            drone_tag: drone_tag.into(),
             control_type: control_type.into(),
             holder: operator.into(),
             priority,
@@ -144,13 +144,13 @@ impl DroneApi for FakeDroneApi {
     }
     async fn renew_control(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         control_type: &str,
         operator: &str,
         _lease_seconds: i32,
     ) -> Result<ControlDto, DroneApiError> {
         Ok(ControlDto {
-            device_id: device_id.into(),
+            drone_tag: drone_tag.into(),
             control_type: control_type.into(),
             holder: operator.into(),
             granted: true,
@@ -160,14 +160,14 @@ impl DroneApi for FakeDroneApi {
     }
     async fn preempt_control(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         control_type: &str,
         operator: &str,
         priority: i32,
         _lease_seconds: i32,
     ) -> Result<ControlDto, DroneApiError> {
         Ok(ControlDto {
-            device_id: device_id.into(),
+            drone_tag: drone_tag.into(),
             control_type: control_type.into(),
             holder: operator.into(),
             priority,
@@ -178,7 +178,7 @@ impl DroneApi for FakeDroneApi {
     }
     async fn release_control(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _control_type: &str,
         _operator: &str,
         _force: bool,
@@ -187,16 +187,16 @@ impl DroneApi for FakeDroneApi {
     }
     async fn get_control(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         control_type: &str,
     ) -> Result<ControlDto, DroneApiError> {
         Ok(ControlDto {
-            device_id: device_id.into(),
+            drone_tag: drone_tag.into(),
             control_type: control_type.into(),
             ..Default::default()
         })
     }
-    async fn event_stream(&self, _device_ids: Vec<String>) -> Result<EventStream, DroneApiError> {
+    async fn event_stream(&self, _drone_tags: Vec<String>) -> Result<EventStream, DroneApiError> {
         Err(DroneApiError::unavailable(
             "event stream not used in auth tests",
         ))
@@ -261,7 +261,7 @@ async fn auth_state(casbin: Arc<CasbinManager>) -> AuthState {
 }
 
 async fn call(app: axum::Router, uri: &str, token: Option<&str>) -> StatusCode {
-    call_with_body(app, uri, token, r#"{"device_id":"drone-001"}"#).await
+    call_with_body(app, uri, token, r#"{"drone_tag":"drone-a"}"#).await
 }
 
 async fn call_with_body(
@@ -340,7 +340,7 @@ async fn drone_api_rejects_viewer_on_command_send() {
 
     let status = call(
         app,
-        "/api/v1/drone/drone-001/command",
+        "/api/v1/drone/drone-a/command",
         Some(&token_for("Viewer")),
     )
     .await;
@@ -446,7 +446,7 @@ impl DroneApi for UnavailableDroneApi {
     async fn list_drones(&self) -> Result<Vec<DroneDto>, DroneApiError> {
         Err(DroneApiError::unavailable("drone-service not configured"))
     }
-    async fn get_drone(&self, _device_id: &str) -> Result<DroneDto, DroneApiError> {
+    async fn get_drone(&self, _drone_tag: &str) -> Result<DroneDto, DroneApiError> {
         Err(DroneApiError::not_found("unknown device"))
     }
     async fn save_drone(
@@ -456,10 +456,10 @@ impl DroneApi for UnavailableDroneApi {
     ) -> Result<DroneDto, DroneApiError> {
         Ok(drone)
     }
-    async fn delete_drone(&self, _device_id: &str) -> Result<bool, DroneApiError> {
+    async fn delete_drone(&self, _drone_tag: &str) -> Result<bool, DroneApiError> {
         Ok(true)
     }
-    async fn list_routes(&self, _device_id: &str) -> Result<Vec<RouteDto>, DroneApiError> {
+    async fn list_routes(&self, _drone_tag: &str) -> Result<Vec<RouteDto>, DroneApiError> {
         Ok(vec![])
     }
     async fn save_route(
@@ -475,7 +475,7 @@ impl DroneApi for UnavailableDroneApi {
     async fn execute_route(
         &self,
         _id: &str,
-        _device_id: &str,
+        _drone_tag: &str,
         _lateral_offset_m: f64,
         _operator: &str,
     ) -> Result<CommandDto, DroneApiError> {
@@ -496,7 +496,7 @@ impl DroneApi for UnavailableDroneApi {
     }
     async fn send_command(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _req: CommandRequest,
         _operator: &str,
     ) -> Result<CommandDto, DroneApiError> {
@@ -507,21 +507,21 @@ impl DroneApi for UnavailableDroneApi {
     }
     async fn list_alerts(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _limit: i32,
     ) -> Result<Vec<AlertDto>, DroneApiError> {
         Ok(vec![])
     }
     async fn list_audits(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _limit: i32,
     ) -> Result<Vec<AuditDto>, DroneApiError> {
         Ok(vec![])
     }
     async fn telemetry_history(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _start_ms: i64,
         _end_ms: i64,
         _limit: i32,
@@ -530,14 +530,14 @@ impl DroneApi for UnavailableDroneApi {
     }
     async fn acquire_control(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         control_type: &str,
         operator: &str,
         priority: i32,
         _lease_seconds: i32,
     ) -> Result<ControlDto, DroneApiError> {
         Ok(ControlDto {
-            device_id: device_id.into(),
+            drone_tag: drone_tag.into(),
             control_type: control_type.into(),
             holder: operator.into(),
             priority,
@@ -549,7 +549,7 @@ impl DroneApi for UnavailableDroneApi {
     }
     async fn renew_control(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _control_type: &str,
         _operator: &str,
         _lease_seconds: i32,
@@ -558,7 +558,7 @@ impl DroneApi for UnavailableDroneApi {
     }
     async fn preempt_control(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _control_type: &str,
         _operator: &str,
         _priority: i32,
@@ -568,7 +568,7 @@ impl DroneApi for UnavailableDroneApi {
     }
     async fn release_control(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _control_type: &str,
         _operator: &str,
         _force: bool,
@@ -577,16 +577,16 @@ impl DroneApi for UnavailableDroneApi {
     }
     async fn get_control(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         control_type: &str,
     ) -> Result<ControlDto, DroneApiError> {
         Ok(ControlDto {
-            device_id: device_id.into(),
+            drone_tag: drone_tag.into(),
             control_type: control_type.into(),
             ..Default::default()
         })
     }
-    async fn event_stream(&self, _device_ids: Vec<String>) -> Result<EventStream, DroneApiError> {
+    async fn event_stream(&self, _drone_tags: Vec<String>) -> Result<EventStream, DroneApiError> {
         Err(DroneApiError::unavailable("event stream not used"))
     }
 }
@@ -620,12 +620,48 @@ async fn unknown_device_returns_404() {
 
     let status = call_get(
         app,
-        "/api/v1/drone/devices/drone-x",
+        "/api/v1/drone/devices/drone-a",
         Some(&token_for("Operator")),
     )
     .await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn drone_route_path_uses_drone_tag() {
+    let app = router_with(Arc::new(FakeDroneApi)).await;
+
+    let status = call_get(
+        app,
+        "/api/v1/drone/devices/drone-a",
+        Some(&token_for("Operator")),
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "路径参数改为 drone_tag 后仍应按无人机权限放行"
+    );
+}
+
+#[tokio::test]
+async fn drone_control_path_uses_drone_tag() {
+    let app = router_with(Arc::new(FakeDroneApi)).await;
+
+    let status = call_get(
+        app,
+        "/api/v1/drone/control/drone-a/flight",
+        Some(&token_for("Operator")),
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "控制权查询路径参数改为 drone_tag 后仍应按无人机权限放行"
+    );
 }
 
 #[tokio::test]

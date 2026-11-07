@@ -59,7 +59,7 @@ impl AdapterLink for AdapterLinkService {
         tx.send(service_message::Payload::RegisterAck(RegisterAck {
             accepted: ack.accepted,
             reason: ack.reason,
-            assigned_devices: ack.assigned_devices,
+            assigned_drone_tags: ack.assigned_drone_tags,
             heartbeat_interval_sec: ack.heartbeat_interval_sec,
             assignments: ack.assignments,
         }))
@@ -108,7 +108,7 @@ async fn dispatch(registry: &Registry, state: &DroneState, adapter_id: &str, msg
             let core = shadow::from_proto(&telemetry);
             let result = shadow::ingest(state, core);
             if !result.accepted() {
-                tracing::debug!(?result, device = %telemetry.device_id, "telemetry not applied");
+                tracing::debug!(?result, device = %telemetry.drone_tag, "telemetry not applied");
             }
         }
         Some(adapter_message::Payload::CommandReply(reply)) => {
@@ -140,8 +140,8 @@ async fn dispatch(registry: &Registry, state: &DroneState, adapter_id: &str, msg
                 .filter(|e| e.value() == adapter_id)
                 .map(|e| e.key().clone())
                 .collect();
-            for device_id in devices {
-                presence::set_device_link_state(state, &device_id, online, "adapter heartbeat")
+            for drone_tag in devices {
+                presence::set_device_link_state(state, &drone_tag, online, "adapter heartbeat")
                     .await;
             }
         }
@@ -152,16 +152,16 @@ async fn dispatch(registry: &Registry, state: &DroneState, adapter_id: &str, msg
             let results = registry
                 .apply_identity_report(adapter_id, &report.identities)
                 .await;
-            for (device_id, ok, detail) in results {
+            for (drone_tag, ok, detail) in results {
                 if ok {
                     continue;
                 }
                 // 置离线 + 广播告警（沿用既有事件发布方式）。
-                presence::set_device_link_state(state, &device_id, false, &detail).await;
+                presence::set_device_link_state(state, &drone_tag, false, &detail).await;
                 let _ = state
                     .event_tx
                     .send(rustcam_drone_core::event::DroneEvent::Alert {
-                        device_id: device_id.clone(),
+                        drone_tag: drone_tag.clone(),
                         rule: "unique_id_mismatch".to_string(),
                         level: "error".to_string(),
                         message: detail,
@@ -183,11 +183,11 @@ async fn handle_device_event(state: &DroneState, event: rustcam_drone_proto::com
 
     match event.r#type.as_str() {
         "fc_online" => {
-            presence::set_device_link_state(state, &event.device_id, true, &event.detail).await;
+            presence::set_device_link_state(state, &event.drone_tag, true, &event.detail).await;
             return;
         }
         "fc_offline" => {
-            presence::set_device_link_state(state, &event.device_id, false, &event.detail).await;
+            presence::set_device_link_state(state, &event.drone_tag, false, &event.detail).await;
             return;
         }
         _ => {}
@@ -201,14 +201,14 @@ async fn handle_device_event(state: &DroneState, event: rustcam_drone_proto::com
     };
 
     tracing::info!(
-        device = %event.device_id,
+        device = %event.drone_tag,
         event_type = %event.r#type,
         detail = %event.detail,
         "[AdapterLink] device event"
     );
 
     let _ = state.event_tx.send(DroneEvent::Alert {
-        device_id: event.device_id,
+        drone_tag: event.drone_tag,
         rule: rule.to_string(),
         level: level.to_string(),
         message: event.detail,
@@ -229,6 +229,10 @@ mod tests {
     #[tokio::test]
     async fn adapter_registers_streams_telemetry_and_receives_commands() {
         let state = DroneState::new(DroneConfig::default());
+        // 无数据库时注册不会下发 assignment；预置归属以验证遥测与指令的传输链路。
+        state
+            .device_to_adapter
+            .insert("drone-001".into(), "a-1".into());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
@@ -254,8 +258,6 @@ mod tests {
                 adapter_id: "a-1".into(),
                 protocol: "mavlink".into(),
                 version: "test".into(),
-                devices: vec!["drone-001".into()],
-                identities: vec![],
             })),
         })
         .await
@@ -271,7 +273,10 @@ mod tests {
         match inbound.message().await.unwrap().unwrap().payload {
             Some(service_message::Payload::RegisterAck(ack)) => {
                 assert!(ack.accepted);
-                assert_eq!(ack.assigned_devices, vec!["drone-001".to_string()]);
+                assert!(
+                    ack.assigned_drone_tags.is_empty(),
+                    "无平台档案下发时不应分配设备"
+                );
             }
             other => panic!("expected RegisterAck, got {other:?}"),
         }
@@ -279,7 +284,7 @@ mod tests {
         // 2) 上行遥测进入影子
         tx.send(AdapterMessage {
             payload: Some(adapter_message::Payload::Telemetry(proto::Telemetry {
-                device_id: "drone-001".into(),
+                drone_tag: "drone-001".into(),
                 ts_ms: 1_000,
                 lat: 31.2304,
                 lon: 121.4737,
@@ -317,7 +322,7 @@ mod tests {
             &state,
             proto::Command {
                 cmd_id: "cmd-1".into(),
-                device_id: "drone-001".into(),
+                drone_tag: "drone-001".into(),
                 r#type: "rtl".into(),
                 params: Default::default(),
                 deadline_ms: 0,
@@ -340,7 +345,7 @@ mod tests {
             payload: Some(adapter_message::Payload::CommandReply(
                 proto::CommandReply {
                     cmd_id: "cmd-1".into(),
-                    device_id: "drone-001".into(),
+                    drone_tag: "drone-001".into(),
                     status: "accepted".into(),
                     code: 200,
                     message: "COMMAND_ACK accepted".into(),

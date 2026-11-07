@@ -8,7 +8,7 @@
       </div>
       <div class="page-toolbar">
         <el-select v-model="deviceId" clearable placeholder="全部无人机" style="width: 180px" @change="refresh">
-          <el-option v-for="d in store.drones" :key="d.device_id" :label="d.name || d.device_id" :value="d.device_id" />
+          <el-option v-for="d in store.drones" :key="d.drone_tag" :label="d.name || d.drone_tag" :value="d.drone_tag" />
         </el-select>
         <el-button :icon="Refresh" @click="refresh">刷新</el-button>
       </div>
@@ -21,7 +21,7 @@
             <el-table-column prop="ts_ms" label="时间" width="180">
               <template #default="{ row }">{{ formatTime(row.ts_ms) }}</template>
             </el-table-column>
-            <el-table-column prop="device_id" label="无人机" width="150" />
+            <el-table-column prop="drone_tag" label="无人机" width="150" />
             <el-table-column label="规则" width="160">
               <template #default="{ row }">
                 <el-tag size="small" :type="row.rule === 'geofence_breach' ? 'danger' : 'info'">{{ row.rule }}</el-tag>
@@ -43,7 +43,7 @@
             <el-table-column prop="ts_ms" label="时间" width="180">
               <template #default="{ row }">{{ formatTime(row.ts_ms) }}</template>
             </el-table-column>
-            <el-table-column prop="device_id" label="无人机" width="140" />
+            <el-table-column prop="drone_tag" label="无人机" width="140" />
             <el-table-column prop="category" label="类别" width="100" />
             <el-table-column prop="action" label="动作" width="120" />
             <el-table-column prop="operator" label="操作者" width="120" />

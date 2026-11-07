@@ -29,7 +29,7 @@ async fn audit_command(state: &DroneState, cmd: &proto::Command, result: &str, d
     state
         .write_audit(AuditRecord {
             ts_ms: now_ms(),
-            device_id: cmd.device_id.clone(),
+            drone_tag: cmd.drone_tag.clone(),
             category: "command".into(),
             action: cmd.r#type.clone(),
             operator: cmd.operator.clone(),
@@ -51,7 +51,7 @@ fn reply(
 ) -> proto::CommandReply {
     proto::CommandReply {
         cmd_id: cmd.cmd_id.clone(),
-        device_id: cmd.device_id.clone(),
+        drone_tag: cmd.drone_tag.clone(),
         status: status.to_string(),
         code,
         message: message.into(),
@@ -187,8 +187,8 @@ pub async fn submit_safety(state: &DroneState, cmd: proto::Command) -> proto::Co
 /// 唯一标识校验（drone.md §12.4 L3）。
 ///
 /// 档案登记了唯一标识时，adapter 实测值必须非空且相等；否则拒绝下发指令。
-pub fn check_identity(state: &DroneState, device_id: &str) -> Result<(), String> {
-    let Some(profile) = state.profiles.get(device_id) else {
+pub fn check_identity(state: &DroneState, drone_tag: &str) -> Result<(), String> {
+    let Some(profile) = state.profiles.get(drone_tag) else {
         return Ok(());
     };
     let registered = profile.unique_id.trim().to_string();
@@ -197,7 +197,7 @@ pub fn check_identity(state: &DroneState, device_id: &str) -> Result<(), String>
     }
     let observed = state
         .devices
-        .get(device_id)
+        .get(drone_tag)
         .map(|d| d.unique_id.trim().to_string())
         .unwrap_or_default();
     if crate::registry::identity_matches(&registered, &observed) {
@@ -225,8 +225,8 @@ async fn submit_inner(
             format!("unsupported command kind `{}`", cmd.r#type),
         );
     }
-    if cmd.device_id.trim().is_empty() {
-        return reply(&cmd, status::REJECTED, 400, "device_id is required");
+    if cmd.drone_tag.trim().is_empty() {
+        return reply(&cmd, status::REJECTED, 400, "drone_tag is required");
     }
     if let Err(e) = validate_params(&cmd) {
         audit_command(state, &cmd, "rejected", &e).await;
@@ -236,7 +236,7 @@ async fn submit_inner(
     if let Some(existing) = state.commands.get(&cmd.cmd_id) {
         return proto::CommandReply {
             cmd_id: existing.cmd_id.clone(),
-            device_id: existing.device_id.clone(),
+            drone_tag: existing.drone_tag.clone(),
             status: existing.status.clone(),
             code: 200,
             message: format!("duplicate cmd_id, current status: {}", existing.message),
@@ -257,12 +257,12 @@ async fn submit_inner(
         );
     }
 
-    let Some(device) = state.devices.get(&cmd.device_id) else {
+    let Some(device) = state.devices.get(&cmd.drone_tag) else {
         return reply(
             &cmd,
             status::REJECTED,
             404,
-            format!("unknown device `{}`", cmd.device_id),
+            format!("unknown device `{}`", cmd.drone_tag),
         );
     };
     if !device.online {
@@ -270,7 +270,7 @@ async fn submit_inner(
             &cmd,
             status::REJECTED,
             503,
-            format!("device `{}` is offline", cmd.device_id),
+            format!("device `{}` is offline", cmd.drone_tag),
         );
     }
     let adapter_id = device.adapter_id.clone();
@@ -278,7 +278,7 @@ async fn submit_inner(
     drop(device);
 
     // 唯一标识核验（drone.md §12.4 L3）：档案登记了标识时，实测值必须非空且相等。
-    if let Err(e) = check_identity(state, &cmd.device_id) {
+    if let Err(e) = check_identity(state, &cmd.drone_tag) {
         audit_command(state, &cmd, "rejected", &e).await;
         return reply(&cmd, status::REJECTED, 409, e);
     }
@@ -286,7 +286,7 @@ async fn submit_inner(
     if enforce_control {
         if let Some(control_type) = control_type_for(&cmd.r#type) {
             if let Err(e) =
-                control::ensure_holder(state, &cmd.device_id, control_type, &cmd.operator).await
+                control::ensure_holder(state, &cmd.drone_tag, control_type, &cmd.operator).await
             {
                 audit_command(state, &cmd, "rejected", &e).await;
                 return reply(&cmd, status::REJECTED, 403, e);
@@ -299,7 +299,7 @@ async fn submit_inner(
         let lat = optional_f64(&cmd, "lat").unwrap_or_default();
         let lon = optional_f64(&cmd, "lon").unwrap_or_default();
         let alt = optional_f64(&cmd, "alt").unwrap_or(DEFAULT_ALT_M);
-        if let Err(e) = geofence::check_target(state, &cmd.device_id, lat, lon, alt) {
+        if let Err(e) = geofence::check_target(state, &cmd.drone_tag, lat, lon, alt) {
             audit_command(state, &cmd, "rejected", &e).await;
             return reply(&cmd, status::REJECTED, 403, e);
         }
@@ -337,7 +337,7 @@ async fn submit_inner(
         Ok(false) => {
             return proto::CommandReply {
                 cmd_id: cmd.cmd_id.clone(),
-                device_id: cmd.device_id.clone(),
+                drone_tag: cmd.drone_tag.clone(),
                 status: status::REJECTED.to_string(),
                 code: 409,
                 message: "duplicate cmd_id, already submitted".to_string(),
@@ -354,7 +354,7 @@ async fn submit_inner(
         cmd.cmd_id.clone(),
         CommandRecord {
             cmd_id: cmd.cmd_id.clone(),
-            device_id: cmd.device_id.clone(),
+            drone_tag: cmd.drone_tag.clone(),
             kind: cmd.r#type.clone(),
             operator: cmd.operator.clone(),
             status: status::PENDING.to_string(),
@@ -378,7 +378,7 @@ async fn submit_inner(
             tracing::info!(
                 cmd_id = %cmd.cmd_id,
                 kind = %cmd.r#type,
-                device = %cmd.device_id,
+                device = %cmd.drone_tag,
                 adapter = %adapter_id,
                 protocol = %protocol,
                 operator = %cmd.operator,
@@ -419,7 +419,7 @@ fn record_with_status(
     let now = now_ms();
     CommandRecord {
         cmd_id: cmd.cmd_id.clone(),
-        device_id: cmd.device_id.clone(),
+        drone_tag: cmd.drone_tag.clone(),
         kind: cmd.r#type.clone(),
         operator: cmd.operator.clone(),
         status: status.to_string(),
@@ -458,7 +458,7 @@ pub async fn on_reply(state: &DroneState, reply: proto::CommandReply) -> bool {
     };
     let kind = record.kind.clone();
     let operator = record.operator.clone();
-    let device_id = record.device_id.clone();
+    let drone_tag = record.drone_tag.clone();
     let created_ms = record.created_ms;
     record.status = new_status.clone();
     record.message = reply.message.clone();
@@ -479,7 +479,7 @@ pub async fn on_reply(state: &DroneState, reply: proto::CommandReply) -> bool {
     state
         .write_audit(AuditRecord {
             ts_ms: now_ms(),
-            device_id: device_id.clone(),
+            drone_tag: drone_tag.clone(),
             category: "command".into(),
             action: kind,
             operator,
@@ -493,7 +493,7 @@ pub async fn on_reply(state: &DroneState, reply: proto::CommandReply) -> bool {
     state.persist();
     let _ = state.event_tx.send(DroneEvent::CommandReply {
         cmd_id: reply.cmd_id,
-        device_id,
+        drone_tag,
         status: new_status,
         message: reply.message,
     });
@@ -520,7 +520,7 @@ pub async fn reap_expired(state: &DroneState, now_ms: i64) -> usize {
         record.status = status::TIMEOUT.to_string();
         record.message = format!("no reply before deadline {}", record.deadline_ms);
         record.updated_ms = now_ms;
-        let device_id = record.device_id.clone();
+        let drone_tag = record.drone_tag.clone();
         let message = record.message.clone();
         let kind = record.kind.clone();
         let operator = record.operator.clone();
@@ -529,7 +529,7 @@ pub async fn reap_expired(state: &DroneState, now_ms: i64) -> usize {
         state
             .write_audit(AuditRecord {
                 ts_ms: now_ms,
-                device_id: device_id.clone(),
+                drone_tag: drone_tag.clone(),
                 category: "command".into(),
                 action: kind.clone(),
                 operator,
@@ -542,7 +542,7 @@ pub async fn reap_expired(state: &DroneState, now_ms: i64) -> usize {
             .await;
         let _ = state.event_tx.send(DroneEvent::CommandReply {
             cmd_id,
-            device_id,
+            drone_tag,
             status: status::TIMEOUT.to_string(),
             message,
         });
@@ -589,11 +589,11 @@ pub fn prune_terminal(state: &DroneState, now_ms: i64, retention_ms: i64) -> usi
 }
 
 /// 设备下线时，把它在途指令全部置为 failed，避免永久 pending。
-pub async fn fail_inflight_for_device(state: &DroneState, device_id: &str, reason: &str) -> usize {
+pub async fn fail_inflight_for_device(state: &DroneState, drone_tag: &str, reason: &str) -> usize {
     let inflight: Vec<String> = state
         .commands
         .iter()
-        .filter(|e| e.value().device_id == device_id && !is_terminal_status(&e.value().status))
+        .filter(|e| e.value().drone_tag == drone_tag && !is_terminal_status(&e.value().status))
         .map(|e| e.key().clone())
         .collect();
     let mut count = 0;
@@ -608,7 +608,7 @@ pub async fn fail_inflight_for_device(state: &DroneState, device_id: &str, reaso
             state
                 .write_audit(AuditRecord {
                     ts_ms: now_ms(),
-                    device_id: device_id.to_string(),
+                    drone_tag: drone_tag.to_string(),
                     category: "command".into(),
                     action: kind,
                     operator,
@@ -673,7 +673,7 @@ mod tests {
     fn command(kind: &str) -> proto::Command {
         proto::Command {
             cmd_id: "cmd-1".into(),
-            device_id: "drone-001".into(),
+            drone_tag: "drone-001".into(),
             r#type: kind.into(),
             params: Default::default(),
             deadline_ms: 0,
@@ -687,7 +687,7 @@ mod tests {
         state.profiles.insert(
             "drone-001".into(),
             crate::state::DroneProfileRecord {
-                device_id: "drone-001".into(),
+                drone_tag: "drone-001".into(),
                 unique_id: "registered".into(),
                 ..crate::state::DroneProfileRecord::new("drone-001", 0)
             },
@@ -704,7 +704,7 @@ mod tests {
         state.profiles.insert(
             "drone-001".into(),
             crate::state::DroneProfileRecord {
-                device_id: "drone-001".into(),
+                drone_tag: "drone-001".into(),
                 unique_id: "registered".into(),
                 ..crate::state::DroneProfileRecord::new("drone-001", 0)
             },
@@ -727,7 +727,7 @@ mod tests {
         state.profiles.insert(
             "drone-001".into(),
             crate::state::DroneProfileRecord {
-                device_id: "drone-001".into(),
+                drone_tag: "drone-001".into(),
                 unique_id: "registered".into(),
                 ..crate::state::DroneProfileRecord::new("drone-001", 0)
             },
@@ -780,7 +780,7 @@ mod tests {
         assert_eq!(reply.code, 400);
 
         let mut cmd = command("rtl");
-        cmd.device_id = "drone-404".into();
+        cmd.drone_tag = "drone-404".into();
         let reply = submit(&state, cmd).await;
         assert_eq!(reply.status, status::REJECTED);
         assert_eq!(reply.code, 404);
@@ -813,7 +813,7 @@ mod tests {
                 &state,
                 proto::CommandReply {
                     cmd_id: "cmd-1".into(),
-                    device_id: "drone-001".into(),
+                    drone_tag: "drone-001".into(),
                     status: status::ACCEPTED.into(),
                     code: 200,
                     message: "COMMAND_ACK accepted".into(),
@@ -834,7 +834,7 @@ mod tests {
                 &state,
                 proto::CommandReply {
                     cmd_id: "cmd-1".into(),
-                    device_id: "drone-001".into(),
+                    drone_tag: "drone-001".into(),
                     status: status::FAILED.into(),
                     code: 500,
                     message: "late".into(),
@@ -929,8 +929,8 @@ mod tests {
                 radius_m: 0.0,
                 min_alt: 0.0,
                 max_alt: 120.0,
-                device_id: String::new(),
-                device_ids: Vec::new(),
+                drone_tag: String::new(),
+                drone_tags: Vec::new(),
                 enabled: true,
                 version: 1,
                 updated_ms: 0,

@@ -22,7 +22,7 @@ fn now_ms() -> i64 {
 
 fn audit(
     state: &DroneState,
-    device_id: &str,
+    drone_tag: &str,
     category: &str,
     action: &str,
     operator: &str,
@@ -31,7 +31,7 @@ fn audit(
 ) {
     state.push_audit(AuditRecord {
         ts_ms: now_ms(),
-        device_id: device_id.to_string(),
+        drone_tag: drone_tag.to_string(),
         category: category.to_string(),
         action: action.to_string(),
         operator: operator.to_string(),
@@ -48,43 +48,41 @@ fn audit(
 
 pub fn list_profiles(state: &DroneState) -> Vec<DroneProfileRecord> {
     let mut profiles: Vec<_> = state.profiles.iter().map(|e| e.value().clone()).collect();
-    profiles.sort_by(|a, b| a.device_id.cmp(&b.device_id));
+    profiles.sort_by(|a, b| a.drone_tag.cmp(&b.drone_tag));
     profiles
 }
 
-fn resolve_drone_tag(
-    state: &DroneState,
-    device_id: &str,
-    incoming: &str,
-) -> Result<String, String> {
-    let existing = state
+/// 解析档案的唯一标识（平台主键）。
+///
+/// - 传入为空 → 生成 `drone-<uuid4>`；
+/// - 传入已存在 → 沿用档案里的值（`drone_tag` 不可变）；
+/// - 传入新的 → 直接采用，但不得与其它档案重名（主键同形，天然唯一）。
+fn resolve_drone_tag(state: &DroneState, incoming: &str) -> Result<String, String> {
+    let incoming = incoming.trim();
+    if incoming.is_empty() {
+        return Ok(format!("drone-{}", uuid::Uuid::new_v4()));
+    }
+    if let Some(existing) = state
         .profiles
-        .get(device_id)
+        .get(incoming)
         .map(|p| p.drone_tag.trim().to_string())
-        .filter(|t| !t.is_empty());
-    let tag = existing
-        .or_else(|| {
-            let t = incoming.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            }
-        })
-        .unwrap_or_else(|| format!("drone-{}", uuid::Uuid::new_v4()));
+        .filter(|t| !t.is_empty())
+    {
+        return Ok(existing);
+    }
     if let Some(other) = state
         .profiles
         .iter()
-        .find(|e| e.key() != device_id && e.value().drone_tag.trim() == tag)
+        .find(|e| e.key() != incoming && e.value().drone_tag.trim() == incoming)
     {
-        return Err(format!("drone_tag `{tag}` 已被 `{}` 使用", other.key()));
+        return Err(format!("drone_tag `{incoming}` 已被 `{}` 使用", other.key()));
     }
-    Ok(tag)
+    Ok(incoming.to_string())
 }
 
 pub fn profile_to_proto(p: &DroneProfileRecord) -> DroneProfile {
     DroneProfile {
-        device_id: p.device_id.clone(),
+        drone_tag: p.drone_tag.clone(),
         name: p.name.clone(),
         model: p.model.clone(),
         autopilot: p.autopilot.clone(),
@@ -104,7 +102,18 @@ pub fn profile_to_proto(p: &DroneProfileRecord) -> DroneProfile {
         mavlink_sysid: p.mavlink_sysid,
         mavlink_compid: p.mavlink_compid,
         adapter_id: p.adapter_id.clone(),
-        drone_tag: p.drone_tag.clone(),
+    }
+}
+
+/// 取值策略：`0` 表示"未指定"——保留已有值，没有已有值时用默认值。
+fn pick_or_keep(incoming: i32, existing: i32, default: i32) -> i32 {
+    if incoming != 0 {
+        return incoming;
+    }
+    if existing != 0 {
+        existing
+    } else {
+        default
     }
 }
 
@@ -113,10 +122,6 @@ pub fn upsert_profile(
     profile: DroneProfile,
     operator: &str,
 ) -> Result<DroneProfileRecord, String> {
-    let device_id = profile.device_id.trim();
-    if device_id.is_empty() {
-        return Err("device_id is required".into());
-    }
     let autopilot = profile.autopilot.trim().to_ascii_lowercase();
     if !matches!(
         autopilot.as_str(),
@@ -126,9 +131,10 @@ pub fn upsert_profile(
     }
 
     let now = now_ms();
+    let drone_tag = resolve_drone_tag(state, &profile.drone_tag)?;
     let created_ms = state
         .profiles
-        .get(device_id)
+        .get(&drone_tag)
         .map(|p| p.created_ms)
         .unwrap_or(now);
 
@@ -137,22 +143,40 @@ pub fn upsert_profile(
     if !unique_id.is_empty() && !unique_id.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err("unique_id must be lowercase hex".into());
     }
-    let mavlink_version = if profile.mavlink_version == 0 {
-        2
-    } else {
-        profile.mavlink_version
+    // MAVLink 版本与寻址地址：0 表示"未指定"（查询接口不返回这些字段，
+    // 客户端回传时会是 0）。未指定时保留已有值，新档案用默认值，
+    // 不能因为 0 直接拒绝——否则档案无法编辑。
+    let (prev_version, prev_sysid, prev_compid) = match state.profiles.get(&drone_tag) {
+        Some(p) => (p.mavlink_version, p.mavlink_sysid, p.mavlink_compid),
+        None => (0, 0, 0),
     };
+    let mavlink_version = pick_or_keep(profile.mavlink_version, prev_version, 2);
     if mavlink_version != 1 && mavlink_version != 2 {
         return Err(format!("unsupported mavlink_version `{mavlink_version}`"));
     }
-    if !(1..=255).contains(&profile.mavlink_sysid) {
-        return Err(format!("invalid mavlink_sysid `{}`", profile.mavlink_sysid));
+    let mavlink_sysid = pick_or_keep(profile.mavlink_sysid, prev_sysid, 1);
+    if !(1..=255).contains(&mavlink_sysid) {
+        return Err(format!("invalid mavlink_sysid `{mavlink_sysid}`"));
     }
-    if !(1..=255).contains(&profile.mavlink_compid) {
+    let mavlink_compid = pick_or_keep(profile.mavlink_compid, prev_compid, 1);
+    if !(1..=255).contains(&mavlink_compid) {
         return Err(format!(
-            "invalid mavlink_compid `{}`",
-            profile.mavlink_compid
+            "invalid mavlink_compid `{mavlink_compid}`"
         ));
+    }
+    // 链路绑定唯一：同一 adapter 内不得有两台机体使用相同 sysid。
+    let adapter_id = profile.adapter_id.trim().to_string();
+    if !adapter_id.is_empty() && mavlink_sysid > 0 {
+        if let Some(other) = state.profiles.iter().find(|e| {
+            e.key() != &drone_tag
+                && e.value().adapter_id.trim() == adapter_id.as_str()
+                && e.value().mavlink_sysid == mavlink_sysid
+        }) {
+            return Err(format!(
+                "adapter_id/mavlink_sysid 已被 `{}` 占用",
+                other.key()
+            ));
+        }
     }
     // 签名密钥以密文入库；没有主密钥时拒绝保存明文密钥。
     let secret_plain = profile.signing_secret.trim().to_string();
@@ -172,12 +196,10 @@ pub fn upsert_profile(
             .map_err(|e| format!("seal signing secret failed: {e}"))?
     };
 
-    let drone_tag = resolve_drone_tag(state, device_id, &profile.drone_tag)?;
-
     let record = DroneProfileRecord {
-        device_id: device_id.to_string(),
+        drone_tag: drone_tag.clone(),
         name: if profile.name.trim().is_empty() {
-            device_id.to_string()
+            drone_tag.clone()
         } else {
             profile.name.trim().to_string()
         },
@@ -201,17 +223,16 @@ pub fn upsert_profile(
         signing_secret,
         signing_allow_unsigned: profile.signing_allow_unsigned,
         mavlink_version,
-        mavlink_sysid: profile.mavlink_sysid,
-        mavlink_compid: profile.mavlink_compid,
-        adapter_id: profile.adapter_id.trim().to_string(),
-        drone_tag,
+        mavlink_sysid,
+        mavlink_compid,
+        adapter_id,
     };
     state
         .profiles
-        .insert(record.device_id.clone(), record.clone());
+        .insert(record.drone_tag.clone(), record.clone());
     audit(
         state,
-        device_id,
+        &drone_tag,
         "profile",
         "upsert",
         operator,
@@ -233,7 +254,7 @@ pub async fn persist_link_params(
         return Err("database is not configured".into());
     };
     let row = crate::infra::db::DeviceLinkRow {
-        device_id: record.device_id.clone(),
+        drone_tag: record.drone_tag.clone(),
         unique_id: record.unique_id.clone(),
         mavlink_addr: record.mavlink_addr.clone(),
         signing_secret: record.signing_secret.clone(),
@@ -242,7 +263,6 @@ pub async fn persist_link_params(
         mavlink_sysid: record.mavlink_sysid,
         mavlink_compid: record.mavlink_compid,
         adapter_id: record.adapter_id.clone(),
-        drone_tag: record.drone_tag.clone(),
     };
     db.upsert_device_link(&row)
         .await
@@ -251,10 +271,10 @@ pub async fn persist_link_params(
 
 pub async fn delete_profile(
     state: &DroneState,
-    device_id: &str,
+    drone_tag: &str,
     operator: &str,
 ) -> Result<bool, String> {
-    let existed = state.profiles.remove(device_id).is_some();
+    let existed = state.profiles.remove(drone_tag).is_some();
     if existed {
         // 多对多航线：只移除该无人机；若它是唯一适用机则删除航线。
         let affected: Vec<(String, RouteRecord)> = state
@@ -262,15 +282,15 @@ pub async fn delete_profile(
             .iter()
             .filter(|r| {
                 let v = r.value();
-                v.device_id == device_id || v.device_ids.iter().any(|id| id == device_id)
+                v.drone_tag == drone_tag || v.drone_tags.iter().any(|id| id == drone_tag)
             })
             .map(|r| (r.key().clone(), r.value().clone()))
             .collect();
         for (id, mut route) in affected {
-            let mut delete = route.device_ids.is_empty();
+            let mut delete = route.drone_tags.is_empty();
             if !delete {
-                route.device_ids.retain(|x| x != device_id);
-                delete = route.device_ids.is_empty();
+                route.drone_tags.retain(|x| x != drone_tag);
+                delete = route.drone_tags.is_empty();
             }
             if delete {
                 if let Some(db) = state.db.clone() {
@@ -281,8 +301,8 @@ pub async fn delete_profile(
                 state.routes.remove(&id);
                 continue;
             }
-            route.device_id = if route.device_ids.len() == 1 {
-                route.device_ids[0].clone()
+            route.drone_tag = if route.drone_tags.len() == 1 {
+                route.drone_tags[0].clone()
             } else {
                 String::new()
             };
@@ -293,7 +313,7 @@ pub async fn delete_profile(
             }
             state.routes.insert(id, route);
         }
-        audit(state, device_id, "profile", "delete", operator, "ok", "");
+        audit(state, drone_tag, "profile", "delete", operator, "ok", "");
     }
     Ok(existed)
 }
@@ -302,20 +322,20 @@ pub async fn delete_profile(
 // 航线
 // ---------------------------------------------------------------------------
 
-pub fn list_routes(state: &DroneState, device_id: &str) -> Vec<RouteRecord> {
+pub fn list_routes(state: &DroneState, drone_tag: &str) -> Vec<RouteRecord> {
     let mut routes: Vec<_> = state
         .routes
         .iter()
         .filter(|r| {
             let v = r.value();
-            if device_id.is_empty() {
+            if drone_tag.is_empty() {
                 return true;
             }
-            if !v.device_ids.is_empty() {
-                v.device_ids.iter().any(|id| id == device_id)
+            if !v.drone_tags.is_empty() {
+                v.drone_tags.iter().any(|id| id == drone_tag)
             } else {
-                // 旧数据没有 device_ids：单机航线按 device_id，空值视为模板。
-                v.device_id.is_empty() || v.device_id == device_id
+                // 旧数据没有 drone_tags：单机航线按 drone_tag，空值视为模板。
+                v.drone_tag.is_empty() || v.drone_tag == drone_tag
             }
         })
         .map(|e| e.value().clone())
@@ -325,16 +345,16 @@ pub fn list_routes(state: &DroneState, device_id: &str) -> Vec<RouteRecord> {
 }
 
 pub fn route_to_proto(r: &RouteRecord) -> ProtoRoute {
-    let device_ids = if r.device_ids.is_empty() && !r.device_id.trim().is_empty() {
-        vec![r.device_id.clone()]
+    let drone_tags = if r.drone_tags.is_empty() && !r.drone_tag.trim().is_empty() {
+        vec![r.drone_tag.clone()]
     } else {
-        r.device_ids.clone()
+        r.drone_tags.clone()
     };
     ProtoRoute {
         id: r.id.clone(),
         name: r.name.clone(),
-        device_id: if device_ids.len() == 1 {
-            device_ids[0].clone()
+        drone_tag: if drone_tags.len() == 1 {
+            drone_tags[0].clone()
         } else {
             String::new()
         },
@@ -354,7 +374,7 @@ pub fn route_to_proto(r: &RouteRecord) -> ProtoRoute {
         updated_ms: r.updated_ms,
         operator: String::new(),
         end_action: normalize_end_action(&r.end_action).to_string(),
-        device_ids,
+        drone_tags,
     }
 }
 
@@ -406,18 +426,18 @@ pub async fn upsert_route(
     } else {
         route.id.trim().to_string()
     };
-    let mut device_ids: Vec<String> = route
-        .device_ids
+    let mut drone_tags: Vec<String> = route
+        .drone_tags
         .iter()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
-    // 兼容旧客户端只传 device_id。
-    if device_ids.is_empty() && !route.device_id.trim().is_empty() {
-        device_ids.push(route.device_id.trim().to_string());
+    // 兼容旧客户端只传 drone_tag。
+    if drone_tags.is_empty() && !route.drone_tag.trim().is_empty() {
+        drone_tags.push(route.drone_tag.trim().to_string());
     }
-    device_ids.sort();
-    device_ids.dedup();
+    drone_tags.sort();
+    drone_tags.dedup();
     let end_action = if route.end_action.trim().is_empty() {
         normalize_end_action(&state.config.route_default_end_action).to_string()
     } else {
@@ -426,12 +446,12 @@ pub async fn upsert_route(
     let record = RouteRecord {
         id: id.clone(),
         name: route.name.trim().to_string(),
-        device_id: if device_ids.len() == 1 {
-            device_ids[0].clone()
+        drone_tag: if drone_tags.len() == 1 {
+            drone_tags[0].clone()
         } else {
             String::new()
         },
-        device_ids,
+        drone_tags,
         waypoints: route
             .waypoints
             .iter()
@@ -461,7 +481,7 @@ pub async fn upsert_route(
     state.routes.insert(id.clone(), record.clone());
     audit(
         state,
-        &record.device_id,
+        &record.drone_tag,
         "route",
         "upsert",
         operator,
@@ -469,7 +489,7 @@ pub async fn upsert_route(
         &format!(
             "route_id={id} waypoints={} devices={}",
             record.waypoints.len(),
-            record.device_ids.len()
+            record.drone_tags.len()
         ),
     );
     Ok(record)
@@ -499,7 +519,7 @@ pub async fn delete_route(state: &DroneState, id: &str, operator: &str) -> Resul
 pub async fn execute_route(
     state: &DroneState,
     route_id: &str,
-    device_id: &str,
+    drone_tag: &str,
     lateral_offset_m: f64,
     operator: &str,
 ) -> Result<proto::CommandReply, String> {
@@ -515,15 +535,15 @@ pub async fn execute_route(
         return Err("operator is required".into());
     }
     // 群控暂不开放：一次任务必须明确指定唯一一架无人机，绝不自动推断/批量执行。
-    let target = device_id.trim();
+    let target = drone_tag.trim();
     if target.is_empty() {
         return Err("一次只允许执行一架无人机，请指定执行目标；多架请逐架执行".into());
     }
     let target = target.to_string();
-    let applies = if !route.device_ids.is_empty() {
-        route.device_ids.iter().any(|id| id == &target)
+    let applies = if !route.drone_tags.is_empty() {
+        route.drone_tags.iter().any(|id| id == &target)
     } else {
-        route.device_id.is_empty() || route.device_id == target
+        route.drone_tag.is_empty() || route.drone_tag == target
     };
     if !applies {
         return Err(format!("航线 `{}` 不适用于无人机 `{target}`", route.name));
@@ -651,12 +671,12 @@ fn mission_started(reply: &proto::CommandReply) -> bool {
 /// 任务启动失败或任务结束时释放活动任务槽。
 struct MissionReservation {
     state: DroneState,
-    device_id: String,
+    drone_tag: String,
 }
 
 impl Drop for MissionReservation {
     fn drop(&mut self) {
-        self.state.active_missions.remove(&self.device_id);
+        self.state.active_missions.remove(&self.drone_tag);
     }
 }
 
@@ -664,7 +684,7 @@ impl Drop for MissionReservation {
 /// 水平 <50m 且高差 <15m 视为冲突，直接拒绝启动，避免空中相撞。
 fn reserve_mission(
     state: &DroneState,
-    device_id: &str,
+    drone_tag: &str,
     route: &RouteRecord,
     estimate: i64,
 ) -> Result<MissionReservation, String> {
@@ -682,9 +702,9 @@ fn reserve_mission(
     for key in expired {
         state.active_missions.remove(&key);
     }
-    if let Some(entry) = state.active_missions.get(device_id) {
+    if let Some(entry) = state.active_missions.get(drone_tag) {
         return Err(format!(
-            "无人机 `{device_id}` 已有任务（航线 `{}`）在执行",
+            "无人机 `{drone_tag}` 已有任务（航线 `{}`）在执行",
             entry.route_id
         ));
     }
@@ -710,7 +730,7 @@ fn reserve_mission(
         }
     }
     state.active_missions.insert(
-        device_id.to_string(),
+        drone_tag.to_string(),
         ActiveMission {
             route_id: route.id.clone(),
             waypoints: route
@@ -723,14 +743,14 @@ fn reserve_mission(
     );
     Ok(MissionReservation {
         state: state.clone(),
-        device_id: device_id.to_string(),
+        drone_tag: drone_tag.to_string(),
     })
 }
 
-fn latest_telemetry(state: &DroneState, device_id: &str) -> Option<Telemetry> {
+fn latest_telemetry(state: &DroneState, drone_tag: &str) -> Option<Telemetry> {
     state
         .devices
-        .get(device_id)
+        .get(drone_tag)
         .and_then(|entry| entry.last_telemetry.clone())
 }
 
@@ -811,12 +831,12 @@ fn route_estimate_seconds(
     total.ceil() as i64
 }
 
-fn build_takeoff(route: &RouteRecord, alt: f64, operator: &str, device_id: &str) -> proto::Command {
+fn build_takeoff(route: &RouteRecord, alt: f64, operator: &str, drone_tag: &str) -> proto::Command {
     let mut params = std::collections::HashMap::new();
     params.insert("alt".to_string(), alt.max(5.0).to_string());
     proto::Command {
         cmd_id: format!("{}-takeoff-{}", route.id, uuid::Uuid::new_v4().simple()),
-        device_id: device_id.to_string(),
+        drone_tag: drone_tag.to_string(),
         r#type: "takeoff".into(),
         params,
         deadline_ms: now_ms() + 60_000,
@@ -824,10 +844,10 @@ fn build_takeoff(route: &RouteRecord, alt: f64, operator: &str, device_id: &str)
     }
 }
 
-fn build_rtl(route: &RouteRecord, operator: &str, device_id: &str) -> proto::Command {
+fn build_rtl(route: &RouteRecord, operator: &str, drone_tag: &str) -> proto::Command {
     proto::Command {
         cmd_id: format!("{}-rtl-{}", route.id, uuid::Uuid::new_v4().simple()),
-        device_id: device_id.to_string(),
+        drone_tag: drone_tag.to_string(),
         r#type: "rtl".into(),
         params: std::collections::HashMap::new(),
         deadline_ms: now_ms() + 60_000,
@@ -835,10 +855,10 @@ fn build_rtl(route: &RouteRecord, operator: &str, device_id: &str) -> proto::Com
     }
 }
 
-fn build_land(route: &RouteRecord, operator: &str, device_id: &str) -> proto::Command {
+fn build_land(route: &RouteRecord, operator: &str, drone_tag: &str) -> proto::Command {
     proto::Command {
         cmd_id: format!("{}-land-{}", route.id, uuid::Uuid::new_v4().simple()),
-        device_id: device_id.to_string(),
+        drone_tag: drone_tag.to_string(),
         r#type: "land".into(),
         params: std::collections::HashMap::new(),
         deadline_ms: now_ms() + 60_000,
@@ -850,7 +870,7 @@ fn build_goto(
     route: &RouteRecord,
     index: usize,
     operator: &str,
-    device_id: &str,
+    drone_tag: &str,
 ) -> proto::Command {
     let w = &route.waypoints[index];
     let mut params = std::collections::HashMap::new();
@@ -859,7 +879,7 @@ fn build_goto(
     params.insert("alt".to_string(), w.alt.to_string());
     proto::Command {
         cmd_id: format!("{}-{}", route.id, uuid::Uuid::new_v4().simple()),
-        device_id: device_id.to_string(),
+        drone_tag: drone_tag.to_string(),
         r#type: "goto".into(),
         params,
         deadline_ms: now_ms() + 60_000,
@@ -874,10 +894,10 @@ fn build_goto(
 async fn send_safety_rtl(
     state: &DroneState,
     route: &RouteRecord,
-    device_id: &str,
+    drone_tag: &str,
     reason: &str,
 ) {
-    let mut cmd = build_rtl(route, "system", device_id);
+    let mut cmd = build_rtl(route, "system", drone_tag);
     cmd.cmd_id = format!("{}-safety-rtl-{}", route.id, uuid::Uuid::new_v4().simple());
     let reply = commands::submit_safety(state, cmd).await;
     let result = if mission_started(&reply) {
@@ -887,7 +907,7 @@ async fn send_safety_rtl(
     };
     audit(
         state,
-        &device_id,
+        &drone_tag,
         "route",
         "safety_rtl",
         "system",
@@ -899,7 +919,7 @@ async fn send_safety_rtl(
 async fn run_route(
     state: DroneState,
     route: RouteRecord,
-    device_id: String,
+    drone_tag: String,
     operator: String,
     plan: Vec<proto::Command>,
     first_already_sent: bool,
@@ -911,7 +931,7 @@ async fn run_route(
         // 不能让任务在“已失去控制权”的状态下悄悄跑完。
         if let Err(e) = control::ensure_holder(
             &state,
-            &device_id,
+            &drone_tag,
             control::CONTROL_FLIGHT,
             &operator,
         )
@@ -919,11 +939,11 @@ async fn run_route(
         {
             // 区分“被接管”和“无人持有”：被接管时交给新持有人；无人持有时安全返航。
             if let Some(lease) =
-                control::get(&state, &device_id, control::CONTROL_FLIGHT).await
+                control::get(&state, &drone_tag, control::CONTROL_FLIGHT).await
             {
                 audit(
                     &state,
-                    &device_id,
+                    &drone_tag,
                     "route",
                     "abort",
                     &operator,
@@ -939,14 +959,14 @@ async fn run_route(
             }
             audit(
                 &state,
-                &device_id,
+                &drone_tag,
                 "route",
                 "abort",
                 &operator,
                 "control_expired",
                 &format!("route_id={} waypoint={} {e}", route.id, index + 1),
             );
-            send_safety_rtl(&state, &route, &device_id, "control_expired").await;
+            send_safety_rtl(&state, &route, &drone_tag, "control_expired").await;
             return;
         }
 
@@ -955,7 +975,7 @@ async fn run_route(
             && wait_takeoff
             && !wait_airborne(
                 &state,
-                &device_id,
+                &drone_tag,
                 takeoff_alt,
                 std::time::Duration::from_secs(60),
             )
@@ -963,7 +983,7 @@ async fn run_route(
         {
             audit(
                 &state,
-                &device_id,
+                &drone_tag,
                 "route",
                 "abort",
                 &operator,
@@ -981,7 +1001,7 @@ async fn run_route(
             if !mission_started(&reply) {
                 audit(
                     &state,
-                    &device_id,
+                    &drone_tag,
                     "route",
                     "abort",
                     &operator,
@@ -1000,7 +1020,7 @@ async fn run_route(
         if !wait_command(&state, &cmd.cmd_id, std::time::Duration::from_secs(120)).await {
             audit(
                 &state,
-                &device_id,
+                &drone_tag,
                 "route",
                 "abort",
                 &operator,
@@ -1015,7 +1035,7 @@ async fn run_route(
         let waypoint = &route.waypoints[index];
         if !wait_reached(
             &state,
-            &device_id,
+            &drone_tag,
             waypoint.lat,
             waypoint.lon,
             std::time::Duration::from_secs(WAYPOINT_REACH_TIMEOUT_SECS),
@@ -1024,7 +1044,7 @@ async fn run_route(
         {
             audit(
                 &state,
-                &device_id,
+                &drone_tag,
                 "route",
                 "abort",
                 &operator,
@@ -1047,7 +1067,7 @@ async fn run_route(
     if end_action == "hold" {
         audit(
             &state,
-            &device_id,
+            &drone_tag,
             "route",
             "complete",
             &operator,
@@ -1058,15 +1078,15 @@ async fn run_route(
     }
 
     if let Err(e) =
-        control::ensure_holder(&state, &device_id, control::CONTROL_FLIGHT, &operator).await
+        control::ensure_holder(&state, &drone_tag, control::CONTROL_FLIGHT, &operator).await
     {
-        if control::get(&state, &device_id, control::CONTROL_FLIGHT)
+        if control::get(&state, &drone_tag, control::CONTROL_FLIGHT)
             .await
             .is_some()
         {
             audit(
                 &state,
-                &device_id,
+                &drone_tag,
                 "route",
                 "complete",
                 &operator,
@@ -1079,21 +1099,21 @@ async fn run_route(
         } else {
             audit(
                 &state,
-                &device_id,
+                &drone_tag,
                 "route",
                 "complete",
                 &operator,
                 "control_expired",
                 &format!("route_id={} safety_rtl: {e}", route.id),
             );
-            send_safety_rtl(&state, &route, &device_id, "control_expired_before_end_action").await;
+            send_safety_rtl(&state, &route, &drone_tag, "control_expired_before_end_action").await;
         }
         return;
     }
     let cmd = if end_action == "rtl" {
-        build_rtl(&route, &operator, &device_id)
+        build_rtl(&route, &operator, &drone_tag)
     } else {
-        build_land(&route, &operator, &device_id)
+        build_land(&route, &operator, &drone_tag)
     };
     let reply = commands::submit(&state, cmd).await;
     let result = if mission_started(&reply) {
@@ -1103,7 +1123,7 @@ async fn run_route(
     };
     audit(
         &state,
-        &device_id,
+        &drone_tag,
         "route",
         "complete",
         &operator,
@@ -1118,14 +1138,14 @@ async fn run_route(
 /// 等待起飞完成：解锁且相对高度达到目标的一个安全比例。
 async fn wait_airborne(
     state: &DroneState,
-    device_id: &str,
+    drone_tag: &str,
     target_alt: f64,
     timeout: std::time::Duration,
 ) -> bool {
     let deadline = tokio::time::Instant::now() + timeout;
     let need = (target_alt * 0.7).clamp(2.0, 10.0);
     loop {
-        if let Some(t) = latest_telemetry(state, device_id) {
+        if let Some(t) = latest_telemetry(state, drone_tag) {
             if t.armed && t.rel_alt >= need {
                 return true;
             }
@@ -1162,14 +1182,14 @@ const WAYPOINT_REACH_TIMEOUT_SECS: u64 = 900;
 /// 轮询最新遥测，直到无人机进入航点水平容差范围或超时。
 async fn wait_reached(
     state: &DroneState,
-    device_id: &str,
+    drone_tag: &str,
     lat: f64,
     lon: f64,
     timeout: std::time::Duration,
 ) -> bool {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        if let Some(entry) = state.devices.get(device_id) {
+        if let Some(entry) = state.devices.get(drone_tag) {
             if let Some(t) = entry.last_telemetry.as_ref() {
                 if geofence::haversine_m(t.lat, t.lon, lat, lon) <= WAYPOINT_REACH_RADIUS_M {
                     return true;
@@ -1194,10 +1214,10 @@ pub fn list_fences(state: &DroneState) -> Vec<FenceRecord> {
 }
 
 pub fn fence_to_proto(f: &FenceRecord) -> ProtoFence {
-    let device_ids = if f.device_ids.is_empty() && !f.device_id.trim().is_empty() {
-        vec![f.device_id.clone()]
+    let drone_tags = if f.drone_tags.is_empty() && !f.drone_tag.trim().is_empty() {
+        vec![f.drone_tag.clone()]
     } else {
-        f.device_ids.clone()
+        f.drone_tags.clone()
     };
     ProtoFence {
         id: f.id.clone(),
@@ -1211,12 +1231,12 @@ pub fn fence_to_proto(f: &FenceRecord) -> ProtoFence {
         center_lat: f.center_lat,
         center_lon: f.center_lon,
         radius_m: f.radius_m,
-        device_id: if device_ids.len() == 1 {
-            device_ids[0].clone()
+        drone_tag: if drone_tags.len() == 1 {
+            drone_tags[0].clone()
         } else {
             String::new()
         },
-        device_ids,
+        drone_tags,
         shape: f.shape.clone(),
         updated_ms: f.updated_ms,
     }
@@ -1276,18 +1296,18 @@ pub async fn upsert_fence(
     } else {
         fence.id.trim().to_string()
     };
-    let mut device_ids: Vec<String> = fence
-        .device_ids
+    let mut drone_tags: Vec<String> = fence
+        .drone_tags
         .iter()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
-    // 兼容旧客户端只传 device_id 的情况。
-    if device_ids.is_empty() && !fence.device_id.trim().is_empty() {
-        device_ids.push(fence.device_id.trim().to_string());
+    // 兼容旧客户端只传 drone_tag 的情况。
+    if drone_tags.is_empty() && !fence.drone_tag.trim().is_empty() {
+        drone_tags.push(fence.drone_tag.trim().to_string());
     }
-    device_ids.sort();
-    device_ids.dedup();
+    drone_tags.sort();
+    drone_tags.dedup();
     let version = state.fences.get(&id).map(|f| f.version + 1).unwrap_or(1);
     let record = FenceRecord {
         id: id.clone(),
@@ -1300,12 +1320,12 @@ pub async fn upsert_fence(
         radius_m: fence.radius_m,
         min_alt: fence.min_alt,
         max_alt: fence.max_alt,
-        device_id: if device_ids.len() == 1 {
-            device_ids[0].clone()
+        drone_tag: if drone_tags.len() == 1 {
+            drone_tags[0].clone()
         } else {
             String::new()
         },
-        device_ids,
+        drone_tags,
         enabled: fence.enabled,
         version,
         updated_ms: now_ms(),
@@ -1318,7 +1338,7 @@ pub async fn upsert_fence(
     state.fences.insert(id.clone(), record.clone());
     audit(
         state,
-        &record.device_id,
+        &record.drone_tag,
         "fence",
         "upsert",
         operator,
@@ -1356,7 +1376,7 @@ mod tests {
 
     fn profile() -> DroneProfile {
         DroneProfile {
-            device_id: "drone-001".into(),
+            drone_tag: "drone-001".into(),
             name: String::new(),
             model: String::new(),
             autopilot: "auto".into(),
@@ -1376,8 +1396,38 @@ mod tests {
             mavlink_sysid: 1,
             mavlink_compid: 1,
             adapter_id: String::new(),
-            drone_tag: String::new(),
         }
+    }
+
+    #[test]
+    fn zero_sysid_and_compid_fall_back_to_defaults() {
+        // 客户端（前端表单 / 查询接口）未带这三个字段时会传 0：
+        // 不能因此拒绝保存（否则档案变成只读）。
+        let state = DroneState::new(DroneConfig::default());
+        let mut p = profile();
+        p.mavlink_sysid = 0;
+        p.mavlink_compid = 0;
+        p.mavlink_version = 0;
+        let rec = upsert_profile(&state, p, "tester").expect("应当保存成功");
+        assert_eq!(rec.mavlink_sysid, 1);
+        assert_eq!(rec.mavlink_compid, 1);
+        assert_eq!(rec.mavlink_version, 2);
+    }
+
+    #[test]
+    fn zero_sysid_keeps_previously_configured_value() {
+        let state = DroneState::new(DroneConfig::default());
+        let mut p = profile();
+        p.mavlink_sysid = 42;
+        p.mavlink_compid = 7;
+        upsert_profile(&state, p, "tester").expect("保存");
+
+        let mut p2 = profile();
+        p2.mavlink_sysid = 0;
+        p2.mavlink_compid = 0;
+        let rec = upsert_profile(&state, p2, "tester").expect("应当保存成功");
+        assert_eq!(rec.mavlink_sysid, 42, "未指定时不应覆盖已配置值");
+        assert_eq!(rec.mavlink_compid, 7);
     }
 
     #[test]
@@ -1417,9 +1467,12 @@ mod tests {
     #[test]
     fn sysid_and_compid_must_be_in_range() {
         let state = DroneState::new(DroneConfig::default());
+        // 0 = 未指定（查询接口不返回该字段，客户端回传 0）→ 取默认值，不报错。
         let mut p = profile();
         p.mavlink_sysid = 0;
-        assert!(upsert_profile(&state, p, "tester").is_err());
+        let rec = upsert_profile(&state, p, "tester").expect("0 视为未指定");
+        assert_eq!(rec.mavlink_sysid, 1);
+        // 越界仍然拒绝。
         let mut p = profile();
         p.mavlink_compid = 300;
         assert!(upsert_profile(&state, p, "tester").is_err());
@@ -1436,30 +1489,32 @@ mod tests {
     }
 
     #[test]
-    fn drone_tag_is_generated_and_stable_across_updates() {
+    fn drone_tag_is_generated_when_absent() {
         let state = DroneState::new(DroneConfig::default());
-        let first = upsert_profile(&state, profile(), "tester").unwrap();
-        assert!(first.drone_tag.starts_with("drone-"));
-
-        let mut changed = profile();
-        changed.drone_tag = "drone-manual".into();
-        let second = upsert_profile(&state, changed, "tester").unwrap();
-        assert_eq!(second.drone_tag, first.drone_tag);
+        let mut p = profile();
+        p.drone_tag = String::new();
+        let rec = upsert_profile(&state, p, "tester").expect("应当保存成功");
+        assert!(rec.drone_tag.starts_with("drone-"));
     }
 
     #[test]
-    fn duplicate_drone_tag_is_rejected() {
+    fn duplicate_adapter_sysid_is_rejected() {
         let state = DroneState::new(DroneConfig::default());
 
         let mut first = profile();
-        first.device_id = "drone-a".into();
-        first.drone_tag = "drone-fixed".into();
-        upsert_profile(&state, first, "tester").unwrap();
+        first.drone_tag = "drone-a".into();
+        first.adapter_id = "adapter-1".into();
+        first.mavlink_sysid = 12;
+        upsert_profile(&state, first, "tester").expect("首次应当成功");
 
         let mut second = profile();
-        second.device_id = "drone-b".into();
-        second.drone_tag = "drone-fixed".into();
-        assert!(upsert_profile(&state, second, "tester").is_err());
+        second.drone_tag = "drone-b".into();
+        second.adapter_id = "adapter-1".into();
+        second.mavlink_sysid = 12;
+        assert!(
+            upsert_profile(&state, second, "tester").is_err(),
+            "同 adapter 内 sysid 不得重复"
+        );
     }
 
     #[test]
@@ -1467,12 +1522,12 @@ mod tests {
         let state = DroneState::new(DroneConfig::default());
 
         let mut first = profile();
-        first.device_id = "drone-a".into();
+        first.drone_tag = "drone-a".into();
         first.drone_tag = "drone-fixed".into();
         let created = upsert_profile(&state, first, "tester").unwrap();
 
         let mut again = profile();
-        again.device_id = "drone-a".into();
+        again.drone_tag = "drone-a".into();
         again.drone_tag = "drone-fixed".into();
         let updated = upsert_profile(&state, again, "tester").expect("resubmit own tag");
         assert_eq!(updated.drone_tag, created.drone_tag);
@@ -1480,13 +1535,13 @@ mod tests {
     }
 
     #[test]
-    fn padded_device_id_update_keeps_generated_drone_tag() {
+    fn padded_drone_tag_update_keeps_generated_drone_tag() {
         let state = DroneState::new(DroneConfig::default());
         let first = upsert_profile(&state, profile(), "tester").unwrap();
 
         let mut padded = profile();
-        padded.device_id = "  drone-001  ".into();
-        let second = upsert_profile(&state, padded, "tester").expect("padded device_id update");
+        padded.drone_tag = "  drone-001  ".into();
+        let second = upsert_profile(&state, padded, "tester").expect("padded drone_tag update");
         assert_eq!(second.drone_tag, first.drone_tag);
     }
 

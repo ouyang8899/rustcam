@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// `mode` 为飞控模式名（PX4 与 ArduPilot 的命名差异由适配层抹平）。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Telemetry {
-    pub device_id: String,
+    pub drone_tag: String,
     pub ts_ms: i64,
     pub lat: f64,
     pub lon: f64,
@@ -58,7 +58,7 @@ pub struct Telemetry {
 
 impl Telemetry {
     pub fn is_valid(&self) -> bool {
-        !self.device_id.is_empty()
+        !self.drone_tag.is_empty()
             && self.lat.is_finite()
             && self.lon.is_finite()
             && self.alt_amsl.is_finite()
@@ -83,7 +83,7 @@ mod tests {
 
     fn sample() -> Telemetry {
         Telemetry {
-            device_id: "drone-001".into(),
+            drone_tag: "drone-001".into(),
             lat: 31.2304,
             lon: 121.4737,
             alt_amsl: 62.5,
@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn out_of_range_battery_is_invalid() {
         let t = Telemetry {
-            device_id: "drone-001".into(),
+            drone_tag: "drone-001".into(),
             battery_pct: 150.0,
             ..Default::default()
         };
@@ -127,7 +127,7 @@ mod tests {
     #[test]
     fn zero_coordinates_are_not_a_position() {
         let t = Telemetry {
-            device_id: "d".into(),
+            drone_tag: "d".into(),
             ..Default::default()
         };
         assert!(!t.has_position());
@@ -145,10 +145,10 @@ mod tests {
 
     #[test]
     fn older_payload_without_new_fields_deserializes() {
-        let json = r#"{"device_id":"d","ts_ms":1,"lat":0,"lon":0,"alt_amsl":0,"rel_alt":0,
+        let json = r#"{"drone_tag":"d","ts_ms":1,"lat":0,"lon":0,"alt_amsl":0,"rel_alt":0,
             "roll":0,"pitch":0,"yaw":0,"battery_pct":50,"voltage":12,"link_quality":0,"seq":0}"#;
         let t: Telemetry = serde_json::from_str(json).unwrap();
-        assert_eq!(t.device_id, "d");
+        assert_eq!(t.drone_tag, "d");
         assert_eq!(t.autopilot, "");
     }
 }

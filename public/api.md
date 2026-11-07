@@ -592,37 +592,38 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data))
 | 权限点 | 覆盖的路由 |
 |---|---|
 | `drone:view` | 设备列表/详情、遥测之外的只读接口、控制权查询、告警、审计 |
-| `drone:telemetry:read` | `GET /api/v1/drone/{device_id}/telemetry` |
+| `drone:telemetry:read` | `GET /api/v1/drone/{drone_tag}/telemetry` |
 | `drone:control:acquire` | `POST /api/v1/drone/control/acquire`、`POST /api/v1/drone/control/renew` |
 | `drone:control:preempt` | `POST /api/v1/drone/control/preempt` |
 | `drone:control:release` | `POST /api/v1/drone/control/release` |
 | `drone:control:force_release` | `POST /api/v1/drone/control/force_release` |
-| `drone:command:send` | `POST /api/v1/drone/{device_id}/command`、`POST /api/v1/drone/routes/{id}/execute` |
+| `drone:command:send` | `POST /api/v1/drone/{drone_tag}/command`、`POST /api/v1/drone/routes/{id}/execute` |
 | `drone:manage` | 无人机档案、航线、围栏的增删改 |
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/v1/drone/drones` | 无人机列表（含在线状态、最新遥测、业务档案） |
 | POST | `/api/v1/drone/drones` | 新增/更新无人机档案 |
-| GET | `/api/v1/drone/drones/{device_id}` | 无人机详情 |
-| PUT | `/api/v1/drone/drones/{device_id}` | 更新档案 |
-| DELETE | `/api/v1/drone/drones/{device_id}` | 删除档案（同时删除其航线） |
-| GET | `/api/v1/drone/{device_id}/telemetry` | 最新遥测 |
-| POST | `/api/v1/drone/{device_id}/command` | 下发飞行/云台/相机指令（见下方「指令参数」） |
-| GET | `/api/v1/drone/commands/{cmd_id}` | 指令状态 |
-| GET/POST | `/api/v1/drone/routes` | 航线列表 / 新建 |
+| GET/PUT/DELETE | `/api/v1/drone/drones/{drone_tag}` | 无人机详情 / 更新档案 / 删除档案（同时删除其航线） |
+| GET/POST | `/api/v1/drone/drones/{drone_tag}/cameras` | 关联相机列表 / 新增关联 |
+| DELETE | `/api/v1/drone/drones/{drone_tag}/cameras/{camera_device_tag}` | 删除相机关联 |
+| GET | `/api/v1/drone/{drone_tag}/telemetry` | 最新遥测（亦支持 `/devices/{drone_tag}/telemetry`） |
+| POST | `/api/v1/drone/{drone_tag}/command` | 下发飞行/云台/相机指令（见下方「指令参数」） |
+| GET | `/api/v1/drone/commands/{cmd_id}` | 指令状态（亦支持 `/{drone_tag}/commands/{cmd_id}`） |
+| GET/POST | `/api/v1/drone/routes` | 航线列表 / 新建（`drone_tag?` 过滤） |
 | PUT/DELETE | `/api/v1/drone/routes/{id}` | 更新 / 删除航线 |
-| POST | `/api/v1/drone/routes/{id}/execute` | 执行航线（顺序下发 goto） |
-| GET/POST | `/api/v1/drone/fences` | 围栏列表 / 新建 |
+| POST | `/api/v1/drone/routes/{id}/execute` | 执行航线（顺序下发 goto，`drone_tag?`） |
+| GET/POST | `/api/v1/drone/fences` | 围栏列表 / 新建（`/geofences` 为同义别名） |
 | PUT/DELETE | `/api/v1/drone/fences/{id}` | 更新 / 删除围栏 |
-| GET | `/api/v1/drone/alerts` | 告警记录（`device_id`、`limit`） |
-| GET | `/api/v1/drone/audits` | 审计记录（`device_id`、`limit`） |
+| GET | `/api/v1/drone/alerts` | 告警记录（`drone_tag?`、`limit?`） |
+| GET | `/api/v1/drone/audits` | 审计记录（`drone_tag?`、`limit?`） |
+| GET | `/api/v1/drone/replay` | 轨迹回放（`drone_tag`、`start_ms?`、`end_ms?`、`limit?`） |
 | POST | `/api/v1/drone/control/acquire` | 申请控制权（**不抢占**：仅无人持有或已过期时成功） |
 | POST | `/api/v1/drone/control/preempt` | 抢占控制权（需**严格更高**优先级，成功时返回被抢占者） |
 | POST | `/api/v1/drone/control/release` | 释放控制权（仅持有人） |
 | POST | `/api/v1/drone/control/renew` | 续约（仅持有人） |
 | POST | `/api/v1/drone/control/force_release` | 强制释放控制权（管理员，不受持有人限制） |
-| GET | `/api/v1/drone/control/{device_id}/{type}` | 查询控制权 |
+| GET | `/api/v1/drone/control/{drone_tag}/{control_type}` | 查询控制权 |
 | POST | `/api/v1/drone/ws-ticket` | 签发 60s 一次性 WS ticket |
 
 > WS 票据在签发时绑定可订阅的消息类型（`drone:view` → 告警/控制权/指令回执，
@@ -655,12 +656,12 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data))
 
 ```json
 {
-  "device_id": "drone-001",
+  "drone_tag": "drone-3f2a5c1e-8b4d-4a6f-9e2c-1d7b0a9f6e33",
   "name": "东区巡检机",
   "model": "S500",
   "autopilot": "auto",
-  "device_tag": "drone-001",
-  "channel_tag": "drone-001",
+  "device_tag": "camera-device-001",
+  "channel_tag": "camera-channel-001",
   "video_stream": "",
   "notes": "",
   "enabled": true,
@@ -675,15 +676,19 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data))
 }
 ```
 
+- `drone_tag`：平台唯一标识，格式 `drone-<uuid4>`。新增档案时留空由服务端生成；一旦创建不可修改（更新时忽略该字段）。REST 路径/查询、前端 key、Redis 键、审计表统一使用它。
+- `device_tag` / `channel_tag`：**摄像机域**的业务关联字段，与 `drone_tag` 无关，只用于视频播放链路。
+
 机载链路身份字段（drone.md §12.4）：
 
 | 字段 | 说明 |
 |---|---|
+| `drone_tag` | 平台唯一标识（主键）；新增时留空自动生成，不可修改 |
 | `adapter_id` | 该机归属的 adapter；服务端按它把设备分配给对应 adapter。留空 = 未归属，不会被分配 |
+| `mavlink_sysid` / `mavlink_compid` | 该机在归属 adapter 链路上的 system/component id（1–255）；`(adapter_id, mavlink_sysid)` 唯一 |
 | `unique_id` | 登记的无人机唯一标识（`AUTOPILOT_VERSION.uid`），小写十六进制。登记后 adapter 实测值必须一致，否则该机不被分配、指令下发返回 `409` |
 | `mavlink_addr` | 该机的 MAVLink 端点（**隧道内地址**，如 `udpin:10.88.0.2:14540`）。生产禁止 `0.0.0.0`；同一 adapter 下各机端点必须唯一 |
 | `mavlink_version` | MAVLink 协议版本：`1` / `2`（默认 `2`）。版本 1 没有签名字段，不能配签名密钥 |
-| `mavlink_sysid` / `mavlink_compid` | 该机的寻址地址（1–255）。adapter 用其作为出站 `target_system` / `target_component`；默认 `1` / `1` |
 | `signing_secret` | MAVLink 2 消息签名密钥（32 字节 hex）。**留空表示该机不需要签名**；服务端加密存储，接口只返回密文 |
 | `signing_allow_unsigned` | 是否放行未签名帧（含 MAVLink 1 帧）。仅在有密钥时生效；混发 v1/v2 的机体必须为 `true` |
 
@@ -711,7 +716,7 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data))
   "geojson": "{\"type\":\"Polygon\",\"coordinates\":[[[121.46,31.22],[121.49,31.22],[121.49,31.25],[121.46,31.25],[121.46,31.22]]]}",
   "min_alt": 0,
   "max_alt": 120,
-  "device_id": "",
+  "drone_tag": "",
   "enabled": true
 }
 ```
@@ -722,7 +727,7 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data))
 ### 控制权
 
 ```json
-{ "device_id": "drone-001", "control_type": "flight", "priority": 10, "lease_seconds": 180 }
+{ "drone_tag": "drone-3f2a5c1e-8b4d-4a6f-9e2c-1d7b0a9f6e33", "control_type": "flight", "priority": 10, "lease_seconds": 180 }
 ```
 
 返回 `granted=false` 时表示控制权被更高优先级占用。

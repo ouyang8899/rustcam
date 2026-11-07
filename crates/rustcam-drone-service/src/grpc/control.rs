@@ -20,7 +20,7 @@ impl ControlServiceImpl {
 
 fn to_lease(outcome: &control::LeaseOutcome) -> Lease {
     Lease {
-        device_id: outcome.lease.device_id.clone(),
+        drone_tag: outcome.lease.drone_tag.clone(),
         control_type: outcome.lease.control_type.clone(),
         holder: outcome.lease.holder.clone(),
         priority: outcome.lease.priority,
@@ -40,7 +40,7 @@ impl ControlService for ControlServiceImpl {
         let r = request.into_inner();
         let outcome = control::acquire(
             &self.state,
-            &r.device_id,
+            &r.drone_tag,
             &r.control_type,
             &r.operator,
             r.priority,
@@ -58,7 +58,7 @@ impl ControlService for ControlServiceImpl {
         let r = request.into_inner();
         match control::release(
             &self.state,
-            &r.device_id,
+            &r.drone_tag,
             &r.control_type,
             &r.operator,
             false,
@@ -83,7 +83,7 @@ impl ControlService for ControlServiceImpl {
         let r = request.into_inner();
         let outcome = control::preempt(
             &self.state,
-            &r.device_id,
+            &r.drone_tag,
             &r.control_type,
             &r.operator,
             r.priority,
@@ -101,7 +101,7 @@ impl ControlService for ControlServiceImpl {
         let r = request.into_inner();
         match control::renew(
             &self.state,
-            &r.device_id,
+            &r.drone_tag,
             &r.control_type,
             &r.operator,
             r.lease_seconds,
@@ -110,7 +110,7 @@ impl ControlService for ControlServiceImpl {
         {
             Ok(outcome) => Ok(Response::new(to_lease(&outcome))),
             Err(e) => Ok(Response::new(Lease {
-                device_id: r.device_id,
+                drone_tag: r.drone_tag,
                 control_type: r.control_type,
                 granted: false,
                 reason: e,
@@ -126,7 +126,7 @@ impl ControlService for ControlServiceImpl {
         let r = request.into_inner();
         match control::release(
             &self.state,
-            &r.device_id,
+            &r.drone_tag,
             &r.control_type,
             &r.operator,
             true,
@@ -149,10 +149,10 @@ impl ControlService for ControlServiceImpl {
         request: Request<StateRequest>,
     ) -> Result<Response<StateReply>, Status> {
         let r = request.into_inner();
-        let lease = control::get(&self.state, &r.device_id, &r.control_type)
+        let lease = control::get(&self.state, &r.drone_tag, &r.control_type)
             .await
             .map(|l| Lease {
-                device_id: l.device_id,
+                drone_tag: l.drone_tag,
                 control_type: l.control_type,
                 holder: l.holder,
                 priority: l.priority,

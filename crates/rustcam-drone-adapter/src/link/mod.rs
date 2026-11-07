@@ -6,14 +6,16 @@ use rustcam_drone_proto::common::CommandReply;
 use rustcam_drone_proto::link::adapter_link_client::AdapterLinkClient;
 use rustcam_drone_proto::link::adapter_message::Payload;
 use rustcam_drone_proto::link::service_message;
-use rustcam_drone_proto::link::{AdapterMessage, Heartbeat, Register, ServiceMessage};
+use rustcam_drone_proto::link::{
+    AdapterMessage, DeviceIdentity, Heartbeat, IdentityReport, Register, ServiceMessage,
+};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Endpoint;
 
 use crate::config::AdapterConfig;
-use crate::fc::{self, FlightController};
+use crate::fc::{self, FcPool, FlightController};
 
 /// 已完成指令的幂等记录保留时长。
 const COMPLETED_TTL: Duration = Duration::from_secs(3_600);
@@ -81,6 +83,57 @@ impl LedgerInner {
     }
 }
 
+/// 唯一标识上报器：把飞控实测 uid 报给 drone-service（drone.md §12.4 L3）。
+///
+/// 规则：
+/// - **空值不上报**：飞控未提供 uid 时上报空值会被判"不一致"并撤销设备分配
+///   （`registry.rs` 的 `apply_identity_report`），而撤销后不会自动恢复分配。
+/// - **相同值不重复上报**：飞控会周期性重发版本消息，值变化才重新上报。
+struct IdentityReporter {
+    drone_tag: String,
+    reported: Mutex<Option<String>>,
+}
+
+impl IdentityReporter {
+    fn new(drone_tag: String) -> IdentityReporter {
+        IdentityReporter {
+            drone_tag,
+            reported: Mutex::new(None),
+        }
+    }
+
+    /// 上报实测唯一标识；空值跳过，相同值跳过。
+    async fn report(&self, tx: &mpsc::Sender<AdapterMessage>, unique_id: &str) {
+        let unique_id = unique_id.trim();
+        if unique_id.is_empty() {
+            return;
+        }
+        {
+            let mut guard = self.reported.lock().unwrap_or_else(|e| e.into_inner());
+            if guard.as_deref() == Some(unique_id) {
+                return;
+            }
+            *guard = Some(unique_id.to_string());
+        }
+        let msg = AdapterMessage {
+            payload: Some(Payload::IdentityReport(IdentityReport {
+                identities: vec![DeviceIdentity {
+                    drone_tag: self.drone_tag.clone(),
+                    unique_id: unique_id.to_string(),
+                }],
+            })),
+        };
+        if let Err(e) = tx.send(msg).await {
+            // 发送失败时撤销标记，等下一次事件再报。
+            let mut guard = self.reported.lock().unwrap_or_else(|e| e.into_inner());
+            *guard = None;
+            tracing::warn!(error = %e, "[Adapter] failed to send identity report");
+            return;
+        }
+        tracing::info!(unique_id, "[Adapter] reported flight controller unique_id");
+    }
+}
+
 /// 连接 drone-service 并注册；断线后指数退避重连，进程永不退出。
 pub async fn run(cfg: AdapterConfig) -> anyhow::Result<()> {
     let mut backoff = Backoff::new(cfg.reconnect_min_secs, cfg.reconnect_max_secs);
@@ -105,19 +158,8 @@ pub async fn run(cfg: AdapterConfig) -> anyhow::Result<()> {
 }
 
 async fn serve(cfg: &AdapterConfig, ledger: Arc<CommandLedger>) -> anyhow::Result<()> {
-    let fc = FlightController::connect(cfg).await?;
-    tracing::info!(device = %fc.device_id, "flight controller link established");
-    // 会话结束后必须停掉后台任务，否则重连会重复占用同一 UDP 端口。
-    let result = run_session(cfg, fc.clone(), ledger.clone()).await;
-    fc.close();
-    result
-}
-
-async fn run_session(
-    cfg: &AdapterConfig,
-    fc: FlightController,
-    ledger: Arc<CommandLedger>,
-) -> anyhow::Result<()> {
+    // 先连平台、再按平台分配的 assignment 建链（drone.md §12.4 L3）：
+    // 端点与设备标识都不在本地配置里。
     let endpoint = Endpoint::from_shared(cfg.service_addr.clone())
         .map_err(|e| anyhow::anyhow!("invalid service_addr: {e}"))?
         .connect_timeout(Duration::from_secs(3))
@@ -128,14 +170,11 @@ async fn run_session(
     let capacity = cfg.buffer_size.clamp(64, 65_536);
     let (tx, rx) = mpsc::channel::<AdapterMessage>(capacity);
 
-    let devices = cfg.registration_devices();
     tx.send(AdapterMessage {
         payload: Some(Payload::Register(Register {
             adapter_id: cfg.adapter_id.clone(),
             protocol: cfg.protocol.clone(),
             version: env!("CARGO_PKG_VERSION").to_string(),
-            devices,
-            identities: Vec::new(),
         })),
     })
     .await
@@ -152,27 +191,34 @@ async fn run_session(
 
     let mut inbound = client.open(ReceiverStream::new(rx)).await?.into_inner();
 
+    let pool = Arc::new(FcPool::default());
+    let result = run_session(cfg, &mut inbound, tx.clone(), &pool, ledger).await;
+    pool.close();
+    result
+}
+
+async fn run_session(
+    cfg: &AdapterConfig,
+    inbound: &mut tonic::Streaming<ServiceMessage>,
+    tx: mpsc::Sender<AdapterMessage>,
+    pool: &Arc<FcPool>,
+    ledger: Arc<CommandLedger>,
+) -> anyhow::Result<()> {
     loop {
-        tokio::select! {
-            message = inbound.message() => {
-                match message? {
-                    Some(msg) => handle_service_message(msg, &fc, &tx, &ledger, cfg.heartbeat_interval_secs).await?,
-                    None => return Ok(()),
-                }
-            }
-            _ = fc.wait_closed() => {
-                return Err(anyhow::anyhow!("flight controller link lost"));
-            }
-        }
+        let message = inbound.message().await?;
+        let Some(msg) = message else {
+            return Ok(());
+        };
+        handle_service_message(msg, cfg, &tx, pool, &ledger).await?;
     }
 }
 
 async fn handle_service_message(
     msg: ServiceMessage,
-    fc: &FlightController,
+    cfg: &AdapterConfig,
     tx: &mpsc::Sender<AdapterMessage>,
+    pool: &Arc<FcPool>,
     ledger: &Arc<CommandLedger>,
-    fallback_heartbeat_secs: u64,
 ) -> anyhow::Result<()> {
     match msg.payload {
         Some(service_message::Payload::RegisterAck(ack)) => {
@@ -187,26 +233,26 @@ async fn handle_service_message(
                 ));
             }
             tracing::info!(
-                assigned = ?ack.assigned_devices,
+                assigned = ?ack.assigned_drone_tags,
                 heartbeat_interval_sec = ack.heartbeat_interval_sec,
                 "[Adapter] registered with drone-service"
             );
-            // 服务端只分配了部分设备时，未被分配的设备不再上报（规则 §6.5 独占）。
-            let assigned = ack.assigned_devices.is_empty()
-                || ack.assigned_devices.iter().any(|d| d == &fc.device_id);
-            if !assigned {
-                tracing::warn!(
-                    device = %fc.device_id,
-                    "[Adapter] device not assigned by drone-service, telemetry suppressed"
-                );
-            }
             // 心跳周期以服务端为准（规则 §5.7：adapter 不得写死）。
-            let interval_secs =
-                cfg_heartbeat_fallback(ack.heartbeat_interval_sec, fallback_heartbeat_secs);
-            spawn_heartbeat_forwarder(tx.clone(), fc.clone(), interval_secs);
-            if assigned {
-                spawn_telemetry_forwarder(tx.clone(), fc.clone());
-                spawn_event_forwarder(tx.clone(), fc.clone());
+            let interval_secs = cfg_heartbeat_fallback(
+                ack.heartbeat_interval_sec,
+                cfg.heartbeat_interval_secs,
+            );
+            spawn_heartbeat_forwarder(tx.clone(), pool.clone(), interval_secs);
+
+            // 按平台分配的端点逐条建链；某一台连不上不影响其余。
+            for assignment in ack.assignments.iter() {
+                connect_assignment(cfg, &tx, pool, assignment).await;
+            }
+            if ack.assigned_drone_tags.is_empty() {
+                tracing::warn!(
+                    adapter = %cfg.adapter_id,
+                    "[Adapter] platform assigned no drones; check drone_device rows for this adapter_id"
+                );
             }
         }
         Some(service_message::Payload::Command(cmd)) => {
@@ -215,16 +261,18 @@ async fn handle_service_message(
                 tracing::warn!(cmd_id = %cmd.cmd_id, "[Adapter] duplicate cmd_id ignored");
                 return Ok(());
             }
-            let fc = fc.clone();
+            let pool = pool.clone();
             let tx = tx.clone();
             let ledger = ledger.clone();
+            let drone_tag = cmd.drone_tag.clone();
             tokio::spawn(async move {
                 let cmd_id = cmd.cmd_id.clone();
                 let kind = cmd.r#type.clone();
-                let reply = fc.execute(cmd).await;
+                let reply = pool.execute(&drone_tag, cmd).await;
                 tracing::info!(
                     cmd_id = %cmd_id,
                     kind = %kind,
+                    drone_tag = %drone_tag,
                     status = %reply.status,
                     code = reply.code,
                     message = %reply.message,
@@ -241,7 +289,7 @@ async fn handle_service_message(
         }
         Some(service_message::Payload::ControlState(state)) => {
             tracing::info!(
-                device = %state.device_id,
+                drone_tag = %state.drone_tag,
                 control_type = %state.control_type,
                 action = %state.action,
                 holder = %state.holder,
@@ -251,6 +299,41 @@ async fn handle_service_message(
         None => {}
     }
     Ok(())
+}
+
+/// 按平台下发的 assignment 建一条飞控链路，并挂上遥测 / 事件 / 唯一标识转发。
+async fn connect_assignment(
+    cfg: &AdapterConfig,
+    tx: &mpsc::Sender<AdapterMessage>,
+    pool: &Arc<FcPool>,
+    assignment: &rustcam_drone_proto::link::DeviceAssignment,
+) {
+    let drone_tag = assignment.drone_tag.clone();
+    let fc = match FlightController::connect(
+        &assignment.mavlink_addr,
+        &drone_tag,
+        assignment.mavlink_sysid as u8,
+        assignment.mavlink_compid as u8,
+        cfg,
+    )
+    .await
+    {
+        Ok(fc) => fc,
+        Err(e) => {
+            tracing::warn!(
+                drone_tag = %drone_tag,
+                error = %e,
+                "[Adapter] failed to connect flight controller"
+            );
+            return;
+        }
+    };
+    pool.insert(&drone_tag, fc.clone());
+    spawn_telemetry_forwarder(tx.clone(), fc.clone());
+    spawn_event_forwarder(tx.clone(), fc.clone());
+    // 每台机体一个上报器：实测 uid 归属到自己的 drone_tag。
+    let reporter = Arc::new(IdentityReporter::new(drone_tag.clone()));
+    spawn_identity_forwarder(tx.clone(), fc.clone(), reporter);
 }
 
 /// 心跳周期以服务端为准；服务端未给出时用本地配置兜底（规则 §5.7）。
@@ -264,7 +347,7 @@ fn cfg_heartbeat_fallback(server_value: i32, local_secs: u64) -> u64 {
 
 fn spawn_heartbeat_forwarder(
     tx: mpsc::Sender<AdapterMessage>,
-    fc: FlightController,
+    pool: Arc<FcPool>,
     interval_secs: u64,
 ) {
     tokio::spawn(async move {
@@ -273,16 +356,32 @@ fn spawn_heartbeat_forwarder(
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
-            let online = fc.is_online().await;
+            let tags = pool.drone_tags();
+            let inflight: usize = tags
+                .iter()
+                .filter_map(|t| pool.get(t))
+                .map(|fc| fc.inflight_commands())
+                .sum();
+            let mut online = false;
+            for tag in &tags {
+                if let Some(fc) = pool.get(tag) {
+                    if fc.is_online().await {
+                        online = true;
+                        break;
+                    }
+                }
+            }
             let msg = AdapterMessage {
                 payload: Some(Payload::Heartbeat(Heartbeat {
                     ts_ms: fc::now_ms(),
-                    device_count: 1,
-                    inflight_commands: fc.inflight_commands() as i32,
-                    adapter_state: if online {
-                        "ok".into()
-                    } else {
+                    device_count: pool.len() as i32,
+                    inflight_commands: inflight as i32,
+                    adapter_state: if !online {
                         "fc_offline".into()
+                    } else if pool.is_empty() {
+                        "no_drone".into()
+                    } else {
+                        "ok".into()
                     },
                 })),
             };
@@ -321,9 +420,13 @@ fn spawn_event_forwarder(tx: mpsc::Sender<AdapterMessage>, fc: FlightController)
         loop {
             match event_rx.recv().await {
                 Ok(event) => {
+                    // 唯一标识走 IdentityReport 通道，不重复作为设备事件上报。
+                    if event.event_type == IDENTITY_EVENT {
+                        continue;
+                    }
                     let msg = AdapterMessage {
                         payload: Some(Payload::Event(rustcam_drone_proto::common::DeviceEvent {
-                            device_id: fc.device_id.clone(),
+                            drone_tag: fc.drone_tag.clone(),
                             r#type: event.event_type,
                             detail: event.detail,
                             ts_ms: fc::now_ms(),
@@ -335,6 +438,36 @@ fn spawn_event_forwarder(tx: mpsc::Sender<AdapterMessage>, fc: FlightController)
                 }
                 Err(RecvError::Lagged(skipped)) => {
                     tracing::warn!(skipped, "adapter event subscriber lagged");
+                }
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
+/// 唯一标识事件名（飞控层 → gRPC 会话）。
+const IDENTITY_EVENT: &str = "identity";
+
+/// 订阅飞控事件，把唯一标识变化上报给服务端。
+fn spawn_identity_forwarder(
+    tx: mpsc::Sender<AdapterMessage>,
+    fc: FlightController,
+    reporter: Arc<IdentityReporter>,
+) {
+    tokio::spawn(async move {
+        // 建链瞬间可能已经读到 uid（事件先于订阅者产生），先补报一次。
+        reporter.report(&tx, &fc.unique_id()).await;
+        let mut event_rx = fc.subscribe_events();
+        loop {
+            match event_rx.recv().await {
+                Ok(event) => {
+                    if event.event_type != IDENTITY_EVENT {
+                        continue;
+                    }
+                    reporter.report(&tx, &event.detail).await;
+                }
+                Err(RecvError::Lagged(skipped)) => {
+                    tracing::warn!(skipped, "adapter identity subscriber lagged");
                 }
                 Err(RecvError::Closed) => break,
             }
@@ -392,6 +525,38 @@ mod tests {
         assert_eq!(b.next_delay(), Duration::from_secs(1));
     }
 
+    #[tokio::test]
+    async fn identity_reporter_skips_empty_unique_id() {
+        let (tx, mut rx) = mpsc::channel::<AdapterMessage>(8);
+        let reporter = IdentityReporter::new("drone-001".into());
+        reporter.report(&tx, "").await;
+        reporter.report(&tx, "   ").await;
+        assert!(rx.try_recv().is_err(), "空唯一标识不应上报");
+    }
+
+    #[tokio::test]
+    async fn identity_reporter_reports_once_per_unique_id() {
+        let (tx, mut rx) = mpsc::channel::<AdapterMessage>(8);
+        let reporter = IdentityReporter::new("drone-001".into());
+        reporter.report(&tx, "0011223344556677").await;
+        reporter.report(&tx, "0011223344556677").await;
+        reporter.report(&tx, "0011223344556678").await;
+
+        let first = rx.try_recv().expect("第一次应上报");
+        let second = rx.try_recv().expect("值变化后应再次上报");
+        assert!(rx.try_recv().is_err(), "相同唯一标识不应重复上报");
+
+        for msg in [first, second] {
+            match msg.payload {
+                Some(Payload::IdentityReport(report)) => {
+                    assert_eq!(report.identities.len(), 1);
+                    assert_eq!(report.identities[0].drone_tag, "drone-001");
+                }
+                other => panic!("expected IdentityReport, got {other:?}"),
+            }
+        }
+    }
+
     #[test]
     fn ledger_dedups_completed_commands() {
         let ledger = CommandLedger::default();
@@ -406,7 +571,7 @@ mod tests {
         let ledger = CommandLedger::default();
         ledger.record_reply(CommandReply {
             cmd_id: "cmd-1".into(),
-            device_id: "d1".into(),
+            drone_tag: "d1".into(),
             status: "acked".into(),
             code: 200,
             message: String::new(),

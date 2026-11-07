@@ -48,7 +48,7 @@ service EventService {
 }
 
 message AcquireRequest {
-  string device_id = 1;
+  string drone_tag = 1;
   string control_type = 2;
   string operator = 3;
   int32  priority = 4;
@@ -56,13 +56,13 @@ message AcquireRequest {
 }
 
 message ReleaseRequest {
-  string device_id = 1;
+  string drone_tag = 1;
   string control_type = 2;
   string operator = 3;
 }
 
 message ForceReleaseRequest {
-  string device_id = 1;
+  string drone_tag = 1;
   string control_type = 2;
   string operator = 3;
 }
@@ -73,7 +73,7 @@ message ReleaseReply {
 }
 
 message PreemptRequest {
-  string device_id = 1;
+  string drone_tag = 1;
   string control_type = 2;
   string operator = 3;
   int32  priority = 4;
@@ -81,14 +81,14 @@ message PreemptRequest {
 }
 
 message RenewRequest {
-  string device_id = 1;
+  string drone_tag = 1;
   string control_type = 2;
   string operator = 3;
   int32  lease_seconds = 4;
 }
 
 message Lease {
-  string device_id = 1;
+  string drone_tag = 1;
   string control_type = 2;
   string holder = 3;
   int32  priority = 4;
@@ -99,7 +99,7 @@ message Lease {
 }
 
 message StateRequest {
-  string device_id = 1;
+  string drone_tag = 1;
   string control_type = 2;
 }
 
@@ -109,11 +109,11 @@ message StateReply {
 }
 
 message DeviceRequest {
-  string device_id = 1;
+  string drone_tag = 1;
 }
 
 message DeviceInfo {
-  string device_id = 1;
+  string drone_tag = 1;
   string protocol = 2;
   string adapter_id = 3;
   bool   online = 4;
@@ -129,7 +129,6 @@ message DeviceInfo {
   string mode = 14;
   bool   enabled = 15;
   string notes = 16;
-  string drone_tag = 17;
 }
 
 message DeviceList {
@@ -137,12 +136,12 @@ message DeviceList {
 }
 
 message CommandStatusRequest { string cmd_id = 1; }
-message CommandStatus { string cmd_id = 1; string status = 2; string message = 3; string device_id = 4; }
-message AlertListRequest { string device_id = 1; int32 limit = 2; }
-message Alert { string device_id = 1; string rule = 2; string level = 3; string message = 4; int64 ts_ms = 5; }
+message CommandStatus { string cmd_id = 1; string status = 2; string message = 3; string drone_tag = 4; }
+message AlertListRequest { string drone_tag = 1; int32 limit = 2; }
+message Alert { string drone_tag = 1; string rule = 2; string level = 3; string message = 4; int64 ts_ms = 5; }
 message AlertList { repeated Alert alerts = 1; }
 message TelemetryHistoryRequest {
-  string device_id = 1;
+  string drone_tag = 1;
   int64  start_ms = 2;   // 0 = 不限
   int64  end_ms = 3;     // 0 = 不限
   int32  limit = 4;      // <=0 时使用服务端默认值
@@ -162,17 +161,17 @@ message Geofence {
   double center_lat = 9;    // circle
   double center_lon = 10;
   double radius_m = 11;
-  string device_id = 12;    // 兼容旧字段：空 = 全部无人机
+  string drone_tag = 12;    // 兼容旧字段：空 = 全部无人机
   string shape = 13;        // polygon / circle
   int64 updated_ms = 14;
-  repeated string device_ids = 15;  // 适用无人机列表；空 = 全部
+  repeated string drone_tags = 15;  // 适用无人机列表；空 = 全部
 }
 message GeofenceUpsertRequest { Geofence geofence = 1; string operator = 2; }
 message GeofenceDeleteRequest { string id = 1; string operator = 2; }
 message DeleteReply { bool deleted = 1; string reason = 2; }
 
 message SubscribeRequest {
-  repeated string device_ids = 1;
+  repeated string drone_tags = 1;
 }
 
 message EventMessage {
@@ -186,7 +185,7 @@ message EventMessage {
 // ---------------------------------------------------------------------------
 
 message DroneProfile {
-  string device_id = 1;
+  string drone_tag = 1;
   string name = 2;
   string model = 3;
   string autopilot = 4;     // auto / px4 / ardupilot
@@ -206,7 +205,6 @@ message DroneProfile {
   int32 mavlink_sysid = 18;          // 该机的 system id；默认 1
   int32 mavlink_compid = 19;         // 该机的 component id；默认 1
   string adapter_id = 20;            // 该机归属的 adapter（决定谁拿到分配）；空 = 未归属
-  string drone_tag = 21;             // 平台内唯一的无人机标识（自动生成，创建后不可改）
 }
 
 message DroneProfileList { repeated DroneProfile profiles = 1; }
@@ -223,33 +221,33 @@ message RouteWaypoint {
 message Route {
   string id = 1;
   string name = 2;
-  string device_id = 3;     // 兼容旧字段：单机航线
+  string drone_tag = 3;     // 兼容旧字段：单机航线
   repeated RouteWaypoint waypoints = 4;
   bool   enabled = 5;
   int64  updated_ms = 6;
   string operator = 7;
   string end_action = 8;    // hold / rtl / land：任务完成后的动作，默认 hold
-  repeated string device_ids = 9;  // 适用无人机列表；空 = 所有无人机（模板）
+  repeated string drone_tags = 9;  // 适用无人机列表；空 = 所有无人机（模板）
 }
 
-message RouteListRequest { string device_id = 1; }
+message RouteListRequest { string drone_tag = 1; }
 message RouteList { repeated Route routes = 1; }
 message RouteDeleteRequest { string id = 1; string operator = 2; }
 message RouteExecuteRequest {
   string route_id = 1;
   string operator = 2;
-  string device_id = 3;
+  string drone_tag = 3;
   double lateral_offset_m = 4;  // 横向偏移（米，正=右，负=左）
 }
 
 message AuditRecord {
   int64  ts_ms = 1;
-  string device_id = 2;
+  string drone_tag = 2;
   string category = 3;      // command / control / device / route / fence
   string action = 4;
   string operator = 5;
   string result = 6;
   string detail = 7;
 }
-message AuditListRequest { string device_id = 1; int32 limit = 2; }
+message AuditListRequest { string drone_tag = 1; int32 limit = 2; }
 message AuditList { repeated AuditRecord records = 1; }

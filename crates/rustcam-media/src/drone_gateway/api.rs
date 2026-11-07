@@ -50,7 +50,7 @@ where
         .route("/api/v1/drone/ping", get(ping))
         .route("/api/v1/drone/drones", get(list_drones).post(create_drone))
         .route(
-            "/api/v1/drone/drones/{device_id}",
+            "/api/v1/drone/drones/{drone_tag}",
             get(get_drone).put(update_drone).delete(delete_drone),
         )
         .route(
@@ -62,17 +62,17 @@ where
             delete(remove_drone_camera),
         )
         .route("/api/v1/drone/devices", get(list_drones))
-        .route("/api/v1/drone/devices/{device_id}", get(get_drone))
-        .route("/api/v1/drone/{device_id}/command", post(send_command))
-        .route("/api/v1/drone/{device_id}/telemetry", get(get_telemetry))
+        .route("/api/v1/drone/devices/{drone_tag}", get(get_drone))
+        .route("/api/v1/drone/{drone_tag}/command", post(send_command))
+        .route("/api/v1/drone/{drone_tag}/telemetry", get(get_telemetry))
         // 规则 §6.12 的路径别名（与上面的简写并存）。
         .route(
-            "/api/v1/drone/devices/{device_id}/telemetry",
+            "/api/v1/drone/devices/{drone_tag}/telemetry",
             get(get_telemetry),
         )
         .route("/api/v1/drone/commands/{cmd_id}", get(get_command))
         .route(
-            "/api/v1/drone/{device_id}/commands/{cmd_id}",
+            "/api/v1/drone/{drone_tag}/commands/{cmd_id}",
             get(get_command),
         )
         .route("/api/v1/drone/routes", get(list_routes).post(save_route))
@@ -103,7 +103,7 @@ where
             post(force_release_control),
         )
         .route(
-            "/api/v1/drone/control/{device_id}/{control_type}",
+            "/api/v1/drone/control/{drone_tag}/{control_type}",
             get(get_control),
         )
         .route("/api/v1/drone/ws-ticket", post(issue_ticket))
@@ -150,9 +150,9 @@ async fn list_drones(
 async fn get_drone(
     Extension(api): Extension<Arc<dyn DroneApi>>,
     Extension(db): Extension<Option<Arc<DbRepository>>>,
-    Path(device_id): Path<String>,
+    Path(drone_tag): Path<String>,
 ) -> ApiResult<DroneDto> {
-    match api.get_drone(&device_id).await {
+    match api.get_drone(&drone_tag).await {
         Ok(v) => Ok(ok(with_camera_tags(db.as_ref(), v).await)),
         Err(e) => Err(e.into()),
     }
@@ -268,10 +268,10 @@ async fn create_drone(
 async fn update_drone(
     Extension(api): Extension<Arc<dyn DroneApi>>,
     user: DroneUser,
-    Path(device_id): Path<String>,
+    Path(drone_tag): Path<String>,
     Json(mut body): Json<DroneDto>,
 ) -> ApiResult<DroneDto> {
-    body.device_id = device_id;
+    body.drone_tag = drone_tag;
     match api.save_drone(body, &user.0.username).await {
         Ok(v) => Ok(ok(v)),
         Err(e) => Err(e.into()),
@@ -281,10 +281,10 @@ async fn update_drone(
 async fn delete_drone(
     Extension(api): Extension<Arc<dyn DroneApi>>,
     Extension(db): Extension<Option<Arc<DbRepository>>>,
-    Path(device_id): Path<String>,
+    Path(drone_tag): Path<String>,
 ) -> ApiResult<bool> {
-    let drone = api.get_drone(&device_id).await?;
-    let deleted = api.delete_drone(&device_id).await?;
+    let drone = api.get_drone(&drone_tag).await?;
+    let deleted = api.delete_drone(&drone_tag).await?;
     if deleted && !drone.drone_tag.is_empty() {
         if let Some(db) = db.as_ref() {
             db.delete_drone_cameras_by_drone(&drone.drone_tag).await?;
@@ -295,12 +295,12 @@ async fn delete_drone(
 
 async fn get_telemetry(
     Extension(api): Extension<Arc<dyn DroneApi>>,
-    Path(device_id): Path<String>,
+    Path(drone_tag): Path<String>,
 ) -> ApiResult<serde_json::Value> {
-    match api.get_drone(&device_id).await {
+    match api.get_drone(&drone_tag).await {
         Ok(drone) => match drone.last_telemetry {
             Some(t) => Ok(ok(serde_json::to_value(t).unwrap_or_default())),
-            None => Ok(fail(404, &format!("no telemetry for {device_id}"))),
+            None => Ok(fail(404, &format!("no telemetry for {drone_tag}"))),
         },
         Err(e) => Err(e.into()),
     }
@@ -309,7 +309,7 @@ async fn get_telemetry(
 #[derive(Debug, Deserialize)]
 struct DeviceQuery {
     #[serde(default)]
-    device_id: String,
+    drone_tag: String,
     #[serde(default)]
     limit: i32,
 }
@@ -319,7 +319,7 @@ async fn list_alerts(
     Query(q): Query<DeviceQuery>,
 ) -> ApiResult<Vec<AlertDto>> {
     let limit = if q.limit <= 0 { 100 } else { q.limit };
-    match api.list_alerts(&q.device_id, limit).await {
+    match api.list_alerts(&q.drone_tag, limit).await {
         Ok(v) => Ok(ok(v)),
         Err(e) => Err(e.into()),
     }
@@ -330,7 +330,7 @@ async fn list_audits(
     Query(q): Query<DeviceQuery>,
 ) -> ApiResult<Vec<AuditDto>> {
     let limit = if q.limit <= 0 { 200 } else { q.limit };
-    match api.list_audits(&q.device_id, limit).await {
+    match api.list_audits(&q.drone_tag, limit).await {
         Ok(v) => Ok(ok(v)),
         Err(e) => Err(e.into()),
     }
@@ -339,7 +339,7 @@ async fn list_audits(
 #[derive(Debug, Deserialize)]
 struct ReplayQuery {
     #[serde(default)]
-    device_id: String,
+    drone_tag: String,
     #[serde(default)]
     start_ms: i64,
     #[serde(default)]
@@ -352,12 +352,12 @@ async fn get_replay(
     Extension(api): Extension<Arc<dyn DroneApi>>,
     Query(q): Query<ReplayQuery>,
 ) -> ApiResult<Vec<TelemetryDto>> {
-    if q.device_id.trim().is_empty() {
-        return Err(AppError::BadRequest("device_id 不能为空".into()));
+    if q.drone_tag.trim().is_empty() {
+        return Err(AppError::BadRequest("drone_tag 不能为空".into()));
     }
     let limit = if q.limit <= 0 { 5_000 } else { q.limit };
     match api
-        .telemetry_history(&q.device_id, q.start_ms, q.end_ms, limit)
+        .telemetry_history(&q.drone_tag, q.start_ms, q.end_ms, limit)
         .await
     {
         Ok(v) => Ok(ok(v)),
@@ -368,10 +368,10 @@ async fn get_replay(
 async fn send_command(
     Extension(api): Extension<Arc<dyn DroneApi>>,
     user: DroneUser,
-    Path(device_id): Path<String>,
+    Path(drone_tag): Path<String>,
     Json(req): Json<CommandRequest>,
 ) -> ApiResult<CommandDto> {
-    match api.send_command(&device_id, req, &user.0.username).await {
+    match api.send_command(&drone_tag, req, &user.0.username).await {
         Ok(v) => Ok(ok(v)),
         Err(e) => Err(e.into()),
     }
@@ -391,7 +391,7 @@ async fn list_routes(
     Extension(api): Extension<Arc<dyn DroneApi>>,
     Query(q): Query<DeviceQuery>,
 ) -> ApiResult<Vec<RouteDto>> {
-    match api.list_routes(&q.device_id).await {
+    match api.list_routes(&q.drone_tag).await {
         Ok(v) => Ok(ok(v)),
         Err(e) => Err(e.into()),
     }
@@ -435,7 +435,7 @@ async fn delete_route(
 #[derive(Debug, Deserialize, Default)]
 struct ExecuteRouteQuery {
     #[serde(default)]
-    device_id: String,
+    drone_tag: String,
     #[serde(default)]
     lateral_offset_m: f64,
 }
@@ -447,7 +447,7 @@ async fn execute_route(
     Query(q): Query<ExecuteRouteQuery>,
 ) -> ApiResult<CommandDto> {
     match api
-        .execute_route(&id, &q.device_id, q.lateral_offset_m, &user.0.username)
+        .execute_route(&id, &q.drone_tag, q.lateral_offset_m, &user.0.username)
         .await
     {
         Ok(v) => Ok(ok(v)),
@@ -499,7 +499,7 @@ async fn delete_fence(
 
 #[derive(Debug, Deserialize)]
 struct ControlRequest {
-    device_id: String,
+    drone_tag: String,
     #[serde(default = "default_control_type")]
     control_type: String,
     #[serde(default)]
@@ -519,7 +519,7 @@ async fn acquire_control(
 ) -> ApiResult<ControlDto> {
     match api
         .acquire_control(
-            &req.device_id,
+            &req.drone_tag,
             &req.control_type,
             &user.0.username,
             req.priority,
@@ -543,7 +543,7 @@ async fn release_control(
     Json(req): Json<ControlRequest>,
 ) -> ApiResult<bool> {
     match api
-        .release_control(&req.device_id, &req.control_type, &user.0.username, false)
+        .release_control(&req.drone_tag, &req.control_type, &user.0.username, false)
         .await
     {
         Ok(v) => Ok(ok(v)),
@@ -558,7 +558,7 @@ async fn preempt_control(
 ) -> ApiResult<ControlDto> {
     match api
         .preempt_control(
-            &req.device_id,
+            &req.drone_tag,
             &req.control_type,
             &user.0.username,
             req.priority,
@@ -577,7 +577,7 @@ async fn force_release_control(
     Json(req): Json<ControlRequest>,
 ) -> ApiResult<bool> {
     match api
-        .release_control(&req.device_id, &req.control_type, &user.0.username, true)
+        .release_control(&req.drone_tag, &req.control_type, &user.0.username, true)
         .await
     {
         Ok(v) => Ok(ok(v)),
@@ -587,7 +587,7 @@ async fn force_release_control(
 
 #[derive(Debug, Deserialize)]
 struct RenewRequest {
-    device_id: String,
+    drone_tag: String,
     #[serde(default = "default_control_type")]
     control_type: String,
     #[serde(default)]
@@ -601,7 +601,7 @@ async fn renew_control(
 ) -> ApiResult<ControlDto> {
     match api
         .renew_control(
-            &req.device_id,
+            &req.drone_tag,
             &req.control_type,
             &user.0.username,
             req.lease_seconds,
@@ -616,9 +616,9 @@ async fn renew_control(
 async fn get_control(
     Extension(api): Extension<Arc<dyn DroneApi>>,
     user: DroneUser,
-    Path((device_id, control_type)): Path<(String, String)>,
+    Path((drone_tag, control_type)): Path<(String, String)>,
 ) -> ApiResult<ControlDto> {
-    match api.get_control(&device_id, &control_type).await {
+    match api.get_control(&drone_tag, &control_type).await {
         Ok(mut v) => {
             // held 表示“存在租约”，granted 表示“当前用户就是持有人”。
             // 前端据此区分“控制权被他人持有”和“我可以释放/续约”。

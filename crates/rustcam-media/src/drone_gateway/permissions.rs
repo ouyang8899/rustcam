@@ -69,9 +69,9 @@ pub fn required_permissions(path: &str, method: &str) -> Option<&'static [&'stat
         ("/api/v1/drone/ping", "GET") => Some(VIEW_ONLY),
         ("/api/v1/drone/drones", "GET") => Some(VIEW_ONLY),
         ("/api/v1/drone/drones", "POST") => Some(MANAGE_ONLY),
-        ("/api/v1/drone/drones/{device_id}", "GET") => Some(VIEW_ONLY),
-        ("/api/v1/drone/drones/{device_id}", "PUT") => Some(MANAGE_ONLY),
-        ("/api/v1/drone/drones/{device_id}", "DELETE") => Some(MANAGE_ONLY),
+        ("/api/v1/drone/drones/{drone_tag}", "GET") => Some(VIEW_ONLY),
+        ("/api/v1/drone/drones/{drone_tag}", "PUT") => Some(MANAGE_ONLY),
+        ("/api/v1/drone/drones/{drone_tag}", "DELETE") => Some(MANAGE_ONLY),
         ("/api/v1/drone/drones/{drone_tag}/cameras", "GET") => Some(VIEW_ONLY),
         ("/api/v1/drone/drones/{drone_tag}/cameras", "POST") => Some(MANAGE_ONLY),
         (
@@ -79,12 +79,12 @@ pub fn required_permissions(path: &str, method: &str) -> Option<&'static [&'stat
             "DELETE",
         ) => Some(MANAGE_ONLY),
         ("/api/v1/drone/devices", "GET") => Some(VIEW_ONLY),
-        ("/api/v1/drone/devices/{device_id}", "GET") => Some(VIEW_ONLY),
-        ("/api/v1/drone/{device_id}/command", "POST") => Some(&[COMMAND_SEND]),
-        ("/api/v1/drone/{device_id}/telemetry", "GET") => Some(&[TELEMETRY_READ]),
-        ("/api/v1/drone/devices/{device_id}/telemetry", "GET") => Some(&[TELEMETRY_READ]),
+        ("/api/v1/drone/devices/{drone_tag}", "GET") => Some(VIEW_ONLY),
+        ("/api/v1/drone/{drone_tag}/command", "POST") => Some(&[COMMAND_SEND]),
+        ("/api/v1/drone/{drone_tag}/telemetry", "GET") => Some(&[TELEMETRY_READ]),
+        ("/api/v1/drone/devices/{drone_tag}/telemetry", "GET") => Some(&[TELEMETRY_READ]),
         ("/api/v1/drone/commands/{cmd_id}", "GET") => Some(VIEW_ONLY),
-        ("/api/v1/drone/{device_id}/commands/{cmd_id}", "GET") => Some(VIEW_ONLY),
+        ("/api/v1/drone/{drone_tag}/commands/{cmd_id}", "GET") => Some(VIEW_ONLY),
         ("/api/v1/drone/routes", "GET") => Some(VIEW_ONLY),
         ("/api/v1/drone/routes", "POST") => Some(MANAGE_ONLY),
         ("/api/v1/drone/routes/{id}", "PUT") => Some(MANAGE_ONLY),
@@ -106,7 +106,7 @@ pub fn required_permissions(path: &str, method: &str) -> Option<&'static [&'stat
         ("/api/v1/drone/control/release", "POST") => Some(&[CONTROL_RELEASE]),
         ("/api/v1/drone/control/renew", "POST") => Some(&[CONTROL_ACQUIRE]),
         ("/api/v1/drone/control/force_release", "POST") => Some(&[CONTROL_FORCE_RELEASE]),
-        ("/api/v1/drone/control/{device_id}/{control_type}", "GET") => Some(VIEW_ONLY),
+        ("/api/v1/drone/control/{drone_tag}/{control_type}", "GET") => Some(VIEW_ONLY),
         // 票据只用于订阅事件流：读权限或遥测权限任一即可换取，
         // 实际可订阅的消息类型由票据 scope 决定。
         ("/api/v1/drone/ws-ticket", "POST") => Some(&[VIEW, TELEMETRY_READ]),
@@ -166,9 +166,9 @@ mod tests {
             ("/api/v1/drone/ping", "GET"),
             ("/api/v1/drone/drones", "GET"),
             ("/api/v1/drone/drones", "POST"),
-            ("/api/v1/drone/drones/{device_id}", "GET"),
-            ("/api/v1/drone/drones/{device_id}", "PUT"),
-            ("/api/v1/drone/drones/{device_id}", "DELETE"),
+            ("/api/v1/drone/drones/{drone_tag}", "GET"),
+            ("/api/v1/drone/drones/{drone_tag}", "PUT"),
+            ("/api/v1/drone/drones/{drone_tag}", "DELETE"),
             ("/api/v1/drone/drones/{drone_tag}/cameras", "GET"),
             ("/api/v1/drone/drones/{drone_tag}/cameras", "POST"),
             (
@@ -176,12 +176,12 @@ mod tests {
                 "DELETE",
             ),
             ("/api/v1/drone/devices", "GET"),
-            ("/api/v1/drone/devices/{device_id}", "GET"),
-            ("/api/v1/drone/{device_id}/command", "POST"),
-            ("/api/v1/drone/{device_id}/telemetry", "GET"),
-            ("/api/v1/drone/devices/{device_id}/telemetry", "GET"),
+            ("/api/v1/drone/devices/{drone_tag}", "GET"),
+            ("/api/v1/drone/{drone_tag}/command", "POST"),
+            ("/api/v1/drone/{drone_tag}/telemetry", "GET"),
+            ("/api/v1/drone/devices/{drone_tag}/telemetry", "GET"),
             ("/api/v1/drone/commands/{cmd_id}", "GET"),
-            ("/api/v1/drone/{device_id}/commands/{cmd_id}", "GET"),
+            ("/api/v1/drone/{drone_tag}/commands/{cmd_id}", "GET"),
             ("/api/v1/drone/routes", "GET"),
             ("/api/v1/drone/routes", "POST"),
             ("/api/v1/drone/routes/{id}", "PUT"),
@@ -202,13 +202,31 @@ mod tests {
             ("/api/v1/drone/control/release", "POST"),
             ("/api/v1/drone/control/renew", "POST"),
             ("/api/v1/drone/control/force_release", "POST"),
-            ("/api/v1/drone/control/{device_id}/{control_type}", "GET"),
+            ("/api/v1/drone/control/{drone_tag}/{control_type}", "GET"),
             ("/api/v1/drone/ws-ticket", "POST"),
         ];
         for (path, method) in routes {
             assert!(
                 required_permissions(path, method).is_some(),
                 "路由 {method} {path} 未登记权限点"
+            );
+        }
+    }
+
+    #[test]
+    fn routes_use_drone_tag_path_params() {
+        for (path, method) in [
+            ("/api/v1/drone/drones/{drone_tag}", "GET"),
+            ("/api/v1/drone/devices/{drone_tag}", "GET"),
+            ("/api/v1/drone/{drone_tag}/command", "POST"),
+            ("/api/v1/drone/{drone_tag}/telemetry", "GET"),
+            ("/api/v1/drone/devices/{drone_tag}/telemetry", "GET"),
+            ("/api/v1/drone/{drone_tag}/commands/{cmd_id}", "GET"),
+            ("/api/v1/drone/control/{drone_tag}/{control_type}", "GET"),
+        ] {
+            assert!(
+                required_permissions(path, method).is_some(),
+                "路由 {method} {path} 未按 drone_tag 登记权限点"
             );
         }
     }

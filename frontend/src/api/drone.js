@@ -50,7 +50,7 @@ export async function removeDroneCamera(droneTag, cameraDeviceTag) {
 
 // 航线
 export async function getRoutes(deviceId = '') {
-  const res = await request.get('/drone/routes', { params: { device_id: deviceId } })
+  const res = await request.get('/drone/routes', { params: { drone_tag: deviceId } })
   return res.data.data
 }
 
@@ -73,7 +73,7 @@ export async function executeRoute(id, deviceId = '', lateralOffsetM = 0) {
   const res = await request.post(
     `/drone/routes/${encodeURIComponent(id)}/execute`,
     null,
-    { params: { device_id: deviceId, lateral_offset_m: lateralOffsetM } }
+    { params: { drone_tag: deviceId, lateral_offset_m: lateralOffsetM } }
   )
   return res.data.data
 }
@@ -121,12 +121,12 @@ export async function getCommand(cmdId) {
 
 // 告警 / 审计
 export async function getAlerts(deviceId = '', limit = 100) {
-  const res = await request.get('/drone/alerts', { params: { device_id: deviceId, limit } })
+  const res = await request.get('/drone/alerts', { params: { drone_tag: deviceId, limit } })
   return res.data.data
 }
 
 export async function getAudits(deviceId = '', limit = 200) {
-  const res = await request.get('/drone/audits', { params: { device_id: deviceId, limit } })
+  const res = await request.get('/drone/audits', { params: { drone_tag: deviceId, limit } })
   return res.data.data
 }
 
@@ -137,7 +137,7 @@ export async function getAudits(deviceId = '', limit = 200) {
 export async function getReplay(deviceId, startMs = 0, endMs = 0, limit = 5000) {
   const res = await request.get('/drone/replay', {
     params: {
-      device_id: deviceId,
+      drone_tag: deviceId,
       start_ms: startMs,
       end_ms: endMs,
       limit,
@@ -157,7 +157,7 @@ function errorMessage(err, fallback) {
 export async function acquireControl(deviceId, controlType = 'flight', priority = 10, leaseSeconds = 60) {
   try {
     const res = await request.post('/drone/control/acquire', {
-      device_id: deviceId,
+      drone_tag: deviceId,
       control_type: controlType,
       priority,
       lease_seconds: leaseSeconds,
@@ -176,7 +176,7 @@ export async function acquireControl(deviceId, controlType = 'flight', priority 
 export async function preemptControl(deviceId, controlType = 'flight', priority = 20, leaseSeconds = 60) {
   try {
     const res = await request.post('/drone/control/preempt', {
-      device_id: deviceId,
+      drone_tag: deviceId,
       control_type: controlType,
       priority,
       lease_seconds: leaseSeconds,
@@ -193,7 +193,7 @@ export async function preemptControl(deviceId, controlType = 'flight', priority 
 
 export async function releaseControl(deviceId, controlType = 'flight') {
   const res = await request.post('/drone/control/release', {
-    device_id: deviceId,
+    drone_tag: deviceId,
     control_type: controlType,
   })
   return res.data.data
@@ -201,7 +201,7 @@ export async function releaseControl(deviceId, controlType = 'flight') {
 
 export async function forceReleaseControl(deviceId, controlType = 'flight') {
   const res = await request.post('/drone/control/force_release', {
-    device_id: deviceId,
+    drone_tag: deviceId,
     control_type: controlType,
   })
   return res.data.data
@@ -210,7 +210,7 @@ export async function forceReleaseControl(deviceId, controlType = 'flight') {
 export async function renewControl(deviceId, controlType = 'flight', leaseSeconds = 60) {
   try {
     const res = await request.post('/drone/control/renew', {
-      device_id: deviceId,
+      drone_tag: deviceId,
       control_type: controlType,
       lease_seconds: leaseSeconds,
     })

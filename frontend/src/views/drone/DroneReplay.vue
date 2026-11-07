@@ -5,7 +5,7 @@
       <div class="header-left">
         <h1 class="page-title">轨迹回放</h1>
         <span class="header-sub">
-          {{ selected ? selected.name || selected.device_id : '未选择无人机' }}
+          {{ selected ? selected.name || selected.drone_tag : '未选择无人机' }}
           <el-tag
             v-if="selected"
             size="small"
@@ -26,9 +26,9 @@
         >
           <el-option
             v-for="d in store.drones"
-            :key="d.device_id"
-            :label="d.name || d.device_id"
-            :value="d.device_id"
+            :key="d.drone_tag"
+            :label="d.name || d.drone_tag"
+            :value="d.drone_tag"
           />
         </el-select>
         <el-date-picker
@@ -270,7 +270,7 @@ const shortcuts = [
   },
 ]
 
-const selected = computed(() => store.drones.find((d) => d.device_id === deviceId.value) || null)
+const selected = computed(() => store.drones.find((d) => d.drone_tag === deviceId.value) || null)
 const t0 = computed(() => (samples.value.length ? samples.value[0].ts_ms : 0))
 const t1 = computed(() =>
   samples.value.length ? samples.value[samples.value.length - 1].ts_ms : 0
@@ -294,7 +294,7 @@ const replayDrones = computed(() => {
   if (!t) return []
   return [
     {
-      device_id: deviceId.value || '__replay__',
+      drone_tag: deviceId.value || '__replay__',
       name: selected.value?.name || deviceId.value || '回放',
       online: true,
       armed: !!t.armed,
@@ -740,9 +740,9 @@ onMounted(async () => {
   window.addEventListener('keydown', onKeydown)
   await store.fetchDrones()
   const queryId = typeof route.query.device === 'string' ? route.query.device : ''
-  deviceId.value = store.drones.some((d) => d.device_id === queryId)
+  deviceId.value = store.drones.some((d) => d.drone_tag === queryId)
     ? queryId
-    : store.drones[0]?.device_id || ''
+    : store.drones[0]?.drone_tag || ''
   await load()
 })
 

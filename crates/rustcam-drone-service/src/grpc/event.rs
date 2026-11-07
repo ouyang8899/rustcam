@@ -24,10 +24,10 @@ impl EventServiceImpl {
     /// 内部使用：按设备过滤的事件流，便于单测与网关复用。
     pub async fn subscribe_to_channel(
         &self,
-        device_ids: Vec<String>,
+        drone_tags: Vec<String>,
     ) -> mpsc::Receiver<EventMessage> {
         let (tx, rx) = mpsc::channel::<EventMessage>(1024);
-        let filter: HashSet<String> = device_ids
+        let filter: HashSet<String> = drone_tags
             .into_iter()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
@@ -40,7 +40,7 @@ impl EventServiceImpl {
                 match events.recv().await {
                     Ok(evt) => {
                         if !filter.is_empty() {
-                            let keep = event_device_id(&evt)
+                            let keep = event_drone_tag(&evt)
                                 .map(|id| filter.contains(id))
                                 .unwrap_or(false);
                             if !keep {
@@ -66,12 +66,12 @@ impl EventServiceImpl {
     }
 }
 
-pub fn event_device_id(evt: &DroneEvent) -> Option<&str> {
+pub fn event_drone_tag(evt: &DroneEvent) -> Option<&str> {
     match evt {
-        DroneEvent::Telemetry(t) => Some(&t.device_id),
-        DroneEvent::Alert { device_id, .. } => Some(device_id),
-        DroneEvent::Control { device_id, .. } => Some(device_id),
-        DroneEvent::CommandReply { device_id, .. } => Some(device_id),
+        DroneEvent::Telemetry(t) => Some(&t.drone_tag),
+        DroneEvent::Alert { drone_tag, .. } => Some(drone_tag),
+        DroneEvent::Control { drone_tag, .. } => Some(drone_tag),
+        DroneEvent::CommandReply { drone_tag, .. } => Some(drone_tag),
     }
 }
 
@@ -93,7 +93,7 @@ impl EventService for EventServiceImpl {
         &self,
         request: Request<SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
-        let filter = request.into_inner().device_ids;
+        let filter = request.into_inner().drone_tags;
         let rx = self.subscribe_to_channel(filter).await;
         let stream = ReceiverStream::new(rx).map(Ok);
         Ok(Response::new(Box::pin(stream)))
@@ -115,7 +115,7 @@ mod tests {
 
         let tx = state.event_tx.clone();
         let evt = DroneEvent::Telemetry(Telemetry {
-            device_id: "drone-001".into(),
+            drone_tag: "drone-001".into(),
             ts_ms: 42,
             ..Default::default()
         });
@@ -131,19 +131,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn subscribe_filters_by_device_id() {
+    async fn subscribe_filters_by_drone_tag() {
         let state = DroneState::new(DroneConfig::default());
         let svc = EventServiceImpl::new(state.clone());
         let mut stream = svc.subscribe_to_channel(vec!["drone-001".into()]).await;
 
         let tx = state.event_tx.clone();
         tx.send(DroneEvent::Telemetry(Telemetry {
-            device_id: "drone-002".into(),
+            drone_tag: "drone-002".into(),
             ..Default::default()
         }))
         .unwrap();
         tx.send(DroneEvent::Telemetry(Telemetry {
-            device_id: "drone-001".into(),
+            drone_tag: "drone-001".into(),
             ts_ms: 1,
             ..Default::default()
         }))
@@ -158,28 +158,28 @@ mod tests {
     }
 
     #[test]
-    fn every_event_exposes_a_device_id() {
+    fn every_event_exposes_a_drone_tag() {
         let events = [
             DroneEvent::Telemetry(Telemetry {
-                device_id: "d1".into(),
+                drone_tag: "d1".into(),
                 ..Default::default()
             }),
             DroneEvent::Alert {
-                device_id: "d2".into(),
+                drone_tag: "d2".into(),
                 rule: "r".into(),
                 level: "info".into(),
                 message: "m".into(),
             },
             DroneEvent::CommandReply {
                 cmd_id: "c".into(),
-                device_id: "d3".into(),
+                drone_tag: "d3".into(),
                 status: "accepted".into(),
                 message: String::new(),
             },
         ];
-        assert_eq!(event_device_id(&events[0]), Some("d1"));
-        assert_eq!(event_device_id(&events[1]), Some("d2"));
-        assert_eq!(event_device_id(&events[2]), Some("d3"));
+        assert_eq!(event_drone_tag(&events[0]), Some("d1"));
+        assert_eq!(event_drone_tag(&events[1]), Some("d2"));
+        assert_eq!(event_drone_tag(&events[2]), Some("d3"));
     }
 
     /// 慢消费者触发 broadcast Lagged 后，订阅任务必须继续存活（规则 §6.9 / §11.6）。
@@ -193,7 +193,7 @@ mod tests {
         // 填满内部 mpsc(1024) 与 broadcast(4096)，逼出 Lagged。
         for i in 0..6_000i64 {
             let _ = tx.send(DroneEvent::Telemetry(Telemetry {
-                device_id: format!("drone-{i}"),
+                drone_tag: format!("drone-{i}"),
                 ts_ms: i,
                 ..Default::default()
             }));

@@ -20,10 +20,10 @@ struct TicketQuery {
     ticket: String,
 }
 
-/// Ğ£Ñé WS Æ±¾İ²¢È·¶¨¶©ÔÄ·¶Î§¡£
+/// æ ¡éªŒ WS ç¥¨æ®å¹¶ç¡®å®šè®¢é˜…èŒƒå›´ã€‚
 ///
-/// ×÷ÎªÌáÈ¡Æ÷ÏÈÓÚ WebSocketUpgrade Ö´ĞĞ£¬±£Ö¤¡¸Æ±¾İÎŞĞ§ / Ô½È¨¶©ÔÄ¡¹·Ö±ğ·µ»Ø
-/// 401 / 403£¬¶ø²»ÊÇ±»ÎÕÊÖÊ§°Ü£¨400£©ÑÚ¸Ç¡£
+/// ä½œä¸ºæå–å™¨å…ˆäº WebSocketUpgrade æ‰§è¡Œï¼Œä¿è¯ã€Œç¥¨æ®æ— æ•ˆ / è¶Šæƒè®¢é˜…ã€åˆ†åˆ«è¿”å›
+/// 401 / 403ï¼Œè€Œä¸æ˜¯è¢«æ¡æ‰‹å¤±è´¥ï¼ˆ400ï¼‰æ©ç›–ã€‚
 pub struct DroneTicket {
     pub kind: String,
 }
@@ -53,7 +53,7 @@ impl<S: Send + Sync> FromRequestParts<S> for DroneTicket {
             return Err(axum::http::StatusCode::NOT_FOUND);
         }
 
-        // Æ±¾İÔÚÇ©·¢Ê±°ó¶¨ÁË¿É¶©ÔÄµÄÏûÏ¢ÀàĞÍ£»Ô½È¨¶©ÔÄÒ»ÂÉ¾Ü¾ø¡£
+        // ç¥¨æ®åœ¨ç­¾å‘æ—¶ç»‘å®šäº†å¯è®¢é˜…çš„æ¶ˆæ¯ç±»å‹ï¼›è¶Šæƒè®¢é˜…ä¸€å¾‹æ‹’ç»ã€‚
         let allowed = permissions::ws_msg_types(&kind);
         if !allowed.iter().all(|m| scope.iter().any(|s| s == m)) {
             return Err(axum::http::StatusCode::FORBIDDEN);

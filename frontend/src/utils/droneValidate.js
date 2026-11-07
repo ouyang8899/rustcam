@@ -8,7 +8,7 @@
 
 /**
  * @typedef {Object} Telemetry
- * @property {string} device_id
+ * @property {string} drone_tag
  * @property {number} ts_ms
  * @property {number} lat
  * @property {number} lon
@@ -24,7 +24,7 @@
 
 /**
  * @typedef {Object} Alert
- * @property {string} device_id
+ * @property {string} drone_tag
  * @property {string} rule
  * @property {string} level
  * @property {string} message
@@ -33,7 +33,7 @@
 
 /**
  * @typedef {Object} ControlState
- * @property {string} device_id
+ * @property {string} drone_tag
  * @property {string} control_type
  * @property {string} holder
  * @property {number} priority
@@ -44,7 +44,7 @@
 /**
  * @typedef {Object} CommandReply
  * @property {string} cmd_id
- * @property {string} device_id
+ * @property {string} drone_tag
  * @property {string} status
  * @property {string} message
  * @property {number} ts_ms
@@ -85,7 +85,7 @@ function isNonEmptyString(value) {
 export function isTelemetry(value) {
   if (!isObject(value)) return false
   return (
-    isNonEmptyString(value.device_id) &&
+    isNonEmptyString(value.drone_tag) &&
     isNumber(value.ts_ms) &&
     isNumber(value.lat) &&
     isNumber(value.lon) &&
@@ -108,7 +108,7 @@ export function isTelemetry(value) {
 export function isAlert(value) {
   if (!isObject(value)) return false
   return (
-    isNonEmptyString(value.device_id) &&
+    isNonEmptyString(value.drone_tag) &&
     isNonEmptyString(value.rule) &&
     isNonEmptyString(value.level) &&
     typeof value.message === 'string'
@@ -123,7 +123,7 @@ export function isAlert(value) {
 export function isControl(value) {
   if (!isObject(value)) return false
   return (
-    isNonEmptyString(value.device_id) &&
+    isNonEmptyString(value.drone_tag) &&
     isNonEmptyString(value.control_type) &&
     typeof value.holder === 'string' &&
     isNumber(value.priority) &&
@@ -167,7 +167,7 @@ export function isAudit(value) {
  */
 export function isDrone(value) {
   if (!isObject(value)) return false
-  return isNonEmptyString(value.device_id)
+  return isNonEmptyString(value.drone_tag)
 }
 
 /**

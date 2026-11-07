@@ -100,7 +100,7 @@ pub fn map_grpc_status(status: &tonic::Status) -> DroneApiError {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TelemetryDto {
-    pub device_id: String,
+    pub drone_tag: String,
     pub ts_ms: i64,
     pub lat: f64,
     pub lon: f64,
@@ -129,12 +129,16 @@ pub struct TelemetryDto {
     pub home_lat: f64,
     pub home_lon: f64,
     pub home_alt: f64,
+    /// 飞控实测的唯一标识（`AUTOPILOT_VERSION.uid`）；空 = 飞控未提供。
+    ///
+    /// 与档案登记的 `unique_id` 比对即可判断链路身份是否一致
+    /// （drone.md §12.4 L3）。
+    pub unique_id: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DroneDto {
-    pub device_id: String,
     pub name: String,
     pub model: String,
     pub protocol: String,
@@ -191,10 +195,10 @@ pub struct RouteDto {
     pub id: String,
     pub name: String,
     #[serde(default)]
-    pub device_id: String,
+    pub drone_tag: String,
     /// 适用无人机列表；为空表示所有无人机都可执行（模板）。
     #[serde(default)]
-    pub device_ids: Vec<String>,
+    pub drone_tags: Vec<String>,
     pub waypoints: Vec<WaypointDto>,
     pub enabled: bool,
     pub updated_ms: i64,
@@ -217,10 +221,10 @@ pub struct FenceDto {
     pub radius_m: f64,
     pub min_alt: f64,
     pub max_alt: f64,
-    pub device_id: String,
+    pub drone_tag: String,
     /// 适用无人机列表；为空表示全部。
     #[serde(default)]
-    pub device_ids: Vec<String>,
+    pub drone_tags: Vec<String>,
     pub enabled: bool,
     pub version: i32,
     pub updated_ms: i64,
@@ -229,7 +233,7 @@ pub struct FenceDto {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CommandDto {
     pub cmd_id: String,
-    pub device_id: String,
+    pub drone_tag: String,
     pub status: String,
     pub message: String,
     pub ts_ms: i64,
@@ -250,7 +254,7 @@ pub struct CommandRequest {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AlertDto {
-    pub device_id: String,
+    pub drone_tag: String,
     pub rule: String,
     pub level: String,
     pub message: String,
@@ -260,7 +264,7 @@ pub struct AlertDto {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AuditDto {
     pub ts_ms: i64,
-    pub device_id: String,
+    pub drone_tag: String,
     pub category: String,
     pub action: String,
     pub operator: String,
@@ -270,7 +274,7 @@ pub struct AuditDto {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ControlDto {
-    pub device_id: String,
+    pub drone_tag: String,
     pub control_type: String,
     pub holder: String,
     pub priority: i32,
@@ -293,17 +297,17 @@ pub struct DroneEventDto {
 pub trait DroneApi: Send + Sync + 'static {
     async fn ping(&self) -> Result<(), DroneApiError>;
     async fn list_drones(&self) -> Result<Vec<DroneDto>, DroneApiError>;
-    async fn get_drone(&self, device_id: &str) -> Result<DroneDto, DroneApiError>;
+    async fn get_drone(&self, drone_tag: &str) -> Result<DroneDto, DroneApiError>;
     async fn save_drone(&self, drone: DroneDto, operator: &str) -> Result<DroneDto, DroneApiError>;
-    async fn delete_drone(&self, device_id: &str) -> Result<bool, DroneApiError>;
+    async fn delete_drone(&self, drone_tag: &str) -> Result<bool, DroneApiError>;
 
-    async fn list_routes(&self, device_id: &str) -> Result<Vec<RouteDto>, DroneApiError>;
+    async fn list_routes(&self, drone_tag: &str) -> Result<Vec<RouteDto>, DroneApiError>;
     async fn save_route(&self, route: RouteDto, operator: &str) -> Result<RouteDto, DroneApiError>;
     async fn delete_route(&self, id: &str, operator: &str) -> Result<bool, DroneApiError>;
     async fn execute_route(
         &self,
         id: &str,
-        device_id: &str,
+        drone_tag: &str,
         lateral_offset_m: f64,
         operator: &str,
     ) -> Result<CommandDto, DroneApiError>;
@@ -314,25 +318,25 @@ pub trait DroneApi: Send + Sync + 'static {
 
     async fn send_command(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         req: CommandRequest,
         operator: &str,
     ) -> Result<CommandDto, DroneApiError>;
     async fn get_command(&self, cmd_id: &str) -> Result<CommandDto, DroneApiError>;
     async fn list_alerts(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         limit: i32,
     ) -> Result<Vec<AlertDto>, DroneApiError>;
     async fn list_audits(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         limit: i32,
     ) -> Result<Vec<AuditDto>, DroneApiError>;
     /// 轨迹回放：按时间窗查询遥测历史。
     async fn telemetry_history(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         start_ms: i64,
         end_ms: i64,
         limit: i32,
@@ -340,7 +344,7 @@ pub trait DroneApi: Send + Sync + 'static {
 
     async fn acquire_control(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         control_type: &str,
         operator: &str,
         priority: i32,
@@ -349,7 +353,7 @@ pub trait DroneApi: Send + Sync + 'static {
     /// 续约控制权：只有当前持有人可以续约。
     async fn renew_control(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         control_type: &str,
         operator: &str,
         lease_seconds: i32,
@@ -357,7 +361,7 @@ pub trait DroneApi: Send + Sync + 'static {
     /// 抢占控制权：需要更高的优先级。
     async fn preempt_control(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         control_type: &str,
         operator: &str,
         priority: i32,
@@ -365,18 +369,18 @@ pub trait DroneApi: Send + Sync + 'static {
     ) -> Result<ControlDto, DroneApiError>;
     async fn release_control(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         control_type: &str,
         operator: &str,
         force: bool,
     ) -> Result<bool, DroneApiError>;
     async fn get_control(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         control_type: &str,
     ) -> Result<ControlDto, DroneApiError>;
 
-    async fn event_stream(&self, device_ids: Vec<String>) -> Result<EventStream, DroneApiError>;
+    async fn event_stream(&self, drone_tags: Vec<String>) -> Result<EventStream, DroneApiError>;
 }
 
 pub struct NoopDroneApi;
@@ -389,7 +393,7 @@ impl DroneApi for NoopDroneApi {
     async fn list_drones(&self) -> Result<Vec<DroneDto>, DroneApiError> {
         Err(DroneApiError::unavailable("drone-service 未配置"))
     }
-    async fn get_drone(&self, _device_id: &str) -> Result<DroneDto, DroneApiError> {
+    async fn get_drone(&self, _drone_tag: &str) -> Result<DroneDto, DroneApiError> {
         Err(DroneApiError::unavailable("drone-service 未配置"))
     }
     async fn save_drone(
@@ -399,10 +403,10 @@ impl DroneApi for NoopDroneApi {
     ) -> Result<DroneDto, DroneApiError> {
         Err(DroneApiError::unavailable("drone-service 未配置"))
     }
-    async fn delete_drone(&self, _device_id: &str) -> Result<bool, DroneApiError> {
+    async fn delete_drone(&self, _drone_tag: &str) -> Result<bool, DroneApiError> {
         Err(DroneApiError::unavailable("drone-service 未配置"))
     }
-    async fn list_routes(&self, _device_id: &str) -> Result<Vec<RouteDto>, DroneApiError> {
+    async fn list_routes(&self, _drone_tag: &str) -> Result<Vec<RouteDto>, DroneApiError> {
         Err(DroneApiError::unavailable("drone-service 未配置"))
     }
     async fn save_route(
@@ -418,7 +422,7 @@ impl DroneApi for NoopDroneApi {
     async fn execute_route(
         &self,
         _id: &str,
-        _device_id: &str,
+        _drone_tag: &str,
         _lateral_offset_m: f64,
         _operator: &str,
     ) -> Result<CommandDto, DroneApiError> {
@@ -439,7 +443,7 @@ impl DroneApi for NoopDroneApi {
     }
     async fn send_command(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _req: CommandRequest,
         _operator: &str,
     ) -> Result<CommandDto, DroneApiError> {
@@ -450,21 +454,21 @@ impl DroneApi for NoopDroneApi {
     }
     async fn list_alerts(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _limit: i32,
     ) -> Result<Vec<AlertDto>, DroneApiError> {
         Err(DroneApiError::unavailable("drone-service 未配置"))
     }
     async fn list_audits(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _limit: i32,
     ) -> Result<Vec<AuditDto>, DroneApiError> {
         Err(DroneApiError::unavailable("drone-service 未配置"))
     }
     async fn telemetry_history(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _start_ms: i64,
         _end_ms: i64,
         _limit: i32,
@@ -473,7 +477,7 @@ impl DroneApi for NoopDroneApi {
     }
     async fn acquire_control(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _control_type: &str,
         _operator: &str,
         _priority: i32,
@@ -483,7 +487,7 @@ impl DroneApi for NoopDroneApi {
     }
     async fn renew_control(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _control_type: &str,
         _operator: &str,
         _lease_seconds: i32,
@@ -492,7 +496,7 @@ impl DroneApi for NoopDroneApi {
     }
     async fn preempt_control(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _control_type: &str,
         _operator: &str,
         _priority: i32,
@@ -502,7 +506,7 @@ impl DroneApi for NoopDroneApi {
     }
     async fn release_control(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _control_type: &str,
         _operator: &str,
         _force: bool,
@@ -511,12 +515,12 @@ impl DroneApi for NoopDroneApi {
     }
     async fn get_control(
         &self,
-        _device_id: &str,
+        _drone_tag: &str,
         _control_type: &str,
     ) -> Result<ControlDto, DroneApiError> {
         Err(DroneApiError::unavailable("drone-service 未配置"))
     }
-    async fn event_stream(&self, _device_ids: Vec<String>) -> Result<EventStream, DroneApiError> {
+    async fn event_stream(&self, _drone_tags: Vec<String>) -> Result<EventStream, DroneApiError> {
         Err(DroneApiError::unavailable("drone-service 未配置"))
     }
 }
@@ -550,7 +554,7 @@ impl DroneClient {
 
 fn telemetry_dto(t: proto::Telemetry) -> TelemetryDto {
     TelemetryDto {
-        device_id: t.device_id,
+        drone_tag: t.drone_tag,
         ts_ms: t.ts_ms,
         lat: t.lat,
         lon: t.lon,
@@ -579,12 +583,12 @@ fn telemetry_dto(t: proto::Telemetry) -> TelemetryDto {
         home_lat: t.home_lat,
         home_lon: t.home_lon,
         home_alt: t.home_alt,
+        unique_id: t.unique_id,
     }
 }
 
 fn drone_dto(info: rustcam_drone_proto::control::DeviceInfo) -> DroneDto {
     DroneDto {
-        device_id: info.device_id,
         name: info.name,
         model: info.model,
         protocol: info.protocol,
@@ -610,7 +614,7 @@ fn route_dto(route: RouteMsg) -> RouteDto {
     RouteDto {
         id: route.id,
         name: route.name,
-        device_id: route.device_id,
+        drone_tag: route.drone_tag,
         waypoints: route
             .waypoints
             .into_iter()
@@ -626,7 +630,7 @@ fn route_dto(route: RouteMsg) -> RouteDto {
         enabled: route.enabled,
         updated_ms: route.updated_ms,
         end_action: route.end_action,
-        device_ids: route.device_ids,
+        drone_tags: route.drone_tags,
     }
 }
 
@@ -634,7 +638,7 @@ fn route_msg(route: RouteDto, operator: &str) -> RouteMsg {
     RouteMsg {
         id: route.id,
         name: route.name,
-        device_id: route.device_id,
+        drone_tag: route.drone_tag,
         waypoints: route
             .waypoints
             .into_iter()
@@ -651,7 +655,7 @@ fn route_msg(route: RouteDto, operator: &str) -> RouteMsg {
         updated_ms: route.updated_ms,
         operator: operator.to_string(),
         end_action: route.end_action,
-        device_ids: route.device_ids,
+        drone_tags: route.drone_tags,
     }
 }
 
@@ -667,8 +671,8 @@ fn fence_dto(fence: FenceMsg) -> FenceDto {
         radius_m: fence.radius_m,
         min_alt: fence.min_alt,
         max_alt: fence.max_alt,
-        device_id: fence.device_id,
-        device_ids: fence.device_ids,
+        drone_tag: fence.drone_tag,
+        drone_tags: fence.drone_tags,
         enabled: fence.enabled,
         version: fence.version,
         updated_ms: fence.updated_ms,
@@ -688,8 +692,8 @@ fn fence_msg(fence: FenceDto) -> FenceMsg {
         center_lat: fence.center_lat,
         center_lon: fence.center_lon,
         radius_m: fence.radius_m,
-        device_id: fence.device_id,
-        device_ids: fence.device_ids,
+        drone_tag: fence.drone_tag,
+        drone_tags: fence.drone_tags,
         shape: fence.shape,
         updated_ms: fence.updated_ms,
     }
@@ -698,7 +702,7 @@ fn fence_msg(fence: FenceDto) -> FenceMsg {
 fn command_dto(reply: proto::CommandReply) -> CommandDto {
     CommandDto {
         cmd_id: reply.cmd_id,
-        device_id: reply.device_id,
+        drone_tag: reply.drone_tag,
         status: reply.status,
         message: reply.message,
         ts_ms: reply.ts_ms,
@@ -707,7 +711,6 @@ fn command_dto(reply: proto::CommandReply) -> CommandDto {
 
 fn profile_msg(drone: DroneDto, operator: &str) -> ProfileMsg {
     ProfileMsg {
-        device_id: drone.device_id,
         name: drone.name,
         model: drone.model,
         autopilot: drone.autopilot,
@@ -733,7 +736,6 @@ fn profile_msg(drone: DroneDto, operator: &str) -> ProfileMsg {
 
 fn profile_dto(profile: ProfileMsg) -> DroneDto {
     DroneDto {
-        device_id: profile.device_id,
         name: profile.name,
         model: profile.model,
         protocol: "mavlink".into(),
@@ -782,11 +784,11 @@ impl DroneApi for DroneClient {
             .collect())
     }
 
-    async fn get_drone(&self, device_id: &str) -> Result<DroneDto, DroneApiError> {
+    async fn get_drone(&self, drone_tag: &str) -> Result<DroneDto, DroneApiError> {
         let mut query = self.query.clone();
         let resp = query
             .get_device(DeviceRequest {
-                device_id: device_id.to_string(),
+                drone_tag: drone_tag.to_string(),
             })
             .await
             .map_err(|e| map_grpc_status(&e))?;
@@ -802,22 +804,22 @@ impl DroneApi for DroneClient {
         Ok(profile_dto(resp.into_inner()))
     }
 
-    async fn delete_drone(&self, device_id: &str) -> Result<bool, DroneApiError> {
+    async fn delete_drone(&self, drone_tag: &str) -> Result<bool, DroneApiError> {
         let mut admin = self.admin.clone();
         let resp = admin
             .delete_drone_profile(DeviceRequest {
-                device_id: device_id.to_string(),
+                drone_tag: drone_tag.to_string(),
             })
             .await
             .map_err(|e| map_grpc_status(&e))?;
         Ok(resp.into_inner().deleted)
     }
 
-    async fn list_routes(&self, device_id: &str) -> Result<Vec<RouteDto>, DroneApiError> {
+    async fn list_routes(&self, drone_tag: &str) -> Result<Vec<RouteDto>, DroneApiError> {
         let mut admin = self.admin.clone();
         let resp = admin
             .list_routes(RouteListRequest {
-                device_id: device_id.to_string(),
+                drone_tag: drone_tag.to_string(),
             })
             .await
             .map_err(|e| map_grpc_status(&e))?;
@@ -853,7 +855,7 @@ impl DroneApi for DroneClient {
     async fn execute_route(
         &self,
         id: &str,
-        device_id: &str,
+        drone_tag: &str,
         lateral_offset_m: f64,
         operator: &str,
     ) -> Result<CommandDto, DroneApiError> {
@@ -862,7 +864,7 @@ impl DroneApi for DroneClient {
             .execute_route(RouteExecuteRequest {
                 route_id: id.to_string(),
                 operator: operator.to_string(),
-                device_id: device_id.to_string(),
+                drone_tag: drone_tag.to_string(),
                 lateral_offset_m,
             })
             .await
@@ -912,7 +914,7 @@ impl DroneApi for DroneClient {
 
     async fn send_command(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         req: CommandRequest,
         operator: &str,
     ) -> Result<CommandDto, DroneApiError> {
@@ -927,7 +929,7 @@ impl DroneApi for DroneClient {
         let resp = control
             .send_command(proto::Command {
                 cmd_id,
-                device_id: device_id.to_string(),
+                drone_tag: drone_tag.to_string(),
                 r#type: req.kind,
                 params: req.params,
                 deadline_ms: req.deadline_ms,
@@ -949,7 +951,7 @@ impl DroneApi for DroneClient {
         let status = resp.into_inner();
         Ok(CommandDto {
             cmd_id: status.cmd_id,
-            device_id: status.device_id,
+            drone_tag: status.drone_tag,
             status: status.status,
             message: status.message,
             ts_ms: chrono::Utc::now().timestamp_millis(),
@@ -958,13 +960,13 @@ impl DroneApi for DroneClient {
 
     async fn list_alerts(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         limit: i32,
     ) -> Result<Vec<AlertDto>, DroneApiError> {
         let mut query = self.query.clone();
         let resp = query
             .list_alerts(AlertListRequest {
-                device_id: device_id.to_string(),
+                drone_tag: drone_tag.to_string(),
                 limit,
             })
             .await
@@ -974,7 +976,7 @@ impl DroneApi for DroneClient {
             .alerts
             .into_iter()
             .map(|a| AlertDto {
-                device_id: a.device_id,
+                drone_tag: a.drone_tag,
                 rule: a.rule,
                 level: a.level,
                 message: a.message,
@@ -985,13 +987,13 @@ impl DroneApi for DroneClient {
 
     async fn list_audits(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         limit: i32,
     ) -> Result<Vec<AuditDto>, DroneApiError> {
         let mut admin = self.admin.clone();
         let resp = admin
             .list_audits(AuditListRequest {
-                device_id: device_id.to_string(),
+                drone_tag: drone_tag.to_string(),
                 limit,
             })
             .await
@@ -1002,7 +1004,7 @@ impl DroneApi for DroneClient {
             .into_iter()
             .map(|a| AuditDto {
                 ts_ms: a.ts_ms,
-                device_id: a.device_id,
+                drone_tag: a.drone_tag,
                 category: a.category,
                 action: a.action,
                 operator: a.operator,
@@ -1014,7 +1016,7 @@ impl DroneApi for DroneClient {
 
     async fn telemetry_history(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         start_ms: i64,
         end_ms: i64,
         limit: i32,
@@ -1022,7 +1024,7 @@ impl DroneApi for DroneClient {
         let mut query = self.query.clone();
         let resp = query
             .get_telemetry_history(TelemetryHistoryRequest {
-                device_id: device_id.to_string(),
+                drone_tag: drone_tag.to_string(),
                 start_ms,
                 end_ms,
                 limit,
@@ -1039,7 +1041,7 @@ impl DroneApi for DroneClient {
 
     async fn acquire_control(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         control_type: &str,
         operator: &str,
         priority: i32,
@@ -1048,7 +1050,7 @@ impl DroneApi for DroneClient {
         let mut control = self.control.clone();
         let resp = control
             .acquire_control(AcquireRequest {
-                device_id: device_id.to_string(),
+                drone_tag: drone_tag.to_string(),
                 control_type: control_type.to_string(),
                 operator: operator.to_string(),
                 priority,
@@ -1058,7 +1060,7 @@ impl DroneApi for DroneClient {
             .map_err(|e| map_grpc_status(&e))?
             .into_inner();
         Ok(ControlDto {
-            device_id: resp.device_id,
+            drone_tag: resp.drone_tag,
             control_type: resp.control_type,
             holder: resp.holder,
             priority: resp.priority,
@@ -1072,7 +1074,7 @@ impl DroneApi for DroneClient {
 
     async fn renew_control(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         control_type: &str,
         operator: &str,
         lease_seconds: i32,
@@ -1080,7 +1082,7 @@ impl DroneApi for DroneClient {
         let mut control = self.control.clone();
         let resp = control
             .renew_control(RenewRequest {
-                device_id: device_id.to_string(),
+                drone_tag: drone_tag.to_string(),
                 control_type: control_type.to_string(),
                 operator: operator.to_string(),
                 lease_seconds,
@@ -1089,7 +1091,7 @@ impl DroneApi for DroneClient {
             .map_err(|e| map_grpc_status(&e))?
             .into_inner();
         Ok(ControlDto {
-            device_id: resp.device_id,
+            drone_tag: resp.drone_tag,
             control_type: resp.control_type,
             holder: resp.holder,
             priority: resp.priority,
@@ -1103,7 +1105,7 @@ impl DroneApi for DroneClient {
 
     async fn preempt_control(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         control_type: &str,
         operator: &str,
         priority: i32,
@@ -1112,7 +1114,7 @@ impl DroneApi for DroneClient {
         let mut control = self.control.clone();
         let resp = control
             .preempt_control(PreemptRequest {
-                device_id: device_id.to_string(),
+                drone_tag: drone_tag.to_string(),
                 control_type: control_type.to_string(),
                 operator: operator.to_string(),
                 priority,
@@ -1122,7 +1124,7 @@ impl DroneApi for DroneClient {
             .map_err(|e| map_grpc_status(&e))?
             .into_inner();
         Ok(ControlDto {
-            device_id: resp.device_id,
+            drone_tag: resp.drone_tag,
             control_type: resp.control_type,
             holder: resp.holder,
             priority: resp.priority,
@@ -1136,7 +1138,7 @@ impl DroneApi for DroneClient {
 
     async fn release_control(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         control_type: &str,
         operator: &str,
         force: bool,
@@ -1145,7 +1147,7 @@ impl DroneApi for DroneClient {
         if force {
             let resp = control
                 .force_release_control(ForceReleaseRequest {
-                    device_id: device_id.to_string(),
+                    drone_tag: drone_tag.to_string(),
                     control_type: control_type.to_string(),
                     operator: operator.to_string(),
                 })
@@ -1156,7 +1158,7 @@ impl DroneApi for DroneClient {
         }
         let resp = control
             .release_control(ReleaseRequest {
-                device_id: device_id.to_string(),
+                drone_tag: drone_tag.to_string(),
                 control_type: control_type.to_string(),
                 operator: operator.to_string(),
             })
@@ -1167,13 +1169,13 @@ impl DroneApi for DroneClient {
 
     async fn get_control(
         &self,
-        device_id: &str,
+        drone_tag: &str,
         control_type: &str,
     ) -> Result<ControlDto, DroneApiError> {
         let mut control = self.control.clone();
         let resp = control
             .get_control_state(StateRequest {
-                device_id: device_id.to_string(),
+                drone_tag: drone_tag.to_string(),
                 control_type: control_type.to_string(),
             })
             .await
@@ -1181,7 +1183,7 @@ impl DroneApi for DroneClient {
             .into_inner();
         match resp.lease {
             Some(lease) => Ok(ControlDto {
-                device_id: lease.device_id,
+                drone_tag: lease.drone_tag,
                 control_type: lease.control_type,
                 holder: lease.holder,
                 priority: lease.priority,
@@ -1192,7 +1194,7 @@ impl DroneApi for DroneClient {
                 preempted: lease.preempted,
             }),
             None => Ok(ControlDto {
-                device_id: device_id.to_string(),
+                drone_tag: drone_tag.to_string(),
                 control_type: control_type.to_string(),
                 held: false,
                 ..Default::default()
@@ -1200,10 +1202,10 @@ impl DroneApi for DroneClient {
         }
     }
 
-    async fn event_stream(&self, device_ids: Vec<String>) -> Result<EventStream, DroneApiError> {
+    async fn event_stream(&self, drone_tags: Vec<String>) -> Result<EventStream, DroneApiError> {
         let mut client = self.events.clone();
         let response = client
-            .subscribe(SubscribeRequest { device_ids })
+            .subscribe(SubscribeRequest { drone_tags })
             .await
             .map_err(|e| map_grpc_status(&e))?;
         let stream = response.into_inner().map(|item| match item {
@@ -1226,9 +1228,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn telemetry_dto_carries_drone_tag() {
+        let dto = telemetry_dto(proto::Telemetry {
+            drone_tag: "drone-a".into(),
+            unique_id: "0011223344556677".into(),
+            ..Default::default()
+        });
+        assert_eq!(dto.drone_tag, "drone-a");
+        assert_eq!(dto.unique_id, "0011223344556677");
+    }
+
+    #[test]
+    fn telemetry_dto_carries_observed_unique_id() {
+        // 实测唯一标识必须透出到 REST 层：运维要靠它和档案登记值比对。
+        let msg = proto::Telemetry {
+            drone_tag: "drone-001".into(),
+            unique_id: "0011223344556677".into(),
+            ..Default::default()
+        };
+        let dto = telemetry_dto(msg);
+        assert_eq!(dto.unique_id, "0011223344556677");
+    }
+
+    #[test]
     fn profile_round_trip_keeps_link_identity_fields() {
         let dto = DroneDto {
-            device_id: "drone-001".into(),
             unique_id: "0123456789abcdef".into(),
             mavlink_addr: "udpin:10.88.0.2:14540".into(),
             signing_secret: "v1:00112233".into(),
@@ -1264,7 +1288,6 @@ mod tests {
     #[test]
     fn drone_dto_json_round_trip_keeps_drone_tag_and_camera_tags() {
         let dto = DroneDto {
-            device_id: "drone-001".into(),
             drone_tag: "drone-abc".into(),
             camera_device_tags: vec!["cam-001".into(), "cam-002".into()],
             ..Default::default()
@@ -1278,8 +1301,8 @@ mod tests {
     #[test]
     fn drone_dto_without_camera_tags_deserializes_with_empty_list() {
         let round: DroneDto =
-            serde_json::from_str(r#"{"device_id":"drone-001"}"#).expect("deserialize");
-        assert_eq!(round.device_id, "drone-001");
+            serde_json::from_str(r#"{"drone_tag":"drone-001"}"#).expect("deserialize");
+        assert_eq!(round.drone_tag, "drone-001");
         assert!(round.camera_device_tags.is_empty());
     }
 }

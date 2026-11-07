@@ -11,9 +11,9 @@
       >
         <el-option
           v-for="d in store.drones"
-          :key="d.device_id"
-          :label="d.name || d.device_id"
-          :value="d.device_id"
+          :key="d.drone_tag"
+          :label="d.name || d.drone_tag"
+          :value="d.drone_tag"
         />
       </el-select>
       <span class="lease-label">租约时长</span>
@@ -31,7 +31,7 @@
     </div>
 
     <el-table :data="rows" border stripe>
-      <el-table-column label="设备" prop="device_id" min-width="140" />
+      <el-table-column label="设备" prop="drone_tag" min-width="140" />
       <el-table-column label="类型" prop="control_type" width="90" />
       <el-table-column label="持有人" prop="holder" min-width="120" />
       <el-table-column label="优先级" prop="priority" width="90" />
@@ -88,12 +88,12 @@ const leaseOptions = LEASE_OPTIONS
 
 const rows = computed(() => {
   return store.drones.map((d) => {
-    const control = store.getControl(d.device_id, 'flight')
+    const control = store.getControl(d.drone_tag, 'flight')
     const remain = control?.held && control.expire_at_ms
       ? Math.max(0, Math.round((control.expire_at_ms - now.value) / 1000))
       : 0
     return {
-      device_id: d.device_id,
+      drone_tag: d.drone_tag,
       online: !!d.online,
       control_type: 'flight',
       holder: control?.holder || '—',
@@ -121,7 +121,7 @@ async function refresh() {
   try {
     await store.fetchDrones()
     for (const d of store.drones) {
-      await store.fetchControl(d.device_id, 'flight')
+      await store.fetchControl(d.drone_tag, 'flight')
     }
   } finally {
     loading.value = false
@@ -133,24 +133,24 @@ async function onSelect(id) {
 }
 
 async function acquire(row) {
-  const res = await store.acquireControl(row.device_id, 'flight', 10, leaseSeconds.value)
+  const res = await store.acquireControl(row.drone_tag, 'flight', 10, leaseSeconds.value)
   if (!res?.granted) {
     ElMessage.warning(res?.reason || '控制权被占用')
   }
 }
 
 async function preempt(row) {
-  const res = await preemptControl(row.device_id, 'flight', 20, leaseSeconds.value)
+  const res = await preemptControl(row.drone_tag, 'flight', 20, leaseSeconds.value)
   if (!res?.granted) {
     ElMessage.warning(res?.reason || '抢占失败（需要更高的优先级）')
   } else {
     ElMessage.success(`已抢占（原持有人 ${res.preempted || '未知'}）`)
   }
-  await store.fetchControl(row.device_id, 'flight')
+  await store.fetchControl(row.drone_tag, 'flight')
 }
 
 async function release(row) {
-  await store.releaseControl(row.device_id, 'flight')
+  await store.releaseControl(row.drone_tag, 'flight')
 }
 </script>
 

@@ -5,13 +5,13 @@ use serde::{Deserialize, Serialize};
 pub enum DroneEvent {
     Telemetry(Telemetry),
     Alert {
-        device_id: String,
+        drone_tag: String,
         rule: String,
         level: String,
         message: String,
     },
     Control {
-        device_id: String,
+        drone_tag: String,
         control_type: String,
         holder: String,
         priority: i32,
@@ -20,7 +20,7 @@ pub enum DroneEvent {
     },
     CommandReply {
         cmd_id: String,
-        device_id: String,
+        drone_tag: String,
         status: String,
         message: String,
     },
@@ -43,18 +43,18 @@ impl DroneEvent {
                 serde_json::to_value(t).unwrap_or_else(|_| serde_json::json!({}))
             }
             DroneEvent::Alert {
-                device_id,
+                drone_tag,
                 rule,
                 level,
                 message,
             } => serde_json::json!({
-                "device_id": device_id,
+                "drone_tag": drone_tag,
                 "rule": rule,
                 "level": level,
                 "message": message,
             }),
             DroneEvent::Control {
-                device_id,
+                drone_tag,
                 control_type,
                 holder,
                 priority,
@@ -62,7 +62,7 @@ impl DroneEvent {
                 action,
             } => {
                 serde_json::json!({
-                    "device_id": device_id,
+                    "drone_tag": drone_tag,
                     "control_type": control_type,
                     "holder": holder,
                     "priority": priority,
@@ -72,12 +72,12 @@ impl DroneEvent {
             }
             DroneEvent::CommandReply {
                 cmd_id,
-                device_id,
+                drone_tag,
                 status,
                 message,
             } => serde_json::json!({
                 "cmd_id": cmd_id,
-                "device_id": device_id,
+                "drone_tag": drone_tag,
                 "status": status,
                 "message": message,
             }),
@@ -97,7 +97,7 @@ mod tests {
         );
         assert_eq!(
             DroneEvent::Alert {
-                device_id: "d".into(),
+                drone_tag: "d".into(),
                 rule: "geofence".into(),
                 level: "high".into(),
                 message: "m".into()
@@ -107,7 +107,7 @@ mod tests {
         );
         assert_eq!(
             DroneEvent::Control {
-                device_id: "d".into(),
+                drone_tag: "d".into(),
                 control_type: "flight".into(),
                 holder: "alice".into(),
                 priority: 10,
@@ -120,7 +120,7 @@ mod tests {
         assert_eq!(
             DroneEvent::CommandReply {
                 cmd_id: "c".into(),
-                device_id: "d".into(),
+                drone_tag: "d".into(),
                 status: "acked".into(),
                 message: String::new()
             }
@@ -132,19 +132,19 @@ mod tests {
     #[test]
     fn telemetry_payload_is_flat_object() {
         let evt = DroneEvent::Telemetry(Telemetry {
-            device_id: "drone-001".into(),
+            drone_tag: "drone-001".into(),
             ts_ms: 7,
             ..Default::default()
         });
         let v = evt.payload_value();
-        assert_eq!(v["device_id"], "drone-001");
+        assert_eq!(v["drone_tag"], "drone-001");
         assert_eq!(v["ts_ms"], 7);
     }
 
     #[test]
     fn alert_payload_has_contract_fields() {
         let evt = DroneEvent::Alert {
-            device_id: "drone-001".into(),
+            drone_tag: "drone-001".into(),
             rule: "geofence".into(),
             level: "high".into(),
             message: "entered no_fly zone".into(),

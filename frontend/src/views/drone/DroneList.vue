@@ -42,14 +42,19 @@
             <div class="drone-name-cell">
               <span class="status-dot" :class="row.online ? 'online' : 'offline'"></span>
               <div>
-                <div class="drone-name">{{ row.name || row.device_id }}</div>
-                <div class="drone-id">{{ row.drone_tag || row.device_id }}</div>
+                <div class="drone-name">{{ row.name || row.drone_tag }}</div>
+                <div class="drone-id" data-testid="drone-tag">{{ row.drone_tag }}</div>
               </div>
             </div>
           </template>
         </el-table-column>
         <el-table-column prop="model" label="机型" width="130">
           <template #default="{ row }">{{ row.model || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="实测唯一标识" width="200">
+          <template #default="{ row }">
+            <span class="muted mono">{{ row.last_telemetry?.unique_id || '—' }}</span>
+          </template>
         </el-table-column>
         <el-table-column label="飞控 / 模式" width="180">
           <template #default="{ row }">
@@ -105,9 +110,6 @@
       <el-form :model="form" label-width="96px">
         <el-form-item label="无人机标识">
           <el-input :model-value="form.drone_tag || '保存后自动生成'" disabled />
-        </el-form-item>
-        <el-form-item label="设备 ID" required>
-          <el-input v-model="form.device_id" :disabled="editing" placeholder="与 adapter 配置的 device_id 一致，如 drone-001" />
         </el-form-item>
         <el-form-item label="名称">
           <el-input v-model="form.name" placeholder="如：东区巡检机" />
@@ -205,7 +207,6 @@ const cameraDialogVisible = ref(false)
 const originalCameraTags = ref([])
 
 const emptyForm = () => ({
-  device_id: '',
   name: '',
   model: '',
   autopilot: 'auto',
@@ -263,10 +264,6 @@ function removeCameraTag(tag) {
 }
 
 async function save() {
-  if (!form.device_id.trim()) {
-    ElMessage.warning('请填写设备 ID')
-    return
-  }
   if (form.unique_id.trim() && !/^[0-9a-f]+$/.test(form.unique_id.trim())) {
     ElMessage.warning('唯一标识必须是十六进制字符串')
     return
@@ -305,16 +302,16 @@ async function syncCameras(saved) {
 }
 
 function view(row) {
-  router.push({ path: '/drone/live', query: { device: row.device_id } })
+  router.push({ path: '/drone/live', query: { device: row.drone_tag } })
 }
 
 async function remove(row) {
   await ElMessageBox.confirm(
-    `删除无人机档案「${row.name || row.device_id}」？其航线也会一并删除。`,
+    `删除无人机档案「${row.name || row.drone_tag}」？其航线也会一并删除。`,
     '删除确认',
     { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
   )
-  await store.removeDrone(row.device_id)
+  await store.removeDrone(row.drone_tag)
 }
 
 onMounted(refresh)
@@ -378,6 +375,9 @@ onMounted(refresh)
 .drone-id {
   font-size: 11px;
   color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.mono {
   font-family: var(--font-mono);
 }
 .fc-cell {

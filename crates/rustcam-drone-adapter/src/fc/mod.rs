@@ -92,16 +92,20 @@ impl Shared {
 
 #[derive(Clone)]
 struct Settings {
-    device_id: String,
+    drone_tag: String,
     header: MavHeader,
     heartbeat_timeout: Duration,
     command_timeout: Duration,
     telemetry_period: Duration,
+    /// 平台分配的期望 system id；与实测不一致时告警（不阻断）。
+    expected_sysid: u8,
+    /// 平台分配的期望 component id。
+    expected_compid: u8,
 }
 
 #[derive(Clone)]
 pub struct FlightController {
-    pub device_id: String,
+    pub drone_tag: String,
     conn: Arc<AsyncConnection<MavMessage>>,
     shared: Arc<Shared>,
     telemetry_tx: broadcast::Sender<Telemetry>,
@@ -113,17 +117,29 @@ pub struct FlightController {
 
 impl FlightController {
     /// 建立 MAVLink 连接并启动后台任务。
-    pub async fn connect(cfg: &AdapterConfig) -> anyhow::Result<FlightController> {
-        let address = MavAddress::parse(&cfg.mavlink_addr)
-            .map_err(|e| anyhow::anyhow!("invalid mavlink_addr: {e}"))?;
+    /// 建立 MAVLink 连接并启动后台任务。
+    ///
+    /// 端点与机体标识由平台分配（drone.md §12.4 L3）：`addr` 是该机的 MAVLink
+    /// 端点，`drone_tag` 是平台唯一标识，`expected_sysid/expected_compid` 是
+    /// 平台登记的寻址号（与实测不一致只告警）。
+    pub async fn connect(
+        addr: &str,
+        drone_tag: &str,
+        expected_sysid: u8,
+        expected_compid: u8,
+        cfg: &AdapterConfig,
+    ) -> anyhow::Result<FlightController> {
+        let address = MavAddress::parse(addr)
+            .map_err(|e| anyhow::anyhow!("invalid mavlink_addr `{addr}`: {e}"))?;
         let hint = AutopilotHint::parse(&cfg.autopilot)?;
-        let device_id = cfg.effective_device_id();
 
         tracing::info!(
             address = %address,
             transport = address.transport().as_str(),
             autopilot = %cfg.autopilot,
-            device = %device_id,
+            drone_tag = %drone_tag,
+            expected_sysid,
+            expected_compid,
             "connecting to flight controller"
         );
 
@@ -141,11 +157,13 @@ impl FlightController {
             sequence: 0,
         };
         let settings = Settings {
-            device_id,
+            drone_tag: drone_tag.to_string(),
             header,
             heartbeat_timeout: Duration::from_millis(cfg.heartbeat_timeout_ms),
             command_timeout: Duration::from_millis(cfg.command_timeout_ms),
             telemetry_period: cfg.telemetry_period(),
+            expected_sysid,
+            expected_compid,
         };
 
         let telemetry_capacity = cfg.buffer_size.clamp(64, 65_536);
@@ -155,7 +173,7 @@ impl FlightController {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
         let fc = FlightController {
-            device_id: settings.device_id.clone(),
+            drone_tag: settings.drone_tag.clone(),
             conn: Arc::clone(&conn),
             shared: Arc::clone(&shared),
             telemetry_tx,
@@ -203,15 +221,6 @@ impl FlightController {
         self.event_tx.subscribe()
     }
 
-    /// 等待飞控读循环结束（链路断开）。
-    pub async fn wait_closed(&self) {
-        let mut rx = self.closed_tx.subscribe();
-        if *rx.borrow() {
-            return;
-        }
-        let _ = rx.changed().await;
-    }
-
     pub async fn is_online(&self) -> bool {
         let now = now_ms();
         let timeout = self.settings.heartbeat_timeout;
@@ -231,6 +240,26 @@ impl FlightController {
         self.shared.pending.len()
     }
 
+    /// 该机在平台分配时的 system id（未收到 HEARTBEAT 时用于出站寻址）。
+    pub fn target_system(&self) -> u8 {
+        let measured = self.shared.target_system.load(Ordering::Relaxed);
+        if measured > 0 {
+            measured
+        } else {
+            self.settings.expected_sysid
+        }
+    }
+
+    /// 该机在平台分配时的 component id。
+    pub fn target_component(&self) -> u8 {
+        let measured = self.shared.target_component.load(Ordering::Relaxed);
+        if measured > 0 {
+            measured
+        } else {
+            self.settings.expected_compid
+        }
+    }
+
     /// 执行一条下行指令；飞控离线时直接失败，不排队。
     pub async fn execute(&self, cmd: proto::Command) -> proto::CommandReply {
         let now = now_ms();
@@ -248,13 +277,14 @@ impl FlightController {
             return rejected_reply(&cmd, 503, "flight controller offline (no HEARTBEAT)");
         }
 
-        let target_system = self.shared.target_system.load(Ordering::Relaxed);
-        let target_component = self.shared.target_component.load(Ordering::Relaxed);
+        // 寻址优先用实测 sysid/compid；尚未收到 HEARTBEAT 时回落到平台分配值。
+        let target_system = self.target_system();
+        let target_component = self.target_component();
 
         tracing::info!(
             cmd_id = %cmd.cmd_id,
             kind = %cmd.r#type,
-            device = %cmd.device_id,
+            drone_tag = %cmd.drone_tag,
             autopilot = autopilot.as_str(),
             target_system,
             "executing command"
@@ -273,6 +303,79 @@ impl FlightController {
             &cmd,
         )
         .await
+    }
+}
+
+/// 多机连接池：一个 adapter 可同时管理多台无人机（每台一条 MAVLink 链路）。
+///
+/// 归属规则：**按 `drone_tag` 定位连接**——平台分配什么就是什么。
+/// 飞控帧里的 sysid 只用于出站寻址，不作为归属依据（sysid 在 1..255 不唯一，
+/// 多机接入时必然重复）。
+#[derive(Default)]
+pub struct FcPool {
+    links: std::sync::RwLock<std::collections::HashMap<String, FlightController>>,
+}
+
+impl FcPool {
+    /// 登记一条已建好的飞控链路。
+    pub fn insert(&self, drone_tag: &str, fc: FlightController) {
+        let mut guard = self
+            .links
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        guard.insert(drone_tag.to_string(), fc);
+    }
+
+    /// 取某台机体的连接。
+    pub fn get(&self, drone_tag: &str) -> Option<FlightController> {
+        let guard = self
+            .links
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        guard.get(drone_tag).cloned()
+    }
+
+    /// 当前已接入的机体列表。
+    pub fn drone_tags(&self) -> Vec<String> {
+        let guard = self
+            .links
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        guard.keys().cloned().collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.links
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// 向指定机体下发指令；目标未接入时立即失败（不排队）。
+    pub async fn execute(&self, drone_tag: &str, cmd: proto::Command) -> proto::CommandReply {
+        match self.get(drone_tag) {
+            Some(fc) => fc.execute(cmd).await,
+            None => rejected_reply(
+                &cmd,
+                404,
+                &format!("drone `{drone_tag}` is not connected to this adapter"),
+            ),
+        }
+    }
+
+    /// 停止全部链路的后台任务。
+    pub fn close(&self) {
+        let guard = self
+            .links
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        for fc in guard.values() {
+            fc.close();
+        }
     }
 }
 
@@ -320,6 +423,27 @@ fn spawn_reader(
                             .store(header.component_id, Ordering::Relaxed);
                         let first = !shared.online.swap(true, Ordering::SeqCst);
                         if first {
+                            // 实测寻址号与平台分配不一致 → 告警（可能是端点配错或飞控换了 sysid）。
+                            if settings.expected_sysid > 0
+                                && header.system_id as u8 != settings.expected_sysid
+                            {
+                                tracing::warn!(
+                                    drone_tag = %settings.drone_tag,
+                                    expected_sysid = settings.expected_sysid,
+                                    observed_sysid = header.system_id,
+                                    "[Adapter] flight controller sysid differs from platform assignment"
+                                );
+                            }
+                            if settings.expected_compid > 0
+                                && header.component_id != settings.expected_compid
+                            {
+                                tracing::warn!(
+                                    drone_tag = %settings.drone_tag,
+                                    expected_compid = settings.expected_compid,
+                                    observed_compid = header.component_id,
+                                    "[Adapter] flight controller compid differs from platform assignment"
+                                );
+                            }
                             tracing::info!(
                                 autopilot = autopilot.as_str(),
                                 system_id = header.system_id,
@@ -465,7 +589,7 @@ fn spawn_telemetry(
             let telemetry = {
                 let state = shared.lock_state();
                 state.to_telemetry(
-                    &settings.device_id,
+                    &settings.drone_tag,
                     seq,
                     now,
                     settings.heartbeat_timeout.as_millis() as u64,
@@ -480,7 +604,7 @@ fn spawn_telemetry(
 fn rejected_reply(cmd: &proto::Command, code: i32, message: &str) -> proto::CommandReply {
     proto::CommandReply {
         cmd_id: cmd.cmd_id.clone(),
-        device_id: cmd.device_id.clone(),
+        drone_tag: cmd.drone_tag.clone(),
         status: rustcam_drone_core::command::status::REJECTED.to_string(),
         code,
         message: message.to_string(),
@@ -512,9 +636,8 @@ mod tests {
         socket.local_addr().unwrap().port()
     }
 
-    fn test_config(port: u16) -> AdapterConfig {
+    fn test_config() -> AdapterConfig {
         AdapterConfig {
-            mavlink_addr: format!("udpin:127.0.0.1:{port}"),
             autopilot: "auto".into(),
             telemetry_hz: 20,
             heartbeat_timeout_ms: 2_000,
@@ -540,7 +663,15 @@ mod tests {
     #[tokio::test]
     async fn real_mavlink_link_reports_telemetry_and_acks_commands() {
         let port = free_udp_port();
-        let fc = FlightController::connect(&test_config(port)).await.unwrap();
+        let fc = FlightController::connect(
+            &format!("udpin:127.0.0.1:{port}"),
+            "drone-001",
+            1,
+            1,
+            &test_config(),
+        )
+        .await
+        .unwrap();
         let mut telemetry_rx = fc.subscribe_telemetry();
 
         let vehicle = ::mavlink::connect_async::<MavMessage>(&format!("udpout:127.0.0.1:{port}"))
@@ -565,7 +696,7 @@ mod tests {
         .await
         .expect("should receive telemetry over MAVLink");
         assert_eq!(telemetry.mode, "AUTO.LOITER");
-        assert_eq!(telemetry.device_id, "drone-001");
+        assert_eq!(telemetry.drone_tag, "drone-001");
 
         // 位置消息进入同一条遥测
         vehicle
@@ -603,7 +734,7 @@ mod tests {
         let fc_handle = fc.clone();
         let command = proto::Command {
             cmd_id: "cmd-it-1".into(),
-            device_id: "drone-001".into(),
+            drone_tag: "drone-001".into(),
             r#type: "rtl".into(),
             params: Default::default(),
             deadline_ms: 0,

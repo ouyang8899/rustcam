@@ -58,7 +58,7 @@
           </el-form-item>
           <el-form-item label="适用无人机（可多选）">
             <el-select
-              v-model="form.device_ids"
+              v-model="form.drone_tags"
               multiple
               collapse-tags
               clearable
@@ -67,9 +67,9 @@
             >
               <el-option
                 v-for="d in store.drones"
-                :key="d.device_id"
-                :label="d.name || d.device_id"
-                :value="d.device_id"
+                :key="d.drone_tag"
+                :label="d.name || d.drone_tag"
+                :value="d.drone_tag"
               />
             </el-select>
           </el-form-item>
@@ -150,7 +150,7 @@ const form = reactive({
   name: '',
   type: 'no_fly',
   shape: 'polygon',
-  device_ids: [],
+  drone_tags: [],
   min_alt: 0,
   max_alt: 120,
   enabled: true,
@@ -190,18 +190,18 @@ function clearPoints() {
   points.value = []
 }
 
-/** 无人机显示名；空 device_id 表示围栏对全部无人机生效。 */
+/** 无人机显示名；空 drone_tag 表示围栏对全部无人机生效。 */
 function droneName(deviceId) {
   if (!deviceId) return '全部无人机'
-  return store.drones.find((d) => d.device_id === deviceId)?.name || deviceId
+  return store.drones.find((d) => d.drone_tag === deviceId)?.name || deviceId
 }
 
 /** 围栏适用范围文案：全部 / 多架名称。 */
 function fenceScope(fence) {
-  const ids = fence.device_ids?.length
-    ? fence.device_ids
-    : fence.device_id
-      ? [fence.device_id]
+  const ids = fence.drone_tags?.length
+    ? fence.drone_tags
+    : fence.drone_tag
+      ? [fence.drone_tag]
       : []
   if (ids.length === 0) return '全部无人机'
   return `适用 ${ids.map(droneName).join('、')}`
@@ -212,7 +212,7 @@ function newFence() {
   form.name = ''
   form.type = 'no_fly'
   form.shape = 'polygon'
-  form.device_ids = []
+  form.drone_tags = []
   form.min_alt = 0
   form.max_alt = 120
   form.enabled = true
@@ -239,10 +239,10 @@ function loadFence(fence) {
   form.name = fence.name
   form.type = fence.type || 'no_fly'
   form.shape = fence.shape || 'polygon'
-  form.device_ids = fence.device_ids?.length
-    ? [...fence.device_ids]
-    : fence.device_id
-      ? [fence.device_id]
+  form.drone_tags = fence.drone_tags?.length
+    ? [...fence.drone_tags]
+    : fence.drone_tag
+      ? [fence.drone_tag]
       : []
   form.min_alt = fence.min_alt || 0
   form.max_alt = fence.max_alt || 120
@@ -336,8 +336,8 @@ async function save() {
     radius_m: form.shape === 'circle' ? circle.radius_m : 0,
     min_alt: Number(form.min_alt) || 0,
     max_alt: Number(form.max_alt) || 0,
-    device_id: form.device_ids.length === 1 ? form.device_ids[0] : '',
-    device_ids: [...form.device_ids],
+    drone_tag: form.drone_tags.length === 1 ? form.drone_tags[0] : '',
+    drone_tags: [...form.drone_tags],
     enabled: form.enabled,
   }
   const saved = await store.saveFence(payload)

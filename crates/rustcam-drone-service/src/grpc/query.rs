@@ -21,11 +21,11 @@ impl QueryServiceImpl {
     fn device_info(
         entry: Option<&DeviceEntry>,
         profile: Option<&DroneProfileRecord>,
-        device_id: &str,
+        drone_tag: &str,
     ) -> DeviceInfo {
         let last = entry.and_then(|e| e.last_telemetry.as_ref());
         DeviceInfo {
-            device_id: device_id.to_string(),
+            drone_tag: drone_tag.to_string(),
             protocol: entry
                 .map(|e| e.protocol.clone())
                 .unwrap_or_else(|| "mavlink".into()),
@@ -36,7 +36,7 @@ impl QueryServiceImpl {
             name: profile
                 .map(|p| p.name.clone())
                 .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| device_id.to_string()),
+                .unwrap_or_else(|| drone_tag.to_string()),
             model: profile.map(|p| p.model.clone()).unwrap_or_default(),
             device_tag: profile.map(|p| p.device_tag.clone()).unwrap_or_default(),
             channel_tag: profile.map(|p| p.channel_tag.clone()).unwrap_or_default(),
@@ -46,7 +46,6 @@ impl QueryServiceImpl {
             mode: last.map(|t| t.mode.clone()).unwrap_or_default(),
             enabled: profile.map(|p| p.enabled).unwrap_or(true),
             notes: profile.map(|p| p.notes.clone()).unwrap_or_default(),
-            drone_tag: profile.map(|p| p.drone_tag.clone()).unwrap_or_default(),
         }
     }
 
@@ -55,24 +54,24 @@ impl QueryServiceImpl {
         let mut seen = std::collections::HashSet::new();
         for entry in self.state.profiles.iter() {
             let profile = entry.value();
-            let live = self.state.devices.get(&profile.device_id);
+            let live = self.state.devices.get(&profile.drone_tag);
             out.push(Self::device_info(
                 live.as_ref().map(|v| v.value()),
                 Some(profile),
-                &profile.device_id,
+                &profile.drone_tag,
             ));
-            seen.insert(profile.device_id.clone());
+            seen.insert(profile.drone_tag.clone());
         }
         for entry in self.state.devices.iter() {
-            if !seen.contains(&entry.device_id) {
+            if !seen.contains(&entry.drone_tag) {
                 out.push(Self::device_info(
                     Some(entry.value()),
                     None,
-                    &entry.device_id,
+                    &entry.drone_tag,
                 ));
             }
         }
-        out.sort_by(|a, b| a.device_id.cmp(&b.device_id));
+        out.sort_by(|a, b| a.drone_tag.cmp(&b.drone_tag));
         out
     }
 }
@@ -92,20 +91,20 @@ impl QueryService for QueryServiceImpl {
         &self,
         request: Request<DeviceRequest>,
     ) -> Result<Response<DeviceInfo>, Status> {
-        let device_id = request.into_inner().device_id;
+        let drone_tag = request.into_inner().drone_tag;
         let profile = self
             .state
             .profiles
-            .get(&device_id)
+            .get(&drone_tag)
             .map(|p| p.value().clone());
-        let live = self.state.devices.get(&device_id).map(|d| d.clone());
+        let live = self.state.devices.get(&drone_tag).map(|d| d.clone());
         if profile.is_none() && live.is_none() {
-            return Err(Status::not_found(format!("unknown device `{device_id}`")));
+            return Err(Status::not_found(format!("unknown device `{drone_tag}`")));
         }
         Ok(Response::new(Self::device_info(
             live.as_ref(),
             profile.as_ref(),
-            &device_id,
+            &drone_tag,
         )))
     }
 
@@ -113,14 +112,14 @@ impl QueryService for QueryServiceImpl {
         &self,
         request: Request<DeviceRequest>,
     ) -> Result<Response<proto::Telemetry>, Status> {
-        let device_id = request.into_inner().device_id;
-        let Some(entry) = self.state.devices.get(&device_id) else {
-            return Err(Status::not_found(format!("unknown device `{device_id}`")));
+        let drone_tag = request.into_inner().drone_tag;
+        let Some(entry) = self.state.devices.get(&drone_tag) else {
+            return Err(Status::not_found(format!("unknown device `{drone_tag}`")));
         };
         match &entry.last_telemetry {
             Some(t) => Ok(Response::new(shadow::to_proto(t))),
             None => Err(Status::not_found(format!(
-                "no telemetry received for `{device_id}` yet"
+                "no telemetry received for `{drone_tag}` yet"
             ))),
         }
     }
@@ -135,13 +134,13 @@ impl QueryService for QueryServiceImpl {
                 cmd_id: record.cmd_id.clone(),
                 status: record.status.clone(),
                 message: record.message.clone(),
-                device_id: record.device_id.clone(),
+                drone_tag: record.drone_tag.clone(),
             })),
             None => Ok(Response::new(CommandStatus {
                 cmd_id,
                 status: "unknown".into(),
                 message: "command not found".into(),
-                device_id: String::new(),
+                drone_tag: String::new(),
             })),
         }
     }
@@ -158,10 +157,10 @@ impl QueryService for QueryServiceImpl {
         };
         let alerts = self
             .state
-            .recent_alerts(&req.device_id, limit)
+            .recent_alerts(&req.drone_tag, limit)
             .into_iter()
             .map(|a| Alert {
-                device_id: a.device_id,
+                drone_tag: a.drone_tag,
                 rule: a.rule,
                 level: a.level,
                 message: a.message,
@@ -183,7 +182,7 @@ impl QueryService for QueryServiceImpl {
         };
         let samples = self
             .state
-            .telemetry_history(&req.device_id, req.start_ms, req.end_ms, limit)
+            .telemetry_history(&req.drone_tag, req.start_ms, req.end_ms, limit)
             .iter()
             .map(shadow::to_proto)
             .collect();
@@ -232,12 +231,12 @@ mod tests {
             .unwrap()
             .into_inner();
         assert_eq!(list.devices.len(), 1);
-        assert_eq!(list.devices[0].device_id, "drone-001");
+        assert_eq!(list.devices[0].drone_tag, "drone-001");
         assert!(list.devices[0].online);
 
         let info = svc
             .get_device(Request::new(DeviceRequest {
-                device_id: "drone-001".into(),
+                drone_tag: "drone-001".into(),
             }))
             .await
             .unwrap()
@@ -260,7 +259,7 @@ mod tests {
         let d2 = list
             .devices
             .iter()
-            .find(|d| d.device_id == "drone-002")
+            .find(|d| d.drone_tag == "drone-002")
             .unwrap();
         assert!(!d2.online);
         assert_eq!(d2.name, "drone-002");
@@ -270,7 +269,7 @@ mod tests {
     async fn alerts_are_returned_from_buffer() {
         let state = state_with_device();
         state.push_alert(crate::state::AlertRecord {
-            device_id: "drone-001".into(),
+            drone_tag: "drone-001".into(),
             rule: "geofence_breach".into(),
             level: "high".into(),
             message: "越界".into(),
@@ -279,7 +278,7 @@ mod tests {
         let svc = QueryServiceImpl::new(state);
         let alerts = svc
             .list_alerts(Request::new(AlertListRequest {
-                device_id: "drone-001".into(),
+                drone_tag: "drone-001".into(),
                 limit: 10,
             }))
             .await
@@ -294,7 +293,7 @@ mod tests {
         let svc = QueryServiceImpl::new(state_with_device());
         let err = svc
             .get_telemetry(Request::new(DeviceRequest {
-                device_id: "drone-001".into(),
+                drone_tag: "drone-001".into(),
             }))
             .await
             .unwrap_err();
@@ -306,7 +305,7 @@ mod tests {
         let state = state_with_device();
         for ts in [1_000_i64, 2_000, 3_000] {
             state.record_telemetry(&rustcam_drone_core::telemetry::Telemetry {
-                device_id: "drone-001".into(),
+                drone_tag: "drone-001".into(),
                 ts_ms: ts,
                 lat: 31.0,
                 lon: 121.0,
@@ -317,7 +316,7 @@ mod tests {
         let svc = QueryServiceImpl::new(state);
         let history = svc
             .get_telemetry_history(Request::new(TelemetryHistoryRequest {
-                device_id: "drone-001".into(),
+                drone_tag: "drone-001".into(),
                 start_ms: 1_500,
                 end_ms: 0,
                 limit: 10,
