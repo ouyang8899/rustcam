@@ -49,7 +49,7 @@
           :key="d.drone_tag"
           class="rail-item"
           :class="{ active: d.drone_tag === selectedId }"
-          @click="select(d.drone_tag)"
+          @click="onDroneSelect(d.drone_tag)"
         >
           <span class="status-dot" :class="d.online ? 'online' : 'offline'"></span>
           <div class="rail-main">
@@ -75,7 +75,7 @@
           :draw-mode="pickMode ? 'waypoint' : 'none'"
           :draft-points="pickMode && gotoForm.lat ? [{ lon: gotoForm.lon, lat: gotoForm.lat }] : []"
           @map-click="onMapClick"
-          @select="select"
+          @select="onDroneSelect"
         />
         <CesiumGlobe
           v-else
@@ -88,6 +88,7 @@
           :draw-mode="pickMode ? 'waypoint' : 'none'"
           :draft-points="pickMode && gotoForm.lat ? [{ lon: gotoForm.lon, lat: gotoForm.lat, alt: gotoForm.alt }] : []"
           @map-click="onMapClick"
+          @select="onDroneSelect"
         >
           <template #hint>
             <el-tag v-if="pickMode" type="warning" effect="dark">点击地图选择目标点</el-tag>
@@ -100,61 +101,11 @@
           effect="dark"
         >点击地图选择目标点</el-tag>
 
-        <div class="video-card" v-if="selected">
-          <div class="card-head">
-            <span>机上视频</span>
-            <el-select
-              v-if="cameraOptions.length > 1"
-              v-model="cameraIndex"
-              size="small"
-              class="video-select"
-            >
-              <el-option
-                v-for="(tag, i) in cameraOptions"
-                :key="tag"
-                :label="tag"
-                :value="i"
-              />
-            </el-select>
-            <el-select
-              v-if="channelOptions.length > 1"
-              v-model="channelIndex"
-              size="small"
-              class="video-select"
-            >
-              <el-option
-                v-for="(ch, i) in channelOptions"
-                :key="ch.channel_tag"
-                :label="ch.name || ch.channel_tag"
-                :value="i"
-              />
-            </el-select>
-            <el-tag v-else-if="activeCameraTag" size="small" effect="plain">
-              {{ activeCameraTag }}
-            </el-tag>
-          </div>
-          <VideoPlayer
-            v-if="videoSrc"
-            :live-src="videoSrc"
-            type="auto"
-            :is-live="true"
-            :autoplay="true"
-          />
-          <div v-else class="video-placeholder">
-            <div>未关联可播放视频</div>
-            <div class="video-hint">
-              在无人机档案中关联摄像头；若通道未推流请先启动播放
-            </div>
-            <el-button
-              v-if="activeCameraTag"
-              size="small"
-              type="primary"
-              plain
-              :loading="videoLoading"
-              @click="resolveVideo"
-            >从平台拉流</el-button>
-          </div>
-        </div>
+        <DroneVideoPopup
+          :drone="videoDrone"
+          :visible="videoOpen"
+          @close="closeDroneVideo"
+        />
       </div>
 
       <aside class="panel-rail">
@@ -309,11 +260,11 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Aim, Refresh } from '@element-plus/icons-vue'
 import { useDroneStore } from '../../stores/droneStore'
-import { getChannelPlayLinks, getDeviceChannels } from '../../api/channels'
 import { DEFAULT_LEASE_SECONDS, LEASE_OPTIONS } from '../../utils/droneLease'
+import { droneVideoAvailability } from '../../utils/droneVideo.js'
 import CesiumGlobe from '../../components/drone/CesiumGlobe.vue'
 import Map2D from '../../components/drone/Map2D.vue'
-import VideoPlayer from '../../components/VideoPlayer.vue'
+import DroneVideoPopup from '../../components/drone/DroneVideoPopup.vue'
 
 const store = useDroneStore()
 const route = useRoute()
@@ -324,12 +275,9 @@ const selectedId = ref('')
 /** 当前地图上显示的计划航线 id；空表示不显示。 */
 const routeId = ref('')
 const pickMode = ref(false)
-const videoLoading = ref(false)
-const resolvedVideo = ref('')
-/** 关联摄像头与通道的选择下标。 */
-const cameraIndex = ref(0)
-const channelIndex = ref(0)
-const channelOptions = ref([])
+/** 点击无人机后弹出的实时视频浮窗。 */
+const videoOpen = ref(false)
+const videoDroneTag = ref('')
 const gotoForm = reactive({ lat: 31.2304, lon: 121.4737, alt: 30 })
 const gimbal = reactive({ pitch: -30, yaw: 0 })
 /** 机体绝对航向（度）。 */
@@ -341,10 +289,9 @@ const leaseOptions = LEASE_OPTIONS
 const selected = computed(() =>
   store.drones.find(d => d.drone_tag === selectedId.value) || null
 )
-/** 可选摄像头：取该无人机已关联的摄像头（drone_camera）。 */
-const cameraOptions = computed(() => selected.value?.camera_device_tags || [])
-const activeCameraTag = computed(() => cameraOptions.value[cameraIndex.value] || '')
-const activeChannel = computed(() => channelOptions.value[channelIndex.value] || null)
+const videoDrone = computed(() =>
+  store.drones.find(d => d.drone_tag === videoDroneTag.value) || null
+)
 const telemetry = computed(() =>
   telemetryFor(selectedId.value)
 )
@@ -394,7 +341,6 @@ onMounted(() => {
 onUnmounted(() => {
   if (leaseTimer) clearInterval(leaseTimer)
 })
-const videoSrc = computed(() => resolvedVideo.value)
 const speed = computed(() => {
   const t = telemetry.value
   if (!t) return 0
@@ -424,10 +370,6 @@ function telemetryFor(id) {
 
 function select(id) {
   selectedId.value = id
-  resolvedVideo.value = ''
-  cameraIndex.value = 0
-  channelIndex.value = 0
-  channelOptions.value = []
   const t = telemetryFor(id)
   if (t && t.lat && t.lon) {
     gotoForm.lat = t.lat
@@ -451,61 +393,43 @@ async function loadRoutes(id) {
   }
 }
 
-async function loadCameraChannels() {
-  const cameraTag = activeCameraTag.value
-  if (!cameraTag) {
-    channelOptions.value = []
+function onDroneSelect(id) {
+  select(id)
+  openDroneVideo(id)
+}
+
+/** 在线且有关联摄像头时，才弹出该无人机的实时视频。 */
+function openDroneVideo(id) {
+  const drone = store.drones.find(d => d.drone_tag === id)
+  const availability = droneVideoAvailability(drone)
+  if (!availability.ok) {
+    videoOpen.value = false
+    if (availability.reason === 'offline') {
+      ElMessage.warning('无人机离线，暂时无法查看实时视频')
+    } else if (availability.reason === 'no_camera') {
+      ElMessage.warning('该无人机未关联摄像头')
+    }
     return
   }
-  try {
-    const list = await getDeviceChannels(cameraTag)
-    channelOptions.value = list || []
-    channelIndex.value = 0
-    if (channelOptions.value.length > 0) {
-      await resolveVideo()
-    }
-  } catch (e) {
-    channelOptions.value = []
-  }
+  videoDroneTag.value = id
+  videoOpen.value = true
 }
 
-watch([cameraIndex, selectedId], async () => {
-  channelIndex.value = 0
-  channelOptions.value = []
-  resolvedVideo.value = ''
-  await loadCameraChannels()
-})
-
-watch(channelIndex, () => {
-  resolvedVideo.value = ''
-  if (activeChannel.value) resolveVideo()
-})
-
-async function resolveVideo() {
-  const cameraTag = activeCameraTag.value
-  if (!cameraTag) return
-  const channelTag = activeChannel.value?.channel_tag || cameraTag
-  videoLoading.value = true
-  try {
-    const data = await getChannelPlayLinks(cameraTag, channelTag)
-    const url = data?.flv || data?.web_flv || data?.hls || data?.webrtc
-    if (!url) {
-      ElMessage.warning('平台未返回播放地址，请确认通道已推流')
-      return
-    }
-    resolvedVideo.value = url
-  } catch (e) {
-    ElMessage.error('获取播放地址失败：' + (e.message || e))
-  } finally {
-    videoLoading.value = false
-  }
+function closeDroneVideo() {
+  videoOpen.value = false
 }
+
+watch(
+  () => videoDrone.value?.online,
+  (online) => {
+    if (videoOpen.value && online === false) videoOpen.value = false
+  },
+)
 
 function refresh() {
   store.fetchDrones()
   if (selectedId.value) {
     loadRoutes(selectedId.value)
-    loadCameraChannels()
   }
 }
 
@@ -819,50 +743,6 @@ onMounted(async () => {
   font-family: var(--font-mono);
   white-space: nowrap;
 }
-.video-card {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  width: 300px;
-  border-radius: 10px;
-  overflow: hidden;
-  background: rgba(8, 15, 30, 0.92);
-  border: 1px solid var(--border);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
-}
-.card-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  padding: 8px 10px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  border-bottom: 1px solid var(--border);
-}
-.video-select {
-  width: 130px;
-}
-.video-card :deep(.video-player) {
-  height: 170px;
-}
-.video-placeholder {
-  height: 170px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-.video-hint {
-  font-size: 11px;
-  max-width: 220px;
-  text-align: center;
-  line-height: 1.5;
-}
 .panel-rail {
   padding: 10px;
   display: flex;
@@ -1007,9 +887,6 @@ onMounted(async () => {
 @media (max-width: 1280px) {
   .live-body {
     grid-template-columns: 180px minmax(0, 1fr) 300px;
-  }
-  .video-card {
-    width: 240px;
   }
 }
 </style>

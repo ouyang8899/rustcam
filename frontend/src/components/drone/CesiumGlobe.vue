@@ -16,6 +16,7 @@ import { ref, onMounted, onBeforeUnmount, watch, shallowRef } from 'vue'
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { Loading } from '@element-plus/icons-vue'
+import { droneTagFromEntityId } from '../../utils/droneVideo.js'
 
 /** 机模地址：默认使用 public/models/drone.glb，可用 VITE_DRONE_MODEL 覆盖。 */
 const DRONE_MODEL_URI = import.meta.env.VITE_DRONE_MODEL || '/models/drone.glb'
@@ -35,7 +36,7 @@ const props = defineProps({
   center: { type: Object, default: () => ({ lon: 121.4737, lat: 31.2304, alt: 1800000 }) },
 })
 
-const emit = defineEmits(['map-click', 'ready'])
+const emit = defineEmits(['map-click', 'ready', 'select'])
 
 const container = ref(null)
 const ready = ref(false)
@@ -109,6 +110,12 @@ function initViewer() {
 
   clickHandler = new Cesium.ScreenSpaceEventHandler(v.scene.canvas)
   clickHandler.setInputAction((movement) => {
+    const picked = v.scene.pick(movement.position)
+    const droneTag = droneTagFromEntityId(picked?.id?.id)
+    if (droneTag) {
+      emit('select', droneTag)
+      return
+    }
     if (props.drawMode === 'none') return
     const cartesian = v.camera.pickEllipsoid(movement.position, v.scene.globe.ellipsoid)
     if (!cartesian) return
