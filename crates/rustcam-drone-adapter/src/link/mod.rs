@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use rustcam_drone_core::reconnect::Backoff;
 use rustcam_drone_proto::common::CommandReply;
 use rustcam_drone_proto::link::adapter_link_client::AdapterLinkClient;
 use rustcam_drone_proto::link::adapter_message::Payload;
@@ -136,7 +137,11 @@ impl IdentityReporter {
 
 /// 连接 drone-service 并注册；断线后指数退避重连，进程永不退出。
 pub async fn run(cfg: AdapterConfig) -> anyhow::Result<()> {
-    let mut backoff = Backoff::new(cfg.reconnect_min_secs, cfg.reconnect_max_secs);
+    let mut backoff = Backoff::from_secs_jittered(
+        cfg.reconnect_min_secs,
+        cfg.reconnect_max_secs,
+        0.2,
+    );
     let ledger = Arc::new(CommandLedger::default());
     loop {
         match serve(&cfg, ledger.clone()).await {
@@ -496,55 +501,9 @@ fn spawn_identity_forwarder(
     });
 }
 
-struct Backoff {
-    min: Duration,
-    max: Duration,
-    next: Duration,
-}
-
-impl Backoff {
-    fn new(min_secs: u64, max_secs: u64) -> Backoff {
-        let min = Duration::from_secs(min_secs.max(1));
-        let max = Duration::from_secs(max_secs.max(min_secs.max(1)));
-        Backoff {
-            min,
-            max,
-            next: min,
-        }
-    }
-
-    fn reset(&mut self) {
-        self.next = self.min;
-    }
-
-    fn next_delay(&mut self) -> Duration {
-        let delay = self.next;
-        self.next = self.next.saturating_mul(2).min(self.max);
-        delay
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn backoff_grows_and_caps() {
-        let mut b = Backoff::new(1, 4);
-        assert_eq!(b.next_delay(), Duration::from_secs(1));
-        assert_eq!(b.next_delay(), Duration::from_secs(2));
-        assert_eq!(b.next_delay(), Duration::from_secs(4));
-        assert_eq!(b.next_delay(), Duration::from_secs(4));
-        b.reset();
-        assert_eq!(b.next_delay(), Duration::from_secs(1));
-    }
-
-    #[test]
-    fn backoff_handles_zero_config() {
-        let mut b = Backoff::new(0, 0);
-        assert_eq!(b.next_delay(), Duration::from_secs(1));
-        assert_eq!(b.next_delay(), Duration::from_secs(1));
-    }
 
     #[tokio::test]
     async fn identity_reporter_skips_empty_unique_id() {

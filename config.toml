@@ -96,3 +96,12 @@ http = false
 media_server = false
 # Dump every SIP message (full content) into the log
 sip = true
+
+# drone-service 控制面地址。三个服务的启动顺序任意：
+# 主服务用惰性连接，drone-service 未启动或重启后都自动恢复。
+[drone]
+service_addr = "http://127.0.0.1:50051"
+connect_timeout_secs = 3
+request_timeout_secs = 30
+reconnect_min_secs = 1
+reconnect_max_secs = 30

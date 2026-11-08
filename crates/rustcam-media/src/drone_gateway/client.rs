@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::Stream;
+use rustcam_drone_core::reconnect::Backoff;
 use rustcam_drone_proto::common as proto;
 use rustcam_drone_proto::control::admin_service_client::AdminServiceClient;
 use rustcam_drone_proto::control::control_service_client::ControlServiceClient;
@@ -19,8 +20,9 @@ use rustcam_drone_proto::control::{
 };
 use rustcam_drone_proto::link::adapter_link_client::AdapterLinkClient;
 use serde::{Deserialize, Serialize};
-use tokio_stream::StreamExt;
 use tonic::transport::{Channel, Endpoint};
+
+use crate::config::DroneClientConfig;
 
 pub type EventStream = Pin<Box<dyn Stream<Item = Result<DroneEventDto, String>> + Send>>;
 
@@ -81,6 +83,11 @@ impl std::error::Error for DroneApiError {}
 /// 不泄露内部实现细节。
 pub fn map_grpc_status(status: &tonic::Status) -> DroneApiError {
     use tonic::Code;
+    // 连接层错误（drone-service 未启动 / 正在重启）一律按“暂时不可用”处理，
+    // 否则浏览器会看到 500 而不是可重试的 503。
+    if is_transport_failure(status) {
+        return DroneApiError::unavailable("drone-service 不可用");
+    }
     match status.code() {
         Code::NotFound => DroneApiError::not_found(status.message()),
         Code::InvalidArgument | Code::FailedPrecondition | Code::OutOfRange => {
@@ -96,6 +103,26 @@ pub fn map_grpc_status(status: &tonic::Status) -> DroneApiError {
         }
         _ => DroneApiError::internal("drone-service 内部错误"),
     }
+}
+
+/// 判断错误是否来自连接层（而非 drone-service 的业务处理）。
+///
+/// tonic 在连接失败时把错误包成 `tonic::transport::Error`，
+/// 其 message 固定为 "transport error"。
+pub fn is_transport_failure(status: &tonic::Status) -> bool {
+    use std::error::Error as _;
+
+    if status.code() == tonic::Code::Unavailable {
+        return true;
+    }
+    let mut source = status.source();
+    while let Some(err) = source {
+        if err.is::<tonic::transport::Error>() {
+            return true;
+        }
+        source = err.source();
+    }
+    status.message() == "transport error"
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -530,14 +557,23 @@ pub struct DroneClient {
     pub admin: AdminServiceClient<Channel>,
     pub events: EventServiceClient<Channel>,
     pub adapter_link: AdapterLinkClient<Channel>,
+    /// 事件流重连的退避下限
+    reconnect_min: Duration,
+    /// 事件流重连的退避上限
+    reconnect_max: Duration,
 }
 
 impl DroneClient {
-    pub async fn connect(service_addr: &str) -> anyhow::Result<DroneClient> {
-        let endpoint = Endpoint::from_shared(service_addr.to_string())?
-            .connect_timeout(Duration::from_secs(3))
-            .timeout(Duration::from_secs(30));
-        let channel = endpoint.connect().await?;
+    /// 建立到 drone-service 的客户端。
+    ///
+    /// 使用惰性连接：drone-service 尚未启动或中途重启都不会让主服务启动失败，
+    /// 真正的建连推迟到第一次调用；之后由 tonic 的 Channel 负责断线重连。
+    /// 只有地址本身非法（无法解析 URI）才算致命错误。
+    pub async fn connect(config: &DroneClientConfig) -> anyhow::Result<DroneClient> {
+        let endpoint = Endpoint::from_shared(config.service_addr.clone())?
+            .connect_timeout(Duration::from_secs(config.connect_timeout_secs))
+            .timeout(Duration::from_secs(config.request_timeout_secs));
+        let channel = endpoint.connect_lazy();
         Ok(DroneClient {
             control: ControlServiceClient::new(channel.clone()),
             query: QueryServiceClient::new(channel.clone()),
@@ -545,7 +581,87 @@ impl DroneClient {
             admin: AdminServiceClient::new(channel.clone()),
             events: EventServiceClient::new(channel.clone()),
             adapter_link: AdapterLinkClient::new(channel),
+            reconnect_min: Duration::from_secs(config.reconnect_min_secs.max(1)),
+            reconnect_max: Duration::from_secs(
+                config.reconnect_max_secs.max(config.reconnect_min_secs.max(1)),
+            ),
         })
+    }
+
+    /// 订阅 drone-service 事件流，断线后自动退避重连。
+    ///
+    /// drone-service 尚未启动时不会失败：订阅在后台任务里按需发起，
+    /// 失败后指数退避重试，直到成功为止。浏览器侧的连接因此可以一直保持，
+    /// drone-service 恢复后事件自动续上。
+    fn resilient_event_stream(&self, drone_tags: Vec<String>) -> EventStream {
+        let (tx, rx) = tokio::sync::mpsc::channel::<Result<DroneEventDto, String>>(256);
+        let client = self.events.clone();
+        let reconnect_min = self.reconnect_min;
+        let reconnect_max = self.reconnect_max;
+        tokio::spawn(async move {
+            let mut backoff = Backoff::with_jitter(reconnect_min, reconnect_max, 0.2);
+            let mut current: Option<tonic::Streaming<rustcam_drone_proto::control::EventMessage>> =
+                None;
+            loop {
+                if current.is_none() {
+                    let mut client = client.clone();
+                    match client
+                        .subscribe(SubscribeRequest {
+                            drone_tags: drone_tags.clone(),
+                        })
+                        .await
+                    {
+                        Ok(resp) => {
+                            backoff.reset();
+                            current = Some(resp.into_inner());
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "drone-service 事件订阅失败，退避后重试");
+                            tokio::select! {
+                                _ = tokio::time::sleep(backoff.next_delay()) => {}
+                                _ = tx.closed() => return,
+                            }
+                            continue;
+                        }
+                    }
+                }
+
+                let mut stream = current.take().expect("事件流已建立");
+                // 消费端（浏览器）断开时立即退出，避免留下悬挂任务。
+                let message = tokio::select! {
+                    msg = stream.message() => msg,
+                    _ = tx.closed() => return,
+                };
+                match message {
+                    Ok(Some(msg)) => {
+                        current = Some(stream);
+                        let dto = DroneEventDto {
+                            msg_type: msg.msg_type,
+                            data: serde_json::from_str(&msg.payload_json)
+                                .unwrap_or(serde_json::Value::Null),
+                            ts_ms: msg.ts_ms,
+                        };
+                        if tx.send(Ok(dto)).await.is_err() {
+                            return;
+                        }
+                    }
+                    Ok(None) => {
+                        tracing::warn!("drone-service 事件流结束，退避后重连");
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "drone-service 事件流中断，退避后重连");
+                    }
+                }
+                if tx.is_closed() {
+                    return;
+                }
+                tokio::select! {
+                    _ = tokio::time::sleep(backoff.next_delay()) => {}
+                    _ = tx.closed() => return,
+                }
+            }
+        });
+        Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx))
     }
 }
 
@@ -1194,20 +1310,9 @@ impl DroneApi for DroneClient {
     }
 
     async fn event_stream(&self, drone_tags: Vec<String>) -> Result<EventStream, DroneApiError> {
-        let mut client = self.events.clone();
-        let response = client
-            .subscribe(SubscribeRequest { drone_tags })
-            .await
-            .map_err(|e| map_grpc_status(&e))?;
-        let stream = response.into_inner().map(|item| match item {
-            Ok(msg) => Ok(DroneEventDto {
-                msg_type: msg.msg_type,
-                data: serde_json::from_str(&msg.payload_json).unwrap_or(serde_json::Value::Null),
-                ts_ms: msg.ts_ms,
-            }),
-            Err(e) => Err(e.to_string()),
-        });
-        Ok(Box::pin(stream))
+        // 返回自愈流：drone-service 未启动或重启时内部退避重订阅，
+        // 浏览器连接不会因此断开。
+        Ok(self.resilient_event_stream(drone_tags))
     }
 }
 

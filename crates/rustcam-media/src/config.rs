@@ -62,20 +62,55 @@ pub struct AppConfig {
 }
 
 /// 主服务侧只需要 drone-service 的 gRPC 地址（控制面参数在 drone-service 自己的 drone.toml）。
+///
+/// 连接采用惰性建连：drone-service 未启动或中途重启都不影响本服务启动，
+/// 由 tonic 的 Channel 按需重连；这里只配置超时与退避边界。
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct DroneClientConfig {
     #[serde(default = "default_drone_service_addr")]
     pub service_addr: String,
+    /// 单次建连超时（秒）
+    #[serde(default = "default_drone_connect_timeout_secs")]
+    pub connect_timeout_secs: u64,
+    /// 单次请求超时（秒）
+    #[serde(default = "default_drone_request_timeout_secs")]
+    pub request_timeout_secs: u64,
+    /// 事件流重订阅的退避下限（秒）
+    #[serde(default = "default_drone_reconnect_min_secs")]
+    pub reconnect_min_secs: u64,
+    /// 事件流重订阅的退避上限（秒）
+    #[serde(default = "default_drone_reconnect_max_secs")]
+    pub reconnect_max_secs: u64,
 }
 
 fn default_drone_service_addr() -> String {
     "http://127.0.0.1:50051".into()
 }
 
+fn default_drone_connect_timeout_secs() -> u64 {
+    3
+}
+
+fn default_drone_request_timeout_secs() -> u64 {
+    30
+}
+
+fn default_drone_reconnect_min_secs() -> u64 {
+    1
+}
+
+fn default_drone_reconnect_max_secs() -> u64 {
+    30
+}
+
 impl Default for DroneClientConfig {
     fn default() -> Self {
         Self {
             service_addr: default_drone_service_addr(),
+            connect_timeout_secs: default_drone_connect_timeout_secs(),
+            request_timeout_secs: default_drone_request_timeout_secs(),
+            reconnect_min_secs: default_drone_reconnect_min_secs(),
+            reconnect_max_secs: default_drone_reconnect_max_secs(),
         }
     }
 }

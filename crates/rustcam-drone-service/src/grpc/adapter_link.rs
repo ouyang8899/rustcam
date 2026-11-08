@@ -368,4 +368,88 @@ mod tests {
         .await
         .expect("command reply should be applied");
     }
+
+    /// adapter 重启（同一 adapter_id 重新注册）后，新会话接管旧会话，
+    /// 旧会话被判定为 superseded，不再影响新会话的设备归属。
+    #[tokio::test]
+    async fn re_register_supersedes_previous_session() {
+        let state = DroneState::new(DroneConfig::default());
+        state
+            .device_to_adapter
+            .insert("drone-001".into(), "a-1".into());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let service = AdapterLinkService::new(state.clone());
+        tokio::spawn(async move {
+            Server::builder()
+                .add_service(AdapterLinkServer::new(service))
+                .serve_with_incoming(TcpListenerStream::new(listener))
+                .await
+                .unwrap();
+        });
+
+        let endpoint = tonic::transport::Endpoint::from_shared(format!("http://{addr}")).unwrap();
+
+        // 第一个会话（旧）
+        let channel = endpoint.connect().await.unwrap();
+        let mut old_client = AdapterLinkClient::new(channel);
+        let (old_tx, old_rx) = mpsc::channel::<AdapterMessage>(16);
+        old_tx
+            .send(AdapterMessage {
+                payload: Some(adapter_message::Payload::Register(Register {
+                    adapter_id: "a-1".into(),
+                    protocol: "mavlink".into(),
+                    version: "test".into(),
+                })),
+            })
+            .await
+            .unwrap();
+        let mut old_inbound = old_client
+            .open(ReceiverStream::new(old_rx))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(matches!(
+            old_inbound.message().await.unwrap().unwrap().payload,
+            Some(service_message::Payload::RegisterAck(_))
+        ));
+        let old_generation = state.generation_of("a-1").unwrap();
+
+        // 第二个会话（新）：同一 adapter_id 重新注册
+        let channel = endpoint.connect().await.unwrap();
+        let mut new_client = AdapterLinkClient::new(channel);
+        let (new_tx, new_rx) = mpsc::channel::<AdapterMessage>(16);
+        new_tx
+            .send(AdapterMessage {
+                payload: Some(adapter_message::Payload::Register(Register {
+                    adapter_id: "a-1".into(),
+                    protocol: "mavlink".into(),
+                    version: "test".into(),
+                })),
+            })
+            .await
+            .unwrap();
+        let mut new_inbound = new_client
+            .open(ReceiverStream::new(new_rx))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(matches!(
+            new_inbound.message().await.unwrap().unwrap().payload,
+            Some(service_message::Payload::RegisterAck(_))
+        ));
+
+        let new_generation = state.generation_of("a-1").unwrap();
+        assert!(
+            new_generation > old_generation,
+            "重新注册必须推进 generation（{old_generation} -> {new_generation}）"
+        );
+        assert_eq!(state.generation_of("a-1"), Some(new_generation));
+        assert_ne!(
+            state.generation_of("a-1"),
+            Some(old_generation),
+            "旧会话必须被判定为过期"
+        );
+    }
 }

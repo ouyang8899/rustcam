@@ -108,19 +108,43 @@ async fn main() -> anyhow::Result<()> {
     let metrics_state = state.clone();
     let metrics_addr = state.config.metrics_addr.clone();
     spawn_supervised("metrics-server", async move {
-        if let Err(e) =
-            rustcam_drone_service::infra::metrics::serve(metrics_state, metrics_addr.as_str()).await
-        {
-            tracing::error!(error = %e, "drone metrics server stopped");
+        let mut backoff = rustcam_drone_core::reconnect::Backoff::from_secs_jittered(1, 30, 0.2);
+        loop {
+            match rustcam_drone_service::infra::metrics::serve(
+                metrics_state.clone(),
+                metrics_addr.as_str(),
+            )
+            .await
+            {
+                Ok(()) => {
+                    tracing::info!("[Drone] metrics server stopped, restarting");
+                    backoff.reset();
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "[Drone] metrics server failed, restarting");
+                }
+            }
+            tokio::time::sleep(backoff.next_delay()).await;
         }
     });
 
     // gRPC 服务端（AdapterLink 面向 adapter；Control/Query/Geofence/Event 面向 rustcam-server）
+    // 服务异常退出后按退避重启，保证 adapter / rustcam-server 侧能自动重连。
     let grpc_addr = state.config.grpc_addr.clone();
     let s = state.clone();
     spawn_supervised("grpc-server", async move {
-        if let Err(e) = rustcam_drone_service::grpc::serve(s, grpc_addr.as_str()).await {
-            tracing::error!(error = %e, "drone gRPC server stopped");
+        let mut backoff = rustcam_drone_core::reconnect::Backoff::from_secs_jittered(1, 30, 0.2);
+        loop {
+            match rustcam_drone_service::grpc::serve(s.clone(), grpc_addr.as_str()).await {
+                Ok(()) => {
+                    tracing::info!("[Drone] gRPC server stopped, restarting");
+                    backoff.reset();
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "[Drone] gRPC server failed, restarting");
+                }
+            }
+            tokio::time::sleep(backoff.next_delay()).await;
         }
     });
 

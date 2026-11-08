@@ -83,8 +83,8 @@ RustCam 正在把监控域从**固定点位**扩展到**会动的视点**——�
 
 | 组件 | 职责 |
 |---|---|
-| `rustcam-drone-service` | 独立控制面进程：设备注册表、遥测去重与影子、控制权仲裁、指令状态机、围栏风控、事件广播 |
-| `rustcam-drone-adapter` | 机载适配进程：对接**飞控**（MAVLink / PX4 / ArduPilot / 厂商 SDK），把无人机同时接入"视频源"与"移动设备"两个维度 |
+| `rustcam-drone-service` | 独立控制面进程：设备注册、遥测、控制权仲裁、指令状态机、围栏风控与事件广播 |
+| `rustcam-drone-adapter` | 机载适配进程：对接 PX4 / ArduPilot 等飞控，把无人机同时接入"视频源"与"移动设备"两个维度 |
 | `rustcam-server` | 唯一对外入口：JWT + RBAC 鉴权、`/api/v1/drone/*` REST 网关、`/ws/drone/*` 实时推送 |
 | GB28181 / RTSP 接入 | 机载摄像头以标准协议接入，视频、录像、回放、监控墙零改动复用 |
 
@@ -98,7 +98,7 @@ RustCam 正在把监控域从**固定点位**扩展到**会动的视点**——�
 | 位置与遥测 | 位置、姿态、电池、链路状态实时上云，地图与轨迹随动 |
 | 控制权仲裁 | 飞行 / 云台控制权带租约与抢占，多人、多系统同时操作不打架 |
 | 围栏风控 | 禁飞区、限高区自动判定，触发即产生告警事件并进入统一告警流 |
-| 合规内置 | 飞行日志与操作审计随平台落库（`drone_control_audit` / `drone_command_audit`）；禁拍区、作业时段为规划项 |
+| 合规内置 | 飞行日志与操作审计随平台落库；禁拍区、作业时段为规划项 |
 
 ### 现状与规划
 
@@ -107,7 +107,7 @@ RustCam 正在把监控域从**固定点位**扩展到**会动的视点**——�
 | 三进程骨架（控制面 / 适配 / 网关）、设备注册与心跳、REST 网关、DB 驱动 RBAC | ✅ 完成 |
 | 真实 MAVLink 飞控接入（PX4 / ArduPilot）、遥测去重与指令回执 | ✅ 完成 |
 | 移动眼前端：无人机档案、Cesium 3D 实时飞行、航线规划、电子围栏、告警审计、轨迹回放 | ✅ 完成 |
-| 控制权仲裁 / 围栏风控 / 指令状态机 / 审计留痕 | ✅ 完成（Redis Lua 租约跨实例互斥，Redis 不可用时降级为进程内锁） |
+| 控制权仲裁 / 围栏风控 / 指令状态机 / 审计留痕 | ✅ 完成 |
 | 模板化场景、移动眼与监控墙联动演示 | 🔄 进行中 |
 
 ### 快速接入（PX4 / ArduPilot）
@@ -121,60 +121,15 @@ pwsh -File testenv\start.ps1
 
 ```bash
 cp adapter.toml.example adapter.toml
-# adapter.toml 只保留进程级配置：adapter_id / service_addr / autopilot。
-# 设备清单、MAVLink 端点、签名密钥与 sysid 由平台档案分配下发，本地不再配置。
 
 cargo run -p rustcam-drone-service
 cargo run -p rustcam-drone-sim          # 无飞控时使用内置 MAVLink 模拟器
 cargo run -p rustcam-drone-adapter
 ```
 
-> 标识模型：`drone_tag` 是平台主键（建档时自动生成 `drone-<uuid4>`，REST/前端/Redis/审计统一
-> 使用）；`unique_id` 是飞控自述的物理标识；`(adapter_id, mavlink_sysid)` 是链路绑定。
-> 首次接入请在「移动眼 → 无人机」新增档案，填写唯一标识、`adapter_id`、MAVLink 端点与 sysid；
-> adapter 注册后由 drone-service 按 `adapter_id` 分配，不再使用本地设备 ID。
+> 首次接入请在「移动眼 → 无人机」新增档案；飞控型号、唯一标识等由平台档案分配下发，本地无需配置。
 
-适配器按 `HEARTBEAT.autopilot` 自动识别 PX4 / ArduPilot，并把两侧的模式编码统一成
-`AUTO.LOITER` / `GUIDED` 等名称；遥测经 gRPC 上行到 drone-service 并做去重与影子缓存，
-指令经 `ControlService.SendCommand` 下行，由 `COMMAND_ACK` 回执闭环。
-
-#### 唯一标识核验
-
-平台按「档案登记的唯一标识 == 飞控实测的唯一标识」判定是否放行指令（[drone.md](./drone.md) §12.4 L3）。
-模拟器通过 `AUTOPILOT_VERSION.uid` 上报实测值（十六进制，≤16 位）：
-
-```bash
-# 指定模拟器的唯一标识（默认 0011223344556677，也可用环境变量 DRONE_SIM_UID）
-cargo run -p rustcam-drone-sim -- --uid 0011223344556677
-```
-
-在「无人机」档案的**唯一标识**字段填入同一个值（小写十六进制）即可正常下发指令；
-填成别的值时，指令会被判 `unique_id mismatch` 拒绝，该机的分配也会被撤销并留告警。
-档案留空则不做判定（放行）。
-
-> 实机边界：MAVLink 2 的 `AUTOPILOT_VERSION.uid2`（18 字节）不在 ardupilotmega v1.0 方言内，
-> 真实 PX4 / ArduPilot 把 UUID 放在 uid2，因此实机当前读不到唯一标识；模拟器用 `uid`（u64）承载，
-> 与平台登记值一一对应。
-
-前端「移动眼」菜单包含：
-
-| 页面 | 能力 |
-|---|---|
-| 无人机 | 档案增删改查、机型/飞控/视频通道绑定 |
-| 控制权管理 | 飞行 / 云台控制权申请、抢占、续约与释放，租约时长与持有人可见 |
-| 实时飞行 | Cesium 3D 地球、实时遥测、控制权申请/释放、起飞/降落/返航/定点/云台/拍照、指令回执 |
-| 航线规划 | 地球点击添加航点、排序/高度/速度/悬停、保存与执行 |
-| 电子围栏 | 多边形/圆形、禁飞区/允许区、高度区间、越界告警、goto 预检 |
-| 告警与审计 | 围栏越界、上下线、指令与控制权操作留痕 |
-| 轨迹回放 | 按时间段查询历史轨迹，2D/3D 视图切换与播放进度 |
-
-> Cesium 底图默认使用离线 NaturalEarth，内网/演示环境不依赖外部瓦片；
-> 生产可在前端构建时设置 `VITE_CESIUM_TMS=<内网瓦片模板>`，或 `VITE_CESIUM_ONLINE=true` 使用在线底图。
-> 无外网时离线底图分辨率有限，高清影像接入由后续配置完成。
->
-> 当前限制：控制权仲裁走 Redis Lua 脚本（跨实例互斥；Redis 不可用时降级为进程内锁，只保证单实例互斥）；
-> 档案、航线、围栏、审计已落 PostgreSQL（`drone_*` 表由 drone-service 启动时自建），
-> `drone-state.json` 仅作快照兜底与旧数据回填；drone gRPC 尚未启用 mTLS/token。
+前端「移动眼」提供无人机档案、控制权管理、实时飞行、航线规划、电子围栏、告警审计与轨迹回放等页面。
 
 ## 截图预览
 

@@ -78,3 +78,4 @@ tokio-stream = { workspace = true }
 tokio-test = { workspace = true }
 mockall = { workspace = true }
 tower = { workspace = true, features = ["util"] }
+tokio-stream = { workspace = true, features = ["net"] }

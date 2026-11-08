@@ -2,15 +2,30 @@
 
 use std::time::Duration;
 
+use rustcam_drone_core::reconnect::Backoff;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use crate::state::DroneState;
 
 pub async fn serve(state: DroneState, addr: &str) -> anyhow::Result<()> {
-    let listener = TcpListener::bind(addr).await?;
+    let listener = bind_with_retry(addr).await?;
     tracing::info!(%addr, "[Drone] metrics server listening");
     serve_listener(state, listener).await
+}
+
+/// 绑定 metrics 端口；端口被占用（旧实例尚未退出）时按退避重试。
+async fn bind_with_retry(addr: &str) -> anyhow::Result<TcpListener> {
+    let mut backoff = Backoff::from_secs_jittered(1, 30, 0.2);
+    loop {
+        match TcpListener::bind(addr).await {
+            Ok(listener) => return Ok(listener),
+            Err(e) => {
+                tracing::warn!(error = %e, %addr, "[Drone] metrics 端口占用，退避后重试绑定");
+                tokio::time::sleep(backoff.next_delay()).await;
+            }
+        }
+    }
 }
 
 /// 供测试注入已绑定的 listener。

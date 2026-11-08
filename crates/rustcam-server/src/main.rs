@@ -118,15 +118,15 @@ async fn main() -> anyhow::Result<()> {
 
     let auth_state = registry.get_auth_state().await?;
 
-    // drone-service 客户端（连接失败不阻断主服务启动，drone 接口返回 503）
+    // drone-service 客户端（惰性连接：drone-service 未启动/重启都不阻断主服务）
     let drone = match rustcam_media::drone_gateway::client::DroneClient::connect(
-        &registry.infra.config().drone.service_addr,
+        &registry.infra.config().drone,
     )
     .await
     {
         Ok(c) => Some(Arc::new(c)),
         Err(e) => {
-            tracing::warn!(error = %e, "failed to connect drone-service, drone APIs disabled");
+            tracing::warn!(error = %e, "invalid drone-service address, drone APIs disabled");
             None
         }
     };
