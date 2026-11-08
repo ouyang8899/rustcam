@@ -26,8 +26,93 @@ pub fn media_list_contains_stream(
 
 #[cfg(test)]
 mod tests {
-    use super::media_list_contains_stream;
+    use super::{media_list_contains_stream, ZlMediaKitAdapter};
+    use crate::adapter::media_server::{MediaServerAdapter, RtpTransport};
+    use crate::config::MediaServerConfig;
     use serde_json::json;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    fn test_config(url: String) -> MediaServerConfig {
+        MediaServerConfig {
+            name: "test".to_string(),
+            url,
+            api_key: "secret".to_string(),
+            server_type: "zlmediakit".to_string(),
+            weight: 1,
+            enabled: true,
+            server_tag: "test".to_string(),
+            protocol_ports: Default::default(),
+        }
+    }
+
+    async fn spawn_zlmediakit_server(
+        open_response: impl Fn(usize) -> String + Send + 'static,
+    ) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind fake zlmediakit");
+        let addr = listener.local_addr().expect("fake zlmediakit addr");
+
+        tokio::spawn(async move {
+            let mut open_calls = 0usize;
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    break;
+                };
+                let mut buf = vec![0u8; 4096];
+                let n = socket.read(&mut buf).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..n]).to_string();
+                let first_line = request.lines().next().unwrap_or("");
+
+                let body = if first_line.contains("openRtpServer") {
+                    open_calls += 1;
+                    open_response(open_calls)
+                } else {
+                    "{\"code\":0}".to_string()
+                };
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+            }
+        });
+
+        format!("http://{}", addr)
+    }
+
+    #[tokio::test]
+    async fn open_rtp_server_rejects_zero_port() {
+        let url = spawn_zlmediakit_server(|_| r#"{"code":0,"port":0}"#.to_string()).await;
+        let adapter = ZlMediaKitAdapter::new(test_config(url));
+
+        let result = adapter
+            .open_rtp_server("stream", 0, RtpTransport::Udp)
+            .await;
+
+        assert!(result.is_err(), "port 0 must not be returned to caller");
+    }
+
+    #[tokio::test]
+    async fn open_rtp_server_rejects_zero_port_after_retry() {
+        let url = spawn_zlmediakit_server(|call| {
+            if call == 1 {
+                r#"{"code":-300,"msg":"already exists"}"#.to_string()
+            } else {
+                r#"{"code":0,"port":0}"#.to_string()
+            }
+        })
+        .await;
+        let adapter = ZlMediaKitAdapter::new(test_config(url));
+
+        let result = adapter
+            .open_rtp_server("stream", 0, RtpTransport::Udp)
+            .await;
+
+        assert!(result.is_err(), "retried port 0 must not be returned to caller");
+    }
 
     #[test]
     fn test_media_list_contains_the_exact_stream() {
@@ -432,18 +517,24 @@ impl MediaServerAdapter for ZlMediaKitAdapter {
             ("tcp_mode", &tcp_mode.to_string()),
             ("stream_id", &stream_id.to_string()),
         ];
-        let resp: Resp = self.client.get_with_params("/index/api/openRtpServer", &params).await?;
+        let mut resp: Resp = self.client.get_with_params("/index/api/openRtpServer", &params).await?;
 
         if resp.code == -300 {
             if let Err(e) = self.close_rtp_server(stream_id).await {
                 tracing::warn!("[ZLMediaKit] close_rtp_server failed: {}, proceeding with retry", e);
             }
-            let resp: Resp = self.client.get_with_params("/index/api/openRtpServer", &params).await?;
-            let actual_port = resp.port.unwrap_or(port);
-            return Ok((actual_port, base_host_from_config(&self.config)));
+            resp = self.client.get_with_params("/index/api/openRtpServer", &params).await?;
         }
 
         let actual_port = resp.port.unwrap_or(port);
+        if actual_port == 0 {
+            anyhow::bail!(
+                "openRtpServer returned invalid port 0 (code={}, msg={})",
+                resp.code,
+                resp.msg.as_deref().unwrap_or("")
+            );
+        }
+
         Ok((actual_port, base_host_from_config(&self.config)))
     }
 

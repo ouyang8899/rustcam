@@ -5,6 +5,7 @@ use crate::media::rtp_server::{RtpPortRange, TcpRtpServer, UDPRtpServer};
 use crate::protocol::event::TransportType;
 use dashmap::DashMap;
 use once_cell::sync::OnceCell;
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -60,12 +61,14 @@ impl RtpServerManager {
         }
     }
 
-    async fn pick_udp_port(&self) -> Option<(u16, u16)> {
+    async fn pick_udp_port(&self, exclude: &HashSet<u16>) -> Option<(u16, u16)> {
         let now = Instant::now();
         {
             let mut free = self.free_udp_ports.write().await;
-            let ready_idx = free.iter().position(|(p, _, at)| {
+            let ready_idx = free.iter().position(|(p, rp, at)| {
                 now.duration_since(*at).as_secs() >= PORT_COOLDOWN_SECS
+                    && !exclude.contains(p)
+                    && !exclude.contains(rp)
                     && !self.udp_servers.contains_key(p)
             });
             if let Some(idx) = ready_idx {
@@ -92,6 +95,12 @@ impl RtpServerManager {
                 port
             };
 
+            if port + 1 > end {
+                continue;
+            }
+            if exclude.contains(&port) || exclude.contains(&(port + 1)) {
+                continue;
+            }
             if self.udp_servers.contains_key(&port) {
                 continue;
             }
@@ -107,12 +116,13 @@ impl RtpServerManager {
         None
     }
 
-    async fn pick_tcp_port(&self) -> Option<u16> {
+    async fn pick_tcp_port(&self, exclude: &HashSet<u16>) -> Option<u16> {
         let now = Instant::now();
         {
             let mut free = self.free_tcp_ports.write().await;
             let ready_idx = free.iter().position(|(p, at)| {
                 now.duration_since(*at).as_secs() >= PORT_COOLDOWN_SECS
+                    && !exclude.contains(p)
                     && !self.tcp_servers.contains_key(p)
             });
             if let Some(idx) = ready_idx {
@@ -133,6 +143,9 @@ impl RtpServerManager {
                 port
             };
 
+            if exclude.contains(&port) {
+                continue;
+            }
             if self.tcp_servers.contains_key(&port) {
                 continue;
             }
@@ -194,40 +207,56 @@ impl RtpServerManager {
     ) -> Result<(u16, u32, Arc<UDPRtpServer>)> {
         let _guard = self.allocation_lock.lock().await;
 
-        let (rtp_port, _rtcp_port) = self
-            .pick_udp_port()
-            .await
-            .ok_or_else(|| MediaError::PortAllocation("无可用 UDP 端口".into()))?;
+        let mut tried: HashSet<u16> = HashSet::new();
+        loop {
+            let Some((rtp_port, _rtcp_port)) = self.pick_udp_port(&tried).await else {
+                return Err(MediaError::PortAllocation(
+                    "无可用 UDP 端口（所有候选端口绑定失败）".into(),
+                ));
+            };
 
-        let server = Arc::new(UDPRtpServer::new(&self.bind_addr, rtp_port, &self.port_range).await?);
-        let ssrc = self.generate_ssrc();
+            let server = match UDPRtpServer::new(&self.bind_addr, rtp_port, &self.port_range).await {
+                Ok(server) => Arc::new(server),
+                Err(e) => {
+                    tracing::warn!(
+                        "[RtpServerManager] UDP 端口对 {}/{} 绑定失败，尝试下一个端口: {}",
+                        rtp_port,
+                        rtp_port + 1,
+                        e
+                    );
+                    tried.insert(rtp_port);
+                    continue;
+                }
+            };
+            let ssrc = self.generate_ssrc();
 
-        if !server
-            .allocate(ssrc, device_tag.to_string(), channel_tag.to_string())
-            .await
-        {
-            return Err(MediaError::PortAllocation(format!(
-                "UDP 端口 {} 已被分配",
-                rtp_port
-            )));
+            if !server
+                .allocate(ssrc, device_tag.to_string(), channel_tag.to_string())
+                .await
+            {
+                return Err(MediaError::PortAllocation(format!(
+                    "UDP 端口 {} 已被分配",
+                    rtp_port
+                )));
+            }
+
+            self.udp_servers.insert(rtp_port, server.clone());
+            let now = Instant::now();
+            self.ports.insert(
+                PortKey(rtp_port, TransportType::Udp),
+                PortInfo {
+                    protocol: TransportType::Udp,
+                    device_tag: device_tag.to_string(),
+                    channel_tag: channel_tag.to_string(),
+                    ssrc: Some(ssrc),
+                    allocated_at: now,
+                    actor: actor.to_string(),
+                    active_at: now,
+                },
+            );
+
+            return Ok((rtp_port, ssrc, server));
         }
-
-        self.udp_servers.insert(rtp_port, server.clone());
-        let now = Instant::now();
-        self.ports.insert(
-            PortKey(rtp_port, TransportType::Udp),
-            PortInfo {
-                protocol: TransportType::Udp,
-                device_tag: device_tag.to_string(),
-                channel_tag: channel_tag.to_string(),
-                ssrc: Some(ssrc),
-                allocated_at: now,
-                actor: actor.to_string(),
-                active_at: now,
-            },
-        );
-
-        Ok((rtp_port, ssrc, server))
     }
 
     pub async fn allocate_tcp(
@@ -238,69 +267,99 @@ impl RtpServerManager {
     ) -> Result<(u16, u32, Arc<TcpRtpServer>)> {
         let _guard = self.allocation_lock.lock().await;
 
-        let port = self
-            .pick_tcp_port()
-            .await
-            .ok_or_else(|| MediaError::PortAllocation("无可用 TCP 端口".into()))?;
+        let mut tried: HashSet<u16> = HashSet::new();
+        loop {
+            let Some(port) = self.pick_tcp_port(&tried).await else {
+                return Err(MediaError::PortAllocation(
+                    "无可用 TCP 端口（所有候选端口绑定失败）".into(),
+                ));
+            };
 
-        let server = Arc::new(TcpRtpServer::new_passive(&self.bind_addr, port).await?);
-        let ssrc = self.generate_ssrc();
+            let server = match TcpRtpServer::new_passive(&self.bind_addr, port).await {
+                Ok(server) => Arc::new(server),
+                Err(e) => {
+                    tracing::warn!(
+                        "[RtpServerManager] TCP 端口 {} 绑定失败，尝试下一个端口: {}",
+                        port,
+                        e
+                    );
+                    tried.insert(port);
+                    continue;
+                }
+            };
+            let ssrc = self.generate_ssrc();
 
-        if !server
-            .allocate(ssrc, device_tag.to_string(), channel_tag.to_string())
-            .await
-        {
-            return Err(MediaError::PortAllocation(format!(
-                "TCP 端口 {} 已被分配",
-                port
-            )));
+            if !server
+                .allocate(ssrc, device_tag.to_string(), channel_tag.to_string())
+                .await
+            {
+                return Err(MediaError::PortAllocation(format!(
+                    "TCP 端口 {} 已被分配",
+                    port
+                )));
+            }
+
+            self.tcp_servers.insert(port, server.clone());
+            let now = Instant::now();
+            self.ports.insert(
+                PortKey(port, TransportType::Tcp),
+                PortInfo {
+                    protocol: TransportType::Tcp,
+                    device_tag: device_tag.to_string(),
+                    channel_tag: channel_tag.to_string(),
+                    ssrc: Some(ssrc),
+                    allocated_at: now,
+                    actor: actor.to_string(),
+                    active_at: now,
+                },
+            );
+
+            return Ok((port, ssrc, server));
         }
-
-        self.tcp_servers.insert(port, server.clone());
-        let now = Instant::now();
-        self.ports.insert(
-            PortKey(port, TransportType::Tcp),
-            PortInfo {
-                protocol: TransportType::Tcp,
-                device_tag: device_tag.to_string(),
-                channel_tag: channel_tag.to_string(),
-                ssrc: Some(ssrc),
-                allocated_at: now,
-                actor: actor.to_string(),
-                active_at: now,
-            },
-        );
-
-        Ok((port, ssrc, server))
     }
 
     pub async fn allocate_tcp_active(&self) -> Result<(u16, u32, Arc<TcpRtpServer>)> {
         let _guard = self.allocation_lock.lock().await;
 
-        let port = self
-            .pick_tcp_port()
-            .await
-            .ok_or_else(|| MediaError::PortAllocation("无可用 TCP 端口".into()))?;
+        let mut tried: HashSet<u16> = HashSet::new();
+        loop {
+            let Some(port) = self.pick_tcp_port(&tried).await else {
+                return Err(MediaError::PortAllocation(
+                    "无可用 TCP 端口（所有候选端口绑定失败）".into(),
+                ));
+            };
 
-        let server = Arc::new(TcpRtpServer::new_active(&self.bind_addr, port).await?);
-        let ssrc = self.generate_ssrc();
+            let server = match TcpRtpServer::new_active(&self.bind_addr, port).await {
+                Ok(server) => Arc::new(server),
+                Err(e) => {
+                    tracing::warn!(
+                        "[RtpServerManager] TCP 端口 {} 绑定失败，尝试下一个端口: {}",
+                        port,
+                        e
+                    );
+                    tried.insert(port);
+                    continue;
+                }
+            };
+            let ssrc = self.generate_ssrc();
 
-        self.tcp_servers.insert(port, server.clone());
-        let now = Instant::now();
-        self.ports.insert(
-            PortKey(port, TransportType::Tcp),
-            PortInfo {
-                protocol: TransportType::Tcp,
-                device_tag: String::new(),
-                channel_tag: String::new(),
-                ssrc: Some(ssrc),
-                allocated_at: now,
-                actor: String::new(),
-                active_at: now,
-            },
-        );
+            self.tcp_servers.insert(port, server.clone());
+            let now = Instant::now();
+            self.ports.insert(
+                PortKey(port, TransportType::Tcp),
+                PortInfo {
+                    protocol: TransportType::Tcp,
+                    device_tag: String::new(),
+                    channel_tag: String::new(),
+                    ssrc: Some(ssrc),
+                    allocated_at: now,
+                    actor: String::new(),
+                    active_at: now,
+                },
+            );
 
-        Ok((port, ssrc, server))
+            return Ok((port, ssrc, server));
+        }
     }
 
     pub async fn release(&self, port: u16, protocol: TransportType) {
@@ -472,4 +531,67 @@ pub fn init_rtp_server_manager(
 
 pub fn get_rtp_server_manager() -> Option<&'static Arc<RtpServerManager>> {
     RTP_SERVER_MANAGER.get()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_manager(start: u16, end: u16) -> RtpServerManager {
+        RtpServerManager::new(RtpPortRange::new(start, end), "127.0.0.1".to_string(), 60)
+    }
+
+    #[tokio::test]
+    async fn allocate_udp_skips_pair_when_rtp_port_used_externally() {
+        let manager = test_manager(45000, 45010);
+        let _held = std::net::UdpSocket::bind("127.0.0.1:45000").expect("bind external RTP");
+
+        let (port, _, _server) = manager
+            .allocate_udp("dev", "ch", "test")
+            .await
+            .expect("should skip externally used RTP port");
+
+        assert_eq!(port, 45002);
+        assert!(manager.get_udp_server(45000).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn allocate_udp_skips_pair_when_rtcp_port_used_externally() {
+        let manager = test_manager(45300, 45310);
+        let _held = std::net::UdpSocket::bind("127.0.0.1:45301").expect("bind external RTCP");
+
+        let (port, _, _server) = manager
+            .allocate_udp("dev", "ch", "test")
+            .await
+            .expect("should skip pair with externally used RTCP port");
+
+        assert_eq!(port, 45302);
+        assert!(manager.get_udp_server(45300).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn allocate_udp_returns_error_when_all_pairs_used_externally() {
+        let manager = test_manager(45200, 45203);
+        let _rtp0 = std::net::UdpSocket::bind("127.0.0.1:45200").expect("bind external RTP 0");
+        let _rtcp0 = std::net::UdpSocket::bind("127.0.0.1:45201").expect("bind external RTCP 0");
+        let _rtp1 = std::net::UdpSocket::bind("127.0.0.1:45202").expect("bind external RTP 1");
+        let _rtcp1 = std::net::UdpSocket::bind("127.0.0.1:45203").expect("bind external RTCP 1");
+
+        let result = manager.allocate_udp("dev", "ch", "test").await;
+        assert!(matches!(result, Err(MediaError::PortAllocation(_))));
+    }
+
+    #[tokio::test]
+    async fn allocate_tcp_skips_port_used_externally() {
+        let manager = test_manager(45100, 45110);
+        let _held = std::net::TcpListener::bind("127.0.0.1:45100").expect("bind external TCP");
+
+        let (port, _, _server) = manager
+            .allocate_tcp("dev", "ch", "test")
+            .await
+            .expect("should skip externally used TCP port");
+
+        assert_eq!(port, 45101);
+        assert!(manager.get_tcp_server(45100).await.is_none());
+    }
 }

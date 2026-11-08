@@ -27,6 +27,7 @@ node_modules/
 build.bat
 run.bat
 document/
+docs/
 /server*.log
 /build_log.txt
 /docs/
