@@ -14,7 +14,7 @@ use super::autopilot::{ardupilot_mode_name, px4_mode_name, AutopilotHint, Autopi
 /// 唯一标识规范化：`uid == 0` → 空串（飞控未提供）；否则 16 位小写十六进制。
 ///
 /// 平台侧登记的唯一标识是小写十六进制字符串（drone-service 校验），
-/// 两边同形才能逐字符比较（drone.md §12.4 L3）。
+/// 两边同形才能逐字符比较。
 ///
 /// 注：MAVLink 2 的 `AUTOPILOT_VERSION.uid2`（18 字节）不在 ardupilotmega v1.0
 /// 方言内，真实 PX4 / ArduPilot 把 UUID 放在 uid2，因此实机读到的仍是空的。
@@ -91,8 +91,7 @@ pub struct VehicleState {
     pub last_seen_ms: i64,
     /// 飞控上报的唯一标识（`AUTOPILOT_VERSION.uid`）；空 = 飞控未提供。
     ///
-    /// 由 AUTOPILOT_VERSION 消息写入，随遥测上报给平台做唯一标识核验
-    /// （drone.md §12.4 L3）。
+    /// 由 AUTOPILOT_VERSION 消息写入，随遥测上报给平台做唯一标识核验。
     pub unique_id: String,
 }
 
@@ -291,7 +290,7 @@ impl VehicleState {
                 );
                 self.firmware = version.clone();
                 // 唯一标识：`uid` 为 0 表示飞控未提供；否则规范成小写十六进制，
-                // 与平台侧登记值同形（drone.md §12.4 L3）。
+                // 与平台侧登记值同形。
                 let unique_id = normalize_unique_id(ver.uid);
                 self.unique_id = unique_id.clone();
                 changes.push(StateChange::AutopilotVersion { version, unique_id });

@@ -1,0 +1,57 @@
+<mapper>
+<select id="drone_fence_select_all">
+SELECT f.id, f.name, f.type, f.shape, f.geojson, f.center_lat, f.center_lon,
+       f.radius_m, f.min_alt, f.max_alt, f.enabled, f.version, f.updated_ms,
+       COALESCE(l.drone_tags::text, '[]') AS drone_tags
+FROM drone_fence f
+LEFT JOIN (
+    SELECT fence_id, jsonb_agg(drone_tag ORDER BY drone_tag) AS drone_tags
+    FROM drone_fence_device GROUP BY fence_id
+) l ON l.fence_id = f.id
+ORDER BY f.updated_ms DESC
+</select>
+
+<insert id="drone_fence_upsert">
+INSERT INTO drone_fence
+    (id, name, type, shape, geojson, center_lat, center_lon, radius_m, min_alt, max_alt,
+     enabled, version, updated_ms, updated_at)
+VALUES (#{id}, #{name}, #{rule_type}, #{shape}, #{geojson}, #{center_lat}, #{center_lon},
+        #{radius_m}, #{min_alt}, #{max_alt}, #{enabled}, #{version}, #{updated_ms}, now())
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name,
+    type = EXCLUDED.type,
+    shape = EXCLUDED.shape,
+    geojson = EXCLUDED.geojson,
+    center_lat = EXCLUDED.center_lat,
+    center_lon = EXCLUDED.center_lon,
+    radius_m = EXCLUDED.radius_m,
+    min_alt = EXCLUDED.min_alt,
+    max_alt = EXCLUDED.max_alt,
+    enabled = EXCLUDED.enabled,
+    version = EXCLUDED.version,
+    updated_ms = EXCLUDED.updated_ms,
+    updated_at = now()
+</insert>
+
+<insert id="drone_fence_devices_replace">
+WITH cleared AS (
+    DELETE FROM drone_fence_device d
+    WHERE d.fence_id = #{fence_id}
+      AND NOT EXISTS (
+          SELECT 1 FROM jsonb_array_elements_text(#{tags}::jsonb) t(tag)
+          WHERE t.tag = d.drone_tag
+      )
+    RETURNING d.drone_tag
+)
+INSERT INTO drone_fence_device (fence_id, drone_tag)
+SELECT #{fence_id}, t.tag FROM jsonb_array_elements_text(#{tags}::jsonb) AS t(tag)
+WHERE NOT EXISTS (SELECT 1 FROM cleared WHERE cleared.drone_tag = t.tag)
+ON CONFLICT (fence_id, drone_tag) DO NOTHING
+</insert>
+
+<delete id="drone_fence_delete">
+WITH cleared AS (
+    DELETE FROM drone_fence_device WHERE fence_id = #{id}
+)
+DELETE FROM drone_fence WHERE id = #{id}
+</delete>
+</mapper>

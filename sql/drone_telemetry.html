@@ -1,0 +1,46 @@
+<mapper>
+<insert id="drone_telemetry_insert_batch">
+INSERT INTO drone_telemetry (
+    drone_tag, ts, lat, lon, alt_amsl, rel_alt, roll, pitch, yaw,
+    vx, vy, vz, qx, qy, qz, qw, battery_pct, voltage, link_quality,
+    seq, satellites, gps_fix, hdop, armed, mode)
+SELECT drone_tag, to_timestamp(ts / 1000.0), lat, lon, alt_amsl, rel_alt,
+       roll, pitch, yaw, vx, vy, vz, qx, qy, qz, qw, battery_pct, voltage,
+       link_quality, seq, satellites, gps_fix, hdop, armed, mode
+FROM jsonb_to_recordset(#{payload}::jsonb) AS t(
+    drone_tag text, ts bigint, lat double precision, lon double precision,
+    alt_amsl double precision, rel_alt double precision, roll double precision,
+    pitch double precision, yaw double precision, vx double precision,
+    vy double precision, vz double precision, qx double precision,
+    qy double precision, qz double precision, qw double precision,
+    battery_pct double precision, voltage double precision, link_quality integer,
+    seq integer, satellites integer, gps_fix integer, hdop double precision,
+    armed boolean, mode text)
+</insert>
+
+<select id="drone_telemetry_select_window">
+WITH src AS (
+    SELECT ts, row_number() OVER (ORDER BY ts) AS rn,
+           count(*) OVER () AS total
+    FROM drone_telemetry
+    WHERE drone_tag = #{drone_tag}
+      AND (NOT (#{start_ms}::bigint &gt; 0)
+           OR ts &gt;= to_timestamp(#{start_ms}::double precision / 1000.0))
+      AND (NOT (#{end_ms}::bigint &gt; 0)
+           OR ts &lt;= to_timestamp(#{end_ms}::double precision / 1000.0))
+), picked AS (
+    SELECT ts FROM src
+    WHERE total &lt;= #{limit}
+       OR rn % GREATEST(1, total / #{limit}) = 0
+       OR rn = total
+)
+SELECT t.drone_tag, (EXTRACT(EPOCH FROM t.ts) * 1000)::bigint AS ts_ms, t.lat, t.lon,
+       t.alt_amsl, t.rel_alt, t.roll, t.pitch, t.yaw, t.vx, t.vy, t.vz,
+       t.qx, t.qy, t.qz, t.qw, t.battery_pct, t.voltage, t.link_quality,
+       t.seq, t.satellites, t.gps_fix, t.hdop, t.armed, t.mode
+FROM drone_telemetry t
+JOIN picked p ON p.ts = t.ts
+WHERE t.drone_tag = #{drone_tag}
+ORDER BY t.ts
+</select>
+</mapper>

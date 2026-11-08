@@ -78,6 +78,9 @@ fn emit(state: &DroneState, telemetry: &Telemetry, rule: &str, level: &str, mess
         level: level.to_string(),
         message: message.clone(),
         ts_ms: now,
+        lat: Some(telemetry.lat),
+        lon: Some(telemetry.lon),
+        alt: Some(telemetry.alt_amsl),
     };
     state.push_alert(alert.clone());
     let _ = state.event_tx.send(DroneEvent::Alert {

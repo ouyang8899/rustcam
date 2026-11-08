@@ -121,8 +121,7 @@ message DeviceInfo {
   common.Telemetry last_telemetry = 6;
   string name = 7;
   string model = 8;
-  string device_tag = 9;
-  string channel_tag = 10;
+  reserved 9, 10;              // 已移除：device_tag / channel_tag（媒体域命名，不属于无人机域）
   string video_stream = 11;
   string autopilot = 12;
   bool   armed = 13;
@@ -189,8 +188,7 @@ message DroneProfile {
   string name = 2;
   string model = 3;
   string autopilot = 4;     // auto / px4 / ardupilot
-  string device_tag = 5;    // 关联视频设备
-  string channel_tag = 6;   // 关联视频通道
+  reserved 5, 6;            // 已移除：device_tag / channel_tag（媒体域命名，不属于无人机域）
   string video_stream = 7;  // RTSP/FLV 播放地址（可空）
   string notes = 8;
   bool   enabled = 9;

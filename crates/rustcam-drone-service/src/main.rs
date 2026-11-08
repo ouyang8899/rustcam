@@ -58,6 +58,17 @@ async fn main() -> anyhow::Result<()> {
 
     let state = DroneState::new(cfg).with_redis(redis).with_db(db);
 
+    // 归档队列：遥测与告警落 PostgreSQL（遥测走 TimescaleDB 超表）。
+    // ingest 侧只投递不等待，写库由后台 worker 批量完成。
+    let (archive_tx, archive_rx) = tokio::sync::mpsc::channel(
+        rustcam_drone_service::archive::ARCHIVE_QUEUE_CAPACITY,
+    );
+    let state = state.with_archive(archive_tx);
+    let archive_state = state.clone();
+    spawn_supervised("archive-writer", async move {
+        rustcam_drone_service::archive::run_archive_worker(archive_state, archive_rx).await;
+    });
+
     // 航线/围栏以 PostgreSQL 为权威源；空库时把 state_file 的旧数据回填。
     if let Err(e) = state.load_persistent().await {
         tracing::error!(error = %e, "[Drone] failed to load routes/fences from PostgreSQL");

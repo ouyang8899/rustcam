@@ -1,0 +1,59 @@
+<mapper>
+<select id="drone_device_link_select_by_adapter">
+SELECT drone_tag,
+       COALESCE(unique_id, '') AS unique_id,
+       COALESCE(mavlink_addr, '') AS mavlink_addr,
+       COALESCE(signing_secret, '') AS signing_secret,
+       signing_allow_unsigned,
+       mavlink_version,
+       mavlink_sysid,
+       mavlink_compid,
+       COALESCE(adapter_id, '') AS adapter_id
+FROM drone_device
+WHERE adapter_id = #{adapter_id}
+ORDER BY drone_device.drone_tag
+</select>
+
+<select id="drone_device_link_select_by_tag">
+SELECT drone_tag,
+       COALESCE(unique_id, '') AS unique_id,
+       COALESCE(mavlink_addr, '') AS mavlink_addr,
+       COALESCE(signing_secret, '') AS signing_secret,
+       signing_allow_unsigned,
+       mavlink_version,
+       mavlink_sysid,
+       mavlink_compid,
+       COALESCE(adapter_id, '') AS adapter_id
+FROM drone_device
+WHERE drone_tag = #{drone_tag}
+LIMIT 1
+</select>
+
+<insert id="drone_device_link_upsert">
+INSERT INTO drone_device
+    (drone_tag, protocol, adapter_id, unique_id, mavlink_addr,
+     signing_secret, signing_allow_unsigned, mavlink_version,
+     mavlink_sysid, mavlink_compid)
+VALUES (#{drone_tag}, 'mavlink', NULLIF(#{adapter_id}, ''), NULLIF(#{unique_id}, ''),
+        NULLIF(#{mavlink_addr}, ''), NULLIF(#{signing_secret}, ''),
+        #{signing_allow_unsigned}, #{mavlink_version},
+        #{mavlink_sysid}, #{mavlink_compid})
+ON CONFLICT (drone_tag) DO UPDATE SET
+    adapter_id = EXCLUDED.adapter_id,
+    unique_id = EXCLUDED.unique_id,
+    mavlink_addr = EXCLUDED.mavlink_addr,
+    signing_secret = EXCLUDED.signing_secret,
+    signing_allow_unsigned = EXCLUDED.signing_allow_unsigned,
+    mavlink_version = EXCLUDED.mavlink_version,
+    mavlink_sysid = EXCLUDED.mavlink_sysid,
+    mavlink_compid = EXCLUDED.mavlink_compid
+</insert>
+
+<select id="drone_device_legacy_column_exists">
+SELECT 1 AS present
+FROM information_schema.columns
+WHERE table_name = #{table_name}
+  AND column_name = #{column_name}
+LIMIT 1
+</select>
+</mapper>

@@ -1,0 +1,20 @@
+<mapper>
+<insert id="drone_alert_insert">
+INSERT INTO drone_alert (ts, drone_tag, rule, level, message, lat, lon, alt)
+VALUES (to_timestamp(#{ts_ms}::double precision / 1000.0), #{drone_tag}, #{rule},
+        #{level}, #{message}, #{lat}, #{lon}, #{alt})
+</insert>
+
+<select id="drone_alert_select_window">
+SELECT (EXTRACT(EPOCH FROM ts) * 1000)::bigint AS ts_ms,
+       drone_tag, rule, level, message, lat, lon, alt
+FROM drone_alert
+WHERE (#{drone_tag} = '' OR drone_tag = #{drone_tag})
+  AND (NOT (#{start_ms}::bigint &gt; 0)
+       OR ts &gt;= to_timestamp(#{start_ms}::double precision / 1000.0))
+  AND (NOT (#{end_ms}::bigint &gt; 0)
+       OR ts &lt;= to_timestamp(#{end_ms}::double precision / 1000.0))
+ORDER BY ts DESC
+LIMIT #{limit}
+</select>
+</mapper>

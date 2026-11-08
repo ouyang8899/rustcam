@@ -38,8 +38,6 @@ impl QueryServiceImpl {
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| drone_tag.to_string()),
             model: profile.map(|p| p.model.clone()).unwrap_or_default(),
-            device_tag: profile.map(|p| p.device_tag.clone()).unwrap_or_default(),
-            channel_tag: profile.map(|p| p.channel_tag.clone()).unwrap_or_default(),
             video_stream: profile.map(|p| p.video_stream.clone()).unwrap_or_default(),
             autopilot: last.map(|t| t.autopilot.clone()).unwrap_or_default(),
             armed: last.map(|t| t.armed).unwrap_or(false),
@@ -180,13 +178,38 @@ impl QueryService for QueryServiceImpl {
         } else {
             req.limit as usize
         };
-        let samples = self
-            .state
-            .telemetry_history(&req.drone_tag, req.start_ms, req.end_ms, limit)
-            .iter()
-            .map(shadow::to_proto)
-            .collect();
+        // 时序库是遥测的归档源；库里没有（或查询失败）时退回内存热数据。
+        let samples = match self
+            .load_archived(&req.drone_tag, req.start_ms, req.end_ms, limit)
+            .await
+        {
+            Some(list) if !list.is_empty() => list,
+            _ => self
+                .state
+                .telemetry_history(&req.drone_tag, req.start_ms, req.end_ms, limit),
+        };
+        let samples = samples.iter().map(shadow::to_proto).collect();
         Ok(Response::new(TelemetryHistory { samples }))
+    }
+}
+
+impl QueryServiceImpl {
+    /// 从时序库读取遥测；未配置数据库时返回 `None`。
+    async fn load_archived(
+        &self,
+        drone_tag: &str,
+        start_ms: i64,
+        end_ms: i64,
+        limit: usize,
+    ) -> Option<Vec<rustcam_drone_core::telemetry::Telemetry>> {
+        let db = self.state.db.clone()?;
+        match db.load_telemetry(drone_tag, start_ms, end_ms, limit).await {
+            Ok(list) => Some(list),
+            Err(e) => {
+                tracing::warn!(error = %e, "[Drone] telemetry archive read failed");
+                None
+            }
+        }
     }
 }
 
@@ -274,6 +297,7 @@ mod tests {
             level: "high".into(),
             message: "越界".into(),
             ts_ms: 1,
+            ..Default::default()
         });
         let svc = QueryServiceImpl::new(state);
         let alerts = svc

@@ -128,11 +128,8 @@ fn applies(fence: &FenceRecord, drone_tag: &str) -> bool {
     if !fence.enabled {
         return false;
     }
-    // drone_tags 优先；旧的单 drone_tag 字段继续兼容。
-    if !fence.drone_tags.is_empty() {
-        return fence.drone_tags.iter().any(|id| id == drone_tag);
-    }
-    fence.drone_tag.is_empty() || fence.drone_tag == drone_tag
+    // 关联表（drone_fence_device）为空表示模板围栏：对所有无人机生效。
+    fence.drone_tags.is_empty() || fence.drone_tags.iter().any(|id| id == drone_tag)
 }
 
 /// 围栏类型归一化（规则 §5.4：`no_fly` / `work` / `height`；`allowed` 视作 `work`）。
@@ -246,6 +243,10 @@ pub fn evaluate(state: &DroneState, telemetry: &Telemetry) {
             level: level.into(),
             message: message.clone(),
             ts_ms: now,
+            // 越界位置：事后追溯要知道在哪越的界。
+            lat: Some(telemetry.lat),
+            lon: Some(telemetry.lon),
+            alt: Some(telemetry.alt_amsl),
         };
         state.push_alert(alert.clone());
         let _ = state.event_tx.send(DroneEvent::Alert {
@@ -314,7 +315,6 @@ mod tests {
             radius_m: 0.0,
             min_alt: 0.0,
             max_alt: 120.0,
-            drone_tag: String::new(),
             drone_tags: Vec::new(),
             enabled: true,
             version: 1,

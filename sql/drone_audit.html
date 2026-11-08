@@ -1,0 +1,20 @@
+<mapper>
+<insert id="drone_control_audit_insert">
+INSERT INTO drone_control_audit
+    (ts, drone_tag, control_type, action, holder, priority, result, operator)
+VALUES (to_timestamp(#{ts_ms}::double precision / 1000.0), #{drone_tag}, #{control_type},
+        #{action}, #{holder}, #{priority}, #{result}, #{operator})
+</insert>
+
+<insert id="drone_command_audit_upsert">
+INSERT INTO drone_command_audit
+    (ts, drone_tag, cmd_id, type, params, status, operator, finished_at)
+VALUES (to_timestamp(#{ts_ms}::double precision / 1000.0), #{drone_tag}, #{cmd_id},
+        #{action}, #{params}::jsonb, #{result}, #{operator},
+        CASE WHEN #{finished_at_ms}::bigint &gt; 0
+             THEN to_timestamp(#{finished_at_ms}::double precision / 1000.0)
+             ELSE NULL END)
+ON CONFLICT (cmd_id) DO UPDATE SET status = EXCLUDED.status,
+    finished_at = EXCLUDED.finished_at
+</insert>
+</mapper>

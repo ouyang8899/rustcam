@@ -119,7 +119,7 @@ impl FlightController {
     /// 建立 MAVLink 连接并启动后台任务。
     /// 建立 MAVLink 连接并启动后台任务。
     ///
-    /// 端点与机体标识由平台分配（drone.md §12.4 L3）：`addr` 是该机的 MAVLink
+    /// 端点与机体标识由平台分配：`addr` 是该机的 MAVLink
     /// 端点，`drone_tag` 是平台唯一标识，`expected_sysid/expected_compid` 是
     /// 平台登记的寻址号（与实测不一致只告警）。
     pub async fn connect(
@@ -219,6 +219,11 @@ impl FlightController {
 
     pub fn subscribe_events(&self) -> broadcast::Receiver<FcEvent> {
         self.event_tx.subscribe()
+    }
+
+    /// 订阅关闭信号；会话结束时 forwarder 用它退出并释放底层 UDP socket。
+    pub fn subscribe_shutdown(&self) -> watch::Receiver<bool> {
+        self.shutdown_tx.subscribe()
     }
 
     pub async fn is_online(&self) -> bool {
@@ -493,8 +498,7 @@ fn spawn_reader(
                                 detail: version,
                             });
                         }
-                        // 唯一标识单独上抛，供 gRPC 会话上报 IdentityReport
-                        // （drone.md §12.4 L3）。
+                        // 唯一标识单独上抛，供 gRPC 会话上报 IdentityReport。
                         if !unique_id.is_empty() && shared.note_identity(&unique_id) {
                             let _ = event_tx.send(FcEvent {
                                 event_type: "identity".into(),
@@ -612,7 +616,7 @@ fn rejected_reply(cmd: &proto::Command, code: i32, message: &str) -> proto::Comm
     }
 }
 
-async fn wait_shutdown(rx: &mut watch::Receiver<bool>) {
+pub(crate) async fn wait_shutdown(rx: &mut watch::Receiver<bool>) {
     if *rx.borrow() {
         return;
     }

@@ -1,6 +1,6 @@
 //! 敏感配置的静态加密（应用层）。
 //!
-//! 签名密钥在库里按密文存放，主密钥来自环境变量，不入库（drone.md §9.1 / §12.4）。
+//! 签名密钥在库里按密文存放，主密钥来自环境变量，不入库。
 //! 加密算法：AES-256-GCM（ring），密文格式 `v1:<hex(nonce||ciphertext)>`。
 
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM, NONCE_LEN};

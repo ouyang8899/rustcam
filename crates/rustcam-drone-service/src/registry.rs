@@ -10,7 +10,7 @@ use crate::infra::redis::DroneRedis;
 use crate::presence;
 use crate::state::{AdapterEntry, AdapterTx, DeviceEntry, DroneState};
 
-/// 唯一标识判定规则（drone.md §12.4 L3，唯一定义处）。
+/// 唯一标识判定规则（唯一定义处）。
 ///
 /// - `registered` 为空（档案未登记）：不做判定，放行。
 /// - `registered` 非空：要求 `observed` 非空且相等；`observed` 为空按不一致处理。
@@ -36,7 +36,7 @@ impl Registry {
     /// adapter 注册：分配设备、记录代次、返回 RegisterAck。
     /// 同一 adapter_id 重复注册时新连接胜出（代次自增，旧连接失效）。
     ///
-    /// 设备来源：**只**按 `adapter_id` 查 `drone_device`（drone.md §9.1）。
+    /// 设备来源：**只**按 `adapter_id` 查 `drone_device`。
     /// 引导模式已取消——adapter 不再自报设备，平台未绑定则该 adapter 无 assignment。
     pub async fn register(&self, reg: &Register, tx: AdapterTx) -> RegisterAck {
         let link_rows = self.load_link_rows(&reg.adapter_id).await;
@@ -229,7 +229,7 @@ impl Registry {
 
     /// 处理 adapter 上报的实测唯一标识。
     ///
-    /// 判定规则同 `identity_matches`；不一致的设备立即撤销分配（drone.md §12.4 L3）。
+    /// 判定规则同 `identity_matches`；不一致的设备立即撤销分配。
     /// 返回每个设备的处理结果，供调用方发事件与告警。
     pub async fn apply_identity_report(
         &self,

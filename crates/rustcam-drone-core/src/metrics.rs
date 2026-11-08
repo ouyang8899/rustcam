@@ -29,6 +29,11 @@ pub mod names {
     pub const ONLINE_DEVICES: &str = "rustcam_drone_online_devices";
     pub const ADAPTERS: &str = "rustcam_drone_adapters";
     pub const FENCES: &str = "rustcam_drone_fences";
+    // 归档（时序库写入）：行数、丢弃、失败、队列深度。
+    pub const ARCHIVE_ROWS_TOTAL: &str = "rustcam_drone_archive_rows_total";
+    pub const ARCHIVE_DROPPED_TOTAL: &str = "rustcam_drone_archive_dropped_total";
+    pub const ARCHIVE_ERRORS_TOTAL: &str = "rustcam_drone_archive_errors_total";
+    pub const ARCHIVE_QUEUE_DEPTH: &str = "rustcam_drone_archive_queue_depth";
 }
 
 /// 一条时间序列：指标名 + 排序后的标签。

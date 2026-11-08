@@ -1,0 +1,48 @@
+<mapper>
+<select id="drone_route_select_all">
+SELECT r.id, r.name, r.enabled, r.end_action, r.updated_ms,
+       r.waypoints::text AS waypoints,
+       COALESCE(l.drone_tags::text, '[]') AS drone_tags
+FROM drone_route r
+LEFT JOIN (
+    SELECT route_id, jsonb_agg(drone_tag ORDER BY drone_tag) AS drone_tags
+    FROM drone_route_device GROUP BY route_id
+) l ON l.route_id = r.id
+ORDER BY r.updated_ms DESC
+</select>
+
+<insert id="drone_route_upsert">
+INSERT INTO drone_route
+    (id, name, waypoints, enabled, end_action, updated_ms, updated_at)
+VALUES (#{id}, #{name}, #{waypoints}::jsonb, #{enabled}, #{end_action}, #{updated_ms}, now())
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name,
+    waypoints = EXCLUDED.waypoints,
+    enabled = EXCLUDED.enabled,
+    end_action = EXCLUDED.end_action,
+    updated_ms = EXCLUDED.updated_ms,
+    updated_at = now()
+</insert>
+
+<insert id="drone_route_devices_replace">
+WITH cleared AS (
+    DELETE FROM drone_route_device d
+    WHERE d.route_id = #{route_id}
+      AND NOT EXISTS (
+          SELECT 1 FROM jsonb_array_elements_text(#{tags}::jsonb) t(tag)
+          WHERE t.tag = d.drone_tag
+      )
+    RETURNING d.drone_tag
+)
+INSERT INTO drone_route_device (route_id, drone_tag)
+SELECT #{route_id}, t.tag FROM jsonb_array_elements_text(#{tags}::jsonb) AS t(tag)
+WHERE NOT EXISTS (SELECT 1 FROM cleared WHERE cleared.drone_tag = t.tag)
+ON CONFLICT (route_id, drone_tag) DO NOTHING
+</insert>
+
+<delete id="drone_route_delete">
+WITH cleared AS (
+    DELETE FROM drone_route_device WHERE route_id = #{id}
+)
+DELETE FROM drone_route WHERE id = #{id}
+</delete>
+</mapper>

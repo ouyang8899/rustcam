@@ -83,7 +83,7 @@ impl LedgerInner {
     }
 }
 
-/// 唯一标识上报器：把飞控实测 uid 报给 drone-service（drone.md §12.4 L3）。
+/// 唯一标识上报器：把飞控实测 uid 报给 drone-service。
 ///
 /// 规则：
 /// - **空值不上报**：飞控未提供 uid 时上报空值会被判"不一致"并撤销设备分配
@@ -158,7 +158,7 @@ pub async fn run(cfg: AdapterConfig) -> anyhow::Result<()> {
 }
 
 async fn serve(cfg: &AdapterConfig, ledger: Arc<CommandLedger>) -> anyhow::Result<()> {
-    // 先连平台、再按平台分配的 assignment 建链（drone.md §12.4 L3）：
+    // 先连平台、再按平台分配的 assignment 建链：
     // 端点与设备标识都不在本地配置里。
     let endpoint = Endpoint::from_shared(cfg.service_addr.clone())
         .map_err(|e| anyhow::anyhow!("invalid service_addr: {e}"))?
@@ -244,9 +244,10 @@ async fn handle_service_message(
             );
             spawn_heartbeat_forwarder(tx.clone(), pool.clone(), interval_secs);
 
-            // 按平台分配的端点逐条建链；某一台连不上不影响其余。
+            // 按平台分配的端点逐条建链；建链失败必须让本次会话失败并重连，
+            // 否则会以「gRPC 在线但无飞控链路」的半死状态一直挂着。
             for assignment in ack.assignments.iter() {
-                connect_assignment(cfg, &tx, pool, assignment).await;
+                connect_assignment(cfg, &tx, pool, assignment).await?;
             }
             if ack.assigned_drone_tags.is_empty() {
                 tracing::warn!(
@@ -307,7 +308,7 @@ async fn connect_assignment(
     tx: &mpsc::Sender<AdapterMessage>,
     pool: &Arc<FcPool>,
     assignment: &rustcam_drone_proto::link::DeviceAssignment,
-) {
+) -> anyhow::Result<()> {
     let drone_tag = assignment.drone_tag.clone();
     let fc = match FlightController::connect(
         &assignment.mavlink_addr,
@@ -325,7 +326,7 @@ async fn connect_assignment(
                 error = %e,
                 "[Adapter] failed to connect flight controller"
             );
-            return;
+            return Err(e);
         }
     };
     pool.insert(&drone_tag, fc.clone());
@@ -334,6 +335,7 @@ async fn connect_assignment(
     // 每台机体一个上报器：实测 uid 归属到自己的 drone_tag。
     let reporter = Arc::new(IdentityReporter::new(drone_tag.clone()));
     spawn_identity_forwarder(tx.clone(), fc.clone(), reporter);
+    Ok(())
 }
 
 /// 心跳周期以服务端为准；服务端未给出时用本地配置兜底（规则 §5.7）。
@@ -392,54 +394,67 @@ fn spawn_heartbeat_forwarder(
     });
 }
 
+/// forwarder 只保留 receiver + shutdown 信号，不长期持有 `FlightController`；
+/// 否则 broadcast Sender 被任务自己握着，`recv` 永远等不到 Closed，任务泄漏并占住 UDP 端口。
 fn spawn_telemetry_forwarder(tx: mpsc::Sender<AdapterMessage>, fc: FlightController) {
+    let mut telemetry_rx = fc.subscribe_telemetry();
+    let mut shutdown_rx = fc.subscribe_shutdown();
+    drop(fc);
     tokio::spawn(async move {
-        let mut telemetry_rx = fc.subscribe_telemetry();
         loop {
-            match telemetry_rx.recv().await {
-                Ok(telemetry) => {
-                    let msg = AdapterMessage {
-                        payload: Some(Payload::Telemetry(fc::telemetry::to_proto(&telemetry))),
-                    };
-                    if tx.send(msg).await.is_err() {
-                        break;
+            tokio::select! {
+                _ = fc::wait_shutdown(&mut shutdown_rx) => break,
+                received = telemetry_rx.recv() => match received {
+                    Ok(telemetry) => {
+                        let msg = AdapterMessage {
+                            payload: Some(Payload::Telemetry(fc::telemetry::to_proto(&telemetry))),
+                        };
+                        if tx.send(msg).await.is_err() {
+                            break;
+                        }
                     }
-                }
-                Err(RecvError::Lagged(skipped)) => {
-                    tracing::warn!(skipped, "telemetry subscriber lagged, dropping old frames");
-                }
-                Err(RecvError::Closed) => break,
+                    Err(RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, "telemetry subscriber lagged, dropping old frames");
+                    }
+                    Err(RecvError::Closed) => break,
+                },
             }
         }
     });
 }
 
 fn spawn_event_forwarder(tx: mpsc::Sender<AdapterMessage>, fc: FlightController) {
+    let mut event_rx = fc.subscribe_events();
+    let mut shutdown_rx = fc.subscribe_shutdown();
+    let drone_tag = fc.drone_tag.clone();
+    drop(fc);
     tokio::spawn(async move {
-        let mut event_rx = fc.subscribe_events();
         loop {
-            match event_rx.recv().await {
-                Ok(event) => {
-                    // 唯一标识走 IdentityReport 通道，不重复作为设备事件上报。
-                    if event.event_type == IDENTITY_EVENT {
-                        continue;
+            tokio::select! {
+                _ = fc::wait_shutdown(&mut shutdown_rx) => break,
+                received = event_rx.recv() => match received {
+                    Ok(event) => {
+                        // 唯一标识走 IdentityReport 通道，不重复作为设备事件上报。
+                        if event.event_type == IDENTITY_EVENT {
+                            continue;
+                        }
+                        let msg = AdapterMessage {
+                            payload: Some(Payload::Event(rustcam_drone_proto::common::DeviceEvent {
+                                drone_tag: drone_tag.clone(),
+                                r#type: event.event_type,
+                                detail: event.detail,
+                                ts_ms: fc::now_ms(),
+                            })),
+                        };
+                        if tx.send(msg).await.is_err() {
+                            break;
+                        }
                     }
-                    let msg = AdapterMessage {
-                        payload: Some(Payload::Event(rustcam_drone_proto::common::DeviceEvent {
-                            drone_tag: fc.drone_tag.clone(),
-                            r#type: event.event_type,
-                            detail: event.detail,
-                            ts_ms: fc::now_ms(),
-                        })),
-                    };
-                    if tx.send(msg).await.is_err() {
-                        break;
+                    Err(RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, "adapter event subscriber lagged");
                     }
-                }
-                Err(RecvError::Lagged(skipped)) => {
-                    tracing::warn!(skipped, "adapter event subscriber lagged");
-                }
-                Err(RecvError::Closed) => break,
+                    Err(RecvError::Closed) => break,
+                },
             }
         }
     });
@@ -454,22 +469,28 @@ fn spawn_identity_forwarder(
     fc: FlightController,
     reporter: Arc<IdentityReporter>,
 ) {
+    let mut event_rx = fc.subscribe_events();
+    let mut shutdown_rx = fc.subscribe_shutdown();
+    let unique_id = fc.unique_id();
+    drop(fc);
     tokio::spawn(async move {
         // 建链瞬间可能已经读到 uid（事件先于订阅者产生），先补报一次。
-        reporter.report(&tx, &fc.unique_id()).await;
-        let mut event_rx = fc.subscribe_events();
+        reporter.report(&tx, &unique_id).await;
         loop {
-            match event_rx.recv().await {
-                Ok(event) => {
-                    if event.event_type != IDENTITY_EVENT {
-                        continue;
+            tokio::select! {
+                _ = fc::wait_shutdown(&mut shutdown_rx) => break,
+                received = event_rx.recv() => match received {
+                    Ok(event) => {
+                        if event.event_type != IDENTITY_EVENT {
+                            continue;
+                        }
+                        reporter.report(&tx, &event.detail).await;
                     }
-                    reporter.report(&tx, &event.detail).await;
-                }
-                Err(RecvError::Lagged(skipped)) => {
-                    tracing::warn!(skipped, "adapter identity subscriber lagged");
-                }
-                Err(RecvError::Closed) => break,
+                    Err(RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, "adapter identity subscriber lagged");
+                    }
+                    Err(RecvError::Closed) => break,
+                },
             }
         }
     });
@@ -564,6 +585,74 @@ mod tests {
         ledger.mark_completed("cmd-1");
         assert!(ledger.is_completed("cmd-1"));
         assert!(!ledger.is_completed("cmd-2"));
+    }
+
+    #[tokio::test]
+    async fn closing_session_releases_mavlink_udp_port() {
+        let port = {
+            let socket = std::net::UdpSocket::bind("0.0.0.0:0").expect("pick free port");
+            socket.local_addr().expect("local addr").port()
+        };
+        let cfg = AdapterConfig::default();
+        let fc = FlightController::connect(
+            &format!("udpin:0.0.0.0:{port}"),
+            "drone-test",
+            0,
+            0,
+            &cfg,
+        )
+        .await
+        .expect("connect udpin");
+
+        // 按生产路径起三个 forwarder；接收端必须存活，否则它们会因发送失败提前退出。
+        let (tx, _guard) = mpsc::channel(64);
+        spawn_telemetry_forwarder(tx.clone(), fc.clone());
+        spawn_event_forwarder(tx.clone(), fc.clone());
+        spawn_identity_forwarder(
+            tx,
+            fc.clone(),
+            Arc::new(IdentityReporter::new("drone-test".into())),
+        );
+
+        fc.close();
+        drop(fc);
+
+        // 会话结束后，旧链路（含 forwarder 持有的 FC 克隆）必须释放 UDP 端口，
+        // 否则下个会话 connect_assignment 会 bind 失败（Windows os error 10048）。
+        let mut rebound = None;
+        for _ in 0..40 {
+            if let Ok(socket) = std::net::UdpSocket::bind(("0.0.0.0", port)) {
+                rebound = Some(socket);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(
+            rebound.is_some(),
+            "MAVLink UDP port {port} was not released after session close"
+        );
+    }
+
+    #[tokio::test]
+    async fn assignment_connect_failure_is_reported() {
+        let blocker = std::net::UdpSocket::bind("0.0.0.0:0").expect("bind blocker");
+        let port = blocker.local_addr().expect("local addr").port();
+        let cfg = AdapterConfig::default();
+        let (tx, _guard) = mpsc::channel(8);
+        let pool = Arc::new(FcPool::default());
+        let assignment = rustcam_drone_proto::link::DeviceAssignment {
+            drone_tag: "drone-test".into(),
+            mavlink_addr: format!("udpin:0.0.0.0:{port}"),
+            ..Default::default()
+        };
+
+        let result = connect_assignment(&cfg, &tx, &pool, &assignment).await;
+
+        assert!(
+            result.is_err(),
+            "connect failure must end the session instead of running half-dead"
+        );
+        assert!(pool.get("drone-test").is_none());
     }
 
     #[test]

@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod archive;
 pub mod commands;
 pub mod config;
 pub mod control;
@@ -11,6 +12,7 @@ pub mod registry;
 pub mod risk;
 pub mod secret;
 pub mod shadow;
+pub mod sql_mappers;
 pub mod state;
 pub mod store;
 pub mod supervisor;

@@ -28,6 +28,10 @@ ring = { workspace = true }
 redis = { workspace = true }
 rbatis = { workspace = true }
 rbdc-pg = { workspace = true }
+rbdc = { workspace = true }
+bb8 = { workspace = true }
+futures-core = { workspace = true }
+async-trait = { workspace = true }
 rbs = { workspace = true }
 dashmap = { workspace = true }
 config = { workspace = true }

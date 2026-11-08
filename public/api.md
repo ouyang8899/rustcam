@@ -679,7 +679,7 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data))
 - `drone_tag`：平台唯一标识，格式 `drone-<uuid4>`。新增档案时留空由服务端生成；一旦创建不可修改（更新时忽略该字段）。REST 路径/查询、前端 key、Redis 键、审计表统一使用它。
 - `device_tag` / `channel_tag`：**摄像机域**的业务关联字段，与 `drone_tag` 无关，只用于视频播放链路。
 
-机载链路身份字段（drone.md §12.4）：
+机载链路身份字段：
 
 | 字段 | 说明 |
 |---|---|

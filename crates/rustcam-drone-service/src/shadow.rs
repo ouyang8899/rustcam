@@ -49,7 +49,7 @@ pub fn ingest(state: &DroneState, telemetry: Telemetry) -> Ingest {
         entry.last_seen_ms = ts;
         entry.last_seq = telemetry.seq;
         entry.last_ts_ms = ts;
-        // 实测唯一标识（drone.md §12.4 L3）：只在上报非空时覆盖，避免未提供时清掉已有值。
+        // 实测唯一标识：只在上报非空时覆盖，避免未提供时清掉已有值。
         if !telemetry.unique_id.trim().is_empty() {
             entry.unique_id = telemetry.unique_id.trim().to_string();
         }

@@ -22,8 +22,8 @@ const TICK_SECS: f64 = 0.1;
 const HOME_ALT_M: f64 = 30.0;
 /// 唯一标识默认值（飞控侧 `AUTOPILOT_VERSION.uid`）。
 ///
-/// 平台侧登记的唯一标识必须与本值一致，否则指令会被唯一标识核验拒绝
-/// （drone.md §12.4 L3）。可用 `--uid` 覆盖。
+/// 平台侧登记的唯一标识必须与本值一致，否则指令会被唯一标识核验拒绝。
+/// 可用 `--uid` 覆盖。
 const DEFAULT_UID: u64 = 0x0011_2233_4455_6677;
 /// `AUTOPILOT_VERSION` 重发周期（秒）。
 const VERSION_REPORT_SECS: u64 = 5;
@@ -153,7 +153,7 @@ impl Vehicle {
         })
     }
 
-    /// 固件版本信息：携带唯一标识，供平台做唯一标识核验（drone.md §12.4 L3）。
+    /// 固件版本信息：携带唯一标识，供平台做唯一标识核验。
     ///
     /// `uid` 字段是 MAVLink 2 `AUTOPILOT_VERSION` 的 64 位唯一标识；
     /// 平台侧登记值需与之相等（登记为空时不做判定）。
@@ -527,7 +527,7 @@ async fn main() -> anyhow::Result<()> {
                 );
                 println!(
                     "  --uid    飞控唯一标识（十六进制，≤16 位）。平台登记值需与之一致，\n\
-                     \x20          否则唯一标识核验会拒绝下发指令（drone.md §12.4 L3）。"
+                     \x20          否则唯一标识核验会拒绝下发指令。"
                 );
                 return Ok(());
             }

@@ -158,7 +158,7 @@ impl AdapterConfig {
     /// 校验关键字段；非法配置直接拒绝启动。
     ///
     /// 注意：MAVLink 端点与设备标识**不在本地配置**——由平台按 `adapter_id`
-    /// 分配下发（drone.md §12.4 L3），因此这里只校验 adapter 自身的参数。
+    /// 分配下发，因此这里只校验 adapter 自身的参数。
     pub fn validate(&self) -> anyhow::Result<()> {
         let autopilot = self.autopilot.trim().to_ascii_lowercase();
         if !matches!(
@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn endpoint_is_not_mandatory_locally() {
-        // 端点改由服务端分配，本地不再必填（drone.md §12.4 L3）。
+        // 端点改由服务端分配，本地不再必填。
         let cfg = AdapterConfig::default();
         cfg.validate().expect("只带 adapter_id 与 service_addr 应当合法");
     }

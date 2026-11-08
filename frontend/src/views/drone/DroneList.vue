@@ -211,8 +211,6 @@ const emptyForm = () => ({
   model: '',
   autopilot: 'auto',
   drone_tag: '',
-  device_tag: '',
-  channel_tag: '',
   video_stream: '',
   camera_device_tags: [],
   notes: '',

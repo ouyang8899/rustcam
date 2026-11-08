@@ -36,7 +36,7 @@
 |------|------|
 | 协议 | RTSP、GB28181、ONVIF、WebSocket |
 | 认证 | JWT + Casbin |
-| 存储 | Redis (缓存) + PostgreSQL (持久化) |
+| 存储 | Redis (缓存) + PostgreSQL/PostGIS (业务与档案) + TimescaleDB (遥测时序) |
 
 ### 前端 (Vue)
 
@@ -419,6 +419,7 @@ RUSTCAM/
 |------|------|
 | Rust | 1.95+（依赖树 MSRV：`parking_lot 0.13` / `lock_api 0.5` 为 1.95，`tonic` / `redis` / `config` 为 1.88） |
 | PostgreSQL | 14+（**需 PostGIS 扩展**，通道坐标依赖 `geometry` 类型） |
+| TimescaleDB | PostgreSQL 扩展（遥测时序归档必需，需在 `shared_preload_libraries` 中预加载） |
 | Redis | 6+ |
 | Node.js | 18+ (前端构建) |
 | ZLMediaKit | 任意近期版本（推流 / 拉流 / 转推必需，配置模板见 `conf/config.ini`） |
@@ -510,6 +511,7 @@ psql -U postgres -d rustcam -f sql/migrate_role_inheritance.sql
 > - `sql/schema.sql` 是唯一的建库脚本；后续结构变更以 `sql/migrate_*.py` 追加，在 `sql/` 目录按需执行。
 > - 移动眼相关表（`drone_device`、`drone_geofence`、`drone_control_audit` 等）由 `rustcam-drone-service`
 >   启动时自动执行 `crates/rustcam-drone-service/migrations.sql` 创建，无需手工建表。
+> - 遥测时序数据写入 TimescaleDB 超表 `drone_telemetry`（`migrations.sql` 自动执行 `CREATE EXTENSION timescaledb`）。
 
 ### 构建与运行
 

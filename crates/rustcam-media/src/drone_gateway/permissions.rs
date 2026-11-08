@@ -1,7 +1,7 @@
 //! 无人机接口的权限点定义与映射。
 //!
-//! 规则来源：`drone.md` §12.1（REST 复用 JWT + Casbin，策略来自 `permissions`
-//! /`role_permissions` 表）与 §6.13（WS 用一次性票据）。
+//! REST 复用 JWT + Casbin，策略来自 `permissions` /`role_permissions` 表；
+//! WS 用一次性票据。
 //!
 //! 权限名在数据库中形如 `drone:control:acquire`；Casbin 按**首个冒号**拆成
 //! `(obj = "drone", act = "control:acquire")`，见 `auth::casbin::parse_permission`。
@@ -38,7 +38,7 @@ pub const ALL_PERMISSIONS: &[(&str, &str)] = &[
     ("drone:manage", "管理无人机档案、航线与围栏"),
 ];
 
-/// WS 路径允许的消息类型（`drone.md` §6.13）。
+/// WS 路径允许的消息类型。
 pub fn ws_msg_types(kind: &str) -> &'static [&'static str] {
     match kind {
         "telemetry" => &["telemetry"],

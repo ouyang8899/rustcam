@@ -219,7 +219,6 @@ mod tests {
             RouteRecord {
                 id: "route-1".into(),
                 name: "巡检".into(),
-                drone_tag: "drone-001".into(),
                 drone_tags: vec!["drone-001".into()],
                 waypoints: vec![WaypointRecord {
                     lat: 31.2,
@@ -247,7 +246,6 @@ mod tests {
                 radius_m: 0.0,
                 min_alt: 0.0,
                 max_alt: 120.0,
-                drone_tag: String::new(),
                 drone_tags: Vec::new(),
                 enabled: true,
                 version: 1,
@@ -292,6 +290,75 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(reread.profiles[0].drone_tag, restored.drone_tag);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn snapshot_uses_drone_tag_naming_only() {
+        let json = r#"{
+            "version": 1,
+            "routes": [{
+                "id": "route-1",
+                "name": "巡检",
+                "drone_tags": ["drone-001"],
+                "waypoints": [],
+                "enabled": true,
+                "updated_ms": 1
+            }],
+            "fences": [{
+                "id": "fence-1",
+                "name": "禁飞区",
+                "rule_type": "no_fly",
+                "shape": "polygon",
+                "geojson": "",
+                "center_lat": 0.0,
+                "center_lon": 0.0,
+                "radius_m": 0.0,
+                "min_alt": 0.0,
+                "max_alt": 120.0,
+                "drone_tags": ["drone-002"],
+                "enabled": true,
+                "version": 1,
+                "updated_ms": 2
+            }],
+            "leases": [{
+                "drone_tag": "drone-001",
+                "control_type": "flight",
+                "holder": "admin",
+                "priority": 10,
+                "expire_at_ms": 4102444800000
+            }],
+            "audits": [{
+                "ts_ms": 1,
+                "drone_tag": "drone-001",
+                "category": "command",
+                "action": "takeoff",
+                "operator": "admin",
+                "result": "accepted",
+                "detail": ""
+            }]
+        }"#;
+        let snapshot: Snapshot = serde_json::from_str(json).expect("parse snapshot");
+        assert_eq!(snapshot.routes[0].drone_tags, vec!["drone-001"]);
+        assert_eq!(snapshot.fences[0].drone_tags, vec!["drone-002"]);
+        assert_eq!(snapshot.leases[0].drone_tag, "drone-001");
+        assert_eq!(snapshot.audits[0].drone_tag, "drone-001");
+    }
+
+    #[test]
+    fn legacy_device_id_naming_is_rejected() {
+        // 旧命名（device_id / device_ids）不再兼容：快照字段名与代码一致。
+        let json = r#"{
+            "version": 1,
+            "routes": [{
+                "id": "route-1",
+                "name": "巡检",
+                "device_ids": ["drone-001"],
+                "waypoints": [],
+                "enabled": true,
+                "updated_ms": 1
+            }]
+        }"#;
+        assert!(serde_json::from_str::<Snapshot>(json).is_err());
     }
 
     #[test]

@@ -39,6 +39,7 @@ pub async fn set_device_link_state(
         level: if online { "info" } else { "high" }.to_string(),
         message: message.to_string(),
         ts_ms: now_ms(),
+        ..Default::default()
     };
     state.push_alert(alert.clone());
     state.push_audit(AuditRecord {

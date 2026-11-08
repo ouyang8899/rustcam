@@ -184,7 +184,7 @@ pub async fn submit_safety(state: &DroneState, cmd: proto::Command) -> proto::Co
     submit_inner(state, cmd, false).await
 }
 
-/// 唯一标识校验（drone.md §12.4 L3）。
+/// 唯一标识校验。
 ///
 /// 档案登记了唯一标识时，adapter 实测值必须非空且相等；否则拒绝下发指令。
 pub fn check_identity(state: &DroneState, drone_tag: &str) -> Result<(), String> {
@@ -277,7 +277,7 @@ async fn submit_inner(
     let protocol = device.protocol.clone();
     drop(device);
 
-    // 唯一标识核验（drone.md §12.4 L3）：档案登记了标识时，实测值必须非空且相等。
+    // 唯一标识核验：档案登记了标识时，实测值必须非空且相等。
     if let Err(e) = check_identity(state, &cmd.drone_tag) {
         audit_command(state, &cmd, "rejected", &e).await;
         return reply(&cmd, status::REJECTED, 409, e);
@@ -929,7 +929,6 @@ mod tests {
                 radius_m: 0.0,
                 min_alt: 0.0,
                 max_alt: 120.0,
-                drone_tag: String::new(),
                 drone_tags: Vec::new(),
                 enabled: true,
                 version: 1,

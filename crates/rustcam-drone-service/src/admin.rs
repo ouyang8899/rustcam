@@ -86,8 +86,6 @@ pub fn profile_to_proto(p: &DroneProfileRecord) -> DroneProfile {
         name: p.name.clone(),
         model: p.model.clone(),
         autopilot: p.autopilot.clone(),
-        device_tag: p.device_tag.clone(),
-        channel_tag: p.channel_tag.clone(),
         video_stream: p.video_stream.clone(),
         notes: p.notes.clone(),
         enabled: p.enabled,
@@ -138,7 +136,7 @@ pub fn upsert_profile(
         .map(|p| p.created_ms)
         .unwrap_or(now);
 
-    // 机载链路身份字段（drone.md §12.4 L3）。
+    // 机载链路身份字段。
     let unique_id = profile.unique_id.trim().to_ascii_lowercase();
     if !unique_id.is_empty() && !unique_id.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err("unique_id must be lowercase hex".into());
@@ -211,8 +209,6 @@ pub fn upsert_profile(
         } else {
             autopilot
         },
-        device_tag: profile.device_tag.trim().to_string(),
-        channel_tag: profile.channel_tag.trim().to_string(),
         video_stream: profile.video_stream.trim().to_string(),
         notes: profile.notes.trim().to_string(),
         enabled: profile.enabled,
@@ -242,7 +238,7 @@ pub fn upsert_profile(
     Ok(record)
 }
 
-/// 把机载链路参数写入 `drone_device` 表（drone.md §9.1）。
+/// 把机载链路参数写入 `drone_device` 表。
 ///
 /// 档案在内存与快照文件里，链路参数以 drone 表为唯一真相源；
 /// adapter 注册时按 `adapter_id` 从这里取端点与密钥下发。
@@ -276,23 +272,17 @@ pub async fn delete_profile(
 ) -> Result<bool, String> {
     let existed = state.profiles.remove(drone_tag).is_some();
     if existed {
-        // 多对多航线：只移除该无人机；若它是唯一适用机则删除航线。
+        // 多对多航线：解绑该无人机；若它是唯一适用机则整条航线删除。
         let affected: Vec<(String, RouteRecord)> = state
             .routes
             .iter()
-            .filter(|r| {
-                let v = r.value();
-                v.drone_tag == drone_tag || v.drone_tags.iter().any(|id| id == drone_tag)
-            })
+            .filter(|r| r.value().drone_tags.iter().any(|id| id == drone_tag))
             .map(|r| (r.key().clone(), r.value().clone()))
             .collect();
         for (id, mut route) in affected {
-            let mut delete = route.drone_tags.is_empty();
-            if !delete {
-                route.drone_tags.retain(|x| x != drone_tag);
-                delete = route.drone_tags.is_empty();
-            }
-            if delete {
+            route.drone_tags.retain(|x| x != drone_tag);
+            if route.drone_tags.is_empty() {
+                // 关联清空的航线整体删除：否则会退化成"适用于全部无人机"的模板。
                 if let Some(db) = state.db.clone() {
                     db.delete_route(&id)
                         .await
@@ -301,11 +291,6 @@ pub async fn delete_profile(
                 state.routes.remove(&id);
                 continue;
             }
-            route.drone_tag = if route.drone_tags.len() == 1 {
-                route.drone_tags[0].clone()
-            } else {
-                String::new()
-            };
             if let Some(db) = state.db.clone() {
                 db.upsert_route(&route)
                     .await
@@ -331,12 +316,8 @@ pub fn list_routes(state: &DroneState, drone_tag: &str) -> Vec<RouteRecord> {
             if drone_tag.is_empty() {
                 return true;
             }
-            if !v.drone_tags.is_empty() {
-                v.drone_tags.iter().any(|id| id == drone_tag)
-            } else {
-                // 旧数据没有 drone_tags：单机航线按 drone_tag，空值视为模板。
-                v.drone_tag.is_empty() || v.drone_tag == drone_tag
-            }
+            // 关联表为空表示模板航线：对所有无人机可用。
+            v.drone_tags.is_empty() || v.drone_tags.iter().any(|id| id == drone_tag)
         })
         .map(|e| e.value().clone())
         .collect();
@@ -345,19 +326,11 @@ pub fn list_routes(state: &DroneState, drone_tag: &str) -> Vec<RouteRecord> {
 }
 
 pub fn route_to_proto(r: &RouteRecord) -> ProtoRoute {
-    let drone_tags = if r.drone_tags.is_empty() && !r.drone_tag.trim().is_empty() {
-        vec![r.drone_tag.clone()]
-    } else {
-        r.drone_tags.clone()
-    };
     ProtoRoute {
         id: r.id.clone(),
         name: r.name.clone(),
-        drone_tag: if drone_tags.len() == 1 {
-            drone_tags[0].clone()
-        } else {
-            String::new()
-        },
+        // 单值字段是关联列表的派生值（仅一架时有值），供旧客户端使用。
+        drone_tag: r.sole_drone_tag().to_string(),
         waypoints: r
             .waypoints
             .iter()
@@ -374,7 +347,7 @@ pub fn route_to_proto(r: &RouteRecord) -> ProtoRoute {
         updated_ms: r.updated_ms,
         operator: String::new(),
         end_action: normalize_end_action(&r.end_action).to_string(),
-        drone_tags,
+        drone_tags: r.drone_tags.clone(),
     }
 }
 
@@ -446,11 +419,6 @@ pub async fn upsert_route(
     let record = RouteRecord {
         id: id.clone(),
         name: route.name.trim().to_string(),
-        drone_tag: if drone_tags.len() == 1 {
-            drone_tags[0].clone()
-        } else {
-            String::new()
-        },
         drone_tags,
         waypoints: route
             .waypoints
@@ -481,7 +449,7 @@ pub async fn upsert_route(
     state.routes.insert(id.clone(), record.clone());
     audit(
         state,
-        &record.drone_tag,
+        record.sole_drone_tag(),
         "route",
         "upsert",
         operator,
@@ -540,11 +508,8 @@ pub async fn execute_route(
         return Err("一次只允许执行一架无人机，请指定执行目标；多架请逐架执行".into());
     }
     let target = target.to_string();
-    let applies = if !route.drone_tags.is_empty() {
-        route.drone_tags.iter().any(|id| id == &target)
-    } else {
-        route.drone_tag.is_empty() || route.drone_tag == target
-    };
+    // 关联表为空表示模板航线：对所有无人机可用。
+    let applies = route.drone_tags.is_empty() || route.drone_tags.iter().any(|id| id == &target);
     if !applies {
         return Err(format!("航线 `{}` 不适用于无人机 `{target}`", route.name));
     }
@@ -1214,11 +1179,6 @@ pub fn list_fences(state: &DroneState) -> Vec<FenceRecord> {
 }
 
 pub fn fence_to_proto(f: &FenceRecord) -> ProtoFence {
-    let drone_tags = if f.drone_tags.is_empty() && !f.drone_tag.trim().is_empty() {
-        vec![f.drone_tag.clone()]
-    } else {
-        f.drone_tags.clone()
-    };
     ProtoFence {
         id: f.id.clone(),
         name: f.name.clone(),
@@ -1231,12 +1191,9 @@ pub fn fence_to_proto(f: &FenceRecord) -> ProtoFence {
         center_lat: f.center_lat,
         center_lon: f.center_lon,
         radius_m: f.radius_m,
-        drone_tag: if drone_tags.len() == 1 {
-            drone_tags[0].clone()
-        } else {
-            String::new()
-        },
-        drone_tags,
+        // 单值字段是关联列表的派生值（仅一架时有值），供旧客户端使用。
+        drone_tag: f.sole_drone_tag().to_string(),
+        drone_tags: f.drone_tags.clone(),
         shape: f.shape.clone(),
         updated_ms: f.updated_ms,
     }
@@ -1320,11 +1277,6 @@ pub async fn upsert_fence(
         radius_m: fence.radius_m,
         min_alt: fence.min_alt,
         max_alt: fence.max_alt,
-        drone_tag: if drone_tags.len() == 1 {
-            drone_tags[0].clone()
-        } else {
-            String::new()
-        },
         drone_tags,
         enabled: fence.enabled,
         version,
@@ -1338,7 +1290,7 @@ pub async fn upsert_fence(
     state.fences.insert(id.clone(), record.clone());
     audit(
         state,
-        &record.drone_tag,
+        record.sole_drone_tag(),
         "fence",
         "upsert",
         operator,
@@ -1380,8 +1332,6 @@ mod tests {
             name: String::new(),
             model: String::new(),
             autopilot: "auto".into(),
-            device_tag: String::new(),
-            channel_tag: String::new(),
             video_stream: String::new(),
             notes: String::new(),
             enabled: true,
@@ -1551,5 +1501,110 @@ mod tests {
         let mut p = profile();
         p.signing_secret = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff".into();
         assert!(upsert_profile(&state, p, "tester").is_err());
+    }
+
+    fn route_proto(drone_tags: &[&str]) -> ProtoRoute {
+        ProtoRoute {
+            id: "route-1".into(),
+            name: "巡检".into(),
+            drone_tag: String::new(),
+            waypoints: vec![RouteWaypoint {
+                lat: 31.2,
+                lon: 121.4,
+                alt: 30.0,
+                speed: 8.0,
+                loiter_sec: 0,
+                action: "waypoint".into(),
+            }],
+            enabled: true,
+            updated_ms: 0,
+            operator: String::new(),
+            end_action: String::new(),
+            drone_tags: drone_tags.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[tokio::test]
+    async fn route_association_is_stored_as_drone_tag_list() {
+        let state = DroneState::new(DroneConfig::default());
+        let record = upsert_route(&state, route_proto(&[" drone-b ", "drone-a", "drone-a"]), "tester")
+            .await
+            .expect("upsert route");
+        assert_eq!(record.drone_tags, vec!["drone-a", "drone-b"]);
+        // 单值字段是关联列表的派生值。
+        assert_eq!(record.sole_drone_tag(), "");
+        assert_eq!(route_to_proto(&record).drone_tag, "");
+        assert_eq!(route_to_proto(&record).drone_tags, vec!["drone-a", "drone-b"]);
+    }
+
+    #[tokio::test]
+    async fn route_sole_drone_is_exposed_as_single_value() {
+        let state = DroneState::new(DroneConfig::default());
+        let record = upsert_route(&state, route_proto(&["drone-a"]), "tester")
+            .await
+            .expect("upsert route");
+        assert_eq!(record.sole_drone_tag(), "drone-a");
+        assert_eq!(route_to_proto(&record).drone_tag, "drone-a");
+    }
+
+    #[tokio::test]
+    async fn route_falls_back_to_single_drone_tag_from_old_clients() {
+        let state = DroneState::new(DroneConfig::default());
+        let mut proto = route_proto(&[]);
+        proto.drone_tag = "drone-a".into();
+        let record = upsert_route(&state, proto, "tester")
+            .await
+            .expect("upsert route");
+        assert_eq!(record.drone_tags, vec!["drone-a"]);
+    }
+
+    #[tokio::test]
+    async fn template_route_applies_to_every_drone() {
+        let state = DroneState::new(DroneConfig::default());
+        upsert_route(&state, route_proto(&[]), "tester")
+            .await
+            .expect("upsert route");
+        assert_eq!(list_routes(&state, "drone-a").len(), 1);
+        assert_eq!(list_routes(&state, "").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn route_listing_filters_by_drone_tag() {
+        let state = DroneState::new(DroneConfig::default());
+        upsert_route(&state, route_proto(&["drone-a"]), "tester")
+            .await
+            .expect("upsert route");
+        assert_eq!(list_routes(&state, "drone-a").len(), 1);
+        assert_eq!(list_routes(&state, "drone-b").len(), 0);
+    }
+
+    #[tokio::test]
+    async fn deleting_profile_unbinds_route_and_removes_orphan_route() {
+        let state = DroneState::new(DroneConfig::default());
+        upsert_route(&state, route_proto(&["drone-a"]), "tester")
+            .await
+            .expect("upsert route");
+        let mut p = profile();
+        p.drone_tag = "drone-a".into();
+        upsert_profile(&state, p, "tester").expect("upsert profile");
+
+        assert!(delete_profile(&state, "drone-a", "tester").await.unwrap());
+        // 关联清空的航线整体删除：否则会退化成适用于全部无人机的模板。
+        assert!(state.routes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn deleting_profile_keeps_route_with_other_drones() {
+        let state = DroneState::new(DroneConfig::default());
+        upsert_route(&state, route_proto(&["drone-a", "drone-b"]), "tester")
+            .await
+            .expect("upsert route");
+        let mut p = profile();
+        p.drone_tag = "drone-a".into();
+        upsert_profile(&state, p, "tester").expect("upsert profile");
+
+        assert!(delete_profile(&state, "drone-a", "tester").await.unwrap());
+        let route = state.routes.get("route-1").expect("route kept");
+        assert_eq!(route.drone_tags, vec!["drone-b"]);
     }
 }

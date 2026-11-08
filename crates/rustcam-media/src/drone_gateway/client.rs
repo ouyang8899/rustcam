@@ -131,8 +131,7 @@ pub struct TelemetryDto {
     pub home_alt: f64,
     /// 飞控实测的唯一标识（`AUTOPILOT_VERSION.uid`）；空 = 飞控未提供。
     ///
-    /// 与档案登记的 `unique_id` 比对即可判断链路身份是否一致
-    /// （drone.md §12.4 L3）。
+    /// 与档案登记的 `unique_id` 比对即可判断链路身份是否一致。
     pub unique_id: String,
 }
 
@@ -154,8 +153,6 @@ pub struct DroneDto {
     pub autopilot: String,
     pub armed: bool,
     pub mode: String,
-    pub device_tag: String,
-    pub channel_tag: String,
     pub video_stream: String,
     pub notes: String,
     pub last_seen_ms: i64,
@@ -599,8 +596,6 @@ fn drone_dto(info: rustcam_drone_proto::control::DeviceInfo) -> DroneDto {
         autopilot: info.autopilot,
         armed: info.armed,
         mode: info.mode,
-        device_tag: info.device_tag,
-        channel_tag: info.channel_tag,
         video_stream: info.video_stream,
         notes: info.notes,
         last_seen_ms: info.last_seen_ms,
@@ -714,8 +709,6 @@ fn profile_msg(drone: DroneDto, operator: &str) -> ProfileMsg {
         name: drone.name,
         model: drone.model,
         autopilot: drone.autopilot,
-        device_tag: drone.device_tag,
-        channel_tag: drone.channel_tag,
         video_stream: drone.video_stream,
         notes: drone.notes,
         enabled: drone.enabled,
@@ -740,8 +733,6 @@ fn profile_dto(profile: ProfileMsg) -> DroneDto {
         model: profile.model,
         protocol: "mavlink".into(),
         autopilot: profile.autopilot,
-        device_tag: profile.device_tag,
-        channel_tag: profile.channel_tag,
         video_stream: profile.video_stream,
         notes: profile.notes,
         enabled: profile.enabled,

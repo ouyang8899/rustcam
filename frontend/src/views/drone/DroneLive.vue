@@ -341,12 +341,8 @@ const leaseOptions = LEASE_OPTIONS
 const selected = computed(() =>
   store.drones.find(d => d.drone_tag === selectedId.value) || null
 )
-/** 可选摄像头：优先用关联的摄像头，旧档案回退到 device_tag。 */
-const cameraOptions = computed(() => {
-  const tags = selected.value?.camera_device_tags || []
-  if (tags.length > 0) return tags
-  return selected.value?.device_tag ? [selected.value.device_tag] : []
-})
+/** 可选摄像头：取该无人机已关联的摄像头（drone_camera）。 */
+const cameraOptions = computed(() => selected.value?.camera_device_tags || [])
 const activeCameraTag = computed(() => cameraOptions.value[cameraIndex.value] || '')
 const activeChannel = computed(() => channelOptions.value[channelIndex.value] || null)
 const telemetry = computed(() =>
@@ -488,9 +484,7 @@ watch(channelIndex, () => {
 async function resolveVideo() {
   const cameraTag = activeCameraTag.value
   if (!cameraTag) return
-  const channelTag = activeChannel.value?.channel_tag
-    || selected.value?.channel_tag
-    || cameraTag
+  const channelTag = activeChannel.value?.channel_tag || cameraTag
   videoLoading.value = true
   try {
     const data = await getChannelPlayLinks(cameraTag, channelTag)

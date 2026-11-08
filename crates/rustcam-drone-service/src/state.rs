@@ -80,8 +80,6 @@ pub struct DroneProfileRecord {
     pub name: String,
     pub model: String,
     pub autopilot: String,
-    pub device_tag: String,
-    pub channel_tag: String,
     pub video_stream: String,
     pub notes: String,
     pub enabled: bool,
@@ -132,8 +130,6 @@ impl DroneProfileRecord {
             name: drone_tag.to_string(),
             model: String::new(),
             autopilot: "auto".into(),
-            device_tag: String::new(),
-            channel_tag: String::new(),
             video_stream: String::new(),
             notes: String::new(),
             enabled: true,
@@ -165,9 +161,9 @@ pub struct WaypointRecord {
 pub struct RouteRecord {
     pub id: String,
     pub name: String,
-    pub drone_tag: String,
     /// 适用无人机列表；为空表示所有无人机都可用（航线模板）。
-    #[serde(default)]
+    ///
+    /// 对应 `drone_route_device` 关联表。
     pub drone_tags: Vec<String>,
     pub waypoints: Vec<WaypointRecord>,
     pub enabled: bool,
@@ -175,6 +171,17 @@ pub struct RouteRecord {
     /// 任务完成后的动作：`hold`（默认，原地悬停）/ `rtl` / `land`。
     #[serde(default)]
     pub end_action: String,
+}
+
+impl RouteRecord {
+    /// 唯一适用机：关联恰好一架时才有值，多机或模板为空。
+    pub fn sole_drone_tag(&self) -> &str {
+        if self.drone_tags.len() == 1 {
+            self.drone_tags[0].as_str()
+        } else {
+            ""
+        }
+    }
 }
 
 /// 围栏：`rule_type = no_fly` 表示“进入即违规”，`allowed` 表示“离开即违规”。
@@ -190,22 +197,40 @@ pub struct FenceRecord {
     pub radius_m: f64,
     pub min_alt: f64,
     pub max_alt: f64,
-    pub drone_tag: String,
     /// 适用无人机列表；为空表示全部。
-    #[serde(default)]
+    ///
+    /// 对应 `drone_fence_device` 关联表。
     pub drone_tags: Vec<String>,
     pub enabled: bool,
     pub version: i32,
     pub updated_ms: i64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+impl FenceRecord {
+    /// 唯一适用机：关联恰好一架时才有值，多机或模板为空。
+    pub fn sole_drone_tag(&self) -> &str {
+        if self.drone_tags.len() == 1 {
+            self.drone_tags[0].as_str()
+        } else {
+            ""
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct AlertRecord {
     pub drone_tag: String,
     pub rule: String,
     pub level: String,
     pub message: String,
     pub ts_ms: i64,
+    /// 告警发生时的位置；空 = 未记录。
+    #[serde(default)]
+    pub lat: Option<f64>,
+    #[serde(default)]
+    pub lon: Option<f64>,
+    #[serde(default)]
+    pub alt: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -316,6 +341,8 @@ pub struct DroneState {
     persist_rx: Arc<Mutex<Option<mpsc::Receiver<()>>>>,
     /// 写入任务是否已启动；未启动时 `persist` 退回同步写盘。
     pub persist_writer_started: Arc<AtomicBool>,
+    /// 归档队列（遥测 / 告警落库）；`None` = 不归档。
+    archive_tx: Arc<Mutex<Option<mpsc::Sender<crate::archive::ArchiveEvent>>>>,
 }
 
 impl DroneState {
@@ -352,6 +379,7 @@ impl DroneState {
             persist_tx,
             persist_rx: Arc::new(Mutex::new(Some(persist_rx))),
             persist_writer_started: Arc::new(AtomicBool::new(false)),
+            archive_tx: Arc::new(Mutex::new(None)),
         };
         crate::store::load(&state);
         state
@@ -373,6 +401,22 @@ impl DroneState {
     pub fn with_db(mut self, db: Option<Arc<crate::infra::db::DroneDb>>) -> DroneState {
         self.db = db;
         self
+    }
+
+    /// 挂上归档队列；遥测与告警随即落库。
+    pub fn with_archive(self, tx: mpsc::Sender<crate::archive::ArchiveEvent>) -> DroneState {
+        if let Ok(mut guard) = self.archive_tx.lock() {
+            *guard = Some(tx);
+        }
+        self
+    }
+
+    /// 归档队列发送端；`None` = 未启用归档。
+    pub fn archive_tx(&self) -> Option<mpsc::Sender<crate::archive::ArchiveEvent>> {
+        self.archive_tx
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
     }
 
     /// 从 PostgreSQL 载入航线/围栏；数据库为空时把现有 JSON 数据回填入库。
@@ -480,11 +524,13 @@ impl DroneState {
 
     pub fn push_alert(&self, alert: AlertRecord) {
         if let Ok(mut alerts) = self.alerts.lock() {
-            alerts.push_back(alert);
+            alerts.push_back(alert.clone());
             while alerts.len() > MAX_ALERTS {
                 alerts.pop_front();
             }
         }
+        // 归档投递：告警要能事后追溯，落库不阻塞告警判定。
+        crate::archive::offer_alert(self, &alert);
     }
 
     /// 写审计：内存环 + PostgreSQL（规则 §6.7 / §6.8）。
@@ -547,16 +593,20 @@ impl DroneState {
 
     /// 记录一帧遥测用于轨迹回放；超出上限时丢弃最旧样本。
     pub fn record_telemetry(&self, telemetry: &Telemetry) {
-        let Ok(mut history) = self.telemetry_history.lock() else {
-            return;
-        };
-        let samples = history
-            .entry(telemetry.drone_tag.clone())
-            .or_insert_with(VecDeque::new);
-        samples.push_back(telemetry.clone());
-        while samples.len() > MAX_TELEMETRY_HISTORY {
-            samples.pop_front();
+        {
+            let Ok(mut history) = self.telemetry_history.lock() else {
+                return;
+            };
+            let samples = history
+                .entry(telemetry.drone_tag.clone())
+                .or_insert_with(VecDeque::new);
+            samples.push_back(telemetry.clone());
+            while samples.len() > MAX_TELEMETRY_HISTORY {
+                samples.pop_front();
+            }
         }
+        // 归档投递：时序库写入走后台 worker，这里只做非阻塞投递。
+        crate::archive::offer_telemetry(self, telemetry);
     }
 
     /// 查询指定时间窗内的遥测历史，按时间升序返回。
@@ -717,6 +767,7 @@ mod tests {
                 level: "high".into(),
                 message: format!("m{i}"),
                 ts_ms: i,
+                ..Default::default()
             });
         }
         assert_eq!(state.recent_alerts("d1", 10).len(), 1);
