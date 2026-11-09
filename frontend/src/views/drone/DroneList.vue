@@ -96,6 +96,14 @@
             <span v-else class="muted">未关联</span>
           </template>
         </el-table-column>
+        <el-table-column label="链路" width="210">
+          <template #default="{ row }">
+            <div v-if="row.mavlink_addr" class="mono link-cell">
+              {{ row.mavlink_addr }}
+            </div>
+            <div class="muted mono">sysid {{ row.mavlink_sysid || '—' }}</div>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
             <el-button text type="primary" @click="view(row)">查看</el-button>
@@ -138,13 +146,35 @@
         </el-form-item>
         <el-divider content-position="left">机载链路身份</el-divider>
         <el-form-item label="归属 Adapter">
-          <el-input v-model="form.adapter_id" placeholder="由哪台 adapter 接管，如 adapter-mavlink-1" />
+          <el-select
+            v-model="form.adapter_id"
+            filterable
+            allow-create
+            clearable
+            default-first-option
+            placeholder="选择或输入归属的 adapter"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="opt in adapterStore.adapterOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+              :disabled="opt.disabled"
+            >
+              <span>{{ opt.label }}</span>
+              <span v-if="opt.disabled" class="muted option-tag">已停用</span>
+            </el-option>
+          </el-select>
+          <div v-if="!adapterStore.adapters.length" class="muted form-hint">
+            还没有 adapter 配置：可在「接入适配器」页面登记，或直接输入标识由平台自动创建。
+          </div>
         </el-form-item>
         <el-form-item label="唯一标识">
           <el-input v-model="form.unique_id" placeholder="飞控 AUTOPILOT_VERSION.uid，小写十六进制" />
         </el-form-item>
-        <el-form-item label="MAVLink 端点">
-          <el-input v-model="form.mavlink_addr" placeholder="udpin:10.88.0.2:14540（隧道内地址）" />
+        <el-form-item label="飞控端点">
+          <el-input v-model="form.mavlink_addr" placeholder="留空由平台按 adapter 端口段自动分配" />
         </el-form-item>
         <el-form-item label="协议版本">
           <el-select v-model="form.mavlink_version" style="width: 100%">
@@ -196,9 +226,11 @@ import { useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { useDroneStore } from '../../stores/droneStore'
+import { useAdapterStore } from '../../stores/adapterStore'
 import DroneCameraDialog from '../../components/drone/DroneCameraDialog.vue'
 
 const store = useDroneStore()
+const adapterStore = useAdapterStore()
 const router = useRouter()
 const editorVisible = ref(false)
 const editing = ref(false)
@@ -238,7 +270,13 @@ function batteryStatus(pct) {
 }
 
 async function refresh() {
-  await Promise.all([store.fetchDrones(), store.fetchRoutes(), store.fetchFences()])
+  await Promise.all([
+    store.fetchDrones(),
+    store.fetchRoutes(),
+    store.fetchFences(),
+    // 连停用的 adapter 一起拉：已绑定的机要能看到自己归属的那个（标注「已停用」）。
+    adapterStore.fetchAdapters(true),
+  ])
 }
 
 function openEditor(row = null) {
@@ -274,6 +312,12 @@ async function save() {
     const saved = await store.saveDrone({ ...form })
     await syncCameras(saved)
     editorVisible.value = false
+    // 端点留空时由平台按 adapter 的端口段分配：把结果告诉用户。
+    if (!form.mavlink_addr.trim() && saved?.mavlink_addr) {
+      ElMessage.success(
+        `已分配飞控端点 ${saved.mavlink_addr}（系统号 ${saved.mavlink_sysid}）`
+      )
+    }
   } catch (e) {
     // request 拦截器已提示
   }
@@ -399,6 +443,17 @@ onMounted(refresh)
 .muted {
   color: var(--text-muted);
   font-size: 12px;
+}
+.form-hint {
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.option-tag {
+  float: right;
+}
+.link-cell {
+  font-size: 12px;
+  word-break: break-all;
 }
 @media (max-width: 1100px) {
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

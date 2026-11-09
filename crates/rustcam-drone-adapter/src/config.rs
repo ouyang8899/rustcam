@@ -39,6 +39,13 @@ fn default_source_system() -> u8 {
 fn default_source_component() -> u8 {
     190
 }
+fn default_log_dir() -> String {
+    "./logs".into()
+}
+fn default_log_level() -> String {
+    "info".into()
+}
+
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AdapterConfig {
@@ -72,7 +79,14 @@ pub struct AdapterConfig {
     /// 指令等待 COMMAND_ACK 的默认超时。
     #[serde(default = "default_command_timeout_ms")]
     pub command_timeout_ms: u64,
+    /// 日志目录（默认 `./logs`）。
+    #[serde(default = "default_log_dir")]
+    pub log_dir: String,
+    /// 日志级别（默认 `info`）。
+    #[serde(default = "default_log_level")]
+    pub log_level: String,
 }
+
 
 impl Default for AdapterConfig {
     fn default() -> Self {
@@ -90,9 +104,12 @@ impl Default for AdapterConfig {
             heartbeat_interval_secs: default_heartbeat_interval_secs(),
             heartbeat_timeout_ms: default_heartbeat_timeout_ms(),
             command_timeout_ms: default_command_timeout_ms(),
+            log_dir: default_log_dir(),
+            log_level: default_log_level(),
         }
     }
 }
+
 
 #[derive(Debug, Deserialize)]
 struct AdapterFile {
@@ -148,7 +165,18 @@ impl AdapterConfig {
                 self.telemetry_hz = hz;
             }
         }
+        if let Ok(v) = std::env::var("ADAPTER_LOG_DIR") {
+            if !v.trim().is_empty() {
+                self.log_dir = v;
+            }
+        }
+        if let Ok(v) = std::env::var("ADAPTER_LOG_LEVEL") {
+            if !v.trim().is_empty() {
+                self.log_level = v;
+            }
+        }
     }
+
 
     pub fn telemetry_period(&self) -> std::time::Duration {
         let hz = self.telemetry_hz.clamp(1, 50);
@@ -236,6 +264,23 @@ mod tests {
         assert_eq!(cfg.service_addr, "http://10.0.0.5:50051");
         assert_eq!(cfg.autopilot, "px4");
     }
+
+    #[test]
+    fn log_settings_default_to_logs_dir() {
+        let cfg = AdapterConfig::from_toml_str("");
+        assert_eq!(cfg.log_dir, "./logs");
+        assert_eq!(cfg.log_level, "info");
+    }
+
+    #[test]
+    fn log_settings_can_be_overridden() {
+        let cfg = AdapterConfig::from_toml_str(
+            "[adapter]\nlog_dir = \"/var/log/rustcam\"\nlog_level = \"debug\"\n",
+        );
+        assert_eq!(cfg.log_dir, "/var/log/rustcam");
+        assert_eq!(cfg.log_level, "debug");
+    }
+
 
     #[test]
     fn invalid_autopilot_is_rejected() {

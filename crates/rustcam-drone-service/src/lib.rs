@@ -7,6 +7,7 @@ pub mod geofence;
 pub mod grpc;
 pub mod infra;
 pub mod lease;
+pub mod link_identity;
 pub mod presence;
 pub mod registry;
 pub mod risk;

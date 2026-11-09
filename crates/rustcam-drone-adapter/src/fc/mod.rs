@@ -7,6 +7,7 @@
 pub mod addr;
 pub mod autopilot;
 pub mod command;
+pub mod shared;
 pub mod state;
 pub mod telemetry;
 
@@ -19,7 +20,7 @@ use ::mavlink::dialects::ardupilotmega::{
     HEARTBEAT_DATA,
 };
 use ::mavlink::{connect_async, AsyncConnection, AsyncMavConnection, MavHeader};
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::MissedTickBehavior;
 
 use rustcam_drone_core::telemetry::Telemetry;
@@ -29,7 +30,10 @@ use crate::config::AdapterConfig;
 use addr::MavAddress;
 use autopilot::AutopilotHint;
 use command::PendingCommands;
+use shared::SharedEndpoint;
 use state::{StateChange, VehicleState};
+
+pub use shared::EndpointRegistry;
 
 /// 飞控侧事件（上线 / 掉线 / STATUSTEXT 等），由 gRPC 会话转成 `DeviceEvent`。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,10 +107,60 @@ struct Settings {
     expected_compid: u8,
 }
 
+/// 共享端口上的单机订阅：收发都按该机的 `sysid` 寻址。
+pub struct SharedLink {
+    endpoint: Arc<SharedEndpoint>,
+    sysid: u8,
+    route: mpsc::UnboundedSender<(MavHeader, MavMessage)>,
+    rx: tokio::sync::Mutex<mpsc::UnboundedReceiver<(MavHeader, MavMessage)>>,
+}
+
+impl SharedLink {
+    /// 注销订阅，最后一个订阅者离开时关闭共享端点。
+    fn release(&self) {
+        self.endpoint.release(self.sysid, &self.route);
+    }
+}
+
+/// 飞控收发链路：独占连接（tcp / serial / udpout）或共享监听端口（udpin）。
+#[derive(Clone)]
+pub enum FcLink {
+    Owned(Arc<AsyncConnection<MavMessage>>),
+    Shared(Arc<SharedLink>),
+}
+
+impl FcLink {
+    pub async fn recv(&self) -> anyhow::Result<(MavHeader, MavMessage)> {
+        match self {
+            FcLink::Owned(conn) => conn
+                .recv()
+                .await
+                .map_err(|e| anyhow::anyhow!("mavlink recv failed: {e}")),
+            FcLink::Shared(link) => {
+                let mut rx = link.rx.lock().await;
+                rx.recv()
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("shared link route closed"))
+            }
+        }
+    }
+
+    pub async fn send(&self, header: &MavHeader, msg: &MavMessage) -> anyhow::Result<()> {
+        match self {
+            FcLink::Owned(conn) => conn
+                .send(header, msg)
+                .await
+                .map(|_| ())
+                .map_err(|e| anyhow::anyhow!("mavlink send failed: {e}")),
+            FcLink::Shared(link) => link.endpoint.send(header, msg, link.sysid).await,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct FlightController {
     pub drone_tag: String,
-    conn: Arc<AsyncConnection<MavMessage>>,
+    link: FcLink,
     shared: Arc<Shared>,
     telemetry_tx: broadcast::Sender<Telemetry>,
     event_tx: broadcast::Sender<FcEvent>,
@@ -149,7 +203,55 @@ impl FlightController {
         // PX4 / ArduPilot 新旧固件可能同时存在 MAVLink1 与 MAVLink2 帧。
         conn.set_allow_recv_any_version(true);
 
-        let conn = Arc::new(conn);
+        Ok(Self::start(
+            FcLink::Owned(Arc::new(conn)),
+            hint,
+            drone_tag,
+            expected_sysid,
+            expected_compid,
+            cfg,
+        ))
+    }
+
+    /// 共享 `udpin` 端口上的单机链路：同一端口按帧头 `sysid` 分派。
+    pub async fn connect_shared(
+        endpoint: Arc<SharedEndpoint>,
+        sysid: u8,
+        drone_tag: &str,
+        expected_compid: u8,
+        cfg: &AdapterConfig,
+    ) -> anyhow::Result<FlightController> {
+        if sysid == 0 {
+            anyhow::bail!("shared endpoint link requires a non-zero sysid");
+        }
+        let hint = AutopilotHint::parse(&cfg.autopilot)?;
+        tracing::info!(
+            address = %endpoint.key(),
+            sysid,
+            autopilot = %cfg.autopilot,
+            drone_tag = %drone_tag,
+            expected_compid,
+            "subscribing to shared flight controller endpoint"
+        );
+        let (rx, route) = endpoint.subscribe(sysid);
+        let link = FcLink::Shared(Arc::new(SharedLink {
+            endpoint,
+            sysid,
+            route,
+            rx: tokio::sync::Mutex::new(rx),
+        }));
+        Ok(Self::start(link, hint, drone_tag, sysid, expected_compid, cfg))
+    }
+
+    /// 构建控制器并启动读 / 心跳 / 遥测任务。
+    fn start(
+        link: FcLink,
+        hint: AutopilotHint,
+        drone_tag: &str,
+        expected_sysid: u8,
+        expected_compid: u8,
+        cfg: &AdapterConfig,
+    ) -> FlightController {
         let shared = Arc::new(Shared::new(hint));
         let header = MavHeader {
             system_id: cfg.source_system as u32,
@@ -174,7 +276,7 @@ impl FlightController {
 
         let fc = FlightController {
             drone_tag: settings.drone_tag.clone(),
-            conn: Arc::clone(&conn),
+            link: link.clone(),
             shared: Arc::clone(&shared),
             telemetry_tx,
             event_tx,
@@ -184,7 +286,7 @@ impl FlightController {
         };
 
         spawn_reader(
-            Arc::clone(&conn),
+            link.clone(),
             Arc::clone(&shared),
             fc.event_tx.clone(),
             settings.clone(),
@@ -192,7 +294,7 @@ impl FlightController {
             shutdown_rx.clone(),
         );
         spawn_heartbeat(
-            Arc::clone(&conn),
+            link,
             Arc::clone(&shared),
             fc.event_tx.clone(),
             settings.clone(),
@@ -205,7 +307,7 @@ impl FlightController {
             shutdown_rx,
         );
 
-        Ok(fc)
+        fc
     }
 
     /// 停止读 / 心跳 / 遥测任务；重连前必须调用，避免重复占用同一 UDP 端口。
@@ -296,7 +398,7 @@ impl FlightController {
         );
 
         command::execute(
-            &self.conn,
+            &self.link,
             self.settings.header,
             &self.shared.pending,
             autopilot,
@@ -385,7 +487,7 @@ impl FcPool {
 }
 
 fn spawn_reader(
-    conn: Arc<AsyncConnection<MavMessage>>,
+    link: FcLink,
     shared: Arc<Shared>,
     event_tx: broadcast::Sender<FcEvent>,
     settings: Settings,
@@ -395,7 +497,7 @@ fn spawn_reader(
     tokio::spawn(async move {
         loop {
             let received = tokio::select! {
-                received = conn.recv() => received,
+                received = link.recv() => received,
                 _ = wait_shutdown(&mut shutdown_rx) => break,
             };
             let (header, msg) = match received {
@@ -468,7 +570,7 @@ fn spawn_reader(
                                     target_component: header.component_id,
                                 },
                             );
-                            if let Err(e) = conn.send(&settings.header, &req).await {
+                            if let Err(e) = link.send(&settings.header, &req).await {
                                 tracing::debug!(error = %e, "failed to request autopilot version");
                             }
                         }
@@ -516,13 +618,17 @@ fn spawn_reader(
             }
         }
 
+        // 共享端口：注销该机订阅；最后一个订阅者离开时关闭端点，释放端口。
+        if let FcLink::Shared(link) = &link {
+            link.release();
+        }
         let _ = shared.online.swap(false, Ordering::SeqCst);
         let _ = closed_tx.send(true);
     });
 }
 
 fn spawn_heartbeat(
-    conn: Arc<AsyncConnection<MavMessage>>,
+    link: FcLink,
     shared: Arc<Shared>,
     event_tx: broadcast::Sender<FcEvent>,
     settings: Settings,
@@ -544,7 +650,7 @@ fn spawn_heartbeat(
                 _ = ticker.tick() => {}
                 _ = wait_shutdown(&mut shutdown_rx) => break,
             }
-            if let Err(e) = conn.send(&settings.header, &heartbeat).await {
+            if let Err(e) = link.send(&settings.header, &heartbeat).await {
                 tracing::warn!(error = %e, "failed to send GCS heartbeat");
                 break;
             }
@@ -778,5 +884,182 @@ mod tests {
         assert_eq!(reply.code, 200);
 
         fc.close();
+    }
+
+    /// 两架飞控共用一个 `udpin` 端口：遥测按 sysid 分流、指令只发往目标机。
+    #[tokio::test]
+    async fn shared_port_serves_multiple_drones_by_sysid() {
+        let port = free_udp_port();
+        let key = format!("udpin:127.0.0.1:{port}");
+        let registry = EndpointRegistry::new();
+        let endpoint = registry
+            .get_or_bind(key.clone(), &format!("127.0.0.1:{port}"))
+            .await
+            .unwrap();
+
+        let mut cfg = test_config();
+        cfg.command_timeout_ms = 5_000;
+        let fc1 = FlightController::connect_shared(endpoint.clone(), 1, "drone-001", 1, &cfg)
+            .await
+            .unwrap();
+        let fc2 = FlightController::connect_shared(endpoint.clone(), 2, "drone-002", 1, &cfg)
+            .await
+            .unwrap();
+        let mut t1 = fc1.subscribe_telemetry();
+        let mut t2 = fc2.subscribe_telemetry();
+
+        let v1 = ::mavlink::connect_async::<MavMessage>(&format!("udpout:127.0.0.1:{port}"))
+            .await
+            .unwrap();
+        let v2 = ::mavlink::connect_async::<MavMessage>(&format!("udpout:127.0.0.1:{port}"))
+            .await
+            .unwrap();
+        let h1 = MavHeader {
+            system_id: 1,
+            component_id: 1,
+            sequence: 0,
+        };
+        let h2 = MavHeader {
+            system_id: 2,
+            component_id: 1,
+            sequence: 0,
+        };
+        v1.send(&h1, &px4_heartbeat()).await.unwrap();
+        v2.send(&h2, &px4_heartbeat()).await.unwrap();
+
+        // 每架机只看到自己的位置（用不同纬度区分）。
+        v1.send(
+            &h1,
+            &MavMessage::GLOBAL_POSITION_INT(GLOBAL_POSITION_INT_DATA {
+                lat: 100_000_000,
+                lon: 0,
+                alt: 0,
+                relative_alt: 0,
+                vx: 0,
+                vy: 0,
+                vz: 0,
+                hdg: 0,
+                time_boot_ms: 1,
+            }),
+        )
+        .await
+        .unwrap();
+        v2.send(
+            &h2,
+            &MavMessage::GLOBAL_POSITION_INT(GLOBAL_POSITION_INT_DATA {
+                lat: 200_000_000,
+                lon: 0,
+                alt: 0,
+                relative_alt: 0,
+                vx: 0,
+                vy: 0,
+                vz: 0,
+                hdg: 0,
+                time_boot_ms: 1,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let tel1 = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if let Ok(t) = t1.recv().await {
+                    if t.lat > 0.0 {
+                        break t;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("drone-001 telemetry");
+        let tel2 = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if let Ok(t) = t2.recv().await {
+                    if t.lat > 0.0 {
+                        break t;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("drone-002 telemetry");
+        assert!((tel1.lat - 10.0).abs() < 1e-6, "drone-001 got {}", tel1.lat);
+        assert!((tel2.lat - 20.0).abs() < 1e-6, "drone-002 got {}", tel2.lat);
+
+        // 指令只发往 sysid=1 的对端。
+        let handle = fc1.clone();
+        let command = proto::Command {
+            cmd_id: "cmd-shared-1".into(),
+            drone_tag: "drone-001".into(),
+            r#type: "rtl".into(),
+            params: Default::default(),
+            deadline_ms: 0,
+            operator: "tester".into(),
+        };
+        let execution = tokio::spawn(async move { handle.execute(command).await });
+
+        let command_long = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let (_, msg) = v1.recv().await.unwrap();
+                if let MavMessage::COMMAND_LONG(c) = msg {
+                    break c;
+                }
+            }
+        })
+        .await
+        .expect("target drone should receive COMMAND_LONG");
+        assert_eq!(command_long.target_system, 1);
+
+        let leaked = tokio::time::timeout(Duration::from_millis(300), async {
+            loop {
+                let (_, msg) = v2.recv().await.unwrap();
+                if let MavMessage::COMMAND_LONG(_) = msg {
+                    break;
+                }
+            }
+        })
+        .await;
+        assert!(leaked.is_err(), "other drone must not receive the command");
+
+        v1.send(
+            &h1,
+            &MavMessage::COMMAND_ACK(COMMAND_ACK_DATA {
+                command: MavCmd::MAV_CMD_NAV_RETURN_TO_LAUNCH,
+                result: MavResult::MAV_RESULT_ACCEPTED,
+            }),
+        )
+        .await
+        .unwrap();
+        let reply = tokio::time::timeout(Duration::from_secs(3), execution)
+            .await
+            .expect("command should complete")
+            .unwrap();
+        assert_eq!(reply.status, rustcam_drone_core::command::status::ACCEPTED);
+
+        fc1.close();
+        fc2.close();
+        // 两架都释放后共享端点应关闭；控制器的 Arc 全部释放后端口才可重新绑定。
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !endpoint.is_closed() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("shared endpoint should close after all drones leave");
+        drop(fc1);
+        drop(fc2);
+        drop(endpoint);
+        let rebind = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if std::net::UdpSocket::bind(("127.0.0.1", port)).is_ok() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        assert!(rebind.is_ok(), "port should be released after all drones drop");
     }
 }

@@ -1,11 +1,17 @@
 use rbatis::html_sql;
 use serde::Deserialize;
 
-use crate::infra::db::DeviceLinkRow;
+use crate::infra::db::{AdapterRow, DeviceLinkRow};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PresentRow {
     pub present: i32,
+}
+
+/// 占用链路身份的无人机（用于唯一性冲突提示）。
+#[derive(Debug, Clone, Deserialize)]
+pub struct LinkIdentityOwner {
+    pub drone_tag: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -96,6 +102,18 @@ pub async fn drone_device_link_select_by_tag(
 }
 
 #[html_sql("sql/drone_device.html")]
+pub async fn drone_device_link_identity_taken(
+    rb: &dyn rbatis::Executor,
+    adapter_id: &str,
+    link_family: &str,
+    link_endpoint: &str,
+    fc_sysid: i32,
+    drone_tag: &str,
+) -> rbatis::Result<Vec<LinkIdentityOwner>> {
+    impled!()
+}
+
+#[html_sql("sql/drone_device.html")]
 pub async fn drone_device_link_upsert(
     rb: &dyn rbatis::Executor,
     drone_tag: &str,
@@ -107,6 +125,45 @@ pub async fn drone_device_link_upsert(
     mavlink_version: i32,
     mavlink_sysid: i32,
     mavlink_compid: i32,
+    link_family: &str,
+    link_endpoint: &str,
+    fc_sysid: i32,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
+
+#[html_sql("sql/drone_adapter.html")]
+pub async fn drone_adapter_select_by_id(
+    rb: &dyn rbatis::Executor,
+    adapter_id: &str,
+) -> rbatis::Result<Vec<AdapterRow>> {
+    impled!()
+}
+
+#[html_sql("sql/drone_adapter.html")]
+pub async fn drone_adapter_select_all(
+    rb: &dyn rbatis::Executor,
+    include_disabled: bool,
+) -> rbatis::Result<Vec<AdapterRow>> {
+    impled!()
+}
+
+#[html_sql("sql/drone_adapter.html")]
+pub async fn drone_adapter_upsert(
+    rb: &dyn rbatis::Executor,
+    adapter_id: &str,
+    name: &str,
+    protocol: &str,
+    bind_addr: &str,
+    port_start: i32,
+    port_end: i32,
+    autopilot: &str,
+    signing_secret: &str,
+    signing_allow_unsigned: bool,
+    reconnect_min_secs: i32,
+    reconnect_max_secs: i32,
+    online: bool,
+    enabled: bool,
 ) -> rbatis::Result<rbatis::rbdc::ExecResult> {
     impled!()
 }

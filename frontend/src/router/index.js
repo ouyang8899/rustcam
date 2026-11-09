@@ -112,7 +112,7 @@ const routes = [
         redirect: '/drone/drones',
       },
       {
-        // ¹æÔò ¡ì10.2 µÄ /drone/devices£º¼æÈÝ±ðÃû
+        // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½10.2 ï¿½ï¿½ /drone/devicesï¿½ï¿½ï¿½ï¿½ï¿½Ý±ï¿½ï¿½ï¿½
         path: 'drone/devices',
         redirect: '/drone/drones',
       },
@@ -122,12 +122,17 @@ const routes = [
         component: () => import('../views/drone/DroneList.vue'),
       },
       {
+        path: 'drone/adapters',
+        name: 'DroneAdapters',
+        component: () => import('../views/drone/AdapterList.vue'),
+      },
+      {
         path: 'drone/live',
         name: 'DroneLive',
         component: () => import('../views/drone/DroneLive.vue'),
       },
       {
-        // ¹æÔò ¡ì10.2 µÄ /drone/control£º¿ØÖÆÈ¨¹ÜÀí£¨·Ö¿Ø/ÖÙ²Ã£©
+        // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½10.2 ï¿½ï¿½ /drone/controlï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È¨ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¿ï¿½/ï¿½Ù²Ã£ï¿½
         path: 'drone/control',
         name: 'DroneControl',
         component: () => import('../views/drone/DroneControl.vue'),
@@ -138,7 +143,7 @@ const routes = [
         component: () => import('../views/drone/RoutePlanner.vue'),
       },
       {
-        // ¹æÔò ¡ì10.2 µÄ /drone/geofence£º¼æÈÝ±ðÃû
+        // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½10.2 ï¿½ï¿½ /drone/geofenceï¿½ï¿½ï¿½ï¿½ï¿½Ý±ï¿½ï¿½ï¿½
         path: 'drone/geofence',
         redirect: '/drone/fences',
       },
@@ -153,7 +158,7 @@ const routes = [
         component: () => import('../views/drone/DroneAlerts.vue'),
       },
       {
-        // ¹æÔò ¡ì10.2 µÄ /drone/replay£º¹ì¼£»Ø·Å
+        // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½10.2 ï¿½ï¿½ /drone/replayï¿½ï¿½ï¿½ì¼£ï¿½Ø·ï¿½
         path: 'drone/replay',
         name: 'DroneReplay',
         component: () => import('../views/drone/DroneReplay.vue'),

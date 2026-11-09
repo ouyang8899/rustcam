@@ -7,7 +7,7 @@ use rustcam_drone_core::command::{is_terminal_status, status};
 use rustcam_drone_core::telemetry::Telemetry;
 use rustcam_drone_proto::common as proto;
 use rustcam_drone_proto::control::{
-    DroneProfile, Geofence as ProtoFence, Route as ProtoRoute, RouteWaypoint,
+    Adapter, DroneProfile, Geofence as ProtoFence, Route as ProtoRoute, RouteWaypoint,
 };
 
 use crate::state::{
@@ -162,16 +162,24 @@ pub fn upsert_profile(
             "invalid mavlink_compid `{mavlink_compid}`"
         ));
     }
-    // 链路绑定唯一：同一 adapter 内不得有两台机体使用相同 sysid。
+    // 链路绑定唯一：同一 adapter 下「协议族 + 端点 + 飞控系统号」三者组合唯一。
+    // 同一端口可以承载多架机（按 sysid 区分），因此只看 sysid 会误判重复。
     let adapter_id = profile.adapter_id.trim().to_string();
-    if !adapter_id.is_empty() && mavlink_sysid > 0 {
+    let mavlink_addr = profile.mavlink_addr.trim().to_string();
+    let (link_family, link_endpoint) = match crate::link_identity::parse_endpoint(&mavlink_addr) {
+        Some(ep) => (ep.family.as_str().to_string(), ep.endpoint),
+        None => (String::new(), String::new()),
+    };
+    if !adapter_id.is_empty() && !link_family.is_empty() && mavlink_sysid > 0 {
         if let Some(other) = state.profiles.iter().find(|e| {
             e.key() != &drone_tag
                 && e.value().adapter_id.trim() == adapter_id.as_str()
+                && e.value().link_family == link_family
+                && e.value().link_endpoint == link_endpoint
                 && e.value().mavlink_sysid == mavlink_sysid
         }) {
             return Err(format!(
-                "adapter_id/mavlink_sysid 已被 `{}` 占用",
+                "链路身份（协议族+端点+sysid）已被 `{}` 占用",
                 other.key()
             ));
         }
@@ -215,13 +223,15 @@ pub fn upsert_profile(
         created_ms,
         updated_ms: now,
         unique_id,
-        mavlink_addr: profile.mavlink_addr.trim().to_string(),
+        mavlink_addr,
         signing_secret,
         signing_allow_unsigned: profile.signing_allow_unsigned,
         mavlink_version,
         mavlink_sysid,
         mavlink_compid,
         adapter_id,
+        link_family,
+        link_endpoint,
     };
     state
         .profiles
@@ -236,6 +246,418 @@ pub fn upsert_profile(
         &format!("name={}", record.name),
     );
     Ok(record)
+}
+
+/// 给未指定链路的档案自动分配一个空位（端口 + 飞控系统号）。
+///
+/// 端口写在 adapter 上（端口段），系统号按端口内空位分配：
+/// 一个端口可承载 255 架（按 sysid 区分），因此接 200 架只需登记 200 次身份，
+/// 端口不用重复写。
+pub async fn assign_link_slot(
+    state: &DroneState,
+    profile: &mut DroneProfile,
+) -> Result<(), String> {
+    if !profile.mavlink_addr.trim().is_empty() {
+        // 显式给了地址就按它走（端口共享由 sysid 区分）。
+        return Ok(());
+    }
+    let adapter_id = profile.adapter_id.trim().to_string();
+    if adapter_id.is_empty() {
+        return Err("mavlink_addr 与 adapter_id 至少要给出其一".into());
+    }
+    // 更新已登记的机：地址留空表示沿用原地址，不重新分配空位。
+    let own_tag = profile.drone_tag.trim().to_string();
+    if !own_tag.is_empty() {
+        if let Some(prev) = state.profiles.get(&own_tag) {
+            if prev.adapter_id.trim() == adapter_id.as_str()
+                && !prev.mavlink_addr.trim().is_empty()
+            {
+                profile.mavlink_addr = prev.mavlink_addr.clone();
+                profile.mavlink_sysid = prev.mavlink_sysid;
+                return Ok(());
+            }
+        }
+    }
+    let Some(db) = state.db.clone() else {
+        return Err("database is not configured".into());
+    };
+    let adapter = match db
+        .load_adapter(&adapter_id)
+        .await
+        .map_err(|e| format!("load adapter `{adapter_id}` failed: {e}"))?
+    {
+        Some(row) => row,
+        None => {
+            // 允许先登记无人机、后接 adapter：缺失时按默认值建行，
+            // adapter 首次注册时再回写它的在线状态。
+            let row = crate::infra::db::AdapterRow {
+                adapter_id: adapter_id.clone(),
+                name: String::new(),
+                protocol: "mavlink".into(),
+                bind_addr: "0.0.0.0".into(),
+                port_start: 14540,
+                port_end: 14560,
+                autopilot: "auto".into(),
+                signing_secret: String::new(),
+                signing_allow_unsigned: true,
+                reconnect_min_secs: 1,
+                reconnect_max_secs: 30,
+                online: false,
+                enabled: true,
+            };
+            db.upsert_adapter(&row)
+                .await
+                .map_err(|e| format!("create adapter `{adapter_id}` failed: {e}"))?;
+            tracing::info!(adapter = %adapter_id, "[Admin] created default adapter row");
+            row
+        }
+    };
+    // 停用（软删除）的 adapter 不再接纳新无人机；已绑定的机沿用原端点，不受影响。
+    ensure_adapter_assignable(&adapter)?;
+
+    // 已占用的 (端点, sysid) 组合：以 drone 表为准，内存档案补齐尚未落库的。
+    // 更新同一架机时排除它自己的旧占用，否则每次保存都会换一个空位。
+    let mut used: Vec<(String, i32)> = Vec::new();
+    if let Ok(rows) = db.load_device_links(&adapter_id).await {
+        for row in rows {
+            if !own_tag.is_empty() && row.drone_tag == own_tag {
+                continue;
+            }
+            let endpoint = if row.link_endpoint.is_empty() {
+                crate::link_identity::parse_endpoint(&row.mavlink_addr)
+                    .map(|e| e.endpoint)
+                    .unwrap_or_default()
+            } else {
+                row.link_endpoint.clone()
+            };
+            if endpoint.is_empty() {
+                continue;
+            }
+            let sysid = if row.fc_sysid > 0 {
+                row.fc_sysid
+            } else {
+                row.mavlink_sysid
+            };
+            used.push((endpoint, sysid));
+        }
+    }
+    for p in state.profiles.iter() {
+        let p = p.value();
+        if p.adapter_id.trim() != adapter_id.as_str() {
+            continue;
+        }
+        if !own_tag.is_empty() && p.drone_tag == own_tag {
+            continue;
+        }
+        let endpoint = if p.link_endpoint.is_empty() {
+            crate::link_identity::parse_endpoint(&p.mavlink_addr)
+                .map(|e| e.endpoint)
+                .unwrap_or_default()
+        } else {
+            p.link_endpoint.clone()
+        };
+        if endpoint.is_empty() {
+            continue;
+        }
+        used.push((endpoint, p.mavlink_sysid));
+    }
+
+    let port_start = adapter.port_start.max(1);
+    let port_end = adapter.port_end.max(port_start);
+    // 操作员指定了 sysid 就按它找空端口；没指定则取最小空位。
+    let preferred_sysid = if profile.mavlink_sysid > 0 {
+        Some(profile.mavlink_sysid)
+    } else {
+        None
+    };
+    let Some((port, sysid)) = find_free_slot(&used, port_start, port_end, preferred_sysid) else {
+        return Err(format!(
+            "adapter `{adapter_id}` 的端口段 {port_start}-{port_end} 已用满"
+        ));
+    };
+    profile.mavlink_addr = format!("udpin:{}:{port}", adapter.bind_addr);
+    profile.mavlink_sysid = sysid;
+    Ok(())
+}
+
+/// 在端口段内找一个空闲的 (端口, 飞控系统号)。
+///
+/// 每个端口按 sysid 区分，最多承载 255 架（sysid 1..=255）；
+/// 因此接 200 架只需登记 200 次身份，端口由平台自动分配。
+fn find_free_slot(
+    used: &[(String, i32)],
+    port_start: i32,
+    port_end: i32,
+    preferred_sysid: Option<i32>,
+) -> Option<(i32, i32)> {
+    let is_free = |port: i32, sysid: i32| {
+        let endpoint = port.to_string();
+        !used.iter().any(|(e, s)| e == &endpoint && *s == sysid)
+    };
+    match preferred_sysid {
+        // 指定了系统号：只找能放下该号的端口。
+        Some(sysid) if (1..=255).contains(&sysid) => (port_start..=port_end)
+            .find(|p| is_free(*p, sysid))
+            .map(|p| (p, sysid)),
+        _ => {
+            for port in port_start..=port_end {
+                for sysid in 1..=255 {
+                    if is_free(port, sysid) {
+                        return Some((port, sysid));
+                    }
+                }
+            }
+            None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 机载链路实体（adapter）
+// ---------------------------------------------------------------------------
+
+/// adapter 标识允许的字符：字母、数字、点、下划线、连字符。
+fn adapter_id_is_valid(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+}
+
+/// 校验并规范化 adapter 配置（协议、监听地址、端口段、重连与签名策略）。
+///
+/// `0` / 空串表示"未指定"：按默认值补齐，避免客户端表单回传 0 时被拒。
+pub fn adapter_from_proto(adapter: &Adapter) -> Result<crate::infra::db::AdapterRow, String> {
+    let adapter_id = adapter.adapter_id.trim().to_string();
+    if !adapter_id_is_valid(&adapter_id) {
+        return Err(format!(
+            "invalid adapter_id `{adapter_id}`：只允许字母、数字、点、下划线与连字符"
+        ));
+    }
+    let protocol = adapter.protocol.trim().to_ascii_lowercase();
+    let protocol = if protocol.is_empty() {
+        "mavlink".to_string()
+    } else {
+        protocol
+    };
+    let autopilot = adapter.autopilot.trim().to_ascii_lowercase();
+    let autopilot = match autopilot.as_str() {
+        "" => "auto".to_string(),
+        "apm" => "ardupilot".to_string(),
+        "auto" | "px4" | "ardupilot" => autopilot,
+        other => return Err(format!("unsupported autopilot `{other}`")),
+    };
+    let bind_addr = adapter.bind_addr.trim().to_string();
+    let bind_addr = if bind_addr.is_empty() {
+        "0.0.0.0".to_string()
+    } else {
+        bind_addr
+    };
+    let port_start = if adapter.port_start <= 0 {
+        14540
+    } else {
+        adapter.port_start
+    };
+    let port_end = if adapter.port_end <= 0 {
+        14560
+    } else {
+        adapter.port_end
+    };
+    if !(1..=65535).contains(&port_start) || !(1..=65535).contains(&port_end) {
+        return Err(format!(
+            "invalid port range {port_start}-{port_end}：端口必须在 1-65535 之间"
+        ));
+    }
+    if port_start > port_end {
+        return Err(format!(
+            "invalid port range {port_start}-{port_end}：起始端口不能大于结束端口"
+        ));
+    }
+    let reconnect_min_secs = if adapter.reconnect_min_secs <= 0 {
+        1
+    } else {
+        adapter.reconnect_min_secs
+    };
+    let reconnect_max_secs = if adapter.reconnect_max_secs <= 0 {
+        30
+    } else {
+        adapter.reconnect_max_secs
+    };
+    if reconnect_min_secs > reconnect_max_secs {
+        return Err(format!(
+            "invalid reconnect range {reconnect_min_secs}-{reconnect_max_secs}：下限不能大于上限"
+        ));
+    }
+    let signing_secret = adapter.signing_secret.trim().to_string();
+    if !signing_secret.is_empty()
+        && (!signing_secret.chars().all(|c| c.is_ascii_hexdigit())
+            || !signing_secret.len().is_multiple_of(2))
+    {
+        return Err("signing_secret must be an even-length hex string".into());
+    }
+    Ok(crate::infra::db::AdapterRow {
+        adapter_id,
+        name: adapter.name.trim().to_string(),
+        protocol,
+        bind_addr,
+        port_start,
+        port_end,
+        autopilot,
+        signing_secret,
+        signing_allow_unsigned: adapter.signing_allow_unsigned,
+        reconnect_min_secs,
+        reconnect_max_secs,
+        online: false,
+        enabled: adapter.enabled,
+    })
+}
+
+/// 合并 adapter 配置：编辑已有行时保留启停状态与在线状态。
+///
+/// 启停只能走专用接口（软删除），配置编辑不能顺手把停用的 adapter 复活；
+/// 在线状态由适配器注册维护，配置编辑更不能覆盖。
+pub fn merge_adapter(
+    existing: Option<&crate::infra::db::AdapterRow>,
+    incoming: &Adapter,
+) -> Result<crate::infra::db::AdapterRow, String> {
+    let mut row = adapter_from_proto(incoming)?;
+    match existing {
+        Some(prev) => {
+            row.enabled = prev.enabled;
+            row.online = prev.online;
+        }
+        None => {
+            row.enabled = true;
+        }
+    }
+    Ok(row)
+}
+
+/// adapter 行转回协议消息。
+pub fn adapter_to_proto(row: &crate::infra::db::AdapterRow) -> Adapter {
+    Adapter {
+        adapter_id: row.adapter_id.clone(),
+        name: row.name.clone(),
+        protocol: row.protocol.clone(),
+        bind_addr: row.bind_addr.clone(),
+        port_start: row.port_start,
+        port_end: row.port_end,
+        autopilot: row.autopilot.clone(),
+        signing_secret: row.signing_secret.clone(),
+        signing_allow_unsigned: row.signing_allow_unsigned,
+        reconnect_min_secs: row.reconnect_min_secs,
+        reconnect_max_secs: row.reconnect_max_secs,
+        online: row.online,
+        enabled: row.enabled,
+        operator: String::new(),
+    }
+}
+
+/// 停用（软删除）的 adapter 不再接纳新无人机；已绑定的无人机继续运行。
+pub fn ensure_adapter_assignable(row: &crate::infra::db::AdapterRow) -> Result<(), String> {
+    if row.enabled {
+        Ok(())
+    } else {
+        Err(format!(
+            "adapter `{}` 已停用，不能绑定新无人机",
+            row.adapter_id
+        ))
+    }
+}
+
+/// 列出 adapter 配置。
+pub async fn list_adapters(
+    state: &DroneState,
+    include_disabled: bool,
+) -> Result<Vec<crate::infra::db::AdapterRow>, String> {
+    let Some(db) = state.db.clone() else {
+        return Err("database is not configured".into());
+    };
+    let rows = db
+        .load_adapters(include_disabled)
+        .await
+        .map_err(|e| format!("adapter 列表读取失败：{e}"))?;
+    Ok(rows)
+}
+
+/// 读取单个 adapter 配置。
+pub async fn get_adapter(
+    state: &DroneState,
+    adapter_id: &str,
+) -> Result<Option<crate::infra::db::AdapterRow>, String> {
+    let Some(db) = state.db.clone() else {
+        return Err("database is not configured".into());
+    };
+    db.load_adapter(adapter_id.trim())
+        .await
+        .map_err(|e| format!("adapter 读取失败：{e}"))
+}
+
+/// 新建或更新 adapter 配置。
+pub async fn upsert_adapter(
+    state: &DroneState,
+    adapter: Adapter,
+    operator: &str,
+) -> Result<crate::infra::db::AdapterRow, String> {
+    let adapter_id = adapter.adapter_id.trim().to_string();
+    let db = state
+        .db
+        .clone()
+        .ok_or_else(|| "database is not configured".to_string())?;
+    let existing = db
+        .load_adapter(&adapter_id)
+        .await
+        .map_err(|e| format!("adapter 读取失败：{e}"))?;
+    let row = merge_adapter(existing.as_ref(), &adapter)?;
+    db.upsert_adapter(&row)
+        .await
+        .map_err(|e| format!("adapter 保存失败：{e}"))?;
+    audit(
+        state,
+        "",
+        "adapter",
+        "upsert",
+        operator,
+        "ok",
+        &format!("adapter_id={} protocol={}", row.adapter_id, row.protocol),
+    );
+    Ok(row)
+}
+
+/// 停用（软删除）或恢复 adapter。
+///
+/// 停用只改启停标记：配置行与已绑定关系都保留，便于审计与回滚。
+pub async fn set_adapter_enabled(
+    state: &DroneState,
+    adapter_id: &str,
+    enabled: bool,
+    operator: &str,
+) -> Result<crate::infra::db::AdapterRow, String> {
+    let adapter_id = adapter_id.trim().to_string();
+    let db = state
+        .db
+        .clone()
+        .ok_or_else(|| "database is not configured".to_string())?;
+    let mut row = db
+        .load_adapter(&adapter_id)
+        .await
+        .map_err(|e| format!("adapter 读取失败：{e}"))?
+        .ok_or_else(|| format!("adapter `{adapter_id}` 不存在"))?;
+    row.enabled = enabled;
+    db.upsert_adapter(&row)
+        .await
+        .map_err(|e| format!("adapter 保存失败：{e}"))?;
+    audit(
+        state,
+        "",
+        "adapter",
+        if enabled { "enable" } else { "disable" },
+        operator,
+        "ok",
+        &format!("adapter_id={adapter_id}"),
+    );
+    Ok(row)
 }
 
 /// 把机载链路参数写入 `drone_device` 表。
@@ -259,6 +681,9 @@ pub async fn persist_link_params(
         mavlink_sysid: record.mavlink_sysid,
         mavlink_compid: record.mavlink_compid,
         adapter_id: record.adapter_id.clone(),
+        link_family: record.link_family.clone(),
+        link_endpoint: record.link_endpoint.clone(),
+        fc_sysid: record.mavlink_sysid,
     };
     db.upsert_device_link(&row)
         .await
@@ -1317,6 +1742,8 @@ pub async fn delete_fence(state: &DroneState, id: &str, operator: &str) -> Resul
 mod tests {
     use super::*;
     use crate::config::DroneConfig;
+    use crate::infra::db::AdapterRow;
+    use rustcam_drone_proto::control::Adapter;
 
     const MASTER: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 
@@ -1324,6 +1751,25 @@ mod tests {
         let mut cfg = DroneConfig::default();
         cfg.signing_master_key = Some(MASTER.to_string());
         DroneState::new(cfg)
+    }
+
+    /// adapter 的落库行夹具；`enabled` / `online` 由各用例单独覆盖。
+    fn adapter_row_fixture() -> AdapterRow {
+        AdapterRow {
+            adapter_id: "adapter-1".into(),
+            name: String::new(),
+            protocol: "mavlink".into(),
+            bind_addr: "0.0.0.0".into(),
+            port_start: 14540,
+            port_end: 14560,
+            autopilot: "auto".into(),
+            signing_secret: String::new(),
+            signing_allow_unsigned: true,
+            reconnect_min_secs: 1,
+            reconnect_max_secs: 30,
+            online: false,
+            enabled: true,
+        }
     }
 
     fn profile() -> DroneProfile {
@@ -1448,23 +1894,109 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_adapter_sysid_is_rejected() {
+    fn duplicate_link_identity_is_rejected() {
         let state = DroneState::new(DroneConfig::default());
 
         let mut first = profile();
         first.drone_tag = "drone-a".into();
         first.adapter_id = "adapter-1".into();
+        first.mavlink_addr = "udpin:0.0.0.0:14540".into();
+        first.mavlink_sysid = 12;
+        upsert_profile(&state, first, "tester").expect("首次应当成功");
+
+        // 同 adapter、同端点、同 sysid → 同一架飞控，重复。
+        let mut second = profile();
+        second.drone_tag = "drone-b".into();
+        second.adapter_id = "adapter-1".into();
+        second.mavlink_addr = "udpin:0.0.0.0:14540".into();
+        second.mavlink_sysid = 12;
+        assert!(
+            upsert_profile(&state, second, "tester").is_err(),
+            "同 adapter 同端点同 sysid 不得重复"
+        );
+    }
+
+    #[test]
+    fn same_port_different_sysid_is_allowed() {
+        // 一个端口可承载多架机（按 sysid 区分），因此同端口不同 sysid 合法。
+        let state = DroneState::new(DroneConfig::default());
+
+        let mut first = profile();
+        first.drone_tag = "drone-a".into();
+        first.adapter_id = "adapter-1".into();
+        first.mavlink_addr = "udpin:0.0.0.0:14540".into();
         first.mavlink_sysid = 12;
         upsert_profile(&state, first, "tester").expect("首次应当成功");
 
         let mut second = profile();
         second.drone_tag = "drone-b".into();
         second.adapter_id = "adapter-1".into();
+        second.mavlink_addr = "udpin:0.0.0.0:14540".into();
+        second.mavlink_sysid = 13;
+        let rec = upsert_profile(&state, second, "tester").expect("同端口不同 sysid 应当允许");
+        assert_eq!(rec.mavlink_sysid, 13);
+    }
+
+    #[test]
+    fn same_sysid_different_port_is_allowed() {
+        // 不同端口属于不同端点，sysid 可以相同。
+        let state = DroneState::new(DroneConfig::default());
+
+        let mut first = profile();
+        first.drone_tag = "drone-a".into();
+        first.adapter_id = "adapter-1".into();
+        first.mavlink_addr = "udpin:0.0.0.0:14540".into();
+        first.mavlink_sysid = 12;
+        upsert_profile(&state, first, "tester").expect("首次应当成功");
+
+        let mut second = profile();
+        second.drone_tag = "drone-b".into();
+        second.adapter_id = "adapter-1".into();
+        second.mavlink_addr = "udpin:0.0.0.0:14541".into();
         second.mavlink_sysid = 12;
-        assert!(
-            upsert_profile(&state, second, "tester").is_err(),
-            "同 adapter 内 sysid 不得重复"
+        upsert_profile(&state, second, "tester").expect("不同端点同 sysid 应当允许");
+    }
+
+    #[test]
+    fn free_slot_prefers_first_port_and_lowest_sysid() {
+        let slot = find_free_slot(&[], 14540, 14560, None).expect("有空位");
+        assert_eq!(slot, (14540, 1));
+    }
+
+    #[test]
+    fn free_slot_skips_occupied_pairs() {
+        // 14540 已被 sysid 1、2 占用 → 下一个空位是 sysid 3。
+        let used = vec![("14540".to_string(), 1), ("14540".to_string(), 2)];
+        assert_eq!(find_free_slot(&used, 14540, 14560, None), Some((14540, 3)));
+    }
+
+    #[test]
+    fn free_slot_moves_to_next_port_when_current_is_full() {
+        // 14540 的 1..=255 全满 → 落到 14541。
+        let used: Vec<(String, i32)> = (1..=255).map(|s| ("14540".to_string(), s)).collect();
+        assert_eq!(find_free_slot(&used, 14540, 14560, None), Some((14541, 1)));
+    }
+
+    #[test]
+    fn free_slot_honours_explicit_sysid() {
+        // 操作员指定 sysid = 42：即使 sysid 1 空闲，也应优先分配 42。
+        assert_eq!(
+            find_free_slot(&[], 14540, 14560, Some(42)),
+            Some((14540, 42))
         );
+        // 14540 的 42 已占用 → 换下一个端口。
+        let used = vec![("14540".to_string(), 42)];
+        assert_eq!(
+            find_free_slot(&used, 14540, 14560, Some(42)),
+            Some((14541, 42))
+        );
+    }
+
+    #[test]
+    fn free_slot_reports_exhaustion() {
+        // 端口段只有 14540 且已满 → 没有空位。
+        let used: Vec<(String, i32)> = (1..=255).map(|s| ("14540".to_string(), s)).collect();
+        assert_eq!(find_free_slot(&used, 14540, 14540, None), None);
     }
 
     #[test]
@@ -1606,5 +2138,138 @@ mod tests {
         assert!(delete_profile(&state, "drone-a", "tester").await.unwrap());
         let route = state.routes.get("route-1").expect("route kept");
         assert_eq!(route.drone_tags, vec!["drone-b"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // 机载链路实体（adapter）
+    // -----------------------------------------------------------------------
+
+    fn adapter_proto() -> Adapter {
+        Adapter {
+            adapter_id: "adapter-1".into(),
+            name: "东场链路".into(),
+            protocol: "mavlink".into(),
+            bind_addr: "0.0.0.0".into(),
+            port_start: 14540,
+            port_end: 14560,
+            autopilot: "auto".into(),
+            signing_secret: String::new(),
+            signing_allow_unsigned: true,
+            reconnect_min_secs: 1,
+            reconnect_max_secs: 30,
+            online: false,
+            enabled: true,
+            operator: String::new(),
+        }
+    }
+
+    #[test]
+    fn adapter_config_rejects_blank_id() {
+        let mut a = adapter_proto();
+        a.adapter_id = "   ".into();
+        assert!(adapter_from_proto(&a).is_err());
+    }
+
+    #[test]
+    fn adapter_config_rejects_unsafe_id_characters() {
+        let mut a = adapter_proto();
+        a.adapter_id = "adapter 1/../x".into();
+        assert!(adapter_from_proto(&a).is_err());
+    }
+
+    #[test]
+    fn adapter_config_rejects_inverted_port_range() {
+        let mut a = adapter_proto();
+        a.port_start = 20000;
+        a.port_end = 10000;
+        assert!(adapter_from_proto(&a).is_err());
+    }
+
+    #[test]
+    fn adapter_config_rejects_port_out_of_range() {
+        let mut a = adapter_proto();
+        a.port_start = 70000;
+        a.port_end = 70001;
+        assert!(adapter_from_proto(&a).is_err());
+    }
+
+    #[test]
+    fn adapter_config_rejects_inverted_reconnect_range() {
+        let mut a = adapter_proto();
+        a.reconnect_min_secs = 30;
+        a.reconnect_max_secs = 1;
+        assert!(adapter_from_proto(&a).is_err());
+    }
+
+    #[test]
+    fn adapter_config_rejects_non_hex_signing_secret() {
+        let mut a = adapter_proto();
+        a.signing_secret = "zz".into();
+        assert!(adapter_from_proto(&a).is_err());
+    }
+
+    #[test]
+    fn adapter_config_fills_defaults_for_blank_fields() {
+        let mut a = adapter_proto();
+        a.protocol = String::new();
+        a.autopilot = String::new();
+        a.bind_addr = String::new();
+        a.port_start = 0;
+        a.port_end = 0;
+        a.reconnect_min_secs = 0;
+        a.reconnect_max_secs = 0;
+        let row = adapter_from_proto(&a).expect("adapter");
+        assert_eq!(row.protocol, "mavlink");
+        assert_eq!(row.autopilot, "auto");
+        assert_eq!(row.bind_addr, "0.0.0.0");
+        assert_eq!(row.port_start, 14540);
+        assert_eq!(row.port_end, 14560);
+        assert_eq!(row.reconnect_min_secs, 1);
+        assert_eq!(row.reconnect_max_secs, 30);
+    }
+
+    #[test]
+    fn disabled_adapter_cannot_take_new_drones() {
+        let mut row = AdapterRow {
+            adapter_id: "adapter-1".into(),
+            enabled: true,
+            ..adapter_row_fixture()
+        };
+        assert!(ensure_adapter_assignable(&row).is_ok());
+        row.enabled = false;
+        assert!(ensure_adapter_assignable(&row).is_err());
+    }
+
+    #[test]
+    fn upsert_keeps_disabled_state_and_runtime_status() {
+        let existing = AdapterRow {
+            enabled: false,
+            online: true,
+            ..adapter_row_fixture()
+        };
+        let mut incoming = adapter_proto();
+        incoming.name = "改名".into();
+        let row = merge_adapter(Some(&existing), &incoming).expect("merge");
+        assert_eq!(row.name, "改名");
+        assert!(!row.enabled, "启停状态只能由专门的启停接口改变");
+        assert!(row.online, "在线状态由适配器注册维护，配置编辑不能覆盖");
+    }
+
+    #[test]
+    fn upsert_creates_enabled_adapter_when_missing() {
+        let row = merge_adapter(None, &adapter_proto()).expect("merge");
+        assert!(row.enabled);
+        assert!(!row.online);
+    }
+
+    #[test]
+    fn adapter_proto_roundtrip_keeps_fields() {
+        let row = adapter_from_proto(&adapter_proto()).expect("adapter");
+        let back = adapter_to_proto(&row);
+        assert_eq!(back.adapter_id, "adapter-1");
+        assert_eq!(back.name, "东场链路");
+        assert_eq!(back.port_start, 14540);
+        assert_eq!(back.port_end, 14560);
+        assert!(back.enabled);
     }
 }

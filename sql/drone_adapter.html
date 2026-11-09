@@ -1,0 +1,69 @@
+<mapper>
+<!-- 机载链路实体（adapter）：配置与运行状态。 -->
+<select id="drone_adapter_select_by_id">
+SELECT adapter_id,
+       COALESCE(name, '') AS name,
+       COALESCE(protocol, 'mavlink') AS protocol,
+       COALESCE(bind_addr, '0.0.0.0') AS bind_addr,
+       COALESCE(port_start, 14540) AS port_start,
+       COALESCE(port_end, 14560) AS port_end,
+       COALESCE(autopilot, 'auto') AS autopilot,
+       COALESCE(signing_secret, '') AS signing_secret,
+       signing_allow_unsigned,
+       COALESCE(reconnect_min_secs, 1) AS reconnect_min_secs,
+       COALESCE(reconnect_max_secs, 30) AS reconnect_max_secs,
+       online,
+       enabled
+FROM drone_adapter
+WHERE adapter_id = #{adapter_id}
+LIMIT 1
+</select>
+
+<!-- include_disabled = false 时只返回启用中的 adapter（软删除的不出现在默认列表里）。 -->
+<select id="drone_adapter_select_all">
+SELECT adapter_id,
+       COALESCE(name, '') AS name,
+       COALESCE(protocol, 'mavlink') AS protocol,
+       COALESCE(bind_addr, '0.0.0.0') AS bind_addr,
+       COALESCE(port_start, 14540) AS port_start,
+       COALESCE(port_end, 14560) AS port_end,
+       COALESCE(autopilot, 'auto') AS autopilot,
+       COALESCE(signing_secret, '') AS signing_secret,
+       signing_allow_unsigned,
+       COALESCE(reconnect_min_secs, 1) AS reconnect_min_secs,
+       COALESCE(reconnect_max_secs, 30) AS reconnect_max_secs,
+       online,
+       enabled
+FROM drone_adapter
+<if test="include_disabled == false">
+WHERE enabled
+</if>
+ORDER BY adapter_id
+</select>
+
+<insert id="drone_adapter_upsert">
+INSERT INTO drone_adapter
+    (adapter_id, name, protocol, bind_addr, port_start, port_end,
+     autopilot, signing_secret, signing_allow_unsigned,
+     reconnect_min_secs, reconnect_max_secs, online, enabled, last_seen, updated_at)
+VALUES (#{adapter_id}, #{name}, #{protocol}, #{bind_addr}, #{port_start}, #{port_end},
+        #{autopilot}, NULLIF(#{signing_secret}, ''), #{signing_allow_unsigned},
+        #{reconnect_min_secs}, #{reconnect_max_secs}, #{online}, #{enabled},
+        CASE WHEN #{online} THEN now() ELSE NULL END, now())
+ON CONFLICT (adapter_id) DO UPDATE SET
+    name = EXCLUDED.name,
+    protocol = EXCLUDED.protocol,
+    bind_addr = EXCLUDED.bind_addr,
+    port_start = EXCLUDED.port_start,
+    port_end = EXCLUDED.port_end,
+    autopilot = EXCLUDED.autopilot,
+    signing_secret = EXCLUDED.signing_secret,
+    signing_allow_unsigned = EXCLUDED.signing_allow_unsigned,
+    reconnect_min_secs = EXCLUDED.reconnect_min_secs,
+    reconnect_max_secs = EXCLUDED.reconnect_max_secs,
+    online = EXCLUDED.online,
+    enabled = EXCLUDED.enabled,
+    last_seen = CASE WHEN EXCLUDED.online THEN now() ELSE drone_adapter.last_seen END,
+    updated_at = now()
+</insert>
+</mapper>

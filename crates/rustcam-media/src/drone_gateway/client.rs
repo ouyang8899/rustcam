@@ -12,11 +12,12 @@ use rustcam_drone_proto::control::event_service_client::EventServiceClient;
 use rustcam_drone_proto::control::geofence_service_client::GeofenceServiceClient;
 use rustcam_drone_proto::control::query_service_client::QueryServiceClient;
 use rustcam_drone_proto::control::{
-    AcquireRequest, AlertListRequest, AuditListRequest, CommandStatusRequest, DeviceRequest,
-    DroneProfile as ProfileMsg, ForceReleaseRequest, Geofence as FenceMsg, GeofenceDeleteRequest,
-    GeofenceListRequest, GeofenceUpsertRequest, PreemptRequest, ReleaseRequest, RenewRequest,
-    Route as RouteMsg, RouteDeleteRequest, RouteExecuteRequest, RouteListRequest, RouteWaypoint,
-    StateRequest, SubscribeRequest, TelemetryHistoryRequest,
+    AcquireRequest, Adapter as AdapterMsg, AdapterRequest, AlertListRequest, AuditListRequest,
+    CommandStatusRequest, DeviceRequest, DroneProfile as ProfileMsg, ForceReleaseRequest,
+    Geofence as FenceMsg, GeofenceDeleteRequest, GeofenceListRequest, GeofenceUpsertRequest,
+    ListAdaptersRequest, PreemptRequest, ReleaseRequest, RenewRequest, Route as RouteMsg,
+    RouteDeleteRequest, RouteExecuteRequest, RouteListRequest, RouteWaypoint,
+    SetAdapterEnabledRequest, StateRequest, SubscribeRequest, TelemetryHistoryRequest,
 };
 use rustcam_drone_proto::link::adapter_link_client::AdapterLinkClient;
 use serde::{Deserialize, Serialize};
@@ -200,6 +201,40 @@ pub struct DroneDto {
     pub mavlink_compid: i32,
 }
 
+/// 一台机载链路实体（adapter）的接入配置。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AdapterDto {
+    /// 唯一标识；与适配器进程配置一致，创建后不可改。
+    pub adapter_id: String,
+    /// 显示名。
+    pub name: String,
+    /// 适配协议：mavlink / 厂商 SDK 等。
+    pub protocol: String,
+    /// 监听地址。
+    pub bind_addr: String,
+    /// 可用端口段起点。
+    pub port_start: i32,
+    /// 可用端口段终点。
+    pub port_end: i32,
+    /// 飞控类型：auto / px4 / ardupilot。
+    pub autopilot: String,
+    /// 签名密钥（服务端加密存储，接口返回密文）。
+    pub signing_secret: String,
+    /// 是否放行未签名帧。
+    pub signing_allow_unsigned: bool,
+    /// 重连退避下限（秒）。
+    pub reconnect_min_secs: i32,
+    /// 重连退避上限（秒）。
+    pub reconnect_max_secs: i32,
+    /// 适配器当前是否已接入。
+    pub online: bool,
+    /// 启停状态：false = 已停用（软删除）。
+    pub enabled: bool,
+    /// 绑定的无人机数量（REST 层统计回填）。
+    pub bound_drones: i32,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WaypointDto {
     pub lat: f64,
@@ -321,9 +356,32 @@ pub struct DroneEventDto {
 pub trait DroneApi: Send + Sync + 'static {
     async fn ping(&self) -> Result<(), DroneApiError>;
     async fn list_drones(&self) -> Result<Vec<DroneDto>, DroneApiError>;
+    /// 列出无人机档案（含链路身份：端点、系统号等）。
+    async fn list_drone_profiles(&self) -> Result<Vec<DroneDto>, DroneApiError>;
     async fn get_drone(&self, drone_tag: &str) -> Result<DroneDto, DroneApiError>;
     async fn save_drone(&self, drone: DroneDto, operator: &str) -> Result<DroneDto, DroneApiError>;
     async fn delete_drone(&self, drone_tag: &str) -> Result<bool, DroneApiError>;
+
+    /// 列出机载链路实体（adapter）；`include_disabled` 为真时包含已停用的。
+    async fn list_adapters(
+        &self,
+        include_disabled: bool,
+    ) -> Result<Vec<AdapterDto>, DroneApiError>;
+    /// 读取单个 adapter 配置。
+    async fn get_adapter(&self, adapter_id: &str) -> Result<AdapterDto, DroneApiError>;
+    /// 新建或更新 adapter 配置。
+    async fn save_adapter(
+        &self,
+        adapter: AdapterDto,
+        operator: &str,
+    ) -> Result<AdapterDto, DroneApiError>;
+    /// 停用（软删除）或恢复 adapter。
+    async fn set_adapter_enabled(
+        &self,
+        adapter_id: &str,
+        enabled: bool,
+        operator: &str,
+    ) -> Result<AdapterDto, DroneApiError>;
 
     async fn list_routes(&self, drone_tag: &str) -> Result<Vec<RouteDto>, DroneApiError>;
     async fn save_route(&self, route: RouteDto, operator: &str) -> Result<RouteDto, DroneApiError>;
@@ -417,6 +475,9 @@ impl DroneApi for NoopDroneApi {
     async fn list_drones(&self) -> Result<Vec<DroneDto>, DroneApiError> {
         Err(DroneApiError::unavailable("drone-service 未配置"))
     }
+    async fn list_drone_profiles(&self) -> Result<Vec<DroneDto>, DroneApiError> {
+        Err(DroneApiError::unavailable("drone-service 未配置"))
+    }
     async fn get_drone(&self, _drone_tag: &str) -> Result<DroneDto, DroneApiError> {
         Err(DroneApiError::unavailable("drone-service 未配置"))
     }
@@ -428,6 +489,27 @@ impl DroneApi for NoopDroneApi {
         Err(DroneApiError::unavailable("drone-service 未配置"))
     }
     async fn delete_drone(&self, _drone_tag: &str) -> Result<bool, DroneApiError> {
+        Err(DroneApiError::unavailable("drone-service 未配置"))
+    }
+    async fn list_adapters(&self, _include_disabled: bool) -> Result<Vec<AdapterDto>, DroneApiError> {
+        Err(DroneApiError::unavailable("drone-service 未配置"))
+    }
+    async fn get_adapter(&self, _adapter_id: &str) -> Result<AdapterDto, DroneApiError> {
+        Err(DroneApiError::unavailable("drone-service 未配置"))
+    }
+    async fn save_adapter(
+        &self,
+        _adapter: AdapterDto,
+        _operator: &str,
+    ) -> Result<AdapterDto, DroneApiError> {
+        Err(DroneApiError::unavailable("drone-service 未配置"))
+    }
+    async fn set_adapter_enabled(
+        &self,
+        _adapter_id: &str,
+        _enabled: bool,
+        _operator: &str,
+    ) -> Result<AdapterDto, DroneApiError> {
         Err(DroneApiError::unavailable("drone-service 未配置"))
     }
     async fn list_routes(&self, _drone_tag: &str) -> Result<Vec<RouteDto>, DroneApiError> {
@@ -866,6 +948,46 @@ fn profile_dto(profile: ProfileMsg) -> DroneDto {
     }
 }
 
+/// adapter 配置转协议消息。
+fn adapter_msg(adapter: AdapterDto) -> AdapterMsg {
+    AdapterMsg {
+        adapter_id: adapter.adapter_id,
+        name: adapter.name,
+        protocol: adapter.protocol,
+        bind_addr: adapter.bind_addr,
+        port_start: adapter.port_start,
+        port_end: adapter.port_end,
+        autopilot: adapter.autopilot,
+        signing_secret: adapter.signing_secret,
+        signing_allow_unsigned: adapter.signing_allow_unsigned,
+        reconnect_min_secs: adapter.reconnect_min_secs,
+        reconnect_max_secs: adapter.reconnect_max_secs,
+        online: adapter.online,
+        enabled: adapter.enabled,
+        operator: String::new(),
+    }
+}
+
+/// 协议消息转 adapter 配置。
+fn adapter_dto(adapter: AdapterMsg) -> AdapterDto {
+    AdapterDto {
+        adapter_id: adapter.adapter_id,
+        name: adapter.name,
+        protocol: adapter.protocol,
+        bind_addr: adapter.bind_addr,
+        port_start: adapter.port_start,
+        port_end: adapter.port_end,
+        autopilot: adapter.autopilot,
+        signing_secret: adapter.signing_secret,
+        signing_allow_unsigned: adapter.signing_allow_unsigned,
+        reconnect_min_secs: adapter.reconnect_min_secs,
+        reconnect_max_secs: adapter.reconnect_max_secs,
+        online: adapter.online,
+        enabled: adapter.enabled,
+        bound_drones: 0,
+    }
+}
+
 #[async_trait]
 impl DroneApi for DroneClient {
     async fn ping(&self) -> Result<(), DroneApiError> {
@@ -888,6 +1010,20 @@ impl DroneApi for DroneClient {
             .devices
             .into_iter()
             .map(drone_dto)
+            .collect())
+    }
+
+    async fn list_drone_profiles(&self) -> Result<Vec<DroneDto>, DroneApiError> {
+        let mut admin = self.admin.clone();
+        let resp = admin
+            .list_drone_profiles(proto::Empty {})
+            .await
+            .map_err(|e| map_grpc_status(&e))?;
+        Ok(resp
+            .into_inner()
+            .profiles
+            .into_iter()
+            .map(profile_dto)
             .collect())
     }
 
@@ -920,6 +1056,64 @@ impl DroneApi for DroneClient {
             .await
             .map_err(|e| map_grpc_status(&e))?;
         Ok(resp.into_inner().deleted)
+    }
+
+    async fn list_adapters(&self, include_disabled: bool) -> Result<Vec<AdapterDto>, DroneApiError> {
+        let mut admin = self.admin.clone();
+        let resp = admin
+            .list_adapters(ListAdaptersRequest { include_disabled })
+            .await
+            .map_err(|e| map_grpc_status(&e))?;
+        Ok(resp
+            .into_inner()
+            .adapters
+            .into_iter()
+            .map(adapter_dto)
+            .collect())
+    }
+
+    async fn get_adapter(&self, adapter_id: &str) -> Result<AdapterDto, DroneApiError> {
+        let mut admin = self.admin.clone();
+        let resp = admin
+            .get_adapter(AdapterRequest {
+                adapter_id: adapter_id.to_string(),
+            })
+            .await
+            .map_err(|e| map_grpc_status(&e))?;
+        Ok(adapter_dto(resp.into_inner()))
+    }
+
+    async fn save_adapter(
+        &self,
+        adapter: AdapterDto,
+        operator: &str,
+    ) -> Result<AdapterDto, DroneApiError> {
+        let mut admin = self.admin.clone();
+        let mut msg = adapter_msg(adapter);
+        msg.operator = operator.to_string();
+        let resp = admin
+            .upsert_adapter(msg)
+            .await
+            .map_err(|e| map_grpc_status(&e))?;
+        Ok(adapter_dto(resp.into_inner()))
+    }
+
+    async fn set_adapter_enabled(
+        &self,
+        adapter_id: &str,
+        enabled: bool,
+        operator: &str,
+    ) -> Result<AdapterDto, DroneApiError> {
+        let mut admin = self.admin.clone();
+        let resp = admin
+            .set_adapter_enabled(SetAdapterEnabledRequest {
+                adapter_id: adapter_id.to_string(),
+                enabled,
+                operator: operator.to_string(),
+            })
+            .await
+            .map_err(|e| map_grpc_status(&e))?;
+        Ok(adapter_dto(resp.into_inner()))
     }
 
     async fn list_routes(&self, drone_tag: &str) -> Result<Vec<RouteDto>, DroneApiError> {
@@ -1400,5 +1594,57 @@ mod tests {
             serde_json::from_str(r#"{"drone_tag":"drone-001"}"#).expect("deserialize");
         assert_eq!(round.drone_tag, "drone-001");
         assert!(round.camera_device_tags.is_empty());
+    }
+
+    #[test]
+    fn adapter_dto_round_trip_keeps_config_fields() {
+        let dto = AdapterDto {
+            adapter_id: "adapter-1".into(),
+            name: "东场链路".into(),
+            protocol: "mavlink".into(),
+            bind_addr: "0.0.0.0".into(),
+            port_start: 14540,
+            port_end: 14560,
+            autopilot: "auto".into(),
+            signing_secret: "00112233".into(),
+            signing_allow_unsigned: true,
+            reconnect_min_secs: 1,
+            reconnect_max_secs: 30,
+            online: true,
+            enabled: true,
+            bound_drones: 3,
+        };
+        let msg = adapter_msg(dto.clone());
+        assert_eq!(msg.adapter_id, "adapter-1");
+        assert_eq!(msg.port_start, 14540);
+        assert_eq!(msg.port_end, 14560);
+        assert!(msg.enabled);
+
+        let back = adapter_dto(msg);
+        assert_eq!(back.adapter_id, dto.adapter_id);
+        assert_eq!(back.name, dto.name);
+        assert_eq!(back.protocol, dto.protocol);
+        assert_eq!(back.bind_addr, dto.bind_addr);
+        assert_eq!(back.port_start, dto.port_start);
+        assert_eq!(back.port_end, dto.port_end);
+        assert_eq!(back.autopilot, dto.autopilot);
+        assert_eq!(back.signing_allow_unsigned, dto.signing_allow_unsigned);
+        assert_eq!(back.reconnect_min_secs, dto.reconnect_min_secs);
+        assert_eq!(back.reconnect_max_secs, dto.reconnect_max_secs);
+        assert!(back.online);
+        assert!(back.enabled);
+    }
+
+    #[test]
+    fn adapter_dto_json_round_trip_keeps_enabled_flag() {
+        let dto = AdapterDto {
+            adapter_id: "adapter-1".into(),
+            enabled: false,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&dto).expect("serialize");
+        let round: AdapterDto = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(round.adapter_id, "adapter-1");
+        assert!(!round.enabled);
     }
 }

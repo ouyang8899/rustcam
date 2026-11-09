@@ -1,9 +1,9 @@
 use rustcam_drone_proto::common as proto;
 use rustcam_drone_proto::control::admin_service_server::AdminService;
 use rustcam_drone_proto::control::{
-    AuditList, AuditListRequest, AuditRecord as ProtoAudit, DeleteReply, DeviceRequest,
-    DroneProfile, DroneProfileList, Route, RouteDeleteRequest, RouteExecuteRequest, RouteList,
-    RouteListRequest,
+    Adapter, AdapterList, AdapterRequest, AuditList, AuditListRequest, AuditRecord as ProtoAudit,
+    DeleteReply, DeviceRequest, DroneProfile, DroneProfileList, ListAdaptersRequest, Route,
+    RouteDeleteRequest, RouteExecuteRequest, RouteList, RouteListRequest, SetAdapterEnabledRequest,
 };
 use tonic::{Request, Response, Status};
 
@@ -37,20 +37,25 @@ impl AdminService for AdminServiceImpl {
         &self,
         request: Request<DroneProfile>,
     ) -> Result<Response<DroneProfile>, Status> {
-        let profile = request.into_inner();
+        let mut profile = request.into_inner();
         let operator = if profile.operator.trim().is_empty() {
             "admin".to_string()
         } else {
             profile.operator.clone()
         };
+        // 未指定链路端点时，按 adapter 的端口段自动分配（端口 + sysid）。
+        admin::assign_link_slot(&self.state, &mut profile)
+            .await
+            .map_err(Status::invalid_argument)?;
         let record = admin::upsert_profile(&self.state, profile, &operator)
             .map_err(Status::invalid_argument)?;
-        // 机载链路参数落 drone 表（端点 / 密钥 / 唯一标识的唯一真相源）。
+        // 档案落库；链路参数以 drone 表为唯一真相源（身份 / 端点 / 密钥 / 唯一标识）
         admin::persist_link_params(&self.state, &record)
             .await
             .map_err(Status::internal)?;
         Ok(Response::new(admin::profile_to_proto(&record)))
     }
+
 
     async fn delete_drone_profile(
         &self,
@@ -167,5 +172,67 @@ impl AdminService for AdminServiceImpl {
             })
             .collect();
         Ok(Response::new(AuditList { records }))
+    }
+
+    async fn get_adapter(
+        &self,
+        request: Request<AdapterRequest>,
+    ) -> Result<Response<Adapter>, Status> {
+        let adapter_id = request.into_inner().adapter_id;
+        let row = admin::get_adapter(&self.state, &adapter_id)
+            .await
+            .map_err(Status::internal)?
+            .ok_or_else(|| Status::not_found(format!("adapter `{adapter_id}` not found")))?;
+        Ok(Response::new(admin::adapter_to_proto(&row)))
+    }
+
+    async fn list_adapters(
+        &self,
+        request: Request<ListAdaptersRequest>,
+    ) -> Result<Response<AdapterList>, Status> {
+        let include_disabled = request.into_inner().include_disabled;
+        let rows = admin::list_adapters(&self.state, include_disabled)
+            .await
+            .map_err(Status::internal)?;
+        let adapters = rows.iter().map(admin::adapter_to_proto).collect();
+        Ok(Response::new(AdapterList { adapters }))
+    }
+
+    async fn upsert_adapter(
+        &self,
+        request: Request<Adapter>,
+    ) -> Result<Response<Adapter>, Status> {
+        let adapter = request.into_inner();
+        let operator = if adapter.operator.trim().is_empty() {
+            "admin".to_string()
+        } else {
+            adapter.operator.clone()
+        };
+        let row = admin::upsert_adapter(&self.state, adapter, &operator)
+            .await
+            .map_err(Status::invalid_argument)?;
+        Ok(Response::new(admin::adapter_to_proto(&row)))
+    }
+
+    async fn set_adapter_enabled(
+        &self,
+        request: Request<SetAdapterEnabledRequest>,
+    ) -> Result<Response<Adapter>, Status> {
+        let req = request.into_inner();
+        let operator = if req.operator.trim().is_empty() {
+            "admin".to_string()
+        } else {
+            req.operator
+        };
+        let row = admin::set_adapter_enabled(&self.state, &req.adapter_id, req.enabled, &operator)
+            .await
+            .map_err(|e| {
+                if e.contains("不存在") {
+                    Status::not_found(e)
+                } else {
+                    Status::internal(e)
+                }
+            })?;
+        Ok(Response::new(admin::adapter_to_proto(&row)))
     }
 }

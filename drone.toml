@@ -11,4 +11,7 @@ route_default_end_action = "hold"
 state_file = "drone-state.json"
 redis_url = "redis://127.0.0.1:6379"
 database_url = "postgres://postgres:123456@192.168.1.7:5435/rustcam"
+# 日志：控制台 + logs/drone-service.<小时戳> 滚动文件
+log_dir = "./logs"
+log_level = "info"
 

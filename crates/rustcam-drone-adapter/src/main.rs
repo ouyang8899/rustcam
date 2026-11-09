@@ -4,11 +4,17 @@ mod link;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
-
     let cfg = config::AdapterConfig::load()?;
+
+    // 日志：控制台 + 按小时滚动的 logs/drone-adapter.<时间戳>。
+    let mut log_cfg = rustcam_drone_core::logging::LogConfig {
+        dir: cfg.log_dir.clone(),
+        level: cfg.log_level.clone(),
+        file_name: "drone-adapter".into(),
+    };
+    log_cfg.apply_env();
+    rustcam_drone_core::logging::init(&log_cfg);
+
     tracing::info!(
         adapter = %cfg.adapter_id,
         service = %cfg.service_addr,

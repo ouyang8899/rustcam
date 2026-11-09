@@ -9,7 +9,9 @@ use ::mavlink::dialects::ardupilotmega::{
     MavCmd, MavFrame, MavMessage, MavModeFlag, MavResult, MavType, PositionTargetTypemask,
     COMMAND_LONG_DATA, SET_POSITION_TARGET_GLOBAL_INT_DATA,
 };
-use ::mavlink::{AsyncConnection, AsyncMavConnection, MavHeader};
+use ::mavlink::MavHeader;
+
+use super::FcLink;
 use tokio::sync::mpsc;
 
 use rustcam_drone_core::command::status;
@@ -533,7 +535,7 @@ fn reply(
 /// 执行一条指令：发送 MAVLink 序列并等待 COMMAND_ACK。
 #[allow(clippy::too_many_arguments)]
 pub async fn execute(
-    conn: &AsyncConnection<MavMessage>,
+    link: &FcLink,
     header: MavHeader,
     pending: &PendingCommands,
     autopilot: AutopilotKind,
@@ -582,7 +584,7 @@ pub async fn execute(
             }
         }
 
-        if let Err(e) = conn.send(&header, &step.message).await {
+        if let Err(e) = link.send(&header, &step.message).await {
             if let Some(command) = step.wait_ack {
                 pending.remove(command);
             }

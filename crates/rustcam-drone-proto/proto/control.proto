@@ -34,6 +34,12 @@ service AdminService {
   rpc ExecuteRoute (RouteExecuteRequest) returns (common.CommandReply);
 
   rpc ListAudits (AuditListRequest) returns (AuditList);
+
+  // 机载链路实体（adapter）：配置登记与启停
+  rpc GetAdapter       (AdapterRequest)          returns (Adapter);
+  rpc ListAdapters     (ListAdaptersRequest)     returns (AdapterList);
+  rpc UpsertAdapter    (Adapter)                 returns (Adapter);
+  rpc SetAdapterEnabled (SetAdapterEnabledRequest) returns (Adapter);
 }
 
 service GeofenceService {
@@ -249,3 +255,35 @@ message AuditRecord {
 }
 message AuditListRequest { string drone_tag = 1; int32 limit = 2; }
 message AuditList { repeated AuditRecord records = 1; }
+
+// ---------------------------------------------------------------------------
+// 机载链路实体（adapter）
+// ---------------------------------------------------------------------------
+
+// 一台 adapter 的接入配置：协议、监听地址、端口段、重连与签名策略。
+// 端口段内可按飞控系统号区分多架机，因此一台 adapter 能服务多架无人机。
+message Adapter {
+  string adapter_id = 1;             // 唯一标识；与适配器进程配置一致，创建后不可改
+  string name = 2;                  // 显示名
+  string protocol = 3;              // 适配协议：mavlink / 厂商 SDK 等
+  string bind_addr = 4;             // 监听地址
+  int32  port_start = 5;            // 可用端口段起点
+  int32  port_end = 6;              // 可用端口段终点
+  string autopilot = 7;             // 飞控类型：auto / px4 / ardupilot
+  string signing_secret = 8;        // 签名密钥（十六进制）；空 = 不需要签名
+  bool   signing_allow_unsigned = 9;
+  int32  reconnect_min_secs = 10;   // 重连退避下限（秒）
+  int32  reconnect_max_secs = 11;   // 重连退避上限（秒）
+  bool   online = 12;               // 运行状态：适配器当前是否已接入
+  bool   enabled = 13;              // 启用状态：false = 已停用（软删除）
+  string operator = 14;             // 操作人（写入审计）
+}
+
+message AdapterRequest { string adapter_id = 1; }
+message ListAdaptersRequest { bool include_disabled = 1; }
+message AdapterList { repeated Adapter adapters = 1; }
+message SetAdapterEnabledRequest {
+  string adapter_id = 1;
+  bool   enabled = 2;
+  string operator = 3;
+}

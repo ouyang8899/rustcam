@@ -9,11 +9,17 @@ use rustcam_drone_service::supervisor::spawn_supervised;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
-
     let cfg = DroneConfig::load()?;
+
+    // 日志：控制台 + 按小时滚动的 logs/drone-service.<时间戳>。
+    let mut log_cfg = rustcam_drone_core::logging::LogConfig {
+        dir: cfg.log_dir.clone(),
+        level: cfg.log_level.clone(),
+        file_name: "drone-service".into(),
+    };
+    log_cfg.apply_env();
+    rustcam_drone_core::logging::init(&log_cfg);
+
     tracing::info!(
         grpc = %cfg.grpc_addr,
         metrics = %cfg.metrics_addr,

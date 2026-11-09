@@ -92,6 +92,8 @@ fn accepts(kind: &str, msg_type: &str) -> bool {
 }
 
 async fn stream_events(mut socket: WebSocket, api: Arc<dyn DroneApi>, kind: String) {
+    // 事件流自带退避重订阅：drone-service 未启动或重启时，浏览器连接保持不断，
+    // 恢复后事件自动续上。
     let mut stream = match api.event_stream(Vec::new()).await {
         Ok(s) => s,
         Err(e) => {
@@ -140,6 +142,8 @@ async fn stream_events(mut socket: WebSocket, api: Arc<dyn DroneApi>, kind: Stri
                         }
                     }
                     Some(Err(e)) => {
+                        // 单条事件解析失败只上报，不断开连接。
+                        tracing::warn!(error = %e, "drone 事件解析失败");
                         let _ = socket
                             .send(Message::Text(
                     serde_json::json!({ "msg_type": "error", "data": { "message": e.to_string() } })
@@ -147,7 +151,6 @@ async fn stream_events(mut socket: WebSocket, api: Arc<dyn DroneApi>, kind: Stri
                                     .into(),
                             ))
                             .await;
-                        break;
                     }
                     None => break,
                 }

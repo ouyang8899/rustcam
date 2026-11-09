@@ -40,6 +40,7 @@
             <span>移动眼</span>
           </template>
           <el-menu-item index="/drone/drones">无人机</el-menu-item>
+          <el-menu-item index="/drone/adapters">接入适配器</el-menu-item>
           <el-menu-item index="/drone/control">控制权管理</el-menu-item>
           <el-menu-item index="/drone/live">实时飞行</el-menu-item>
           <el-menu-item index="/drone/routes">航线规划</el-menu-item>

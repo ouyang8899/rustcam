@@ -44,6 +44,7 @@ const routeNames = {
   '/users': '用户管理',
   '/settings': '系统设置',
   '/drone/drones': '无人机',
+  '/drone/adapters': '接入适配器',
   '/drone/control': '控制权管理',
   '/drone/live': '实时飞行',
   '/drone/routes': '航线规划',

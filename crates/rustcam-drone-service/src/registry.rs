@@ -40,7 +40,18 @@ impl Registry {
     /// 引导模式已取消——adapter 不再自报设备，平台未绑定则该 adapter 无 assignment。
     pub async fn register(&self, reg: &Register, tx: AdapterTx) -> RegisterAck {
         let link_rows = self.load_link_rows(&reg.adapter_id).await;
+        self.cache_adapter_bind_addr(&reg.adapter_id).await;
         self.register_with_rows(reg, tx, link_rows).await
+    }
+
+    /// 从 `drone_adapter` 表读监听地址并缓存，供拼装端点时使用。
+    async fn cache_adapter_bind_addr(&self, adapter_id: &str) {
+        let Some(db) = self.state.db.clone() else {
+            return;
+        };
+        if let Ok(Some(row)) = db.load_adapter(adapter_id).await {
+            self.state.set_adapter_bind_addr(adapter_id, &row.bind_addr);
+        }
     }
 
     /// 按给定的链路行做分配（生产走 `register` 查库；测试直接注入行）。
@@ -155,6 +166,8 @@ impl Registry {
             "[Registry] adapter registered"
         );
 
+        self.touch_adapter_row(&reg.adapter_id, true).await;
+
         self.state.metrics_inc_labeled(
             names::ADAPTER_CONNECTIONS_TOTAL,
             &[("adapter_id", reg.adapter_id.as_str())],
@@ -194,16 +207,89 @@ impl Registry {
         }
     }
 
+    /// 记录 adapter 的在线状态（机载链路实体的运行状态）。
+    async fn touch_adapter_row(&self, adapter_id: &str, online: bool) {
+        let Some(db) = self.state.db.clone() else {
+            return;
+        };
+        let existing = match db.load_adapter(adapter_id).await {
+            Ok(Some(row)) => row,
+            Ok(None) => crate::infra::db::AdapterRow {
+                adapter_id: adapter_id.to_string(),
+                name: String::new(),
+                protocol: "mavlink".into(),
+                bind_addr: "0.0.0.0".into(),
+                port_start: 14540,
+                port_end: 14560,
+                autopilot: "auto".into(),
+                signing_secret: String::new(),
+                signing_allow_unsigned: true,
+                reconnect_min_secs: 1,
+                reconnect_max_secs: 30,
+                online: false,
+                enabled: true,
+            },
+            Err(e) => {
+                tracing::warn!(error = %e, adapter = %adapter_id, "[Registry] load adapter row failed");
+                return;
+            }
+        };
+        self.state
+            .set_adapter_bind_addr(adapter_id, &existing.bind_addr);
+        let row = crate::infra::db::AdapterRow {
+            online,
+            ..existing
+        };
+        if let Err(e) = db.upsert_adapter(&row).await {
+            tracing::warn!(error = %e, adapter = %adapter_id, "[Registry] persist adapter row failed");
+        }
+    }
+
     /// 构造下发给 adapter 的分配信息（端点 + 密钥 + 版本 + 寻址地址）。
+    ///
+    /// 端点优先用无人机自己登记的地址；没登记时用 adapter 的监听地址 + 该机
+    /// 的端点（端口/串口）拼出来——端口写在 adapter 上，每机只登记身份。
     fn build_assignment(&self, row: &DeviceLinkRow) -> DeviceAssignment {
+        let mavlink_addr = if row.mavlink_addr.trim().is_empty() {
+            self.compose_endpoint(row)
+        } else {
+            row.mavlink_addr.clone()
+        };
         DeviceAssignment {
             drone_tag: row.drone_tag.clone(),
-            mavlink_addr: row.mavlink_addr.clone(),
+            mavlink_addr,
             signing_secret: self.decrypt_secret(&row.signing_secret),
             allow_unsigned: row.signing_allow_unsigned,
             mavlink_version: row.mavlink_version,
-            mavlink_sysid: row.mavlink_sysid,
+            mavlink_sysid: if row.fc_sysid > 0 {
+                row.fc_sysid
+            } else {
+                row.mavlink_sysid
+            },
             mavlink_compid: row.mavlink_compid,
+        }
+    }
+
+    /// 用 adapter 的监听地址与该机的端点拼出完整链路地址。
+    fn compose_endpoint(&self, row: &DeviceLinkRow) -> String {
+        let endpoint = if !row.link_endpoint.is_empty() {
+            row.link_endpoint.clone()
+        } else {
+            match crate::link_identity::parse_endpoint(&row.mavlink_addr) {
+                Some(ep) => ep.endpoint,
+                None => String::new(),
+            }
+        };
+        if endpoint.is_empty() {
+            return String::new();
+        }
+        let bind_addr = self
+            .state
+            .adapter_bind_addr(&row.adapter_id)
+            .unwrap_or_else(|| "0.0.0.0".to_string());
+        match crate::link_identity::parse_endpoint(&format!("udpin:{bind_addr}:{endpoint}")) {
+            Some(_) => format!("udpin:{bind_addr}:{endpoint}"),
+            None => String::new(),
         }
     }
 
@@ -362,8 +448,12 @@ mod tests {
             mavlink_sysid: 1,
             mavlink_compid: 1,
             adapter_id: adapter_id.into(),
+            link_family: "udp".into(),
+            link_endpoint: "14540".into(),
+            fc_sysid: 1,
         }
     }
+
 
     fn channel() -> (mpsc::Sender<Payload>, mpsc::Receiver<Payload>) {
         mpsc::channel(8)

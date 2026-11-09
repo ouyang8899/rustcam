@@ -9,8 +9,8 @@ use crate::api::response::ApiResponse;
 use crate::auth::casbin::CasbinManager;
 use crate::drone_gateway::auth::{ws_scope, DroneUser};
 use crate::drone_gateway::client::{
-    AlertDto, AuditDto, CommandDto, CommandRequest, ControlDto, DroneApi, DroneApiError, DroneDto,
-    FenceDto, RouteDto, TelemetryDto,
+    AdapterDto, AlertDto, AuditDto, CommandDto, CommandRequest, ControlDto, DroneApi, DroneApiError,
+    DroneDto, FenceDto, RouteDto, TelemetryDto,
 };
 use crate::drone_gateway::ticket::TicketStore;
 use crate::error::AppError;
@@ -63,6 +63,16 @@ where
         )
         .route("/api/v1/drone/devices", get(list_drones))
         .route("/api/v1/drone/devices/{drone_tag}", get(get_drone))
+        // 机载链路实体（adapter）：配置登记与启停（软删除）。
+        .route("/api/v1/drone/adapters", get(list_adapters).post(create_adapter))
+        .route(
+            "/api/v1/drone/adapters/{adapter_id}",
+            get(get_adapter).put(update_adapter).delete(disable_adapter),
+        )
+        .route(
+            "/api/v1/drone/adapters/{adapter_id}/restore",
+            post(restore_adapter),
+        )
         .route("/api/v1/drone/{drone_tag}/command", post(send_command))
         .route("/api/v1/drone/{drone_tag}/telemetry", get(get_telemetry))
         // 规则 §6.12 的路径别名（与上面的简写并存）。
@@ -141,10 +151,43 @@ async fn list_drones(
             for drone in list {
                 out.push(with_camera_tags(db.as_ref(), drone).await);
             }
-            Ok(ok(out))
+            Ok(ok(merge_link_identity(&api, out).await))
         }
         Err(e) => Err(e.into()),
     }
+}
+
+/// 把档案里的链路身份（端点、系统号、唯一标识）补到设备列表上。
+///
+/// 设备列表来自运行时注册信息，不含链路身份；档案里有登记值。
+/// 档案读失败不阻断列表返回：链路信息缺失不应让整个列表不可用。
+async fn merge_link_identity(api: &Arc<dyn DroneApi>, drones: Vec<DroneDto>) -> Vec<DroneDto> {
+    let Ok(profiles) = api.list_drone_profiles().await else {
+        return drones;
+    };
+    drones
+        .into_iter()
+        .map(|mut drone| {
+            if let Some(profile) = profiles.iter().find(|p| p.drone_tag == drone.drone_tag) {
+                if !profile.mavlink_addr.is_empty() {
+                    drone.mavlink_addr = profile.mavlink_addr.clone();
+                }
+                if profile.mavlink_sysid > 0 {
+                    drone.mavlink_sysid = profile.mavlink_sysid;
+                }
+                if profile.mavlink_compid > 0 {
+                    drone.mavlink_compid = profile.mavlink_compid;
+                }
+                if !profile.unique_id.is_empty() {
+                    drone.unique_id = profile.unique_id.clone();
+                }
+                if !profile.adapter_id.is_empty() {
+                    drone.adapter_id = profile.adapter_id.clone();
+                }
+            }
+            drone
+        })
+        .collect()
 }
 
 async fn get_drone(
@@ -304,6 +347,123 @@ async fn get_telemetry(
         },
         Err(e) => Err(e.into()),
     }
+}
+
+// ---------------------------------------------------------------------------
+// 机载链路实体（adapter）
+// ---------------------------------------------------------------------------
+
+/// adapter 列表查询参数。
+#[derive(Debug, Deserialize, Default)]
+struct AdapterListQuery {
+    /// 是否包含已停用（软删除）的 adapter。
+    #[serde(default)]
+    include_disabled: bool,
+}
+
+/// 列出 adapter 配置，并回填每个 adapter 名下的无人机数量。
+async fn list_adapters(
+    Extension(api): Extension<Arc<dyn DroneApi>>,
+    Query(q): Query<AdapterListQuery>,
+) -> ApiResult<Vec<AdapterDto>> {
+    let mut adapters = api.list_adapters(q.include_disabled).await?;
+    // 绑定机数按无人机档案统计；统计失败不影响列表本身。
+    if let Ok(drones) = api.list_drones().await {
+        for adapter in adapters.iter_mut() {
+            adapter.bound_drones = drones
+                .iter()
+                .filter(|d| d.adapter_id == adapter.adapter_id)
+                .count() as i32;
+        }
+    }
+    Ok(ok(adapters))
+}
+
+/// 读取单个 adapter 配置。
+async fn get_adapter(
+    Extension(api): Extension<Arc<dyn DroneApi>>,
+    Path(adapter_id): Path<String>,
+) -> ApiResult<AdapterDto> {
+    Ok(ok(api.get_adapter(&adapter_id).await?))
+}
+
+/// 新建 adapter 配置。
+///
+/// 已存在同名 adapter 时拒绝：标识与适配器进程配置绑定，不能被悄悄覆盖。
+async fn create_adapter(
+    Extension(api): Extension<Arc<dyn DroneApi>>,
+    user: DroneUser,
+    Json(mut body): Json<AdapterDto>,
+) -> ApiResult<AdapterDto> {
+    body.adapter_id = body.adapter_id.trim().to_string();
+    if body.adapter_id.is_empty() {
+        return Err(AppError::BadRequest("adapter_id 不能为空".into()));
+    }
+    match api.get_adapter(&body.adapter_id).await {
+        Ok(_) => {
+            return Err(AppError::Conflict(format!(
+                "adapter `{}` 已存在",
+                body.adapter_id
+            )))
+        }
+        Err(e) if e.status == 404 => {}
+        Err(e) => return Err(e.into()),
+    }
+    // 新建一律启用；停用只能走停用接口。
+    body.enabled = true;
+    Ok(ok(api.save_adapter(body, &user.0.username).await?))
+}
+
+/// 修改 adapter 配置。
+///
+/// 标识创建后不可改：它与适配器进程配置一一对应。
+async fn update_adapter(
+    Extension(api): Extension<Arc<dyn DroneApi>>,
+    user: DroneUser,
+    Path(adapter_id): Path<String>,
+    Json(mut body): Json<AdapterDto>,
+) -> ApiResult<AdapterDto> {
+    let path_id = adapter_id.trim().to_string();
+    if path_id.is_empty() {
+        return Err(AppError::BadRequest("adapter_id 不能为空".into()));
+    }
+    let body_id = body.adapter_id.trim().to_string();
+    if !body_id.is_empty() && body_id != path_id {
+        return Err(AppError::BadRequest("adapter_id 不可修改".into()));
+    }
+    body.adapter_id = path_id.clone();
+    match api.get_adapter(&path_id).await {
+        Ok(_) => {}
+        Err(e) if e.status == 404 => {
+            return Err(AppError::NotFound(format!("adapter `{path_id}` 不存在")))
+        }
+        Err(e) => return Err(e.into()),
+    }
+    Ok(ok(api.save_adapter(body, &user.0.username).await?))
+}
+
+/// 停用 adapter（软删除）：配置行与绑定关系都保留，可恢复。
+async fn disable_adapter(
+    Extension(api): Extension<Arc<dyn DroneApi>>,
+    user: DroneUser,
+    Path(adapter_id): Path<String>,
+) -> ApiResult<AdapterDto> {
+    Ok(ok(
+        api.set_adapter_enabled(&adapter_id, false, &user.0.username)
+            .await?,
+    ))
+}
+
+/// 恢复已停用的 adapter。
+async fn restore_adapter(
+    Extension(api): Extension<Arc<dyn DroneApi>>,
+    user: DroneUser,
+    Path(adapter_id): Path<String>,
+) -> ApiResult<AdapterDto> {
+    Ok(ok(
+        api.set_adapter_enabled(&adapter_id, true, &user.0.username)
+            .await?,
+    ))
 }
 
 #[derive(Debug, Deserialize)]

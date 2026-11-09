@@ -16,7 +16,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Endpoint;
 
 use crate::config::AdapterConfig;
-use crate::fc::{self, FcPool, FlightController};
+use crate::fc::addr::{MavAddress, Transport};
+use crate::fc::{self, EndpointRegistry, FcPool, FlightController};
 
 /// 已完成指令的幂等记录保留时长。
 const COMPLETED_TTL: Duration = Duration::from_secs(3_600);
@@ -197,7 +198,9 @@ async fn serve(cfg: &AdapterConfig, ledger: Arc<CommandLedger>) -> anyhow::Resul
     let mut inbound = client.open(ReceiverStream::new(rx)).await?.into_inner();
 
     let pool = Arc::new(FcPool::default());
-    let result = run_session(cfg, &mut inbound, tx.clone(), &pool, ledger).await;
+    // 共享端点按会话存活：同一 `udpin` 端口只绑定一次，供多架飞控复用。
+    let endpoints = EndpointRegistry::new();
+    let result = run_session(cfg, &mut inbound, tx.clone(), &pool, &endpoints, ledger).await;
     pool.close();
     result
 }
@@ -207,6 +210,7 @@ async fn run_session(
     inbound: &mut tonic::Streaming<ServiceMessage>,
     tx: mpsc::Sender<AdapterMessage>,
     pool: &Arc<FcPool>,
+    endpoints: &EndpointRegistry,
     ledger: Arc<CommandLedger>,
 ) -> anyhow::Result<()> {
     loop {
@@ -214,7 +218,7 @@ async fn run_session(
         let Some(msg) = message else {
             return Ok(());
         };
-        handle_service_message(msg, cfg, &tx, pool, &ledger).await?;
+        handle_service_message(msg, cfg, &tx, pool, endpoints, &ledger).await?;
     }
 }
 
@@ -223,6 +227,7 @@ async fn handle_service_message(
     cfg: &AdapterConfig,
     tx: &mpsc::Sender<AdapterMessage>,
     pool: &Arc<FcPool>,
+    endpoints: &EndpointRegistry,
     ledger: &Arc<CommandLedger>,
 ) -> anyhow::Result<()> {
     match msg.payload {
@@ -249,17 +254,21 @@ async fn handle_service_message(
             );
             spawn_heartbeat_forwarder(tx.clone(), pool.clone(), interval_secs);
 
-            // 按平台分配的端点逐条建链；建链失败必须让本次会话失败并重连，
-            // 否则会以「gRPC 在线但无飞控链路」的半死状态一直挂着。
-            for assignment in ack.assignments.iter() {
-                connect_assignment(cfg, &tx, pool, assignment).await?;
-            }
+            // 按平台分配的端点逐条建链；单架建链失败只跳过该机（平台侧显示离线），
+            // 不中断整场会话——一个 adapter 可能带多架机，一架失败不能让其余全部掉线。
+            let connected = connect_assignments(cfg, tx, pool, endpoints, &ack.assignments).await;
+            tracing::info!(
+                assigned = ack.assignments.len(),
+                connected,
+                "[Adapter] flight controller links established"
+            );
             if ack.assigned_drone_tags.is_empty() {
                 tracing::warn!(
                     adapter = %cfg.adapter_id,
                     "[Adapter] platform assigned no drones; check drone_device rows for this adapter_id"
                 );
             }
+
         }
         Some(service_message::Payload::Command(cmd)) => {
             // 已执行过的 cmd_id 不再重复执行（规则 §16）。
@@ -308,22 +317,70 @@ async fn handle_service_message(
 }
 
 /// 按平台下发的 assignment 建一条飞控链路，并挂上遥测 / 事件 / 唯一标识转发。
+/// 逐条建立平台分配的飞控链路，返回成功建链的架数。
+///
+/// 单架建链失败只跳过该机（该机在平台侧显示离线），不影响其余架；
+/// 全部失败时不报错——平台随时可能补录新机，会话本身仍是健康的。
+async fn connect_assignments(
+    cfg: &AdapterConfig,
+    tx: &mpsc::Sender<AdapterMessage>,
+    pool: &Arc<FcPool>,
+    endpoints: &EndpointRegistry,
+    assignments: &[rustcam_drone_proto::link::DeviceAssignment],
+) -> usize {
+    let mut connected = 0usize;
+    for assignment in assignments {
+        match connect_assignment(cfg, tx, pool, endpoints, assignment).await {
+            Ok(()) => connected += 1,
+            Err(e) => {
+                tracing::warn!(
+                    drone_tag = %assignment.drone_tag,
+                    error = %e,
+                    "[Adapter] flight controller link failed, skipping this drone"
+                );
+            }
+        }
+    }
+    connected
+}
+
+/// 判断一条链路是否应复用共享端口，返回 (注册键, 绑定目标)。
+///
+/// 只有 `udpin`（本地监听）且 sysid 非零时才共享：sysid 是分派依据。
+fn shared_target(addr: &str) -> Option<(String, String)> {
+    let address = MavAddress::parse(addr).ok()?;
+    if address.transport() != Transport::UdpIn {
+        return None;
+    }
+    let (_, target) = address.as_str().split_once(':')?;
+    Some((address.as_str().to_string(), target.to_string()))
+}
+
+/// 平台 → adapter 的单架链路信息：描述一条机载链路身份与飞控寻址。
+///
+/// 平台 → adapter：一条链路身份 = 端点（协议族 + 端口/串口）+ 飞控系统号。
 async fn connect_assignment(
     cfg: &AdapterConfig,
     tx: &mpsc::Sender<AdapterMessage>,
     pool: &Arc<FcPool>,
+    endpoints: &EndpointRegistry,
     assignment: &rustcam_drone_proto::link::DeviceAssignment,
 ) -> anyhow::Result<()> {
     let drone_tag = assignment.drone_tag.clone();
-    let fc = match FlightController::connect(
-        &assignment.mavlink_addr,
-        &drone_tag,
-        assignment.mavlink_sysid as u8,
-        assignment.mavlink_compid as u8,
-        cfg,
-    )
-    .await
-    {
+    let sysid = assignment.mavlink_sysid as u8;
+    let compid = assignment.mavlink_compid as u8;
+
+    // `udpin` + 非零 sysid 走共享端口：同一端口按 sysid 分派给多架飞控。
+    let connected = match shared_target(&assignment.mavlink_addr) {
+        Some((key, target)) if sysid > 0 => {
+            let endpoint = endpoints.get_or_bind(key, &target).await?;
+            FlightController::connect_shared(endpoint, sysid, &drone_tag, compid, cfg).await
+        }
+        _ => {
+            FlightController::connect(&assignment.mavlink_addr, &drone_tag, sysid, compid, cfg).await
+        }
+    };
+    let fc = match connected {
         Ok(fc) => fc,
         Err(e) => {
             tracing::warn!(
@@ -605,13 +662,50 @@ mod tests {
             ..Default::default()
         };
 
-        let result = connect_assignment(&cfg, &tx, &pool, &assignment).await;
+        let endpoints = EndpointRegistry::new();
+        let result = connect_assignment(&cfg, &tx, &pool, &endpoints, &assignment).await;
 
         assert!(
             result.is_err(),
-            "connect failure must end the session instead of running half-dead"
+            "单架建链失败必须上报，供平台把该机标为离线"
         );
         assert!(pool.get("drone-test").is_none());
+    }
+
+    /// 一架机建链失败不能连累同一 adapter 上的其它机（端口被占即典型场景）。
+    #[tokio::test]
+    async fn one_failed_link_does_not_block_other_drones() {
+        // 占用一个端口，让指向它的链路必然 bind 失败。
+        let blocker = std::net::UdpSocket::bind("0.0.0.0:0").expect("bind blocker");
+        let blocked_port = blocker.local_addr().expect("local addr").port();
+
+        // 另一个可用端口，供正常链路使用。
+        let free = std::net::UdpSocket::bind("0.0.0.0:0").expect("bind free");
+        let free_port = free.local_addr().expect("local addr").port();
+        drop(free);
+
+        let cfg = AdapterConfig::default();
+        let (tx, _guard) = mpsc::channel(8);
+        let pool = Arc::new(FcPool::default());
+        let assignments = vec![
+            rustcam_drone_proto::link::DeviceAssignment {
+                drone_tag: "drone-bad".into(),
+                mavlink_addr: format!("udpin:0.0.0.0:{blocked_port}"),
+                ..Default::default()
+            },
+            rustcam_drone_proto::link::DeviceAssignment {
+                drone_tag: "drone-ok".into(),
+                mavlink_addr: format!("udpin:0.0.0.0:{free_port}"),
+                ..Default::default()
+            },
+        ];
+
+        let endpoints = EndpointRegistry::new();
+        let connected = connect_assignments(&cfg, &tx, &pool, &endpoints, &assignments).await;
+
+        assert_eq!(connected, 1, "失败的那架应被跳过，其余照常建链");
+        assert!(pool.get("drone-bad").is_none());
+        assert!(pool.get("drone-ok").is_some());
     }
 
     #[test]

@@ -36,7 +36,6 @@ rbs = { workspace = true }
 dashmap = { workspace = true }
 config = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }

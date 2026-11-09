@@ -24,17 +24,47 @@ pub struct DeviceLinkRow {
     pub drone_tag: String,
     pub unique_id: String,
     pub mavlink_addr: String,
-    /// 密文（`v1:<hex>`）；为空表示该机不需要签名。
+    /// 签名密钥（`v1:<hex>` 密文）；未配置密钥的机按"不需要签名"处理
     pub signing_secret: String,
     pub signing_allow_unsigned: bool,
-    /// MAVLink 协议版本：1 / 2。版本 1 不能签名（MAVLink 1 帧无签名字段）。
+    /// MAVLink 协议版本：1 / 2（版本 1 没有签名字段）
     pub mavlink_version: i32,
-    /// 该机的 system id；adapter 用作出站 target_system。
+    /// 飞控 system id；adapter 侧据此填 target_system
     pub mavlink_sysid: i32,
-    /// 该机的 component id；adapter 用作出站 target_component。
+    /// 飞控 component id；adapter 侧据此填 target_component
     pub mavlink_compid: i32,
     pub adapter_id: String,
+    /// 链路身份的传输族（tcp / udp / serial），由地址归一化而来
+    pub link_family: String,
+    /// 链路端点：端口号（tcp/udp）或串口设备名
+    pub link_endpoint: String,
+    /// 协议中立的飞控系统号（唯一性判定用）
+    pub fc_sysid: i32,
 }
+
+/// 机载链路实体（adapter）的配置与运行状态。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AdapterRow {
+    pub adapter_id: String,
+    pub name: String,
+    /// 适配协议（mavlink / 厂商 SDK 等）
+    pub protocol: String,
+    /// 监听地址
+    pub bind_addr: String,
+    /// 可用端口段起点
+    pub port_start: i32,
+    /// 可用端口段终点
+    pub port_end: i32,
+    pub autopilot: String,
+    pub signing_secret: String,
+    pub signing_allow_unsigned: bool,
+    pub reconnect_min_secs: i32,
+    pub reconnect_max_secs: i32,
+    pub online: bool,
+    /// 启停状态：false = 已停用（软删除），保留配置与绑定关系以便回滚。
+    pub enabled: bool,
+}
+
 
 /// drone-service 自有的 PG 连接池；只操作 drone_* 表。
 #[derive(Clone)]
@@ -153,6 +183,67 @@ impl DroneDb {
             row.mavlink_version,
             row.mavlink_sysid,
             row.mavlink_compid,
+            &row.link_family,
+            &row.link_endpoint,
+            row.fc_sysid,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// 同一 adapter 下「协议族 + 端点 + 飞控系统号」是否已被别的机占用。
+    ///
+    /// 返回占用者的 drone_tag（None = 未占用）。
+    pub async fn link_identity_owner(
+        &self,
+        adapter_id: &str,
+        link_family: &str,
+        link_endpoint: &str,
+        fc_sysid: i32,
+        drone_tag: &str,
+    ) -> anyhow::Result<Option<String>> {
+        let rows = sql_mappers::drone_device_link_identity_taken(
+            &self.rb,
+            adapter_id,
+            link_family,
+            link_endpoint,
+            fc_sysid,
+            drone_tag,
+        )
+        .await?;
+        Ok(rows.into_iter().next().map(|r| r.drone_tag))
+    }
+
+    /// 读取一个机载链路实体（adapter）的配置。
+    pub async fn load_adapter(&self, adapter_id: &str) -> anyhow::Result<Option<AdapterRow>> {
+        let rows = sql_mappers::drone_adapter_select_by_id(&self.rb, adapter_id).await?;
+        Ok(rows.into_iter().next())
+    }
+
+    /// 列出全部机载链路实体。
+    ///
+    /// `include_disabled = false` 时只返回启用中的（软删除的默认不出现）。
+    pub async fn load_adapters(&self, include_disabled: bool) -> anyhow::Result<Vec<AdapterRow>> {
+        Ok(sql_mappers::drone_adapter_select_all(&self.rb, include_disabled).await?)
+    }
+
+    /// 写入（或更新）一个机载链路实体。
+    pub async fn upsert_adapter(&self, row: &AdapterRow) -> anyhow::Result<()> {
+        sql_mappers::drone_adapter_upsert(
+            &self.rb,
+            &row.adapter_id,
+            &row.name,
+            &row.protocol,
+            &row.bind_addr,
+            row.port_start,
+            row.port_end,
+            &row.autopilot,
+            &row.signing_secret,
+            row.signing_allow_unsigned,
+            row.reconnect_min_secs,
+            row.reconnect_max_secs,
+            row.online,
+            row.enabled,
         )
         .await?;
         Ok(())
@@ -522,7 +613,11 @@ mod tests {
         assert!(sql.contains("mavlink_sysid"));
         assert!(sql.contains("mavlink_compid"));
         assert!(sql.contains("CREATE INDEX IF NOT EXISTS idx_drone_device_adapter_id"));
-        assert!(sql.contains("uq_drone_device_adapter_sysid"));
+        // 机载链路实体表与协议中立的链路身份列。
+        assert!(sql.contains("CREATE TABLE IF NOT EXISTS drone_adapter"));
+        assert!(sql.contains("port_start"));
+        assert!(sql.contains("port_end"));
+        assert!(sql.contains("uq_drone_device_link_identity"));
     }
 
     #[test]
@@ -530,7 +625,11 @@ mod tests {
         let sql = include_str!("../../migrations.sql");
         assert!(sql.contains("drone_tag"));
         assert!(!sql.contains("device_id"));
-        assert!(sql.contains("uq_drone_device_adapter_sysid"));
+        // 链路绑定唯一性按「协议族 + 端点 + 飞控系统号」判定。
+        assert!(sql.contains("uq_drone_device_link_identity"));
+        assert!(sql.contains("link_family"));
+        assert!(sql.contains("link_endpoint"));
+        assert!(sql.contains("fc_sysid"));
     }
 
     #[test]
@@ -545,6 +644,9 @@ mod tests {
             mavlink_sysid: 1,
             mavlink_compid: 1,
             adapter_id: "adapter-1".into(),
+            link_family: "udp".into(),
+            link_endpoint: "14540".into(),
+            fc_sysid: 1,
         };
         let json = serde_json::to_value(&row).expect("serialize");
         assert_eq!(json["drone_tag"], "drone-001");
@@ -553,5 +655,8 @@ mod tests {
         assert_eq!(json["mavlink_version"], 2);
         assert_eq!(json["mavlink_sysid"], 1);
         assert_eq!(json["mavlink_compid"], 1);
+        assert_eq!(json["link_family"], "udp");
+        assert_eq!(json["link_endpoint"], "14540");
+        assert_eq!(json["fc_sysid"], 1);
     }
 }

@@ -30,6 +30,12 @@ fn default_redis_url() -> String {
 fn default_database_url() -> String {
     "postgres://postgres:123456@127.0.0.1:5435/rustcam".into()
 }
+fn default_log_dir() -> String {
+    "./logs".into()
+}
+fn default_log_level() -> String {
+    "info".into()
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DroneConfig {
@@ -69,6 +75,12 @@ pub struct DroneConfig {
     /// 未配置时不下发签名密钥（该机按"不需要签名"处理），并记录告警。
     #[serde(default)]
     pub signing_master_key: Option<String>,
+    /// 日志目录（默认 `./logs`）。
+    #[serde(default = "default_log_dir")]
+    pub log_dir: String,
+    /// 日志级别（默认 `info`）。
+    #[serde(default = "default_log_level")]
+    pub log_level: String,
 }
 
 impl Default for DroneConfig {
@@ -88,6 +100,8 @@ impl Default for DroneConfig {
             redis_url: default_redis_url(),
             database_url: default_database_url(),
             signing_master_key: None,
+            log_dir: default_log_dir(),
+            log_level: default_log_level(),
         }
     }
 }
@@ -133,6 +147,16 @@ impl DroneConfig {
             let v = v.trim().to_string();
             self.signing_master_key = if v.is_empty() { None } else { Some(v) };
         }
+        if let Ok(v) = std::env::var("DRONE_LOG_DIR") {
+            if !v.trim().is_empty() {
+                self.log_dir = v;
+            }
+        }
+        if let Ok(v) = std::env::var("DRONE_LOG_LEVEL") {
+            if !v.trim().is_empty() {
+                self.log_level = v;
+            }
+        }
     }
 
     /// 校验配置；主密钥格式错误时直接拒绝启动。
@@ -173,6 +197,22 @@ mod tests {
         assert!(!cfg.risk_enabled);
         assert_eq!(cfg.max_inflight_commands, 1024);
         assert_eq!(cfg.default_command_timeout_sec, 30);
+    }
+
+    #[test]
+    fn log_settings_default_to_logs_dir() {
+        let cfg = DroneConfig::from_toml_str("");
+        assert_eq!(cfg.log_dir, "./logs");
+        assert_eq!(cfg.log_level, "info");
+    }
+
+    #[test]
+    fn log_settings_can_be_overridden() {
+        let cfg = DroneConfig::from_toml_str(
+            "log_dir = \"/var/log/rustcam\"\nlog_level = \"debug\"\n",
+        );
+        assert_eq!(cfg.log_dir, "/var/log/rustcam");
+        assert_eq!(cfg.log_level, "debug");
     }
 
     #[test]

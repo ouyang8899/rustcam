@@ -5,6 +5,32 @@
 -- 扩展需随 PG 预加载（shared_preload_libraries = 'timescaledb'），随包安装。
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
+-- 机载链路实体：adapter 自身的配置与运行状态。
+-- 飞控链路身份（协议族 / 端口 / 飞控系统号）按无人机登记在 drone_device 上。
+CREATE TABLE IF NOT EXISTS drone_adapter (
+  adapter_id              text PRIMARY KEY,
+  name                    text NOT NULL DEFAULT '',
+  protocol                text NOT NULL DEFAULT 'mavlink',
+  bind_addr               text NOT NULL DEFAULT '0.0.0.0',
+  -- 可用端口段：端口数 × 255 架（每端口按 sysid 区分）。
+  port_start              smallint NOT NULL DEFAULT 14540,
+  port_end                smallint NOT NULL DEFAULT 14560,
+  autopilot               text NOT NULL DEFAULT 'auto',
+  signing_secret          text,
+  signing_allow_unsigned  boolean NOT NULL DEFAULT true,
+  reconnect_min_secs      int NOT NULL DEFAULT 1,
+  reconnect_max_secs      int NOT NULL DEFAULT 30,
+  online                  boolean NOT NULL DEFAULT false,
+  -- 启停状态：false = 已停用（软删除），配置行与绑定关系保留以便回滚。
+  enabled                 boolean NOT NULL DEFAULT true,
+  last_seen               timestamptz,
+  created_at              timestamptz NOT NULL DEFAULT now(),
+  updated_at              timestamptz NOT NULL DEFAULT now()
+);
+
+-- 旧库补列：软删除能力是后加的，历史库没有 enabled 列。
+ALTER TABLE drone_adapter ADD COLUMN IF NOT EXISTS enabled boolean NOT NULL DEFAULT true;
+
 CREATE TABLE IF NOT EXISTS drone_device (
   drone_tag     text PRIMARY KEY,
   protocol      text NOT NULL,
@@ -19,15 +45,45 @@ CREATE TABLE IF NOT EXISTS drone_device (
   mavlink_version smallint NOT NULL DEFAULT 2,
   mavlink_sysid   smallint NOT NULL DEFAULT 1,
   mavlink_compid  smallint NOT NULL DEFAULT 1,
+  -- 链路身份的协议中立拆解（由 mavlink_addr / mavlink_sysid 归一化而来）：
+  -- 传输族（tcp / udp / serial，不含 in/out 方向）+ 端点（端口或串口）+ 飞控系统号。
+  link_family   text,
+  link_endpoint text,
+  fc_sysid      smallint,
   meta          jsonb,
   created_at    timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_drone_device_adapter_id ON drone_device (adapter_id);
 
--- 链路绑定：同一 adapter 内 sysid 唯一；adapter_id 为空或 sysid 未指定的行不参与约束。
-CREATE UNIQUE INDEX IF NOT EXISTS uq_drone_device_adapter_sysid
-    ON drone_device (adapter_id, mavlink_sysid)
-    WHERE adapter_id <> '' AND mavlink_sysid > 0;
+-- 存量库补列（新建库时上面的 CREATE TABLE 已含这些列）。
+ALTER TABLE drone_device ADD COLUMN IF NOT EXISTS link_family   text;
+ALTER TABLE drone_device ADD COLUMN IF NOT EXISTS link_endpoint text;
+ALTER TABLE drone_device ADD COLUMN IF NOT EXISTS fc_sysid      smallint;
+
+-- 回填：把既有的 mavlink_addr / mavlink_sysid 归一化成协议中立的链路身份。
+UPDATE drone_device
+SET link_family = CASE
+        WHEN mavlink_addr LIKE 'tcp%' THEN 'tcp'
+        WHEN mavlink_addr LIKE 'serial:%' THEN 'serial'
+        ELSE 'udp'
+    END,
+    link_endpoint = CASE
+        WHEN mavlink_addr LIKE 'serial:%' THEN split_part(mavlink_addr, ':', 2)
+        WHEN mavlink_addr LIKE '%:%:%' THEN split_part(mavlink_addr, ':', 3)
+        ELSE NULL
+    END,
+    fc_sysid = mavlink_sysid
+WHERE (link_family IS NULL OR link_endpoint IS NULL OR fc_sysid IS NULL)
+  AND mavlink_addr IS NOT NULL AND mavlink_addr <> '';
+
+-- 链路绑定：同一 adapter 内「协议族 + 端点 + 飞控系统号」三者组合唯一。
+-- 同一端口可承载多架机（按 sysid 区分），因此端点与 sysid 必须同时参与约束。
+DROP INDEX IF EXISTS uq_drone_device_adapter_sysid;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_drone_device_link_identity
+    ON drone_device (adapter_id, link_family, link_endpoint, fc_sysid)
+    WHERE adapter_id IS NOT NULL AND adapter_id <> ''
+      AND link_family IS NOT NULL AND link_endpoint IS NOT NULL
+      AND fc_sysid IS NOT NULL AND fc_sysid > 0;
 
 CREATE TABLE IF NOT EXISTS drone_control_audit (
   id           bigserial PRIMARY KEY,

@@ -107,6 +107,13 @@ pub fn required_permissions(path: &str, method: &str) -> Option<&'static [&'stat
         ("/api/v1/drone/control/renew", "POST") => Some(&[CONTROL_ACQUIRE]),
         ("/api/v1/drone/control/force_release", "POST") => Some(&[CONTROL_FORCE_RELEASE]),
         ("/api/v1/drone/control/{drone_tag}/{control_type}", "GET") => Some(VIEW_ONLY),
+        // 机载链路实体（adapter）：读配置只要查看权，改配置与启停要管理权。
+        ("/api/v1/drone/adapters", "GET") => Some(VIEW_ONLY),
+        ("/api/v1/drone/adapters", "POST") => Some(MANAGE_ONLY),
+        ("/api/v1/drone/adapters/{adapter_id}", "GET") => Some(VIEW_ONLY),
+        ("/api/v1/drone/adapters/{adapter_id}", "PUT") => Some(MANAGE_ONLY),
+        ("/api/v1/drone/adapters/{adapter_id}", "DELETE") => Some(MANAGE_ONLY),
+        ("/api/v1/drone/adapters/{adapter_id}/restore", "POST") => Some(MANAGE_ONLY),
         // 票据只用于订阅事件流：读权限或遥测权限任一即可换取，
         // 实际可订阅的消息类型由票据 scope 决定。
         ("/api/v1/drone/ws-ticket", "POST") => Some(&[VIEW, TELEMETRY_READ]),
@@ -204,11 +211,42 @@ mod tests {
             ("/api/v1/drone/control/force_release", "POST"),
             ("/api/v1/drone/control/{drone_tag}/{control_type}", "GET"),
             ("/api/v1/drone/ws-ticket", "POST"),
+            ("/api/v1/drone/adapters", "GET"),
+            ("/api/v1/drone/adapters", "POST"),
+            ("/api/v1/drone/adapters/{adapter_id}", "GET"),
+            ("/api/v1/drone/adapters/{adapter_id}", "PUT"),
+            ("/api/v1/drone/adapters/{adapter_id}", "DELETE"),
+            ("/api/v1/drone/adapters/{adapter_id}/restore", "POST"),
         ];
         for (path, method) in routes {
             assert!(
                 required_permissions(path, method).is_some(),
                 "路由 {method} {path} 未登记权限点"
+            );
+        }
+    }
+
+    #[test]
+    fn adapter_routes_follow_view_and_manage_split() {
+        // 读配置只要查看权；改配置与启停必须走管理权。
+        assert_eq!(
+            required_permissions("/api/v1/drone/adapters", "GET"),
+            Some(&[VIEW][..])
+        );
+        assert_eq!(
+            required_permissions("/api/v1/drone/adapters/{adapter_id}", "GET"),
+            Some(&[VIEW][..])
+        );
+        for (path, method) in [
+            ("/api/v1/drone/adapters", "POST"),
+            ("/api/v1/drone/adapters/{adapter_id}", "PUT"),
+            ("/api/v1/drone/adapters/{adapter_id}", "DELETE"),
+            ("/api/v1/drone/adapters/{adapter_id}/restore", "POST"),
+        ] {
+            assert_eq!(
+                required_permissions(path, method),
+                Some(&[MANAGE][..]),
+                "路由 {method} {path} 必须是管理权"
             );
         }
     }

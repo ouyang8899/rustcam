@@ -109,6 +109,12 @@ pub struct DroneProfileRecord {
     /// 该机归属的 adapter（决定谁拿到分配）；空 = 未归属。
     #[serde(default)]
     pub adapter_id: String,
+    /// 链路身份的传输族（tcp / udp / serial），由地址归一化而来；空 = 地址未登记。
+    #[serde(default)]
+    pub link_family: String,
+    /// 链路端点：端口号（tcp/udp）或串口设备名（serial）。
+    #[serde(default)]
+    pub link_endpoint: String,
 }
 
 fn default_true() -> bool {
@@ -143,6 +149,8 @@ impl DroneProfileRecord {
             mavlink_sysid: default_mavlink_address(),
             mavlink_compid: default_mavlink_address(),
             adapter_id: String::new(),
+            link_family: String::new(),
+            link_endpoint: String::new(),
         }
     }
 }
@@ -294,6 +302,8 @@ pub struct ActiveMission {
 pub struct DroneState {
     pub config: Arc<DroneConfig>,
     pub adapters: Arc<DashMap<String, AdapterEntry>>,
+    /// adapter 的监听地址缓存（adapter_id → bind_addr），注册时从 drone_adapter 表刷新。
+    pub adapter_bind_addrs: Arc<DashMap<String, String>>,
     pub device_to_adapter: Arc<DashMap<String, String>>,
     pub adapter_generation: Arc<DashMap<String, u64>>,
     /// 设备影子：注册即建条目，遥测到达后补齐。
@@ -352,6 +362,7 @@ impl DroneState {
         let state = DroneState {
             config: Arc::new(config),
             adapters: Arc::new(DashMap::new()),
+            adapter_bind_addrs: Arc::new(DashMap::new()),
             device_to_adapter: Arc::new(DashMap::new()),
             adapter_generation: Arc::new(DashMap::new()),
             devices: Arc::new(DashMap::new()),
@@ -383,6 +394,19 @@ impl DroneState {
         };
         crate::store::load(&state);
         state
+    }
+
+    /// 刷新 adapter 的监听地址缓存（注册时从 `drone_adapter` 表读取）。
+    pub fn set_adapter_bind_addr(&self, adapter_id: &str, bind_addr: &str) {
+        self.adapter_bind_addrs
+            .insert(adapter_id.to_string(), bind_addr.to_string());
+    }
+
+    /// 取 adapter 的监听地址；未缓存时返回 None（调用方回退到 0.0.0.0）。
+    pub fn adapter_bind_addr(&self, adapter_id: &str) -> Option<String> {
+        self.adapter_bind_addrs
+            .get(adapter_id)
+            .map(|v| v.value().clone())
     }
 
     /// 取走快照写入任务的接收端；只能取一次。

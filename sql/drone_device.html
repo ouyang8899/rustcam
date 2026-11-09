@@ -8,7 +8,10 @@ SELECT drone_tag,
        mavlink_version,
        mavlink_sysid,
        mavlink_compid,
-       COALESCE(adapter_id, '') AS adapter_id
+       COALESCE(adapter_id, '') AS adapter_id,
+       COALESCE(link_family, '') AS link_family,
+       COALESCE(link_endpoint, '') AS link_endpoint,
+       COALESCE(fc_sysid, mavlink_sysid) AS fc_sysid
 FROM drone_device
 WHERE adapter_id = #{adapter_id}
 ORDER BY drone_device.drone_tag
@@ -23,9 +26,24 @@ SELECT drone_tag,
        mavlink_version,
        mavlink_sysid,
        mavlink_compid,
-       COALESCE(adapter_id, '') AS adapter_id
+       COALESCE(adapter_id, '') AS adapter_id,
+       COALESCE(link_family, '') AS link_family,
+       COALESCE(link_endpoint, '') AS link_endpoint,
+       COALESCE(fc_sysid, mavlink_sysid) AS fc_sysid
 FROM drone_device
 WHERE drone_tag = #{drone_tag}
+LIMIT 1
+</select>
+
+<!-- 同一 adapter 下「协议族 + 端点 + 飞控系统号」组合是否已被别的机占用。 -->
+<select id="drone_device_link_identity_taken">
+SELECT drone_tag
+FROM drone_device
+WHERE adapter_id = #{adapter_id}
+  AND link_family = #{link_family}
+  AND link_endpoint = #{link_endpoint}
+  AND fc_sysid = #{fc_sysid}
+  AND drone_tag <> #{drone_tag}
 LIMIT 1
 </select>
 
@@ -33,11 +51,12 @@ LIMIT 1
 INSERT INTO drone_device
     (drone_tag, protocol, adapter_id, unique_id, mavlink_addr,
      signing_secret, signing_allow_unsigned, mavlink_version,
-     mavlink_sysid, mavlink_compid)
+     mavlink_sysid, mavlink_compid, link_family, link_endpoint, fc_sysid)
 VALUES (#{drone_tag}, 'mavlink', NULLIF(#{adapter_id}, ''), NULLIF(#{unique_id}, ''),
         NULLIF(#{mavlink_addr}, ''), NULLIF(#{signing_secret}, ''),
         #{signing_allow_unsigned}, #{mavlink_version},
-        #{mavlink_sysid}, #{mavlink_compid})
+        #{mavlink_sysid}, #{mavlink_compid},
+        NULLIF(#{link_family}, ''), NULLIF(#{link_endpoint}, ''), #{fc_sysid})
 ON CONFLICT (drone_tag) DO UPDATE SET
     adapter_id = EXCLUDED.adapter_id,
     unique_id = EXCLUDED.unique_id,
@@ -46,7 +65,10 @@ ON CONFLICT (drone_tag) DO UPDATE SET
     signing_allow_unsigned = EXCLUDED.signing_allow_unsigned,
     mavlink_version = EXCLUDED.mavlink_version,
     mavlink_sysid = EXCLUDED.mavlink_sysid,
-    mavlink_compid = EXCLUDED.mavlink_compid
+    mavlink_compid = EXCLUDED.mavlink_compid,
+    link_family = EXCLUDED.link_family,
+    link_endpoint = EXCLUDED.link_endpoint,
+    fc_sysid = EXCLUDED.fc_sysid
 </insert>
 
 <select id="drone_device_legacy_column_exists">

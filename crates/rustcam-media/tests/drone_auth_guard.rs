@@ -14,8 +14,8 @@ use rustcam_media::auth::repository::{
 };
 use rustcam_media::drone_gateway::api::router;
 use rustcam_media::drone_gateway::client::{
-    AlertDto, AuditDto, CommandDto, CommandRequest, ControlDto, DroneApi, DroneApiError, DroneDto,
-    EventStream, FenceDto, RouteDto, TelemetryDto,
+    AdapterDto, AlertDto, AuditDto, CommandDto, CommandRequest, ControlDto, DroneApi,
+    DroneApiError, DroneDto, EventStream, FenceDto, RouteDto, TelemetryDto,
 };
 use rustcam_media::drone_gateway::ticket::TicketStore;
 
@@ -47,6 +47,40 @@ impl DroneApi for FakeDroneApi {
     }
     async fn delete_drone(&self, _drone_tag: &str) -> Result<bool, DroneApiError> {
         Ok(true)
+    }
+    async fn list_drone_profiles(&self) -> Result<Vec<DroneDto>, DroneApiError> {
+        Ok(vec![DroneDto {
+            drone_tag: "drone-a".into(),
+            ..Default::default()
+        }])
+    }
+    async fn list_adapters(&self, _include_disabled: bool) -> Result<Vec<AdapterDto>, DroneApiError> {
+        Ok(vec![])
+    }
+    async fn get_adapter(&self, adapter_id: &str) -> Result<AdapterDto, DroneApiError> {
+        Ok(AdapterDto {
+            adapter_id: adapter_id.into(),
+            ..Default::default()
+        })
+    }
+    async fn save_adapter(
+        &self,
+        adapter: AdapterDto,
+        _operator: &str,
+    ) -> Result<AdapterDto, DroneApiError> {
+        Ok(adapter)
+    }
+    async fn set_adapter_enabled(
+        &self,
+        adapter_id: &str,
+        enabled: bool,
+        _operator: &str,
+    ) -> Result<AdapterDto, DroneApiError> {
+        Ok(AdapterDto {
+            adapter_id: adapter_id.into(),
+            enabled,
+            ..Default::default()
+        })
     }
     async fn list_routes(&self, _drone_tag: &str) -> Result<Vec<RouteDto>, DroneApiError> {
         Ok(vec![])
@@ -459,6 +493,40 @@ impl DroneApi for UnavailableDroneApi {
     async fn delete_drone(&self, _drone_tag: &str) -> Result<bool, DroneApiError> {
         Ok(true)
     }
+    async fn list_drone_profiles(&self) -> Result<Vec<DroneDto>, DroneApiError> {
+        Ok(vec![DroneDto {
+            drone_tag: "drone-a".into(),
+            ..Default::default()
+        }])
+    }
+    async fn list_adapters(&self, _include_disabled: bool) -> Result<Vec<AdapterDto>, DroneApiError> {
+        Ok(vec![])
+    }
+    async fn get_adapter(&self, adapter_id: &str) -> Result<AdapterDto, DroneApiError> {
+        Ok(AdapterDto {
+            adapter_id: adapter_id.into(),
+            ..Default::default()
+        })
+    }
+    async fn save_adapter(
+        &self,
+        adapter: AdapterDto,
+        _operator: &str,
+    ) -> Result<AdapterDto, DroneApiError> {
+        Ok(adapter)
+    }
+    async fn set_adapter_enabled(
+        &self,
+        adapter_id: &str,
+        enabled: bool,
+        _operator: &str,
+    ) -> Result<AdapterDto, DroneApiError> {
+        Ok(AdapterDto {
+            adapter_id: adapter_id.into(),
+            enabled,
+            ..Default::default()
+        })
+    }
     async fn list_routes(&self, _drone_tag: &str) -> Result<Vec<RouteDto>, DroneApiError> {
         Ok(vec![])
     }
@@ -662,6 +730,309 @@ async fn drone_control_path_uses_drone_tag() {
         StatusCode::OK,
         "控制权查询路径参数改为 drone_tag 后仍应按无人机权限放行"
     );
+}
+
+// ---------------------------------------------------------------------------
+// 机载链路实体（adapter）的 REST 接口
+// ---------------------------------------------------------------------------
+
+/// adapter 接口用的假实现：已登记的 adapter 只有一个。
+struct AdapterDroneApi;
+
+#[async_trait]
+impl DroneApi for AdapterDroneApi {
+    async fn ping(&self) -> Result<(), DroneApiError> {
+        Ok(())
+    }
+    async fn list_drones(&self) -> Result<Vec<DroneDto>, DroneApiError> {
+        Ok(vec![DroneDto {
+            drone_tag: "drone-a".into(),
+            adapter_id: "adapter-1".into(),
+            ..Default::default()
+        }])
+    }
+    async fn list_drone_profiles(&self) -> Result<Vec<DroneDto>, DroneApiError> {
+        Ok(vec![])
+    }
+    async fn get_drone(&self, drone_tag: &str) -> Result<DroneDto, DroneApiError> {
+        Ok(DroneDto {
+            drone_tag: drone_tag.into(),
+            ..Default::default()
+        })
+    }
+    async fn save_drone(
+        &self,
+        drone: DroneDto,
+        _operator: &str,
+    ) -> Result<DroneDto, DroneApiError> {
+        Ok(drone)
+    }
+    async fn delete_drone(&self, _drone_tag: &str) -> Result<bool, DroneApiError> {
+        Ok(true)
+    }
+    async fn list_adapters(&self, _include_disabled: bool) -> Result<Vec<AdapterDto>, DroneApiError> {
+        Ok(vec![AdapterDto {
+            adapter_id: "adapter-1".into(),
+            name: "东场链路".into(),
+            protocol: "mavlink".into(),
+            enabled: true,
+            ..Default::default()
+        }])
+    }
+    async fn get_adapter(&self, adapter_id: &str) -> Result<AdapterDto, DroneApiError> {
+        if adapter_id == "adapter-1" {
+            Ok(AdapterDto {
+                adapter_id: adapter_id.into(),
+                enabled: true,
+                ..Default::default()
+            })
+        } else {
+            Err(DroneApiError::not_found("adapter not found"))
+        }
+    }
+    async fn save_adapter(
+        &self,
+        adapter: AdapterDto,
+        _operator: &str,
+    ) -> Result<AdapterDto, DroneApiError> {
+        Ok(adapter)
+    }
+    async fn set_adapter_enabled(
+        &self,
+        adapter_id: &str,
+        enabled: bool,
+        _operator: &str,
+    ) -> Result<AdapterDto, DroneApiError> {
+        Ok(AdapterDto {
+            adapter_id: adapter_id.into(),
+            enabled,
+            ..Default::default()
+        })
+    }
+    async fn list_routes(&self, _drone_tag: &str) -> Result<Vec<RouteDto>, DroneApiError> {
+        Ok(vec![])
+    }
+    async fn save_route(
+        &self,
+        route: RouteDto,
+        _operator: &str,
+    ) -> Result<RouteDto, DroneApiError> {
+        Ok(route)
+    }
+    async fn delete_route(&self, _id: &str, _operator: &str) -> Result<bool, DroneApiError> {
+        Ok(true)
+    }
+    async fn execute_route(
+        &self,
+        _id: &str,
+        _drone_tag: &str,
+        _lateral_offset_m: f64,
+        _operator: &str,
+    ) -> Result<CommandDto, DroneApiError> {
+        Ok(CommandDto::default())
+    }
+    async fn list_fences(&self) -> Result<Vec<FenceDto>, DroneApiError> {
+        Ok(vec![])
+    }
+    async fn save_fence(&self, fence: FenceDto, _operator: &str) -> Result<FenceDto, DroneApiError> {
+        Ok(fence)
+    }
+    async fn delete_fence(&self, _id: &str, _operator: &str) -> Result<bool, DroneApiError> {
+        Ok(true)
+    }
+    async fn send_command(
+        &self,
+        _drone_tag: &str,
+        _req: CommandRequest,
+        _operator: &str,
+    ) -> Result<CommandDto, DroneApiError> {
+        Ok(CommandDto::default())
+    }
+    async fn get_command(&self, _cmd_id: &str) -> Result<CommandDto, DroneApiError> {
+        Ok(CommandDto::default())
+    }
+    async fn list_alerts(&self, _drone_tag: &str, _limit: i32) -> Result<Vec<AlertDto>, DroneApiError> {
+        Ok(vec![])
+    }
+    async fn list_audits(&self, _drone_tag: &str, _limit: i32) -> Result<Vec<AuditDto>, DroneApiError> {
+        Ok(vec![])
+    }
+    async fn telemetry_history(
+        &self,
+        _drone_tag: &str,
+        _start_ms: i64,
+        _end_ms: i64,
+        _limit: i32,
+    ) -> Result<Vec<TelemetryDto>, DroneApiError> {
+        Ok(vec![])
+    }
+    async fn acquire_control(
+        &self,
+        _drone_tag: &str,
+        _control_type: &str,
+        _operator: &str,
+        _priority: i32,
+        _lease_seconds: i32,
+    ) -> Result<ControlDto, DroneApiError> {
+        Ok(ControlDto::default())
+    }
+    async fn renew_control(
+        &self,
+        _drone_tag: &str,
+        _control_type: &str,
+        _operator: &str,
+        _lease_seconds: i32,
+    ) -> Result<ControlDto, DroneApiError> {
+        Ok(ControlDto::default())
+    }
+    async fn preempt_control(
+        &self,
+        _drone_tag: &str,
+        _control_type: &str,
+        _operator: &str,
+        _priority: i32,
+        _lease_seconds: i32,
+    ) -> Result<ControlDto, DroneApiError> {
+        Ok(ControlDto::default())
+    }
+    async fn release_control(
+        &self,
+        _drone_tag: &str,
+        _control_type: &str,
+        _operator: &str,
+        _force: bool,
+    ) -> Result<bool, DroneApiError> {
+        Ok(true)
+    }
+    async fn get_control(&self, _drone_tag: &str, _control_type: &str) -> Result<ControlDto, DroneApiError> {
+        Ok(ControlDto::default())
+    }
+    async fn event_stream(&self, _drone_tags: Vec<String>) -> Result<EventStream, DroneApiError> {
+        Err(DroneApiError::unavailable("event stream not used in auth tests"))
+    }
+}
+
+/// 按指定角色与权限点构造网关路由（adapter 接口要区分查看权与管理权）。
+async fn adapter_router(
+    api: Arc<dyn DroneApi>,
+    role: &str,
+    permissions: &[&str],
+) -> axum::Router {
+    let casbin = casbin_with(role, permissions).await;
+    let tickets = Arc::new(TicketStore::new(60));
+    let app = router(api, tickets, casbin.clone(), None);
+    app.route_layer(axum::middleware::from_fn_with_state(
+        auth_state(casbin).await,
+        jwt_auth_layer,
+    ))
+}
+
+#[tokio::test]
+async fn adapter_list_is_readable_with_view_permission() {
+    let app = adapter_router(
+        Arc::new(AdapterDroneApi),
+        "Viewer",
+        &["drone:view"],
+    )
+    .await;
+
+    let status = call_get(app, "/api/v1/drone/adapters", Some(&token_for("Viewer"))).await;
+
+    assert_eq!(status, StatusCode::OK, "查看权应能读 adapter 列表");
+}
+
+#[tokio::test]
+async fn adapter_write_requires_manage_permission() {
+    let app = adapter_router(
+        Arc::new(AdapterDroneApi),
+        "Viewer",
+        &["drone:view"],
+    )
+    .await;
+
+    let status = call_with_body(
+        app,
+        "/api/v1/drone/adapters",
+        Some(&token_for("Viewer")),
+        r#"{"adapter_id":"adapter-2"}"#,
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "只有查看权时不应能新建 adapter"
+    );
+}
+
+#[tokio::test]
+async fn creating_existing_adapter_is_rejected_as_conflict() {
+    let app = adapter_router(
+        Arc::new(AdapterDroneApi),
+        "Operator",
+        &["drone:view", "drone:manage"],
+    )
+    .await;
+
+    let status = call_with_body(
+        app,
+        "/api/v1/drone/adapters",
+        Some(&token_for("Operator")),
+        r#"{"adapter_id":"adapter-1"}"#,
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "标识已存在时应拒绝覆盖"
+    );
+}
+
+#[tokio::test]
+async fn updating_missing_adapter_is_rejected_as_not_found() {
+    let app = adapter_router(
+        Arc::new(AdapterDroneApi),
+        "Operator",
+        &["drone:view", "drone:manage"],
+    )
+    .await;
+
+    let status = request(
+        app,
+        "/api/v1/drone/adapters/adapter-404",
+        Some(&token_for("Operator")),
+        r#"{"name":"改名"}"#,
+        "PUT",
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "改不存在的 adapter 应返回 404"
+    );
+}
+
+#[tokio::test]
+async fn disabling_adapter_soft_deletes_it() {
+    let app = adapter_router(
+        Arc::new(AdapterDroneApi),
+        "Operator",
+        &["drone:view", "drone:manage"],
+    )
+    .await;
+
+    let status = request(
+        app,
+        "/api/v1/drone/adapters/adapter-1",
+        Some(&token_for("Operator")),
+        "",
+        "DELETE",
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "停用 adapter 应成功");
 }
 
 #[tokio::test]

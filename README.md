@@ -131,6 +131,45 @@ cargo run -p rustcam-drone-adapter
 
 前端「移动眼」提供无人机档案、控制权管理、实时飞行、航线规划、电子围栏、告警审计与轨迹回放等页面。
 
+### 启动顺序与重启容错
+
+三个进程的启动顺序任意，任意一个单独重启都不需要人工干预：
+
+| 边界 | 机制 |
+|---|---|
+| `rustcam-server` → `drone-service` | 惰性连接（`connect_lazy`）：drone-service 未启动时主服务照常启动，drone 接口返回 503；drone-service 就绪后自动恢复，无需重启主服务 |
+| `rustcam-server` → `drone-service` 事件流 | 断线后指数退避重订阅，浏览器侧连接保持不断，恢复后事件自动续上 |
+| `rustcam-drone-adapter` → `drone-service` | 会话断开后指数退避重连并重新注册，恢复后自动取回设备分配 |
+| `rustcam-drone-service` 自身 | gRPC / metrics 端口被占用（旧实例未退出）时退避重试绑定；服务异常退出后按退避重启 |
+
+退避策略集中在 `rustcam-drone-core::reconnect::Backoff`（指数增长 + 上限 + 抖动），server 与 adapter 共用。
+
+相关配置：
+
+```toml
+# config.toml（rustcam-server 侧）
+[drone]
+service_addr = "http://127.0.0.1:50051"
+connect_timeout_secs = 3
+request_timeout_secs = 30
+reconnect_min_secs = 1
+reconnect_max_secs = 30
+
+# adapter.toml（rustcam-drone-adapter 侧）
+reconnect_min_secs = 1
+reconnect_max_secs = 30
+```
+
+### 日志
+
+| 进程 | 控制台 | 文件 |
+|---|---|---|
+| `rustcam-server` | 标准输出 | `logs/rustcam.log.<小时戳>` |
+| `rustcam-drone-service` | 标准输出 | `logs/drone-service.<小时戳>` |
+| `rustcam-drone-adapter` | 标准输出 | `logs/drone-adapter.<小时戳>` |
+
+日志目录与级别可分别通过配置项 `log_dir` / `log_level` 或环境变量 `DRONE_LOG_DIR` / `DRONE_LOG_LEVEL`（adapter 用 `ADAPTER_LOG_DIR` / `ADAPTER_LOG_LEVEL`）覆盖。
+
 ## 截图预览
 
 ### 前端控制台 (Vue 3)
