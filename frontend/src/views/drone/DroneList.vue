@@ -36,7 +36,7 @@
         <el-button type="primary" @click="openEditor()">创建第一架无人机</el-button>
       </el-empty>
 
-      <el-table v-else v-loading="store.loading" :data="store.drones" class="drone-table" stripe>
+      <el-table v-else v-loading="store.loading" :data="pagedDrones" class="drone-table" stripe>
         <el-table-column label="名称" min-width="190">
           <template #default="{ row }">
             <div class="drone-name-cell">
@@ -54,7 +54,9 @@
         <el-table-column label="飞控 / 模式" min-width="150">
           <template #default="{ row }">
             <div class="fc-cell">
-              <el-tag size="small" effect="plain">{{ (row.autopilot || 'unknown').toUpperCase() }}</el-tag>
+              <el-tag size="small" effect="plain">
+                {{ (row.autopilot_detected || row.autopilot || 'unknown').toUpperCase() }}
+              </el-tag>
               <span class="mode-text">{{ row.mode || '—' }}</span>
             </div>
           </template>
@@ -108,6 +110,15 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div v-if="store.drones.length > pageSize" class="pagination-wrapper">
+        <el-pagination
+          v-model:current-page="currentPage"
+          :page-size="pageSize"
+          :total="store.drones.length"
+          layout="prev, pager, next"
+        />
+      </div>
     </div>
 
     <el-dialog v-model="editorVisible" :title="editing ? '编辑无人机' : '新增无人机'" width="560px" destroy-on-close>
@@ -189,8 +200,11 @@
             v-model="form.signing_secret"
             type="password"
             show-password
-            placeholder="MAVLink 2 签名密钥（32 字节 hex），留空表示该机不需要签名"
+            :placeholder="signingPlaceholder"
           />
+          <div v-if="editingHasSecret" class="muted form-hint">
+            已配置密钥；留空保持不变，输入新值则覆盖。
+          </div>
         </el-form-item>
         <el-form-item label="放行未签名帧">
           <el-switch v-model="form.signing_allow_unsigned" />
@@ -217,7 +231,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
@@ -231,6 +245,13 @@ const router = useRouter()
 const editorVisible = ref(false)
 const editing = ref(false)
 const cameraDialogVisible = ref(false)
+/** 编辑时该机是否已配置签名密钥（密钥本体不外传，只回这个标记）。 */
+const editingHasSecret = ref(false)
+const signingPlaceholder = computed(() =>
+  editingHasSecret.value
+    ? '已配置，留空保持原密钥'
+    : 'MAVLink 2 签名密钥（32 字节 hex），留空表示该机不需要签名'
+)
 /** 打开编辑器时的关联列表；保存时按差异增删关联。 */
 const originalCameraTags = ref([])
 
@@ -259,6 +280,23 @@ const armedCount = computed(() =>
   store.drones.filter(d => d.last_telemetry?.armed).length
 )
 
+/** 列表分页：机队规模可以到几百架，表格只渲染当前页。 */
+const currentPage = ref(1)
+const pageSize = 20
+const pagedDrones = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return store.drones.slice(start, start + pageSize)
+})
+
+// 删掉最后一架后当前页会越界，退回最后一页。
+watch(
+  () => store.drones.length,
+  (len) => {
+    const maxPage = Math.max(1, Math.ceil(len / pageSize))
+    if (currentPage.value > maxPage) currentPage.value = maxPage
+  },
+)
+
 function batteryStatus(pct) {
   if (pct <= 20) return 'exception'
   if (pct <= 40) return 'warning'
@@ -278,6 +316,12 @@ async function refresh() {
 function openEditor(row = null) {
   editing.value = !!row
   Object.assign(form, emptyForm(), row ? { ...row } : {})
+  // 飞控类型取档案配置值：列表里的 `autopilot_detected` 是运行时探测值，
+  // 拿它回填会把档案里配的类型覆盖成探测值（离线时甚至被清成 auto）。
+  form.autopilot = row?.autopilot || 'auto'
+  // 协议版本 0 = 未登记，按默认值 2 回填（后端也把 0 当"未指定"）。
+  form.mavlink_version = row?.mavlink_version || 2
+  editingHasSecret.value = !!row?.has_signing_secret
   form.camera_device_tags = [...(row?.camera_device_tags || [])]
   originalCameraTags.value = [...form.camera_device_tags]
   editorVisible.value = true
@@ -402,6 +446,11 @@ onMounted(refresh)
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
+}
+.pagination-wrapper {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--space-4);
 }
 .drone-name-cell {
   display: flex;

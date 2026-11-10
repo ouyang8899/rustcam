@@ -208,9 +208,15 @@ async function loadDetails() {
   details.value = Object.fromEntries(entries.filter(([, detail]) => detail))
 }
 
+/**
+ * 拉取全部权限点，供「角色权限」弹窗勾选。
+ *
+ * 权限点接口是分页的，这里一次取满（上限 500，与服务端一致）。
+ */
 async function fetchPermissions() {
   try {
-    permissions.value = await permissionApi.getPermissions()
+    const res = await permissionApi.getPermissions({ limit: 500 })
+    permissions.value = res.items || []
   } catch (e) {
     toast.error('获取权限列表失败: ' + e.message)
   }

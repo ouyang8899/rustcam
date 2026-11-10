@@ -129,11 +129,15 @@ message DeviceInfo {
   string model = 8;
   reserved 9, 10;              // 已移除：device_tag / channel_tag（媒体域命名，不属于无人机域）
   string video_stream = 11;
-  string autopilot = 12;
+  string autopilot = 12;       // 运行时探测到的飞控类型
   bool   armed = 13;
   string mode = 14;
   bool   enabled = 15;
   string notes = 16;
+  int32  mavlink_version = 17;         // 档案配置的 MAVLink 协议版本：1 / 2
+  bool   signing_allow_unsigned = 18;   // 档案配置：是否放行未签名帧
+  string autopilot_configured = 19;     // 档案配置的飞控类型；与 autopilot（探测值）不同
+  bool   has_signing_secret = 20;       // 是否已配置签名密钥（密钥本体不外传）
 }
 
 message DeviceList {

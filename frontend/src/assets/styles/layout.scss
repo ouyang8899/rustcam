@@ -90,6 +90,14 @@
   min-height: 0;
 }
 
+// 页面主体是 flex 列容器：子项默认可压缩，超过一屏的表格会被压扁，
+// 内容被 .page-container 的 overflow:hidden 裁掉且滚不到（权限管理只显示
+// 前十几行）。禁止压缩后子项保持自然高度，由 .page-body 自身滚动。
+// 自带 flex 声明的子项（如 flex:1 的全屏地图）不受影响。
+.page-body > * {
+  flex-shrink: 0;
+}
+
 .page-grid {
   display: grid;
   gap: var(--space-4);

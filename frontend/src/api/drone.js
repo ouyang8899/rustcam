@@ -2,8 +2,9 @@
 import { request } from '../utils/request'
 
 // 无人机档案
-export async function getDrones() {
-  const res = await request.get('/drone/drones')
+// options.silent = true 时失败不弹提示，由调用方自行处理（概览页的可选数据源）。
+export async function getDrones(options = {}) {
+  const res = await request.get('/drone/drones', options)
   return res.data.data
 }
 
@@ -49,8 +50,8 @@ export async function removeDroneCamera(droneTag, cameraDeviceTag) {
 }
 
 // 航线
-export async function getRoutes(deviceId = '') {
-  const res = await request.get('/drone/routes', { params: { drone_tag: deviceId } })
+export async function getRoutes(deviceId = '', options = {}) {
+  const res = await request.get('/drone/routes', { params: { drone_tag: deviceId }, ...options })
   return res.data.data
 }
 
@@ -79,8 +80,8 @@ export async function executeRoute(id, deviceId = '', lateralOffsetM = 0) {
 }
 
 // 围栏
-export async function getFences() {
-  const res = await request.get('/drone/fences')
+export async function getFences(options = {}) {
+  const res = await request.get('/drone/fences', options)
   return res.data.data
 }
 

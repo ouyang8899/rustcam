@@ -162,6 +162,30 @@ impl UserRepository for PostgresAuthRepository {
         }).collect())
     }
 
+    async fn list_paginated(&self, offset: usize, limit: usize) -> Result<Vec<User>> {
+        let rows: Vec<Value> = self.rb.exec_decode(
+            "SELECT id, username, password_hash, created_at, updated_at FROM users \
+             ORDER BY created_at, id LIMIT $1 OFFSET $2",
+            vec![rbs::value![limit as i64], rbs::value![offset as i64]],
+        ).await?;
+        Ok(rows.into_iter().map(|r| User {
+            id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
+            username: r["username"].as_str().unwrap_or("").to_string(),
+            password_hash: r["password_hash"].as_str().unwrap_or("").to_string(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }).collect())
+    }
+
+    async fn count(&self) -> Result<usize> {
+        let rows: Vec<Value> = self.rb.exec_decode("SELECT count(*) AS total FROM users", vec![]).await?;
+        Ok(rows
+            .first()
+            .and_then(|r| r["total"].as_i64())
+            .unwrap_or(0)
+            .max(0) as usize)
+    }
+
     async fn get_user_roles(&self, user_id: Uuid) -> Result<Vec<String>> {
         let rows: Vec<Value> = self.rb.exec_decode(
             "SELECT r.name FROM roles r INNER JOIN user_roles ur ON r.id::uuid = ur.role_id::uuid WHERE ur.user_id = $1::uuid",
@@ -368,6 +392,29 @@ impl PermissionRepository for PostgresAuthRepository {
             description: r["description"].as_str().map(String::from),
             created_at: chrono::Utc::now(),
         }).collect())
+    }
+
+    async fn list_paginated(&self, offset: usize, limit: usize) -> Result<Vec<Permission>> {
+        let rows: Vec<Value> = self.rb.exec_decode(
+            "SELECT id, name, description, created_at FROM permissions \
+             ORDER BY name, id LIMIT $1 OFFSET $2",
+            vec![rbs::value![limit as i64], rbs::value![offset as i64]],
+        ).await?;
+        Ok(rows.into_iter().map(|r| Permission {
+            id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
+            name: r["name"].as_str().unwrap_or("").to_string(),
+            description: r["description"].as_str().map(String::from),
+            created_at: chrono::Utc::now(),
+        }).collect())
+    }
+
+    async fn count(&self) -> Result<usize> {
+        let rows: Vec<Value> = self.rb.exec_decode("SELECT count(*) AS total FROM permissions", vec![]).await?;
+        Ok(rows
+            .first()
+            .and_then(|r| r["total"].as_i64())
+            .unwrap_or(0)
+            .max(0) as usize)
     }
 }
 

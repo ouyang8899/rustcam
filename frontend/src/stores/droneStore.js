@@ -49,10 +49,14 @@ export const useDroneStore = defineStore('drone', {
   },
 
   actions: {
-    async fetchDrones() {
+    /**
+     * 拉取无人机列表。
+     * @param {{silent?: boolean}} [options] silent = true 时失败不弹提示。
+     */
+    async fetchDrones(options = {}) {
       this.loading = true
       try {
-        const list = await api.getDrones()
+        const list = await api.getDrones(options)
         // REST 响应同样要校验后再进 store（规则 §10.7）。
         this.drones = Array.isArray(list) ? list.filter(isDrone) : []
         for (const d of this.drones) {
@@ -92,8 +96,12 @@ export const useDroneStore = defineStore('drone', {
       return api.removeDroneCamera(droneTag, cameraDeviceTag)
     },
 
-    async fetchRoutes(deviceId = '') {
-      const list = await api.getRoutes(deviceId)
+    /**
+     * @param {string} deviceId
+     * @param {{silent?: boolean}} [options] silent = true 时失败不弹提示。
+     */
+    async fetchRoutes(deviceId = '', options = {}) {
+      const list = await api.getRoutes(deviceId, options)
       this.routes = Array.isArray(list) ? list.filter(isRoute) : []
     },
 
@@ -119,8 +127,11 @@ export const useDroneStore = defineStore('drone', {
       return reply
     },
 
-    async fetchFences() {
-      const list = await api.getFences()
+    /**
+     * @param {{silent?: boolean}} [options] silent = true 时失败不弹提示。
+     */
+    async fetchFences(options = {}) {
+      const list = await api.getFences(options)
       this.fences = Array.isArray(list) ? list.filter(isFence) : []
     },
 
@@ -409,7 +420,7 @@ export const useDroneStore = defineStore('drone', {
             name: id,
             online: true,
             last_telemetry: data,
-            autopilot: data.autopilot,
+            autopilot_detected: data.autopilot,
             armed: data.armed,
             mode: data.mode,
             last_seen_ms: data.ts_ms,
@@ -419,7 +430,8 @@ export const useDroneStore = defineStore('drone', {
           d.online = true
           d.last_seen_ms = data.ts_ms
           d.last_telemetry = data
-          d.autopilot = data.autopilot
+          // `autopilot` 是档案里配置的类型，遥测只能更新探测值。
+          d.autopilot_detected = data.autopilot
           d.armed = data.armed
           d.mode = data.mode
         }

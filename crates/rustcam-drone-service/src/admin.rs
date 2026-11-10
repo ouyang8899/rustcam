@@ -190,7 +190,14 @@ pub fn upsert_profile(
         return Err("MAVLink 1 has no signature field: clear signing_secret".into());
     }
     let signing_secret = if secret_plain.is_empty() {
-        String::new()
+        // 留空表示"保持原密钥"：密钥本体不外传（接口只回"是否已配置"），
+        // 前端回传的密钥必然为空。直接置空会把已配置的密钥抹掉，
+        // adapter 下发的签名校验随之失效。
+        state
+            .profiles
+            .get(&drone_tag)
+            .map(|p| p.signing_secret.clone())
+            .unwrap_or_default()
     } else {
         let master = state
             .config
@@ -1886,6 +1893,33 @@ mod tests {
         let rec = upsert_profile(&state, p, "tester").expect("upsert");
         assert!(rec.signing_secret.starts_with("v1:"));
         assert!(!rec.signing_secret.contains("0011223344556677"));
+    }
+
+    #[test]
+    fn blank_signing_secret_keeps_previously_configured_secret() {
+        // 签名密钥不外传（接口只回"是否已配置"），前端回传的密钥必然为空：
+        // 留空必须表示"保持原密钥"，否则每次编辑档案都会把已配置的密钥抹掉，
+        // adapter 下发的签名校验随之失效。
+        let state = state_with_master();
+        let mut p = profile();
+        p.signing_secret =
+            "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff".into();
+        let sealed = upsert_profile(&state, p, "tester")
+            .expect("upsert")
+            .signing_secret;
+        assert!(sealed.starts_with("v1:"));
+
+        let mut p2 = profile();
+        p2.signing_secret = String::new();
+        let rec = upsert_profile(&state, p2, "tester").expect("upsert");
+        assert_eq!(rec.signing_secret, sealed, "留空应保持原密钥，不能被抹掉");
+    }
+
+    #[test]
+    fn blank_signing_secret_on_new_profile_stays_empty() {
+        let state = state_with_master();
+        let rec = upsert_profile(&state, profile(), "tester").expect("upsert");
+        assert!(rec.signing_secret.is_empty());
     }
 
     #[test]

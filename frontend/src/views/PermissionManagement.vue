@@ -34,6 +34,16 @@
             <el-empty v-if="permissions.length === 0" description="暂无权限点" />
           </template>
         </el-skeleton>
+
+        <div v-if="total > pageSize" class="pagination-wrapper">
+          <el-pagination
+            v-model:current-page="currentPage"
+            :page-size="pageSize"
+            :total="total"
+            layout="prev, pager, next"
+            @current-change="fetchPermissions"
+          />
+        </div>
       </DataCard>
     </div>
 
@@ -83,6 +93,9 @@ const toast = useToast()
 const permissions = ref([])
 const loading = ref(false)
 const submitting = ref(false)
+const total = ref(0)
+const currentPage = ref(1)
+const pageSize = 20
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
 const editPermission = ref(null)
@@ -94,10 +107,25 @@ onMounted(async () => {
   await fetchPermissions()
 })
 
+/**
+ * 拉取权限点列表（服务端分页）。
+ *
+ * 删完最后一页的最后一条时要回退一页，否则会停在空页上。
+ */
 async function fetchPermissions() {
   loading.value = true
   try {
-    permissions.value = await permissionApi.getPermissions()
+    const res = await permissionApi.getPermissions({
+      limit: pageSize,
+      offset: (currentPage.value - 1) * pageSize,
+    })
+    total.value = res.total || 0
+    permissions.value = res.items || []
+    const maxPage = Math.max(1, Math.ceil(total.value / pageSize))
+    if (currentPage.value > maxPage) {
+      currentPage.value = maxPage
+      await fetchPermissions()
+    }
   } catch (e) {
     toast.error('获取权限列表失败: ' + e.message)
   } finally {
@@ -174,4 +202,5 @@ function formatDate(dateStr) {
 </script>
 
 <style scoped>
+.pagination-wrapper { display: flex; justify-content: center; margin-top: 16px; }
 </style>

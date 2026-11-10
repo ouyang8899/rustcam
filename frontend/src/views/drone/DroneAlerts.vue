@@ -17,7 +17,7 @@
     <div class="page-body">
       <el-tabs v-model="tab">
         <el-tab-pane label="告警" name="alerts">
-          <el-table :data="store.alerts" stripe>
+          <el-table :data="pagedAlerts" stripe>
             <el-table-column prop="ts_ms" label="时间" width="180">
               <template #default="{ row }">{{ formatTime(row.ts_ms) }}</template>
             </el-table-column>
@@ -37,9 +37,17 @@
             <el-table-column prop="message" label="内容" min-width="320" />
           </el-table>
           <el-empty v-if="store.alerts.length === 0" description="暂无告警" />
+          <div v-if="store.alerts.length > pageSize" class="pagination-wrapper">
+            <el-pagination
+              v-model:current-page="alertPage"
+              :page-size="pageSize"
+              :total="store.alerts.length"
+              layout="prev, pager, next"
+            />
+          </div>
         </el-tab-pane>
         <el-tab-pane label="审计" name="audits">
-          <el-table :data="store.audits" stripe>
+          <el-table :data="pagedAudits" stripe>
             <el-table-column prop="ts_ms" label="时间" width="180">
               <template #default="{ row }">{{ formatTime(row.ts_ms) }}</template>
             </el-table-column>
@@ -57,6 +65,14 @@
             <el-table-column prop="detail" label="详情" min-width="260" />
           </el-table>
           <el-empty v-if="store.audits.length === 0" description="暂无审计记录" />
+          <div v-if="store.audits.length > pageSize" class="pagination-wrapper">
+            <el-pagination
+              v-model:current-page="auditPage"
+              :page-size="pageSize"
+              :total="store.audits.length"
+              layout="prev, pager, next"
+            />
+          </div>
         </el-tab-pane>
       </el-tabs>
     </div>
@@ -64,7 +80,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { useDroneStore } from '../../stores/droneStore'
 
@@ -72,15 +88,39 @@ const store = useDroneStore()
 const tab = ref('alerts')
 const deviceId = ref('')
 
+/**
+ * 告警/审计各取最近的一段再分页。
+ *
+ * 服务端只保留内存窗口（告警 2000 条、审计 5000 条），
+ * 因此这里拉满一页窗口后在表格上翻页，而不是逐页回服务端。
+ */
+const pageSize = 20
+const ALERT_WINDOW = 500
+const AUDIT_WINDOW = 1000
+const alertPage = ref(1)
+const auditPage = ref(1)
+
+const pagedAlerts = computed(() => {
+  const start = (alertPage.value - 1) * pageSize
+  return store.alerts.slice(start, start + pageSize)
+})
+
+const pagedAudits = computed(() => {
+  const start = (auditPage.value - 1) * pageSize
+  return store.audits.slice(start, start + pageSize)
+})
+
 function formatTime(ms) {
   if (!ms) return '—'
   return new Date(ms).toLocaleString('zh-CN', { hour12: false })
 }
 
 async function refresh() {
+  alertPage.value = 1
+  auditPage.value = 1
   await Promise.all([
-    store.fetchAlerts(deviceId.value),
-    store.fetchAudits(deviceId.value),
+    store.fetchAlerts(deviceId.value, ALERT_WINDOW),
+    store.fetchAudits(deviceId.value, AUDIT_WINDOW),
   ])
 }
 
@@ -99,5 +139,10 @@ onMounted(async () => {
 .header-sub {
   font-size: 12px;
   color: var(--text-muted);
+}
+.pagination-wrapper {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--space-4);
 }
 </style>

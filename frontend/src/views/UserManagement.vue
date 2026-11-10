@@ -32,6 +32,16 @@
             <el-empty v-if="users.length === 0" description="暂无用户" />
           </template>
         </el-skeleton>
+
+        <div v-if="total > pageSize" class="pagination-wrapper">
+          <el-pagination
+            v-model:current-page="currentPage"
+            :page-size="pageSize"
+            :total="total"
+            layout="prev, pager, next"
+            @current-change="fetchUsers"
+          />
+        </div>
       </DataCard>
     </div>
 
@@ -100,6 +110,9 @@ const users = ref([])
 const availableRoles = ref([])
 const loading = ref(false)
 const submitting = ref(false)
+const total = ref(0)
+const currentPage = ref(1)
+const pageSize = 20
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
 const showRolesModal = ref(false)
@@ -113,7 +126,31 @@ const rolesForm = ref({ roleIds: [] })
 
 onMounted(async () => { await Promise.all([fetchUsers(), fetchRoles()]) })
 
-async function fetchUsers() { loading.value = true; try { users.value = await userApi.getUsers() } catch (e) { toast.error('获取用户列表失败: ' + e.message) } finally { loading.value = false } }
+/**
+ * 拉取用户列表（服务端分页）。
+ *
+ * 删完最后一页的最后一条时要回退一页，否则会停在空页上。
+ */
+async function fetchUsers() {
+  loading.value = true
+  try {
+    const res = await userApi.getUsers({
+      limit: pageSize,
+      offset: (currentPage.value - 1) * pageSize,
+    })
+    total.value = res.total || 0
+    users.value = res.items || []
+    const maxPage = Math.max(1, Math.ceil(total.value / pageSize))
+    if (currentPage.value > maxPage) {
+      currentPage.value = maxPage
+      await fetchUsers()
+    }
+  } catch (e) {
+    toast.error('获取用户列表失败: ' + e.message)
+  } finally {
+    loading.value = false
+  }
+}
 async function fetchRoles() { try { availableRoles.value = await roleApi.getRoles() } catch (e) { toast.error('获取角色列表失败') } }
 
 function openCreateModal() { createForm.value = { username: '', password: '' }; showCreateModal.value = true }
@@ -132,4 +169,5 @@ function formatDate(dateStr) { if (!dateStr) return '-'; return new Date(dateStr
 </script>
 
 <style scoped>
+.pagination-wrapper { display: flex; justify-content: center; margin-top: 16px; }
 </style>

@@ -46,7 +46,10 @@ request.interceptors.response.use(
   (response) => {
     const res = response.data
     if (res.code !== undefined && res.code !== 200) {
-      ElMessage.error(res.message || res.msg || '请求失败')
+      // silent：调用方自行处理错误（例如概览页的可选数据源），不弹提示。
+      if (!response.config?.silent) {
+        ElMessage.error(res.message || res.msg || '请求失败')
+      }
       return Promise.reject(new Error(res.message || res.msg || '请求失败'))
     }
     return response
@@ -83,6 +86,11 @@ request.interceptors.response.use(
       clearTokens()
       ElMessage.warning('登录已过期，请重新登录')
       window.location.href = '/login'
+      return Promise.reject(error)
+    }
+
+    // silent：调用方自行处理错误，不弹提示。
+    if (originalRequest?.silent) {
       return Promise.reject(error)
     }
 

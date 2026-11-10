@@ -1,8 +1,9 @@
 import { request } from '../utils/request'
 
-export async function getPermissions() {
-  const res = await request.get('/permissions')
-  return res.data.data || []
+/** 权限点列表（分页）：返回 `{ items, total, limit, offset }` */
+export async function getPermissions(params = {}) {
+  const res = await request.get('/permissions', { params })
+  return res.data.data || { items: [], total: 0, limit: 0, offset: 0 }
 }
 
 export async function createPermission(data) {

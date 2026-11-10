@@ -178,7 +178,13 @@ pub struct DroneDto {
     pub camera_device_tags: Vec<String>,
     pub online: bool,
     pub enabled: bool,
+    /// 档案里配置的飞控类型（auto / px4 / ardupilot）。
+    ///
+    /// 这是档案的配置项，写入时也用这个字段：列表读到它再原样写回，
+    /// 不会把配置覆盖成探测值。
     pub autopilot: String,
+    /// 运行时探测到的飞控类型（`HEARTBEAT.autopilot`）；离线时为空。
+    pub autopilot_detected: String,
     pub armed: bool,
     pub mode: String,
     pub video_stream: String,
@@ -191,6 +197,8 @@ pub struct DroneDto {
     pub mavlink_addr: String,
     /// 该机的 MAVLink 2 签名密钥（服务端加密存储，接口返回密文）。
     pub signing_secret: String,
+    /// 是否已配置签名密钥（密钥本体不外传，只回这个标记）。
+    pub has_signing_secret: bool,
     /// 是否放行未签名帧（含 MAVLink 1 帧）。
     pub signing_allow_unsigned: bool,
     /// MAVLink 协议版本：1 / 2。
@@ -793,13 +801,18 @@ fn drone_dto(info: rustcam_drone_proto::control::DeviceInfo) -> DroneDto {
         drone_tag: info.drone_tag,
         online: info.online,
         enabled: info.enabled,
-        autopilot: info.autopilot,
+        autopilot: info.autopilot_configured,
+        autopilot_detected: info.autopilot,
         armed: info.armed,
         mode: info.mode,
         video_stream: info.video_stream,
         notes: info.notes,
         last_seen_ms: info.last_seen_ms,
         last_telemetry: info.last_telemetry.map(telemetry_dto),
+        // 档案里的链路参数随设备列表一起返回（端点/身份仍需 REST 层补齐）。
+        mavlink_version: info.mavlink_version,
+        signing_allow_unsigned: info.signing_allow_unsigned,
+        has_signing_secret: info.has_signing_secret,
         // 设备列表不含链路身份字段；档案接口（profile_dto）才带。
         ..Default::default()
     }
@@ -939,7 +952,9 @@ fn profile_dto(profile: ProfileMsg) -> DroneDto {
         last_seen_ms: 0,
         unique_id: profile.unique_id,
         mavlink_addr: profile.mavlink_addr,
-        signing_secret: profile.signing_secret,
+        // 密钥本体不外传：只回"是否已配置"，前端留空表示保持原密钥。
+        signing_secret: String::new(),
+        has_signing_secret: !profile.signing_secret.trim().is_empty(),
         signing_allow_unsigned: profile.signing_allow_unsigned,
         mavlink_version: profile.mavlink_version,
         mavlink_sysid: profile.mavlink_sysid,
@@ -1570,12 +1585,66 @@ mod tests {
         let back = profile_dto(msg);
         assert_eq!(back.unique_id, dto.unique_id);
         assert_eq!(back.mavlink_addr, dto.mavlink_addr);
-        assert_eq!(back.signing_secret, dto.signing_secret);
+        assert!(
+            back.signing_secret.is_empty(),
+            "密钥本体不得随档案回传"
+        );
+        assert!(back.has_signing_secret, "只回『是否已配置』标记");
         assert_eq!(back.mavlink_version, dto.mavlink_version);
         assert_eq!(back.mavlink_sysid, dto.mavlink_sysid);
         assert_eq!(back.mavlink_compid, dto.mavlink_compid);
         assert_eq!(back.adapter_id, dto.adapter_id);
         assert_eq!(back.drone_tag, dto.drone_tag);
+    }
+
+    #[test]
+    fn device_info_carries_profile_link_config_into_dto() {
+        // 列表必须同时带运行时探测值（autopilot_detected）与档案配置值
+        // （autopilot / mavlink_version / 签名策略），
+        // 否则前端编辑器无处回填，配置项存不进去。
+        let msg = rustcam_drone_proto::control::DeviceInfo {
+            drone_tag: "drone-001".into(),
+            autopilot: "px4".into(),
+            autopilot_configured: "ardupilot".into(),
+            mavlink_version: 1,
+            signing_allow_unsigned: false,
+            has_signing_secret: true,
+            ..Default::default()
+        };
+        let dto = drone_dto(msg);
+        assert_eq!(dto.autopilot, "ardupilot", "autopilot 是档案配置值");
+        assert_eq!(dto.autopilot_detected, "px4", "autopilot_detected 是运行时探测值");
+        assert_eq!(dto.mavlink_version, 1);
+        assert!(!dto.signing_allow_unsigned);
+        assert!(dto.has_signing_secret);
+    }
+
+    #[test]
+    fn profile_dto_does_not_leak_signing_secret() {
+        // 密钥本体不得外传：只回"是否已配置"，前端留空表示保持原密钥。
+        let msg = ProfileMsg {
+            drone_tag: "drone-001".into(),
+            autopilot: "px4".into(),
+            signing_secret: "v1:00112233".into(),
+            mavlink_version: 2,
+            ..Default::default()
+        };
+        let dto = profile_dto(msg);
+        assert!(dto.has_signing_secret);
+        assert!(dto.signing_secret.is_empty(), "密钥本体不得外传");
+        assert_eq!(dto.autopilot, "px4");
+    }
+
+    #[test]
+    fn profile_msg_writes_back_the_configured_autopilot() {
+        // 列表读到就原样写回时，档案里配的飞控类型不能被覆盖。
+        let dto = DroneDto {
+            drone_tag: "drone-001".into(),
+            autopilot: "ardupilot".into(),
+            autopilot_detected: "px4".into(),
+            ..Default::default()
+        };
+        assert_eq!(profile_msg(dto, "alice").autopilot, "ardupilot");
     }
 
     #[test]

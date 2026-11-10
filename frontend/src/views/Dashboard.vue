@@ -32,6 +32,37 @@
         </MetricCard>
       </div>
 
+      <div class="page-grid" v-if="droneVisible">
+        <DataCard title="移动眼 · 无人机">
+          <div class="status-bar" v-loading="droneLoading">
+            <div class="status-item">
+              <span class="status-value">{{ droneStats.total }}</span>
+              <span class="status-name">无人机</span>
+            </div>
+            <div class="status-divider"></div>
+            <div class="status-item">
+              <span class="status-value" style="color: var(--color-success);">{{ droneStats.online }}</span>
+              <span class="status-name">在线</span>
+            </div>
+            <div class="status-divider"></div>
+            <div class="status-item">
+              <span class="status-value" style="color: var(--color-warning);">{{ droneStats.armed }}</span>
+              <span class="status-name">已解锁</span>
+            </div>
+            <div class="status-divider"></div>
+            <div class="status-item">
+              <span class="status-value">{{ droneStats.fences }}</span>
+              <span class="status-name">围栏</span>
+            </div>
+            <div class="status-divider"></div>
+            <div class="status-item">
+              <span class="status-value">{{ droneStats.routes }}</span>
+              <span class="status-name">航线</span>
+            </div>
+          </div>
+        </DataCard>
+      </div>
+
       <div class="page-grid tables-grid">
         <DataCard title="在线设备">
           <el-table :data="onlineDevices" size="small" :loading="onlineDevicesLoading">
@@ -155,7 +186,7 @@
       </div>
 
       <DataCard>
-        <div class="device-status-bar">
+        <div class="status-bar">
           <div class="status-item">
             <span class="status-value" style="color: var(--color-success);">{{ dashData?.devices?.online || 0 }}</span>
             <span class="status-name">在线</span>
@@ -190,12 +221,17 @@ import { authFetch } from '../utils/authFetch'
 import { getStreams } from '../api/streams'
 import { getSessions } from '../api/sessions'
 import { getOnlineDevices } from '../api/devices'
+import { useDroneStore } from '../stores/droneStore'
 import StatusDot from '../components/common/StatusDot.vue'
 import MetricCard from '../components/common/MetricCard.vue'
 import DataCard from '../components/common/DataCard.vue'
 
 const wsConnected = ref(false)
 const dashData = ref(null)
+const droneStore = useDroneStore()
+/** 无人机数据是可选的：没有权限或 drone-service 未接入时整块隐藏。 */
+const droneVisible = ref(true)
+const droneLoading = ref(true)
 const statsLoading = ref(true)
 const onlineDevicesLoading = ref(true)
 const streamsLoading = ref(true)
@@ -204,6 +240,7 @@ const loading = ref(false)
 const reloading = ref(false)
 const currentTime = ref('')
 let refreshTimer = null
+let droneTimer = null
 let ws = null
 
 const onlineDevices = ref([])
@@ -238,6 +275,37 @@ const deviceOnlineRate = computed(() => {
   const t = dashData.value?.devices?.total || 0, o = dashData.value?.devices?.online || 0
   return t === 0 ? 0 : Math.round((o / t) * 100)
 })
+
+/** 无人机统计：与「无人机」页面的口径一致（总数/在线/已解锁/围栏/航线）。 */
+const droneStats = computed(() => ({
+  total: droneStore.drones.length,
+  online: droneStore.onlineCount,
+  armed: droneStore.drones.filter(d => d.last_telemetry?.armed).length,
+  fences: droneStore.fences.length,
+  routes: droneStore.routes.length,
+}))
+
+/**
+ * 拉取无人机统计。
+ *
+ * 概览页对所有用户开放，而无人机接口需要 `drone:view` 权限：
+ * 权限不足（403）或 drone-service 未接入（503）时静默隐藏整块，不再重试。
+ */
+async function loadDroneStats() {
+  if (!droneVisible.value) return
+  try {
+    await Promise.all([
+      droneStore.fetchDrones({ silent: true }),
+      droneStore.fetchRoutes('', { silent: true }),
+      droneStore.fetchFences({ silent: true }),
+    ])
+  } catch (e) {
+    const status = e?.response?.status
+    if (status === 403 || status === 503) droneVisible.value = false
+  } finally {
+    droneLoading.value = false
+  }
+}
 
 function cpuColor(val) {
   if (val >= 80) return '#ef4444'
@@ -287,12 +355,15 @@ onMounted(async () => {
   loadOnlineDevicesByPage(1).finally(() => { onlineDevicesLoading.value = false })
   loadStreamsByPage(1).finally(() => { streamsLoading.value = false })
   loadSessionsByPage(1).finally(() => { sessionsLoading.value = false })
+  loadDroneStats()
   refreshTimer = setInterval(() => { fetchDashboard() }, 10000)
+  droneTimer = setInterval(() => { loadDroneStats() }, 10000)
   initWs()
 })
 
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
+  if (droneTimer) clearInterval(droneTimer)
   if (ws) ws.close()
 })
 
@@ -385,6 +456,7 @@ function fetchAll() {
     loadOnlineDevicesByPage(1).finally(() => { onlineDevicesLoading.value = false }),
     loadStreamsByPage(1).finally(() => { streamsLoading.value = false }),
     loadSessionsByPage(1).finally(() => { sessionsLoading.value = false }),
+    loadDroneStats(),
   ]).finally(() => { loading.value = false })
 }
 </script>
@@ -445,7 +517,7 @@ function fetchAll() {
   font-family: var(--font-mono);
 }
 
-.device-status-bar {
+.status-bar {
   display: flex;
   align-items: center;
   justify-content: space-around;

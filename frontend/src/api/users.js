@@ -1,8 +1,9 @@
 import { request } from '../utils/request'
 
-export async function getUsers() {
-  const res = await request.get('/users')
-  return res.data.data || []
+/** 用户列表（分页）：返回 `{ items, total, limit, offset }` */
+export async function getUsers(params = {}) {
+  const res = await request.get('/users', { params })
+  return res.data.data || { items: [], total: 0, limit: 0, offset: 0 }
 }
 
 export async function getUser(id) {

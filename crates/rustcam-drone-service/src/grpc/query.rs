@@ -39,11 +39,25 @@ impl QueryServiceImpl {
                 .unwrap_or_else(|| drone_tag.to_string()),
             model: profile.map(|p| p.model.clone()).unwrap_or_default(),
             video_stream: profile.map(|p| p.video_stream.clone()).unwrap_or_default(),
+            // `autopilot` 是运行时探测到的飞控类型；档案里配置的类型另存
+            // `autopilot_configured`：两者含义不同，不能互相覆盖。
             autopilot: last.map(|t| t.autopilot.clone()).unwrap_or_default(),
             armed: last.map(|t| t.armed).unwrap_or(false),
             mode: last.map(|t| t.mode.clone()).unwrap_or_default(),
             enabled: profile.map(|p| p.enabled).unwrap_or(true),
             notes: profile.map(|p| p.notes.clone()).unwrap_or_default(),
+            // 链路配置取自档案：前端编辑器完全依赖列表回填，
+            // 缺一个字段就存不进去（协议版本/放行未签名帧都会被当成默认值）。
+            mavlink_version: profile
+                .map(|p| p.mavlink_version)
+                .unwrap_or(crate::state::default_mavlink_version()),
+            signing_allow_unsigned: profile
+                .map(|p| p.signing_allow_unsigned)
+                .unwrap_or_else(crate::state::default_signing_allow_unsigned),
+            autopilot_configured: profile.map(|p| p.autopilot.clone()).unwrap_or_default(),
+            has_signing_secret: profile
+                .map(|p| !p.signing_secret.trim().is_empty())
+                .unwrap_or(false),
         }
     }
 
@@ -286,6 +300,42 @@ mod tests {
             .unwrap();
         assert!(!d2.online);
         assert_eq!(d2.name, "drone-002");
+    }
+
+    #[tokio::test]
+    async fn device_info_carries_profile_link_config() {
+        // 档案里配置的飞控类型/协议版本/签名策略必须随设备列表一起返回：
+        // 前端编辑器完全依赖列表回填，缺一个字段就存不进去。
+        let state = state_with_device();
+        state.profiles.insert(
+            "drone-001".into(),
+            DroneProfileRecord {
+                drone_tag: "drone-001".into(),
+                autopilot: "px4".into(),
+                mavlink_version: 1,
+                signing_allow_unsigned: false,
+                signing_secret: "v1:00112233".into(),
+                ..DroneProfileRecord::new("drone-001", 1)
+            },
+        );
+        let svc = QueryServiceImpl::new(state);
+        let profile = svc.state.profiles.get("drone-001").unwrap().value().clone();
+        let info = QueryServiceImpl::device_info(None, Some(&profile), "drone-001");
+        assert_eq!(info.autopilot_configured, "px4");
+        assert_eq!(info.mavlink_version, 1);
+        assert!(!info.signing_allow_unsigned);
+        assert!(info.has_signing_secret);
+    }
+
+    #[tokio::test]
+    async fn device_info_without_profile_uses_domain_defaults() {
+        // 没有档案的运行时设备：按平台默认值回填，别把"未登记"当成"关掉"。
+        let svc = QueryServiceImpl::new(state_with_device());
+        let info = QueryServiceImpl::device_info(None, None, "drone-x");
+        assert_eq!(info.mavlink_version, 2);
+        assert!(info.signing_allow_unsigned);
+        assert!(!info.has_signing_secret);
+        assert!(info.autopilot_configured.is_empty());
     }
 
     #[tokio::test]

@@ -14,9 +14,38 @@ pub trait UserRepository: Send + Sync {
     async fn update(&self, user: &User) -> Result<()>;
     async fn delete(&self, id: Uuid) -> Result<()>;
     async fn list(&self) -> Result<Vec<User>>;
+
+    /// 按创建时间排序取一页（`offset` 之后的 `limit` 条）。
+    ///
+    /// 默认实现基于 `list()` 切片，数据库实现会覆盖成真正的 LIMIT/OFFSET。
+    async fn list_paginated(&self, offset: usize, limit: usize) -> Result<Vec<User>> {
+        let mut all = self.list().await?;
+        sort_users(&mut all);
+        Ok(all.into_iter().skip(offset).take(limit).collect())
+    }
+
+    /// 用户总数（分页控件用）。
+    async fn count(&self) -> Result<usize> {
+        Ok(self.list().await?.len())
+    }
+
     async fn get_user_roles(&self, user_id: Uuid) -> Result<Vec<String>>;
     async fn get_user_role_ids(&self, user_id: Uuid) -> Result<Vec<Uuid>>;
     async fn set_user_roles(&self, user_id: Uuid, role_ids: &[Uuid]) -> Result<()>;
+}
+
+/// 用户的稳定排序：创建时间优先，同一时间按 id 兜底，避免翻页时行序跳动。
+pub fn sort_users(users: &mut [User]) {
+    users.sort_by(|a, b| {
+        a.created_at
+            .cmp(&b.created_at)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+}
+
+/// 权限点的稳定排序：名称优先，保证分页时行序稳定。
+pub fn sort_permissions(permissions: &mut [Permission]) {
+    permissions.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
 }
 
 #[async_trait]
@@ -51,6 +80,20 @@ pub trait PermissionRepository: Send + Sync {
     async fn update(&self, permission: &Permission) -> Result<()>;
     async fn delete(&self, id: Uuid) -> Result<()>;
     async fn list(&self) -> Result<Vec<Permission>>;
+
+    /// 按名称排序取一页（`offset` 之后的 `limit` 条）。
+    ///
+    /// 默认实现基于 `list()` 切片，数据库实现会覆盖成真正的 LIMIT/OFFSET。
+    async fn list_paginated(&self, offset: usize, limit: usize) -> Result<Vec<Permission>> {
+        let mut all = self.list().await?;
+        sort_permissions(&mut all);
+        Ok(all.into_iter().skip(offset).take(limit).collect())
+    }
+
+    /// 权限点总数（分页控件用）。
+    async fn count(&self) -> Result<usize> {
+        Ok(self.list().await?.len())
+    }
 }
 
 pub struct InMemoryAuthRepository {

@@ -121,7 +121,13 @@ fn default_true() -> bool {
     true
 }
 
-fn default_mavlink_version() -> i32 {
+/// 放行未签名帧的默认值：与档案新建时的取值一致。
+pub fn default_signing_allow_unsigned() -> bool {
+    default_true()
+}
+
+/// MAVLink 协议版本的默认值：2。
+pub fn default_mavlink_version() -> i32 {
     2
 }
 

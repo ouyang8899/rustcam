@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use axum::{
-    extract::{Extension, Path, State},
+    extract::{Extension, Path, Query, State},
     Json,
 };
 use argon2::{
@@ -8,12 +8,32 @@ use argon2::{
 };
 use password_hash::phc::SaltString;
 use password_hash::PasswordHasher;
+use serde::Deserialize;
 use uuid::Uuid;
 use crate::api::FullState;
+use crate::api::http::handlers::device_handler::PaginatedResponse;
 use crate::error::{AppError, Result as AppResult};
 use crate::auth::models::*;
 use crate::auth::middleware::CurrentUser;
 use crate::auth::repository::{UserRepository, RoleRepository, PermissionRepository};
+
+/// 列表分页参数。
+///
+/// 与设备/流等列表同一套口径：默认每页 50 条，最多 500 条。
+#[derive(Debug, Deserialize)]
+pub struct PageQuery {
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
+}
+
+impl PageQuery {
+    pub fn limit(&self) -> usize {
+        self.limit.unwrap_or(50).min(500)
+    }
+    pub fn offset(&self) -> usize {
+        self.offset.unwrap_or(0)
+    }
+}
 
 /// 校验当前用户是否具备指定权限；任一角色命中即放行。
 async fn require_permission(
@@ -145,11 +165,16 @@ pub async fn me(
 pub async fn list_users(
     State(state): State<Arc<FullState>>,
     Extension(current_user): Extension<CurrentUser>,
-) -> AppResult<Json<ApiResponse<Vec<UserWithRoles>>>> {
+    Query(q): Query<PageQuery>,
+) -> AppResult<Json<ApiResponse<PaginatedResponse<UserWithRoles>>>> {
 
     require_permission(&state, &current_user, "user", "read").await?;
 
-    let users = UserRepository::list(&*state.auth.repo)
+    let total = UserRepository::count(&*state.auth.repo)
+        .await
+        .map_err(|e| AppError::Auth(e.to_string()))?;
+
+    let users = UserRepository::list_paginated(&*state.auth.repo, q.offset(), q.limit())
         .await
         .map_err(|e| AppError::Auth(e.to_string()))?;
 
@@ -172,7 +197,12 @@ pub async fn list_users(
         });
     }
 
-    Ok(Json(ApiResponse::success(result)))
+    Ok(Json(ApiResponse::success(PaginatedResponse {
+        items: result,
+        total,
+        limit: q.limit(),
+        offset: q.offset(),
+    })))
 }
 
 pub async fn create_user(
@@ -602,15 +632,25 @@ pub async fn set_role_parents(
 pub async fn list_permissions(
     State(state): State<Arc<FullState>>,
     Extension(current_user): Extension<CurrentUser>,
-) -> AppResult<Json<ApiResponse<Vec<Permission>>>> {
+    Query(q): Query<PageQuery>,
+) -> AppResult<Json<ApiResponse<PaginatedResponse<Permission>>>> {
 
     require_permission(&state, &current_user, "role", "manage").await?;
 
-    let permissions = PermissionRepository::list(&*state.auth.repo)
+    let total = PermissionRepository::count(&*state.auth.repo)
         .await
         .map_err(|e| AppError::Auth(e.to_string()))?;
 
-    Ok(Json(ApiResponse::success(permissions)))
+    let permissions = PermissionRepository::list_paginated(&*state.auth.repo, q.offset(), q.limit())
+        .await
+        .map_err(|e| AppError::Auth(e.to_string()))?;
+
+    Ok(Json(ApiResponse::success(PaginatedResponse {
+        items: permissions,
+        total,
+        limit: q.limit(),
+        offset: q.offset(),
+    })))
 }
 
 pub async fn create_permission(
