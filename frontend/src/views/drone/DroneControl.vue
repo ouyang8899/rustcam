@@ -16,22 +16,19 @@
           :value="d.drone_tag"
         />
       </el-select>
-      <span class="lease-label">租约时长</span>
-      <el-select v-model="leaseSeconds" style="width: 120px">
-        <el-option
-          v-for="opt in leaseOptions"
-          :key="opt.value"
-          :label="opt.label"
-          :value="opt.value"
-        />
-      </el-select>
-      <el-button :loading="loading" @click="refresh">
+      <span class="page-hint">申请或抢占时设置租约时长，从当前时间开始计时</span>
+      <el-button :loading="loading" class="refresh-btn" @click="refresh">
         <el-icon><Refresh /></el-icon>
       </el-button>
     </div>
 
     <el-table :data="rows" border stripe>
-      <el-table-column label="设备" prop="drone_tag" min-width="140" />
+      <el-table-column label="设备" min-width="200">
+        <template #default="{ row }">
+          <div class="device-name">{{ row.name || row.drone_tag }}</div>
+          <div class="device-tag">{{ row.drone_tag }}</div>
+        </template>
+      </el-table-column>
       <el-table-column label="类型" prop="control_type" width="90" />
       <el-table-column label="持有人" prop="holder" min-width="120" />
       <el-table-column label="优先级" prop="priority" width="90" />
@@ -42,7 +39,7 @@
             size="small"
             type="primary"
             :disabled="!row.online || row.held"
-            @click="acquire(row)"
+            @click="openLease(row, 'acquire')"
           >
             申请
           </el-button>
@@ -50,7 +47,7 @@
             size="small"
             type="warning"
             :disabled="!row.held || row.granted"
-            @click="preempt(row)"
+            @click="openLease(row, 'preempt')"
           >
             抢占
           </el-button>
@@ -66,6 +63,16 @@
     </el-table>
 
     <el-empty v-if="rows.length === 0" description="暂无设备" />
+
+    <LeaseDialog
+      v-model="leaseDialogVisible"
+      :drone-tag="pendingRow?.drone_tag || ''"
+      :drone-name="pendingRow?.name || ''"
+      :title="pendingMode === 'preempt' ? '抢占控制权' : '申请控制权'"
+      :confirm-text="pendingMode === 'preempt' ? '确认抢占' : '确认申请'"
+      :default-seconds="leaseSeconds"
+      @confirm="onLeaseConfirm"
+    />
   </div>
 </template>
 
@@ -76,15 +83,20 @@ import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { useDroneStore } from '../../stores/droneStore'
 import { preemptControl } from '../../api/drone'
-import { DEFAULT_LEASE_SECONDS, LEASE_OPTIONS } from '../../utils/droneLease'
+import { DEFAULT_LEASE_SECONDS } from '../../utils/droneLease'
+import LeaseDialog from '../../components/drone/LeaseDialog.vue'
 
 const store = useDroneStore()
 const selectedId = ref('')
 const loading = ref(false)
 const now = ref(Date.now())
-/** 申请/抢占时使用的租约时长（秒）。 */
+/** 最近一次使用的租约时长（秒），作为下次弹窗默认值。 */
 const leaseSeconds = ref(DEFAULT_LEASE_SECONDS)
-const leaseOptions = LEASE_OPTIONS
+const leaseDialogVisible = ref(false)
+/** @type {import('vue').Ref<any>} */
+const pendingRow = ref(null)
+/** @type {import('vue').Ref<'acquire' | 'preempt'>} */
+const pendingMode = ref('acquire')
 
 const rows = computed(() => {
   return store.drones.map((d) => {
@@ -94,6 +106,7 @@ const rows = computed(() => {
       : 0
     return {
       drone_tag: d.drone_tag,
+      name: d.name || '',
       online: !!d.online,
       control_type: 'flight',
       holder: control?.holder || '—',
@@ -132,19 +145,31 @@ async function onSelect(id) {
   await store.fetchControl(id, 'flight')
 }
 
-async function acquire(row) {
-  const res = await store.acquireControl(row.drone_tag, 'flight', 10, leaseSeconds.value)
-  if (!res?.granted) {
-    ElMessage.warning(res?.reason || '控制权被占用')
-  }
+function openLease(row, mode) {
+  pendingRow.value = row
+  pendingMode.value = mode
+  leaseDialogVisible.value = true
 }
 
-async function preempt(row) {
-  const res = await preemptControl(row.drone_tag, 'flight', 20, leaseSeconds.value)
+async function onLeaseConfirm(seconds) {
+  const row = pendingRow.value
+  if (!row) return
+  leaseSeconds.value = seconds
+  if (pendingMode.value === 'preempt') {
+    const res = await preemptControl(row.drone_tag, 'flight', 20, seconds)
+    if (!res?.granted) {
+      ElMessage.warning(res?.reason || '抢占失败（需要更高的优先级）')
+    } else {
+      ElMessage.success(`已抢占（原持有人 ${res.preempted || '未知'}）`)
+    }
+    await store.fetchControl(row.drone_tag, 'flight')
+    return
+  }
+  const res = await store.acquireControl(row.drone_tag, 'flight', 10, seconds)
   if (!res?.granted) {
-    ElMessage.warning(res?.reason || '抢占失败（需要更高的优先级）')
+    ElMessage.warning(res?.reason || '控制权被占用')
   } else {
-    ElMessage.success(`已抢占（原持有人 ${res.preempted || '未知'}）`)
+    ElMessage.success(`已获得控制权，${Math.round(seconds / 60)} 分钟后到期`)
   }
   await store.fetchControl(row.drone_tag, 'flight')
 }
@@ -164,8 +189,19 @@ async function release(row) {
   gap: 12px;
   margin-bottom: 16px;
 }
-.lease-label {
+.page-hint {
   font-size: 12px;
+  color: var(--text-muted);
+}
+.refresh-btn {
+  margin-left: auto;
+}
+.device-name {
+  font-weight: 500;
+}
+.device-tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
   color: var(--text-muted);
 }
 </style>

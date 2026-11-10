@@ -219,8 +219,10 @@ pub struct AdapterDto {
     pub port_end: i32,
     /// 飞控类型：auto / px4 / ardupilot。
     pub autopilot: String,
-    /// 签名密钥（服务端加密存储，接口返回密文）。
+    /// 签名密钥；接口只返回空串，避免把密钥泄露给前端。
     pub signing_secret: String,
+    /// 是否已配置签名密钥（接口回填，供前端显示“已配置”）。
+    pub has_signing_secret: bool,
     /// 是否放行未签名帧。
     pub signing_allow_unsigned: bool,
     /// 重连退避下限（秒）。
@@ -979,6 +981,7 @@ fn adapter_dto(adapter: AdapterMsg) -> AdapterDto {
         port_end: adapter.port_end,
         autopilot: adapter.autopilot,
         signing_secret: adapter.signing_secret,
+        has_signing_secret: false,
         signing_allow_unsigned: adapter.signing_allow_unsigned,
         reconnect_min_secs: adapter.reconnect_min_secs,
         reconnect_max_secs: adapter.reconnect_max_secs,
@@ -1607,6 +1610,7 @@ mod tests {
             port_end: 14560,
             autopilot: "auto".into(),
             signing_secret: "00112233".into(),
+            has_signing_secret: true,
             signing_allow_unsigned: true,
             reconnect_min_secs: 1,
             reconnect_max_secs: 30,

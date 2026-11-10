@@ -51,6 +51,10 @@ async fn main() -> anyhow::Result<()> {
             if let Err(e) = client.run_migrations().await {
                 tracing::error!(error = %e, "[Drone] migrations failed, drone_* tables may be missing");
             }
+            // 启动时 adapter 都还没接入：清掉上次进程遗留的在线标记。
+            if let Err(e) = client.exec("UPDATE drone_adapter SET online = FALSE").await {
+                tracing::warn!(error = %e, "[Drone] reset adapter online flags failed");
+            }
             Some(client)
         }
         Err(e) => {

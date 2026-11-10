@@ -376,7 +376,16 @@ async fn list_adapters(
                 .count() as i32;
         }
     }
-    Ok(ok(adapters))
+    Ok(ok(adapters.into_iter().map(sanitize_adapter).collect()))
+}
+
+/// 抹掉密钥内容，只保留“是否已配置”标记。
+///
+/// 编辑时前端留空表示保持原密钥，由 drone-service 的合并逻辑处理。
+fn sanitize_adapter(mut adapter: AdapterDto) -> AdapterDto {
+    adapter.has_signing_secret = !adapter.signing_secret.trim().is_empty();
+    adapter.signing_secret.clear();
+    adapter
 }
 
 /// 读取单个 adapter 配置。
@@ -384,7 +393,7 @@ async fn get_adapter(
     Extension(api): Extension<Arc<dyn DroneApi>>,
     Path(adapter_id): Path<String>,
 ) -> ApiResult<AdapterDto> {
-    Ok(ok(api.get_adapter(&adapter_id).await?))
+    Ok(ok(sanitize_adapter(api.get_adapter(&adapter_id).await?)))
 }
 
 /// 新建 adapter 配置。
@@ -411,7 +420,9 @@ async fn create_adapter(
     }
     // 新建一律启用；停用只能走停用接口。
     body.enabled = true;
-    Ok(ok(api.save_adapter(body, &user.0.username).await?))
+    Ok(ok(sanitize_adapter(
+        api.save_adapter(body, &user.0.username).await?,
+    )))
 }
 
 /// 修改 adapter 配置。
@@ -439,7 +450,9 @@ async fn update_adapter(
         }
         Err(e) => return Err(e.into()),
     }
-    Ok(ok(api.save_adapter(body, &user.0.username).await?))
+    Ok(ok(sanitize_adapter(
+        api.save_adapter(body, &user.0.username).await?,
+    )))
 }
 
 /// 停用 adapter（软删除）：配置行与绑定关系都保留，可恢复。
@@ -448,10 +461,10 @@ async fn disable_adapter(
     user: DroneUser,
     Path(adapter_id): Path<String>,
 ) -> ApiResult<AdapterDto> {
-    Ok(ok(
+    Ok(ok(sanitize_adapter(
         api.set_adapter_enabled(&adapter_id, false, &user.0.username)
             .await?,
-    ))
+    )))
 }
 
 /// 恢复已停用的 adapter。
@@ -460,10 +473,10 @@ async fn restore_adapter(
     user: DroneUser,
     Path(adapter_id): Path<String>,
 ) -> ApiResult<AdapterDto> {
-    Ok(ok(
+    Ok(ok(sanitize_adapter(
         api.set_adapter_enabled(&adapter_id, true, &user.0.username)
             .await?,
-    ))
+    )))
 }
 
 #[derive(Debug, Deserialize)]

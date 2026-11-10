@@ -11,7 +11,10 @@ import * as api from '../api/adapter'
  */
 export const useAdapterStore = defineStore('adapter', {
   state: () => ({
+    /** 当前列表视图（受 includeDisabled 过滤）。 */
     adapters: [],
+    /** 全量 adapter（含停用），用于统计与下拉选项。 */
+    allAdapters: [],
     loading: false,
     /** 是否把已停用（软删除）的 adapter 也列出来。 */
     includeDisabled: false,
@@ -19,30 +22,39 @@ export const useAdapterStore = defineStore('adapter', {
 
   getters: {
     /** 启用中的 adapter：可绑定新无人机。 */
-    enabledAdapters: (state) => state.adapters.filter(a => a.enabled),
+    enabledAdapters: (state) => state.allAdapters.filter(a => a.enabled),
     /** 下拉选项：停用的仍可见但标注出来，避免误绑。 */
     adapterOptions: (state) =>
-      state.adapters.map(a => ({
+      state.allAdapters.map(a => ({
         value: a.adapter_id,
         label: a.name ? `${a.name}（${a.adapter_id}）` : a.adapter_id,
         disabled: !a.enabled,
       })),
-    onlineCount: (state) => state.adapters.filter(a => a.online).length,
+    onlineCount: (state) => state.allAdapters.filter(a => a.online).length,
+    totalCount: (state) => state.allAdapters.length,
+    disabledCount: (state) => state.allAdapters.filter(a => !a.enabled).length,
+    boundTotal: (state) =>
+      state.allAdapters.reduce((sum, a) => sum + (a.bound_drones || 0), 0),
   },
 
   actions: {
     async fetchAdapters(includeDisabled = this.includeDisabled) {
       this.loading = true
       try {
-        const list = await api.getAdapters(includeDisabled)
-        this.adapters = Array.isArray(list) ? list : []
+        // 一次取全量：统计口径不随“显示已停用”开关变化。
+        const list = await api.getAdapters(true)
+        this.allAdapters = Array.isArray(list) ? list : []
+        this.adapters = includeDisabled
+          ? this.allAdapters
+          : this.allAdapters.filter(a => a.enabled)
       } finally {
         this.loading = false
       }
     },
 
-    async saveAdapter(adapter) {
-      const saved = adapter.adapter_id && this.adapters.some(a => a.adapter_id === adapter.adapter_id)
+    /** `editing=true` 时按更新处理；新增冲突交给页面引导恢复。 */
+    async saveAdapter(adapter, editing = false) {
+      const saved = editing
         ? await api.updateAdapter(adapter.adapter_id, adapter)
         : await api.createAdapter(adapter)
       await this.fetchAdapters()

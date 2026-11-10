@@ -37,26 +37,21 @@
       </el-empty>
 
       <el-table v-else v-loading="store.loading" :data="store.drones" class="drone-table" stripe>
-        <el-table-column label="无人机" min-width="200">
+        <el-table-column label="名称" min-width="190">
           <template #default="{ row }">
             <div class="drone-name-cell">
               <span class="status-dot" :class="row.online ? 'online' : 'offline'"></span>
-              <div>
-                <div class="drone-name">{{ row.name || row.drone_tag }}</div>
+              <div class="drone-name-main">
+                <div class="drone-name">{{ row.name || '未命名无人机' }}</div>
                 <div class="drone-id" data-testid="drone-tag">{{ row.drone_tag }}</div>
               </div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="model" label="机型" width="130">
+        <el-table-column prop="model" label="机型" min-width="110" show-overflow-tooltip>
           <template #default="{ row }">{{ row.model || '—' }}</template>
         </el-table-column>
-        <el-table-column label="实测唯一标识" width="200">
-          <template #default="{ row }">
-            <span class="muted mono">{{ row.last_telemetry?.unique_id || '—' }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="飞控 / 模式" width="180">
+        <el-table-column label="飞控 / 模式" min-width="150">
           <template #default="{ row }">
             <div class="fc-cell">
               <el-tag size="small" effect="plain">{{ (row.autopilot || 'unknown').toUpperCase() }}</el-tag>
@@ -64,14 +59,14 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="110">
+        <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag v-if="!row.online" type="info" size="small">离线</el-tag>
             <el-tag v-else-if="row.armed" type="warning" size="small">已解锁</el-tag>
             <el-tag v-else type="success" size="small">待命</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="电池 / 链路" width="170">
+        <el-table-column label="电池 / 信号" min-width="170">
           <template #default="{ row }">
             <template v-if="row.last_telemetry">
               <el-progress
@@ -82,13 +77,13 @@
               />
               <div class="battery-line">
                 <span>{{ Math.round(row.last_telemetry.battery_pct || 0) }}%</span>
-                <span>{{ row.last_telemetry.link_quality || 0 }}% 链路</span>
+                <span>{{ row.last_telemetry.link_quality || 0 }}% 信号</span>
               </div>
             </template>
             <span v-else class="muted">暂无遥测</span>
           </template>
         </el-table-column>
-        <el-table-column label="摄像头" width="200">
+        <el-table-column label="摄像头" min-width="190" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.camera_device_tags?.length" class="muted">
               {{ row.camera_device_tags.length }} 个：{{ row.camera_device_tags.join('、') }}
@@ -96,15 +91,16 @@
             <span v-else class="muted">未关联</span>
           </template>
         </el-table-column>
-        <el-table-column label="链路" width="210">
+        <el-table-column label="链路 / 标识" min-width="210">
           <template #default="{ row }">
-            <div v-if="row.mavlink_addr" class="mono link-cell">
-              {{ row.mavlink_addr }}
+            <div v-if="row.mavlink_addr" class="mono link-cell">{{ row.mavlink_addr }}</div>
+            <div v-else class="muted">未分配端点</div>
+            <div class="muted mono link-sub">
+              sysid {{ row.mavlink_sysid || '—' }} · {{ row.last_telemetry?.unique_id || '无唯一标识' }}
             </div>
-            <div class="muted mono">sysid {{ row.mavlink_sysid || '—' }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column label="操作" width="210" fixed="right">
           <template #default="{ row }">
             <el-button text type="primary" @click="view(row)">查看</el-button>
             <el-button text @click="openEditor(row)">编辑</el-button>
@@ -402,6 +398,7 @@ onMounted(refresh)
 .stat-value.online { color: #22c55e; }
 .stat-value.warn { color: #f97316; }
 .drone-table {
+  width: 100%;
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
@@ -410,14 +407,30 @@ onMounted(refresh)
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+}
+.drone-name-main {
+  min-width: 0;
 }
 .drone-name {
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .drone-id {
   font-size: 11px;
   color: var(--text-muted);
   font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.link-sub {
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .mono {
   font-family: var(--font-mono);

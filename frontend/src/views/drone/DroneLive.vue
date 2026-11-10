@@ -163,17 +163,6 @@
             >申请控制</el-button>
             <el-button size="small" :disabled="!control?.granted" @click="release">释放</el-button>
           </div>
-          <div class="lease-row">
-            <span>租约时长</span>
-            <el-select v-model="leaseSeconds" size="small" :disabled="control?.granted" style="width: 110px">
-              <el-option
-                v-for="opt in leaseOptions"
-                :key="opt.value"
-                :label="opt.label"
-                :value="opt.value"
-              />
-            </el-select>
-          </div>
           <div class="control-hint" v-if="control?.held">
             优先级 P{{ control.priority }} · 剩余租约 {{ leaseRemain }}s
             <span v-if="control.expire_at_ms"> · {{ formatTime(control.expire_at_ms) }} 到期</span>
@@ -251,6 +240,14 @@
         </div>
       </aside>
     </div>
+
+    <LeaseDialog
+      v-model="leaseDialogVisible"
+      :drone-tag="selectedId"
+      :drone-name="selected?.name || selectedId"
+      :default-seconds="leaseSeconds"
+      @confirm="onLeaseConfirm"
+    />
   </div>
 </template>
 
@@ -260,11 +257,12 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Aim, Refresh } from '@element-plus/icons-vue'
 import { useDroneStore } from '../../stores/droneStore'
-import { DEFAULT_LEASE_SECONDS, LEASE_OPTIONS } from '../../utils/droneLease'
+import { DEFAULT_LEASE_SECONDS } from '../../utils/droneLease'
 import { droneVideoAvailability } from '../../utils/droneVideo.js'
 import CesiumGlobe from '../../components/drone/CesiumGlobe.vue'
 import Map2D from '../../components/drone/Map2D.vue'
 import DroneVideoPopup from '../../components/drone/DroneVideoPopup.vue'
+import LeaseDialog from '../../components/drone/LeaseDialog.vue'
 
 const store = useDroneStore()
 const route = useRoute()
@@ -282,9 +280,9 @@ const gotoForm = reactive({ lat: 31.2304, lon: 121.4737, alt: 30 })
 const gimbal = reactive({ pitch: -30, yaw: 0 })
 /** 机体绝对航向（度）。 */
 const bodyYaw = ref(0)
-/** 申请控制权时的租约时长（秒）；续约沿用同一时长。 */
+/** 申请控制权时的租约时长（秒）；隐式取权与续约沿用同一时长。 */
 const leaseSeconds = ref(DEFAULT_LEASE_SECONDS)
-const leaseOptions = LEASE_OPTIONS
+const leaseDialogVisible = ref(false)
 
 const selected = computed(() =>
   store.drones.find(d => d.drone_tag === selectedId.value) || null
@@ -625,7 +623,19 @@ async function camera(action) {
 }
 
 function acquire() {
-  store.acquireControl(selectedId.value, 'flight', 10, leaseSeconds.value)
+  if (!selectedId.value) return
+  leaseDialogVisible.value = true
+}
+
+async function onLeaseConfirm(seconds) {
+  leaseSeconds.value = seconds
+  const res = await store.acquireControl(selectedId.value, 'flight', 10, seconds)
+  if (!res?.granted) {
+    ElMessage.warning(res?.reason || '控制权被占用')
+  } else {
+    ElMessage.success(`已获得控制权，${Math.round(seconds / 60)} 分钟后到期`)
+  }
+  await store.fetchControl(selectedId.value, 'flight')
 }
 
 function release() {
@@ -801,14 +811,6 @@ onMounted(async () => {
 .control-row {
   display: flex;
   gap: 8px;
-}
-.lease-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 8px;
-  font-size: 11px;
-  color: var(--text-muted);
 }
 .control-hint {
   margin-top: 6px;

@@ -399,6 +399,8 @@ impl Registry {
             }
         }
         self.state.adapters.remove(adapter_id);
+        // 同步数据库里的在线标记，避免列表把已断开的 adapter 长期显示为“已接入”。
+        self.touch_adapter_row(adapter_id, false).await;
         tracing::info!(adapter = %adapter_id, devices = devices.len(), "[Registry] adapter unregistered");
     }
 

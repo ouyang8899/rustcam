@@ -524,6 +524,10 @@ pub fn merge_adapter(
     let mut row = adapter_from_proto(incoming)?;
     match existing {
         Some(prev) => {
+            // 接口回包会抹掉密钥；编辑时留空表示保持原密钥。
+            if row.signing_secret.trim().is_empty() {
+                row.signing_secret = prev.signing_secret.clone();
+            }
             row.enabled = prev.enabled;
             row.online = prev.online;
         }
