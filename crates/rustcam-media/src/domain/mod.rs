@@ -14,6 +14,7 @@ pub mod session;
 pub mod stream;
 pub mod user;
 pub mod traits;
+pub mod video_tour;
 
 pub use traits::*;
 
@@ -27,3 +28,4 @@ pub use recording_policy::*;
 pub use region::*;
 pub use session::*;
 pub use stream::*;
+pub use video_tour::*;

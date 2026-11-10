@@ -1376,6 +1376,101 @@ pub async fn layout_set_default(rb: &dyn rbatis::Executor) -> rbatis::Result<rba
 pub async fn layout_delete(rb: &dyn rbatis::Executor, id: i64) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
 
 #[derive(Debug, Clone, serde::Deserialize)]
+pub struct TourSchemeRow {
+    pub id: i64,
+    pub name: String,
+    pub version: i32,
+    pub layout_id: i32,
+    pub device_channels: serde_json::Value,
+    pub locked_set: serde_json::Value,
+    pub dwell_ms: i32,
+    pub batch_timeout_ms: i32,
+    pub switch_gap_ms: i32,
+    pub cycle_gap_ms: i32,
+    pub max_cycles: Option<i32>,
+    pub run_window: Option<serde_json::Value>,
+    pub safety_max_duration_ms: Option<i64>,
+    pub backfill_limit: i32,
+    pub created_at: Option<RbatisDateTime>,
+    pub updated_at: Option<RbatisDateTime>,
+}
+
+impl From<TourSchemeRow> for crate::domain::video_tour::TourScheme {
+    fn from(r: TourSchemeRow) -> Self {
+        let created_at = r.created_at.map(|dt| chrono::DateTime::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(chrono::Utc::now)).unwrap_or_else(chrono::Utc::now);
+        let updated_at = r.updated_at.map(|dt| chrono::DateTime::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(chrono::Utc::now)).unwrap_or_else(chrono::Utc::now);
+        Self {
+            id: r.id,
+            name: r.name,
+            version: r.version,
+            layout_id: r.layout_id,
+            device_channels: serde_json::from_value(r.device_channels).unwrap_or_default(),
+            locked_set: serde_json::from_value(r.locked_set).unwrap_or_default(),
+            dwell_ms: r.dwell_ms,
+            batch_timeout_ms: r.batch_timeout_ms,
+            switch_gap_ms: r.switch_gap_ms,
+            cycle_gap_ms: r.cycle_gap_ms,
+            max_cycles: r.max_cycles,
+            run_window: r.run_window.and_then(|v| serde_json::from_value(v).ok()),
+            safety_max_duration_ms: r.safety_max_duration_ms,
+            backfill_limit: r.backfill_limit,
+            created_at,
+            updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct TourSchemeInsertResult {
+    pub id: i64,
+}
+
+#[html_sql("sql/video_tour.html")]
+pub async fn tour_scheme_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<TourSchemeRow>> { impled!() }
+
+#[html_sql("sql/video_tour.html")]
+pub async fn tour_scheme_select_by_id(rb: &dyn rbatis::Executor, id: i64) -> rbatis::Result<Vec<TourSchemeRow>> { impled!() }
+
+#[html_sql("sql/video_tour.html")]
+pub async fn tour_scheme_insert(
+    rb: &dyn rbatis::Executor,
+    name: &str,
+    layout_id: i32,
+    device_channels: serde_json::Value,
+    locked_set: serde_json::Value,
+    dwell_ms: i32,
+    batch_timeout_ms: i32,
+    switch_gap_ms: i32,
+    cycle_gap_ms: i32,
+    max_cycles: Option<i32>,
+    run_window: Option<serde_json::Value>,
+    safety_max_duration_ms: Option<i64>,
+    backfill_limit: i32,
+) -> rbatis::Result<Vec<TourSchemeInsertResult>> { impled!() }
+
+#[html_sql("sql/video_tour.html")]
+pub async fn tour_scheme_update(
+    rb: &dyn rbatis::Executor,
+    id: i64,
+    expected_version: i32,
+    name: &str,
+    layout_id: i32,
+    device_channels: serde_json::Value,
+    locked_set: serde_json::Value,
+    dwell_ms: i32,
+    batch_timeout_ms: i32,
+    switch_gap_ms: i32,
+    cycle_gap_ms: i32,
+    max_cycles: Option<i32>,
+    run_window: Option<serde_json::Value>,
+    safety_max_duration_ms: Option<i64>,
+    backfill_limit: i32,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+#[sql("DELETE FROM video_tour_schemes WHERE id = $1")]
+pub async fn tour_scheme_delete(rb: &dyn rbatis::Executor, id: i64) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct MapSettingsRow {
     pub id: i64,
     pub browser_tms_url: String,

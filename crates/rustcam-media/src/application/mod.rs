@@ -16,6 +16,7 @@ pub mod player_layout_service;
 pub mod map_settings_service;
 pub mod channel_service;
 pub mod cron_parser;
+pub mod tour_scheme_service;
 
 pub use session_service::*;
 pub use device_service::*;
@@ -34,3 +35,4 @@ pub use player_layout_service::PlayerLayoutService;
 pub use map_settings_service::MapSettingsService;
 pub use channel_service::ChannelService;
 pub use cron_parser::{CronExpr, CronError};
+pub use tour_scheme_service::TourSchemeService;

@@ -9,6 +9,7 @@ use crate::application::{
     PlayService, WsBroadcaster, StreamRecoveryService,
     zlmediakit_hook::ZlMediaKitHookHandler, ChannelService,
     RecordingPolicyService, RecordingSchedulerService,
+    TourSchemeService,
 };
 use crate::domain::traits::{DeviceLookup, StreamManager, EventPublisher, CacheStore};
 use crate::domain::device::Protocol;
@@ -47,6 +48,8 @@ pub struct ServiceRegistry {
     pub zlmediakit_hook_handler: Arc<ZlMediaKitHookHandler>,
 
     pub player_layout_service: Arc<PlayerLayoutService>,
+
+    pub tour_scheme_service: Arc<TourSchemeService>,
 
     pub map_settings_service: Arc<MapSettingsService>,
 
@@ -192,6 +195,10 @@ impl ServiceRegistry {
             infra.db.clone(),
         ));
 
+        let tour_scheme_service = Arc::new(TourSchemeService::new(
+            infra.db.clone(),
+        ));
+
         let map_settings_service = Arc::new(MapSettingsService::new(
             infra.db.clone(),
         ));
@@ -234,6 +241,7 @@ impl ServiceRegistry {
             // hook_service,
             zlmediakit_hook_handler,
             player_layout_service,
+            tour_scheme_service,
             map_settings_service,
             channel_service,
             play_service,

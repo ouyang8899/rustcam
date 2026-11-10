@@ -1,0 +1,46 @@
+<mapper>
+<select id="tour_scheme_select_all">
+SELECT id, name, version, layout_id, device_channels, locked_set, dwell_ms, batch_timeout_ms,
+       switch_gap_ms, cycle_gap_ms, max_cycles, run_window, safety_max_duration_ms, backfill_limit,
+       created_at, updated_at
+FROM video_tour_schemes
+ORDER BY updated_at DESC
+</select>
+
+<select id="tour_scheme_select_by_id">
+SELECT id, name, version, layout_id, device_channels, locked_set, dwell_ms, batch_timeout_ms,
+       switch_gap_ms, cycle_gap_ms, max_cycles, run_window, safety_max_duration_ms, backfill_limit,
+       created_at, updated_at
+FROM video_tour_schemes
+WHERE id = #{id}
+</select>
+
+<insert id="tour_scheme_insert">
+INSERT INTO video_tour_schemes
+(name, version, layout_id, device_channels, locked_set, dwell_ms, batch_timeout_ms,
+ switch_gap_ms, cycle_gap_ms, max_cycles, run_window, safety_max_duration_ms, backfill_limit)
+VALUES
+(#{name}, 1, #{layout_id}, #{device_channels}, #{locked_set}, #{dwell_ms}, #{batch_timeout_ms},
+ #{switch_gap_ms}, #{cycle_gap_ms}, #{max_cycles}, #{run_window}, #{safety_max_duration_ms}, #{backfill_limit})
+RETURNING id
+</insert>
+
+<update id="tour_scheme_update">
+UPDATE video_tour_schemes SET
+  name = #{name},
+  version = version + 1,
+  layout_id = #{layout_id},
+  device_channels = #{device_channels},
+  locked_set = #{locked_set},
+  dwell_ms = #{dwell_ms},
+  batch_timeout_ms = #{batch_timeout_ms},
+  switch_gap_ms = #{switch_gap_ms},
+  cycle_gap_ms = #{cycle_gap_ms},
+  max_cycles = #{max_cycles},
+  run_window = #{run_window},
+  safety_max_duration_ms = #{safety_max_duration_ms},
+  backfill_limit = #{backfill_limit},
+  updated_at = now()
+WHERE id = #{id} AND version = #{expected_version}
+</update>
+</mapper>

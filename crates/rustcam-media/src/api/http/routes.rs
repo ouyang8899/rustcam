@@ -27,6 +27,7 @@ use crate::api::http::handlers::{
     channel_handler,
     proxy_handler,
     settings_handler,
+    tour_handler,
 };
 
 async fn trace_layer(request: Request, next: Next) -> axum::response::Response {
@@ -150,6 +151,11 @@ fn protected_routes(
         .route("/api/v1/layouts/{id}", put(layout_handler::update_layout_handler))
         .route("/api/v1/layouts/{id}", delete(layout_handler::delete_layout_handler))
         .route("/api/v1/layouts/{id}/default", put(layout_handler::set_default_layout_handler))
+        .route("/api/v1/tour-schemes", get(tour_handler::list_tour_schemes_handler))
+        .route("/api/v1/tour-schemes", post(tour_handler::create_tour_scheme_handler))
+        .route("/api/v1/tour-schemes/{id}", get(tour_handler::get_tour_scheme_handler))
+        .route("/api/v1/tour-schemes/{id}", put(tour_handler::update_tour_scheme_handler))
+        .route("/api/v1/tour-schemes/{id}", delete(tour_handler::delete_tour_scheme_handler))
 
         .route("/api/v1/regions", get(region_handler::list_regions_handler))
         .route("/api/v1/regions/tree", get(region_handler::list_region_tree_handler))

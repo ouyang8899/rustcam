@@ -48,6 +48,7 @@ use crate::sql_mappers::{
     ServerRow, GroupRow, SessionRow,
     layout_select_by_id, layout_select_all, layout_select_default,
     layout_insert, layout_update, layout_set_default, layout_delete,
+    tour_scheme_select_all, tour_scheme_select_by_id, tour_scheme_insert, tour_scheme_update, tour_scheme_delete,
     map_settings_select, map_settings_upsert,
     policy_insert, policy_update, policy_delete_by_id, policy_select_all, policy_select_by_id,
     policy_select_by_device_tag, policy_select_by_alarm_triggered,
@@ -121,6 +122,8 @@ impl DbRepository {
             "CREATE INDEX IF NOT EXISTS idx_recordings_next_retry ON recordings(state, next_retry_at)",
             "CREATE INDEX IF NOT EXISTS idx_recordings_recording_type ON recordings(device_tag, channel_tag, recording_type)",
             "CREATE INDEX IF NOT EXISTS idx_alarms_channel_time ON alarms(channel_tag, alarm_time DESC)",
+            "CREATE TABLE IF NOT EXISTS video_tour_schemes (id bigserial PRIMARY KEY, name varchar(100) NOT NULL, version integer NOT NULL DEFAULT 1, layout_id integer NOT NULL, device_channels jsonb NOT NULL DEFAULT '[]'::jsonb, locked_set jsonb NOT NULL DEFAULT '[]'::jsonb, dwell_ms integer NOT NULL DEFAULT 10000, batch_timeout_ms integer NOT NULL DEFAULT 5000, switch_gap_ms integer NOT NULL DEFAULT 1000, cycle_gap_ms integer NOT NULL DEFAULT 0, max_cycles integer, run_window jsonb, safety_max_duration_ms bigint, backfill_limit integer NOT NULL DEFAULT 2, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())",
+            "CREATE INDEX IF NOT EXISTS idx_video_tour_schemes_name ON video_tour_schemes (name)",
         ];
         for sql in statements {
             if let Err(e) = self.rb.exec(sql, vec![]).await {
@@ -1654,6 +1657,80 @@ impl DbRepository {
     pub async fn delete_layout(&self, id: i64) -> Result<()> {
         layout_delete(&self.rb, id).await.map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(())
+    }
+
+    pub async fn list_tour_schemes(&self) -> Vec<crate::domain::video_tour::TourScheme> {
+        tour_scheme_select_all(&self.rb).await.unwrap_or_default()
+            .into_iter().map(crate::domain::video_tour::TourScheme::from).collect()
+    }
+
+    pub async fn get_tour_scheme(&self, id: i64) -> Option<crate::domain::video_tour::TourScheme> {
+        tour_scheme_select_by_id(&self.rb, id).await.ok()
+            .and_then(|rows| rows.into_iter().next().map(crate::domain::video_tour::TourScheme::from))
+    }
+
+    pub async fn create_tour_scheme(&self, req: &crate::domain::video_tour::CreateTourSchemeRequest) -> Result<i64> {
+        let device_channels = serde_json::to_value(&req.device_channels).unwrap_or_default();
+        let locked_set = serde_json::to_value(&req.locked_set).unwrap_or_default();
+        let run_window = req.run_window.as_ref().and_then(|w| serde_json::to_value(w).ok());
+        let rows = tour_scheme_insert(
+            &self.rb,
+            &req.name,
+            req.layout_id,
+            device_channels,
+            locked_set,
+            req.dwell_ms,
+            req.batch_timeout_ms,
+            req.switch_gap_ms,
+            req.cycle_gap_ms,
+            req.max_cycles,
+            run_window,
+            req.safety_max_duration_ms,
+            req.backfill_limit,
+        )
+        .await?;
+        rows.into_iter().next().map(|r| r.id)
+            .ok_or_else(|| AppError::Internal("Failed to insert tour scheme".to_string()))
+    }
+
+    pub async fn update_tour_scheme(
+        &self,
+        id: i64,
+        req: &crate::domain::video_tour::CreateTourSchemeRequest,
+        expected_version: i32,
+        clear_locks: bool,
+    ) -> Result<bool> {
+        let device_channels = serde_json::to_value(&req.device_channels).unwrap_or_default();
+        let locked_set = if clear_locks {
+            serde_json::Value::Array(Vec::new())
+        } else {
+            serde_json::to_value(&req.locked_set).unwrap_or_default()
+        };
+        let run_window = req.run_window.as_ref().and_then(|w| serde_json::to_value(w).ok());
+        let result = tour_scheme_update(
+            &self.rb,
+            id,
+            expected_version,
+            &req.name,
+            req.layout_id,
+            device_channels,
+            locked_set,
+            req.dwell_ms,
+            req.batch_timeout_ms,
+            req.switch_gap_ms,
+            req.cycle_gap_ms,
+            req.max_cycles,
+            run_window,
+            req.safety_max_duration_ms,
+            req.backfill_limit,
+        )
+        .await?;
+        Ok(result.rows_affected > 0)
+    }
+
+    pub async fn delete_tour_scheme(&self, id: i64) -> Result<bool> {
+        let result = tour_scheme_delete(&self.rb, id).await?;
+        Ok(result.rows_affected > 0)
     }
 
     pub async fn get_map_settings(&self) -> Option<MapSettings> {
