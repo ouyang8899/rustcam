@@ -357,6 +357,16 @@ async function save() {
       ElMessage.success(
         `已分配飞控端点 ${saved.mavlink_addr}（系统号 ${saved.mavlink_sysid}）`
       )
+      return
+    }
+    // 链路参数已落库：在线的 adapter 会立即重建该机链路，离线的等它连上再生效。
+    const adapterId = (form.adapter_id || '').trim()
+    if (!adapterId) {
+      ElMessage.success('无人机档案已保存')
+    } else if (adapterStore.allAdapters.find((a) => a.adapter_id === adapterId)?.online) {
+      ElMessage.success(`配置已保存并下发至 adapter ${adapterId}`)
+    } else {
+      ElMessage.warning(`配置已保存，adapter ${adapterId} 未连接，连接后生效`)
     }
   } catch (e) {
     // request 拦截器已提示

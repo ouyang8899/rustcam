@@ -115,6 +115,17 @@ fn pick_or_keep(incoming: i32, existing: i32, default: i32) -> i32 {
     }
 }
 
+/// 取档案当前的归属 adapter；档案不存在或未归属时返回空串。
+///
+/// 必须在 `upsert_profile` 之前调用：它会覆盖内存档案。
+pub fn previous_adapter_id(state: &DroneState, drone_tag: &str) -> String {
+    state
+        .profiles
+        .get(drone_tag.trim())
+        .map(|p| p.adapter_id.trim().to_string())
+        .unwrap_or_default()
+}
+
 pub fn upsert_profile(
     state: &DroneState,
     profile: DroneProfile,
@@ -708,6 +719,13 @@ pub async fn delete_profile(
 ) -> Result<bool, String> {
     let existed = state.profiles.remove(drone_tag).is_some();
     if existed {
+        // 链路行必须一并删除：否则该机仍留在 adapter 的分配列表里，
+        // adapter 会继续为它建链。
+        if let Some(db) = state.db.clone() {
+            db.delete_device_link(drone_tag)
+                .await
+                .map_err(|e| format!("链路参数删除失败：{e}"))?;
+        }
         // 多对多航线：解绑该无人机；若它是唯一适用机则整条航线删除。
         let affected: Vec<(String, RouteRecord)> = state
             .routes
@@ -2309,5 +2327,21 @@ mod tests {
         assert_eq!(back.port_start, 14540);
         assert_eq!(back.port_end, 14560);
         assert!(back.enabled);
+    }
+
+    /// 旧归属要在档案被覆盖之前取到。
+    #[test]
+    fn previous_adapter_id_reads_existing_profile() {
+        let state = DroneState::new(DroneConfig::default());
+        assert_eq!(previous_adapter_id(&state, "drone-x"), "");
+
+        let profile = rustcam_drone_proto::control::DroneProfile {
+            drone_tag: "drone-x".into(),
+            adapter_id: "a-1".into(),
+            ..Default::default()
+        };
+        upsert_profile(&state, profile, "tester").expect("建档");
+
+        assert_eq!(previous_adapter_id(&state, "drone-x"), "a-1");
     }
 }

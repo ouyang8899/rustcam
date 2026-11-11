@@ -71,6 +71,11 @@ ON CONFLICT (drone_tag) DO UPDATE SET
     fc_sysid = EXCLUDED.fc_sysid
 </insert>
 
+<delete id="drone_device_link_delete">
+DELETE FROM drone_device
+WHERE drone_tag = #{drone_tag}
+</delete>
+
 <select id="drone_device_legacy_column_exists">
 SELECT 1 AS present
 FROM information_schema.columns

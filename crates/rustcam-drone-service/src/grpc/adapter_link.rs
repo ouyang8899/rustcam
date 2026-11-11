@@ -190,6 +190,17 @@ async fn handle_device_event(state: &DroneState, event: rustcam_drone_proto::com
             presence::set_device_link_state(state, &event.drone_tag, false, &event.detail).await;
             return;
         }
+        // 重配失败：该机仍用旧链工作（未掉线），但配置没有生效——必须告警。
+        "link_reconfig_failed" => {
+            presence::set_device_link_state(state, &event.drone_tag, true, &event.detail).await;
+            let _ = state.event_tx.send(DroneEvent::Alert {
+                drone_tag: event.drone_tag,
+                rule: "link_reconfig_failed".to_string(),
+                level: "error".to_string(),
+                message: event.detail,
+            });
+            return;
+        }
         _ => {}
     }
 
@@ -372,8 +383,7 @@ mod tests {
     /// adapter 重启（同一 adapter_id 重新注册）后，新会话接管旧会话，
     /// 旧会话被判定为 superseded，不再影响新会话的设备归属。
     #[tokio::test]
-    async fn re_register_supersedes_previous_session() {
-        let state = DroneState::new(DroneConfig::default());
+    async fn re_register_supersedes_previous_session() {        let state = DroneState::new(DroneConfig::default());
         state
             .device_to_adapter
             .insert("drone-001".into(), "a-1".into());
@@ -451,5 +461,37 @@ mod tests {
             Some(old_generation),
             "旧会话必须被判定为过期"
         );
+    }
+
+    /// 重配失败事件要变成平台告警。
+    #[tokio::test]
+    async fn link_reconfig_failed_becomes_platform_alert() {
+        let state = DroneState::new(DroneConfig::default());
+        let mut events = state.event_tx.subscribe();
+
+        handle_device_event(
+            &state,
+            proto::DeviceEvent {
+                drone_tag: "drone-001".into(),
+                r#type: "link_reconfig_failed".into(),
+                detail: "reconnect failed: bind failed".into(),
+                ts_ms: 1,
+            },
+        )
+        .await;
+
+        let alert = tokio::time::timeout(std::time::Duration::from_secs(2), events.recv())
+            .await
+            .expect("应产生告警")
+            .expect("事件通道");
+        match alert {
+            rustcam_drone_core::event::DroneEvent::Alert {
+                rule, level, ..
+            } => {
+                assert_eq!(rule, "link_reconfig_failed");
+                assert_eq!(level, "error");
+            }
+            other => panic!("expected Alert, got {other:?}"),
+        }
     }
 }

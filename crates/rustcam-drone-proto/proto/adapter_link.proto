@@ -25,6 +25,8 @@ message ServiceMessage {
     RegisterAck  register_ack  = 1;
     common.Command command     = 2;
     ControlState control_state = 3;
+    // 平台重算分配后主动下发（全量快照，adapter 自行差量）
+    AssignmentsUpdated assignments_updated = 4;
   }
 }
 
@@ -56,9 +58,15 @@ message DeviceAssignment {
 message RegisterAck {
   bool accepted = 1;
   string reason = 2;
-  repeated string assigned_drone_tags = 3;
+  repeated string assigned_drone_tags = 3;  // 每设备的端点与密钥；与 assigned_drone_tags 同序
   int32 heartbeat_interval_sec = 4;
   repeated DeviceAssignment assignments = 5;  // 每设备的端点与密钥；与 assigned_drone_tags 同序
+}
+
+// 平台分配的最新快照：某 adapter 名下机体的完整分配。
+message AssignmentsUpdated {
+  repeated DeviceAssignment assignments = 1;  // 全量快照，adapter 与本地生效配置做差量
+  uint64 revision = 2;                        // 单调递增修订号，用于丢弃过期消息
 }
 
 message Heartbeat {

@@ -87,7 +87,6 @@ export const useDroneStore = defineStore('drone', {
         ? await api.updateDrone(drone.drone_tag, drone)
         : await api.createDrone(drone)
       await this.fetchDrones()
-      ElMessage.success('无人机档案已保存')
       return saved
     },
 

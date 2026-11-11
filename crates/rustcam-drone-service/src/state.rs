@@ -312,6 +312,8 @@ pub struct DroneState {
     pub adapter_bind_addrs: Arc<DashMap<String, String>>,
     pub device_to_adapter: Arc<DashMap<String, String>>,
     pub adapter_generation: Arc<DashMap<String, u64>>,
+    /// adapter 分配修订号：每次重算并下发分配自增，供 adapter 丢弃过期消息。
+    pub adapter_revisions: Arc<DashMap<String, u64>>,
     /// 设备影子：注册即建条目，遥测到达后补齐。
     pub devices: Arc<DashMap<String, DeviceEntry>>,
     /// 无人机业务档案（可先于设备上线创建）。
@@ -371,6 +373,7 @@ impl DroneState {
             adapter_bind_addrs: Arc::new(DashMap::new()),
             device_to_adapter: Arc::new(DashMap::new()),
             adapter_generation: Arc::new(DashMap::new()),
+            adapter_revisions: Arc::new(DashMap::new()),
             devices: Arc::new(DashMap::new()),
             profiles: Arc::new(DashMap::new()),
             routes: Arc::new(DashMap::new()),
@@ -503,6 +506,18 @@ impl DroneState {
     /// 当前 adapter 的代次；未注册返回 None。
     pub fn generation_of(&self, adapter_id: &str) -> Option<u64> {
         self.adapter_generation.get(adapter_id).map(|v| *v)
+    }
+
+    /// 取下一个分配修订号（按 adapter 单调自增）。
+    ///
+    /// 每次把最新分配下发给 adapter 时自增；adapter 用它丢弃过期/重复的快照。
+    pub fn next_adapter_revision(&self, adapter_id: &str) -> u64 {
+        let mut entry = self
+            .adapter_revisions
+            .entry(adapter_id.to_string())
+            .or_insert(0);
+        *entry += 1;
+        *entry
     }
 
     pub fn touch_adapter_heartbeat(&self, adapter_id: &str, now_ms: i64) {

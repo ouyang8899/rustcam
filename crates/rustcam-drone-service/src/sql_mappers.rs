@@ -132,6 +132,14 @@ pub async fn drone_device_link_upsert(
     impled!()
 }
 
+#[html_sql("sql/drone_device.html")]
+pub async fn drone_device_link_delete(
+    rb: &dyn rbatis::Executor,
+    drone_tag: &str,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
+
 #[html_sql("sql/drone_adapter.html")]
 pub async fn drone_adapter_select_by_id(
     rb: &dyn rbatis::Executor,

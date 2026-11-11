@@ -168,6 +168,12 @@ impl DroneDb {
         Ok(rows.into_iter().next())
     }
 
+    /// 删除该机的链路参数行：档案删除后不再分配给任何 adapter。
+    pub async fn delete_device_link(&self, drone_tag: &str) -> anyhow::Result<()> {
+        sql_mappers::drone_device_link_delete(&self.rb, drone_tag).await?;
+        Ok(())
+    }
+
     /// 写入（或更新）一台无人机的链路参数。
     ///
     /// 只写链路相关列；`unique_id` / `mavlink_addr` / `signing_secret` 为空时清空对应列。

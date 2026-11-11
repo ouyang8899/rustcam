@@ -12,11 +12,34 @@ use crate::state::DroneState;
 
 pub struct AdminServiceImpl {
     state: DroneState,
+    /// 用于在链路参数变化后重算并下发分配（保存即生效）。
+    registry: crate::registry::Registry,
 }
 
 impl AdminServiceImpl {
     pub fn new(state: DroneState) -> AdminServiceImpl {
-        AdminServiceImpl { state }
+        let registry = crate::registry::Registry::new(state.clone(), state.redis.clone());
+        AdminServiceImpl { state, registry }
+    }
+
+    /// 通知受影响的 adapter 重算并下发分配（保存即生效）。
+    ///
+    /// `previous_adapter` 是变更前的归属，`current_adapter` 是变更后的归属；
+    /// 归属变更时两者都要通知——旧 adapter 要关链，新 adapter 要建链。
+    async fn notify_link_changed(&self, previous_adapter: &str, current_adapter: &str) {
+        let mut targets: Vec<String> = Vec::new();
+        for id in [previous_adapter, current_adapter] {
+            let id = id.trim();
+            if id.is_empty() {
+                continue;
+            }
+            if !targets.iter().any(|t| t == id) {
+                targets.push(id.to_string());
+            }
+        }
+        for adapter_id in targets {
+            self.registry.resync_and_push(&adapter_id).await;
+        }
     }
 }
 
@@ -43,6 +66,8 @@ impl AdminService for AdminServiceImpl {
         } else {
             profile.operator.clone()
         };
+        // 旧归属必须在 upsert_profile 覆盖内存档案之前取到。
+        let previous_adapter = admin::previous_adapter_id(&self.state, &profile.drone_tag);
         // 未指定链路端点时，按 adapter 的端口段自动分配（端口 + sysid）。
         admin::assign_link_slot(&self.state, &mut profile)
             .await
@@ -53,6 +78,9 @@ impl AdminService for AdminServiceImpl {
         admin::persist_link_params(&self.state, &record)
             .await
             .map_err(Status::internal)?;
+        // 链路参数已落库 → 重算并下发，adapter 立即生效（保存即生效）。
+        self.notify_link_changed(&previous_adapter, &record.adapter_id)
+            .await;
         Ok(Response::new(admin::profile_to_proto(&record)))
     }
 
@@ -62,9 +90,12 @@ impl AdminService for AdminServiceImpl {
         request: Request<DeviceRequest>,
     ) -> Result<Response<DeleteReply>, Status> {
         let drone_tag = request.into_inner().drone_tag;
+        let previous_adapter = admin::previous_adapter_id(&self.state, &drone_tag);
         let deleted = admin::delete_profile(&self.state, &drone_tag, "admin")
             .await
             .map_err(Status::internal)?;
+        // 档案没了 → 该机要从 adapter 的分配列表里消失，adapter 关链。
+        self.notify_link_changed(&previous_adapter, "").await;
         Ok(Response::new(DeleteReply {
             deleted,
             reason: if deleted {
@@ -211,6 +242,8 @@ impl AdminService for AdminServiceImpl {
         let row = admin::upsert_adapter(&self.state, adapter, &operator)
             .await
             .map_err(Status::invalid_argument)?;
+        // 端点由 adapter 的 bind_addr + 端口段拼出，bind_addr 变了端点就变了。
+        self.notify_link_changed("", &row.adapter_id).await;
         Ok(Response::new(admin::adapter_to_proto(&row)))
     }
 

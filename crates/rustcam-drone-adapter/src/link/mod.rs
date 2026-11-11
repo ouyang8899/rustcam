@@ -19,6 +19,10 @@ use crate::config::AdapterConfig;
 use crate::fc::addr::{MavAddress, Transport};
 use crate::fc::{self, EndpointRegistry, FcPool, FlightController};
 
+mod assignments;
+
+use self::assignments::{ApplyReport, AssignmentTracker};
+
 /// 已完成指令的幂等记录保留时长。
 const COMPLETED_TTL: Duration = Duration::from_secs(3_600);
 /// 未确认回执最多保留条数。
@@ -200,7 +204,9 @@ async fn serve(cfg: &AdapterConfig, ledger: Arc<CommandLedger>) -> anyhow::Resul
     let pool = Arc::new(FcPool::default());
     // 共享端点按会话存活：同一 `udpin` 端口只绑定一次，供多架飞控复用。
     let endpoints = EndpointRegistry::new();
-    let result = run_session(cfg, &mut inbound, tx.clone(), &pool, &endpoints, ledger).await;
+    // 当前生效的分配：平台下发全量快照后与它做差量。
+    let mut tracker = AssignmentTracker::new(&[]);
+    let result = run_session(cfg, &mut inbound, tx.clone(), &pool, &endpoints, &mut tracker, ledger).await;
     pool.close();
     result
 }
@@ -211,6 +217,7 @@ async fn run_session(
     tx: mpsc::Sender<AdapterMessage>,
     pool: &Arc<FcPool>,
     endpoints: &EndpointRegistry,
+    tracker: &mut AssignmentTracker,
     ledger: Arc<CommandLedger>,
 ) -> anyhow::Result<()> {
     loop {
@@ -218,7 +225,7 @@ async fn run_session(
         let Some(msg) = message else {
             return Ok(());
         };
-        handle_service_message(msg, cfg, &tx, pool, endpoints, &ledger).await?;
+        handle_service_message(msg, cfg, &tx, pool, endpoints, tracker, &ledger).await?;
     }
 }
 
@@ -228,6 +235,7 @@ async fn handle_service_message(
     tx: &mpsc::Sender<AdapterMessage>,
     pool: &Arc<FcPool>,
     endpoints: &EndpointRegistry,
+    tracker: &mut AssignmentTracker,
     ledger: &Arc<CommandLedger>,
 ) -> anyhow::Result<()> {
     match msg.payload {
@@ -254,6 +262,9 @@ async fn handle_service_message(
             );
             spawn_heartbeat_forwarder(tx.clone(), pool.clone(), interval_secs);
 
+            // 注册时下发的分配就是当前生效配置：后续快照与它做差量。
+            tracker.replace_all(&ack.assignments);
+
             // 按平台分配的端点逐条建链；单架建链失败只跳过该机（平台侧显示离线），
             // 不中断整场会话——一个 adapter 可能带多架机，一架失败不能让其余全部掉线。
             let connected = connect_assignments(cfg, tx, pool, endpoints, &ack.assignments).await;
@@ -269,6 +280,31 @@ async fn handle_service_message(
                 );
             }
 
+        }
+        Some(service_message::Payload::AssignmentsUpdated(update)) => {
+            // 平台重算分配后主动下发（全量快照）：按差量重建受影响的链路。
+            tracing::info!(
+                adapter = %cfg.adapter_id,
+                revision = update.revision,
+                count = update.assignments.len(),
+                "[Adapter] assignment update received"
+            );
+            let report = apply_assignments(
+                tracker,
+                &update.assignments,
+                cfg,
+                tx,
+                pool,
+                endpoints,
+            )
+            .await;
+            tracing::info!(
+                connected = report.connected,
+                reconnected = report.reconnected,
+                disconnected = report.disconnected,
+                failed = report.failed,
+                "[Adapter] assignment update applied"
+            );
         }
         Some(service_message::Payload::Command(cmd)) => {
             // 已执行过的 cmd_id 不再重复执行（规则 §16）。
@@ -366,6 +402,22 @@ async fn connect_assignment(
     endpoints: &EndpointRegistry,
     assignment: &rustcam_drone_proto::link::DeviceAssignment,
 ) -> anyhow::Result<()> {
+    let fc = open_assignment(cfg, tx, endpoints, assignment).await?;
+    pool.insert(&assignment.drone_tag, fc.clone());
+    spawn_link_forwarders(tx.clone(), fc);
+    Ok(())
+}
+
+/// 建立一条飞控链路（不入池、不起转发）。
+///
+/// 端点与机体标识由平台分配：`udpin` + 非零 sysid 走共享端口，
+/// 其余走独占连接（tcp / serial / udpout）。
+async fn open_assignment(
+    cfg: &AdapterConfig,
+    tx: &mpsc::Sender<AdapterMessage>,
+    endpoints: &EndpointRegistry,
+    assignment: &rustcam_drone_proto::link::DeviceAssignment,
+) -> anyhow::Result<FlightController> {
     let drone_tag = assignment.drone_tag.clone();
     let sysid = assignment.mavlink_sysid as u8;
     let compid = assignment.mavlink_compid as u8;
@@ -380,24 +432,114 @@ async fn connect_assignment(
             FlightController::connect(&assignment.mavlink_addr, &drone_tag, sysid, compid, cfg).await
         }
     };
-    let fc = match connected {
-        Ok(fc) => fc,
-        Err(e) => {
-            tracing::warn!(
-                drone_tag = %drone_tag,
-                error = %e,
-                "[Adapter] failed to connect flight controller"
-            );
-            return Err(e);
-        }
-    };
-    pool.insert(&drone_tag, fc.clone());
+    connected.map_err(|e| {
+        tracing::warn!(
+            drone_tag = %drone_tag,
+            error = %e,
+            "[Adapter] failed to connect flight controller"
+        );
+        e
+    })
+}
+
+/// 起该机的三个转发任务（遥测 / 事件 / 唯一标识）。
+fn spawn_link_forwarders(tx: mpsc::Sender<AdapterMessage>, fc: FlightController) {
     spawn_telemetry_forwarder(tx.clone(), fc.clone());
     spawn_event_forwarder(tx.clone(), fc.clone());
     // 每台机体一个上报器：实测 uid 归属到自己的 drone_tag。
-    let reporter = Arc::new(IdentityReporter::new(drone_tag.clone()));
-    spawn_identity_forwarder(tx.clone(), fc.clone(), reporter);
-    Ok(())
+    let reporter = Arc::new(IdentityReporter::new(fc.drone_tag.clone()));
+    spawn_identity_forwarder(tx, fc, reporter);
+}
+
+/// 差量应用：新增建链、变更先建新链再关旧链（失败保留旧链）、移除关链。
+///
+/// - 新增 / 变更：**先建新链**，成功后才关旧链——端口变更时该机无空窗；
+///   新链建不起来时保留旧链（该机继续在线工作），并上报失败。
+/// - 移除：关链即可（该机被删除或换到了别的 adapter）。
+async fn apply_assignments(
+    tracker: &mut AssignmentTracker,
+    next: &[rustcam_drone_proto::link::DeviceAssignment],
+    cfg: &AdapterConfig,
+    tx: &mpsc::Sender<AdapterMessage>,
+    pool: &Arc<FcPool>,
+    endpoints: &EndpointRegistry,
+) -> ApplyReport {
+    let diff = assignments::diff_assignments(tracker.applied(), next);
+    let mut report = ApplyReport::default();
+    let by_tag: HashMap<String, &rustcam_drone_proto::link::DeviceAssignment> =
+        next.iter().map(|a| (a.drone_tag.clone(), a)).collect();
+
+    for (drone_tag, action) in diff.actions {
+        match action {
+            assignments::AssignmentAction::Keep => {}
+            assignments::AssignmentAction::Connect => {
+                let Some(assignment) = by_tag.get(&drone_tag) else {
+                    continue;
+                };
+                match open_assignment(cfg, tx, endpoints, assignment).await {
+                    Ok(fc) => {
+                        spawn_link_forwarders(tx.clone(), fc.clone());
+                        pool.insert(&drone_tag, fc);
+                        tracker.set_applied(&drone_tag, (*assignment).clone());
+                        report.connected += 1;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            drone_tag = %drone_tag,
+                            error = %e,
+                            "[Adapter] connect failed on assignment update"
+                        );
+                        report.failed += 1;
+                        report_failure(tx, &drone_tag, "connect failed").await;
+                    }
+                }
+            }
+            assignments::AssignmentAction::Reconnect => {
+                let Some(assignment) = by_tag.get(&drone_tag) else {
+                    continue;
+                };
+                // 先建新链：成功后才关旧链；失败保留旧链（该机继续在线工作）。
+                match open_assignment(cfg, tx, endpoints, assignment).await {
+                    Ok(fc) => {
+                        spawn_link_forwarders(tx.clone(), fc.clone());
+                        pool.remove(&drone_tag);
+                        pool.insert(&drone_tag, fc);
+                        tracker.set_applied(&drone_tag, (*assignment).clone());
+                        report.reconnected += 1;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            drone_tag = %drone_tag,
+                            error = %e,
+                            "[Adapter] reconnect failed, keeping old link"
+                        );
+                        report.failed += 1;
+                        report_failure(tx, &drone_tag, "reconnect failed").await;
+                    }
+                }
+            }
+            assignments::AssignmentAction::Disconnect => {
+                pool.remove(&drone_tag);
+                tracker.clear_applied(&drone_tag);
+                report.disconnected += 1;
+            }
+        }
+    }
+    report
+}
+
+/// 上报重配失败：平台据此产生告警（该机仍用旧链工作）。
+async fn report_failure(tx: &mpsc::Sender<AdapterMessage>, drone_tag: &str, detail: &str) {
+    let _ = tx
+        .send(AdapterMessage {
+            payload: Some(Payload::Event(rustcam_drone_proto::common::DeviceEvent {
+                drone_tag: drone_tag.to_string(),
+                r#type: "link_reconfig_failed".into(),
+                detail: detail.to_string(),
+                ts_ms: fc::now_ms(),
+            })),
+        })
+        .await;
 }
 
 /// 心跳周期以服务端为准；服务端未给出时用本地配置兜底（规则 §5.7）。
@@ -709,8 +851,7 @@ mod tests {
     }
 
     #[test]
-    fn ledger_keeps_pending_replies_for_resend() {
-        let ledger = CommandLedger::default();
+    fn ledger_keeps_pending_replies_for_resend() {        let ledger = CommandLedger::default();
         ledger.record_reply(CommandReply {
             cmd_id: "cmd-1".into(),
             drone_tag: "d1".into(),
@@ -723,5 +864,138 @@ mod tests {
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].cmd_id, "cmd-1");
         assert!(ledger.take_pending().is_empty(), "取出后不应重复补发");
+    }
+
+    /// 取一个空闲 UDP 端口（建链测试用）。
+    fn free_udp_port() -> u16 {
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        socket.local_addr().unwrap().port()
+    }
+
+    /// 参数变化：旧链关闭、新链建立，池里只剩新链，生效配置同步更新。
+    #[tokio::test]
+    async fn apply_assignments_rebuilds_changed_link() {
+        let port_a = free_udp_port();
+        let port_b = free_udp_port();
+        let cfg = AdapterConfig::default();
+        let (tx, _guard) = mpsc::channel(8);
+        let pool = Arc::new(FcPool::default());
+        let endpoints = EndpointRegistry::new();
+
+        let old = rustcam_drone_proto::link::DeviceAssignment {
+            drone_tag: "drone-x".into(),
+            mavlink_addr: format!("udpin:127.0.0.1:{port_a}"),
+            mavlink_sysid: 1,
+            mavlink_compid: 1,
+            ..Default::default()
+        };
+        let new = rustcam_drone_proto::link::DeviceAssignment {
+            mavlink_addr: format!("udpin:127.0.0.1:{port_b}"),
+            ..old.clone()
+        };
+
+        let mut tracker = AssignmentTracker::new(&[old.clone()]);
+        connect_assignment(&cfg, &tx, &pool, &endpoints, &old)
+            .await
+            .expect("初始建链");
+        assert!(pool.get("drone-x").is_some());
+
+        let report = apply_assignments(
+            &mut tracker,
+            &[new.clone()],
+            &cfg,
+            &tx,
+            &pool,
+            &endpoints,
+        )
+        .await;
+
+        assert_eq!(report.reconnected, 1, "应重建一条链路");
+        assert_eq!(report.failed, 0);
+        assert!(pool.get("drone-x").is_some(), "新链应已入池");
+        assert_eq!(
+            tracker
+                .applied()
+                .get("drone-x")
+                .map(|a| a.mavlink_addr.clone()),
+            Some(new.mavlink_addr.clone())
+        );
+    }
+
+    /// 新链建不起来：旧链保留（该机继续在线工作），失败计数 +1。
+    #[tokio::test]
+    async fn apply_assignments_keeps_old_link_on_failure() {
+        let port_a = free_udp_port();
+        // 占用目标端口，让新链必然 bind 失败。
+        let blocker = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind blocker");
+        let blocked_port = blocker.local_addr().expect("local addr").port();
+
+        let cfg = AdapterConfig::default();
+        let (tx, _guard) = mpsc::channel(8);
+        let pool = Arc::new(FcPool::default());
+        let endpoints = EndpointRegistry::new();
+
+        let old = rustcam_drone_proto::link::DeviceAssignment {
+            drone_tag: "drone-y".into(),
+            mavlink_addr: format!("udpin:127.0.0.1:{port_a}"),
+            mavlink_sysid: 1,
+            mavlink_compid: 1,
+            ..Default::default()
+        };
+        let new = rustcam_drone_proto::link::DeviceAssignment {
+            mavlink_addr: format!("udpin:127.0.0.1:{blocked_port}"),
+            ..old.clone()
+        };
+
+        let mut tracker = AssignmentTracker::new(&[old.clone()]);
+        connect_assignment(&cfg, &tx, &pool, &endpoints, &old)
+            .await
+            .expect("初始建链");
+
+        let report = apply_assignments(&mut tracker, &[new], &cfg, &tx, &pool, &endpoints).await;
+
+        assert_eq!(report.failed, 1, "应记一次失败");
+        assert_eq!(report.reconnected, 0);
+        assert!(pool.get("drone-y").is_some(), "旧链必须保留");
+        assert_eq!(
+            tracker
+                .applied()
+                .get("drone-y")
+                .map(|a| a.mavlink_addr.clone()),
+            Some(old.mavlink_addr.clone()),
+            "生效配置仍应是旧地址"
+        );
+    }
+
+    /// 参数没变：不重建（不闪断）。
+    #[tokio::test]
+    async fn apply_assignments_keeps_unchanged_link() {
+        let port_a = free_udp_port();
+        let cfg = AdapterConfig::default();
+        let (tx, _guard) = mpsc::channel(8);
+        let pool = Arc::new(FcPool::default());
+        let endpoints = EndpointRegistry::new();
+
+        let assignment = rustcam_drone_proto::link::DeviceAssignment {
+            drone_tag: "drone-z".into(),
+            mavlink_addr: format!("udpin:127.0.0.1:{port_a}"),
+            mavlink_sysid: 1,
+            mavlink_compid: 1,
+            ..Default::default()
+        };
+
+        let mut tracker = AssignmentTracker::new(&[assignment.clone()]);
+        connect_assignment(&cfg, &tx, &pool, &endpoints, &assignment)
+            .await
+            .expect("初始建链");
+
+        let report =
+            apply_assignments(&mut tracker, &[assignment], &cfg, &tx, &pool, &endpoints).await;
+
+        assert_eq!(report.reconnected, 0);
+        assert_eq!(report.connected, 0);
+        assert_eq!(report.disconnected, 0);
+        assert_eq!(report.failed, 0);
+        assert!(pool.get("drone-z").is_some());
     }
 }

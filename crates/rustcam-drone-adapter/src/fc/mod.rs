@@ -474,6 +474,25 @@ impl FcPool {
         }
     }
 
+    /// 摘除某台机体的链路并关闭它；返回被摘除的连接。
+    ///
+    /// 只关**这一台**：共享 UDP 端口的 socket 由 `SharedEndpoint` 的按-sysid
+    /// 订阅计数决定——最后一个订阅者离开才关端口（`fc/shared.rs`），
+    /// 因此关闭一台不会误伤同端口的其它机体。
+    pub fn remove(&self, drone_tag: &str) -> Option<FlightController> {
+        let removed = {
+            let mut guard = self
+                .links
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
+            guard.remove(drone_tag)
+        };
+        if let Some(fc) = &removed {
+            fc.close();
+        }
+        removed
+    }
+
     /// 停止全部链路的后台任务。
     pub fn close(&self) {
         let guard = self
@@ -1061,5 +1080,53 @@ mod tests {
         })
         .await;
         assert!(rebind.is_ok(), "port should be released after all drones drop");
+    }
+
+    /// 关闭一台机不能误伤共用同一端口的其它机体：
+    /// 订阅计数只少一个、端口仍被占用、另一台仍在池里。
+    #[tokio::test]
+    async fn removing_one_drone_keeps_shared_port_for_others() {
+        let port = free_udp_port();
+        let key = format!("udpin:127.0.0.1:{port}");
+        let registry = EndpointRegistry::new();
+        let endpoint = registry
+            .get_or_bind(key.clone(), &format!("127.0.0.1:{port}"))
+            .await
+            .unwrap();
+
+        let cfg = test_config();
+        let fc1 = FlightController::connect_shared(endpoint.clone(), 1, "drone-001", 1, &cfg)
+            .await
+            .unwrap();
+        let fc2 = FlightController::connect_shared(endpoint.clone(), 2, "drone-002", 1, &cfg)
+            .await
+            .unwrap();
+        assert_eq!(endpoint.subscriber_count(), 2);
+
+        let pool = FcPool::default();
+        pool.insert("drone-001", fc1);
+        pool.insert("drone-002", fc2);
+
+        // 摘掉 drone-001（模拟重配时关闭旧链）。
+        let removed = pool.remove("drone-001");
+        assert!(removed.is_some(), "drone-001 应被摘除");
+        drop(removed);
+
+        // 订阅计数回落到 1：drone-002 仍在同一端口上。
+        let mut count = endpoint.subscriber_count();
+        for _ in 0..40 {
+            if count == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            count = endpoint.subscriber_count();
+        }
+        assert_eq!(count, 1, "只应摘掉 drone-001 的订阅");
+        assert!(pool.get("drone-002").is_some(), "drone-002 不应被摘除");
+        // 端口仍被 drone-002 占用，不应被释放。
+        assert!(
+            std::net::UdpSocket::bind(("127.0.0.1", port)).is_err(),
+            "共享端口不应被释放"
+        );
     }
 }
