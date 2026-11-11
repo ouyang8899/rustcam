@@ -1,0 +1,12 @@
+{
+  "name": "mcp",
+  "version": "0.0.0",
+  "description": "rustcam mcp server for ai agent",
+  "license": "MIT",
+  "author": "ouyang",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "structured-agent",
+  "version": "0.0.1",
+  "description": "rustcam ai agent extend operation use structured view",
+  "license": "MIT",
+  "author": "ouyang",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}
