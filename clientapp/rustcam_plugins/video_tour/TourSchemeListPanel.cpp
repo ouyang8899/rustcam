@@ -19,10 +19,6 @@ TourSchemeListPanel::TourSchemeListPanel(TourApi* api, QWidget* parent)
     layout->setContentsMargins(4, 4, 4, 4);
     layout->setSpacing(4);
 
-    m_list = new QListWidget(this);
-    m_list->setSelectionMode(QAbstractItemView::SingleSelection);
-    layout->addWidget(m_list, 1);
-
     QHBoxLayout* buttons = new QHBoxLayout();
     m_newButton = new QPushButton(tr("新建"), this);
     m_editButton = new QPushButton(tr("编辑"), this);
@@ -33,6 +29,10 @@ TourSchemeListPanel::TourSchemeListPanel(TourApi* api, QWidget* parent)
     buttons->addWidget(m_deleteButton);
     buttons->addWidget(m_startButton);
     layout->addLayout(buttons);
+
+    m_list = new QListWidget(this);
+    m_list->setSelectionMode(QAbstractItemView::SingleSelection);
+    layout->addWidget(m_list, 1);
 
     connect(m_list, &QListWidget::itemActivated, this, &TourSchemeListPanel::onItemActivated);
     connect(m_list, &QListWidget::itemSelectionChanged, this, &TourSchemeListPanel::onSelectionChanged);
@@ -99,6 +99,13 @@ void TourSchemeListPanel::onSelectionChanged()
     m_editButton->setEnabled(hasSelection);
     m_deleteButton->setEnabled(hasSelection);
     m_startButton->setEnabled(hasSelection);
+
+    TourScheme scheme;
+    if (hasSelection && currentScheme(&scheme)) {
+        emit schemeSelected(scheme);
+    } else {
+        emit schemeSelected(TourScheme());
+    }
 }
 
 void TourSchemeListPanel::onItemActivated(QListWidgetItem* item)

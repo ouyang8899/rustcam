@@ -6,13 +6,13 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSplitter>
-#include <QTableView>
 #include <QVBoxLayout>
 
 #include "SingleInstanceGuard.h"
 #include "TourApi.h"
 #include "TourAuditLog.h"
 #include "TourChannelModel.h"
+#include "TourChannelStatusPanel.h"
 #include "TourPlayerManager.h"
 #include "TourScheduler.h"
 #include "TourSchemeListPanel.h"
@@ -25,10 +25,20 @@ TourRunWidget::TourRunWidget(TourApi* api, QWidget* parent)
 {
     QSplitter* splitter = new QSplitter(Qt::Horizontal, this);
 
-    m_listPanel = new TourSchemeListPanel(m_api, splitter);
+    // 左栏：方案树（上）与通道状态列表（下），两者可上下拖动调整高度。
+    QSplitter* leftSplitter = new QSplitter(Qt::Vertical, splitter);
+
+    m_listPanel = new TourSchemeListPanel(m_api, leftSplitter);
     m_listPanel->setMinimumWidth(280);
     m_listPanel->setMaximumWidth(360);
-    splitter->addWidget(m_listPanel);
+    leftSplitter->addWidget(m_listPanel);
+
+    m_statusPanel = new TourChannelStatusPanel(leftSplitter);
+    leftSplitter->addWidget(m_statusPanel);
+    leftSplitter->setStretchFactor(0, 1);
+    leftSplitter->setStretchFactor(1, 1);
+
+    splitter->addWidget(leftSplitter);
 
     QWidget* right = new QWidget(splitter);
     QVBoxLayout* rightLayout = new QVBoxLayout(right);
@@ -53,26 +63,15 @@ TourRunWidget::TourRunWidget(TourApi* api, QWidget* parent)
     m_gridHost->setMinimumHeight(320);
     rightLayout->addWidget(m_gridHost, 1);
 
-    m_model = new TourChannelModel(this);
-    m_tableView = new QTableView(right);
-    m_tableView->setModel(m_model);
-    m_tableView->setMinimumHeight(160);
-    m_tableView->setMaximumHeight(220);
-    m_tableView->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_tableView->horizontalHeader()->setStretchLastSection(true);
-    rightLayout->addWidget(m_tableView);
-
     QHBoxLayout* controls = new QHBoxLayout();
     m_pauseButton = new QPushButton(tr("暂停"), right);
     m_stopButton = new QPushButton(tr("停止"), right);
     m_prevButton = new QPushButton(tr("上一批"), right);
     m_nextButton = new QPushButton(tr("下一批"), right);
-    m_retryButton = new QPushButton(tr("重试"), right);
     controls->addWidget(m_pauseButton);
     controls->addWidget(m_stopButton);
     controls->addWidget(m_prevButton);
     controls->addWidget(m_nextButton);
-    controls->addWidget(m_retryButton);
     controls->addStretch(1);
     rightLayout->addLayout(controls);
 
@@ -84,11 +83,15 @@ TourRunWidget::TourRunWidget(TourApi* api, QWidget* parent)
 
     m_scheduler = new TourScheduler(this);
     m_players = new TourPlayerManager(m_api, m_gridHost, this);
+    m_model = m_statusPanel->model();
 
     connect(m_listPanel, &TourSchemeListPanel::startRequested, this, &TourRunWidget::onStartRequested);
+    connect(m_listPanel, &TourSchemeListPanel::schemeSelected, this, &TourRunWidget::onSchemeSelected);
     connect(m_listPanel, &TourSchemeListPanel::notify, this, [this](const QString& message, bool isError) {
         emit notify(message, isError);
     });
+
+    connect(m_statusPanel, &TourChannelStatusPanel::retryRequested, this, &TourRunWidget::onRetryRequested);
 
     connect(m_scheduler, &TourScheduler::playRequested, m_players, &TourPlayerManager::play);
     connect(m_scheduler, &TourScheduler::releaseRequested, this, [this](const QString& layoutItemId) {
@@ -104,7 +107,7 @@ TourRunWidget::TourRunWidget(TourApi* api, QWidget* parent)
     connect(m_players, &TourPlayerManager::stalled, m_scheduler, &TourScheduler::onStalled);
     connect(m_players, &TourPlayerManager::fullscreenChanged, this,
             [this](const QString&, bool fullscreen) { m_scheduler->setFullscreenPaused(fullscreen); });
-    connect(m_players, &TourPlayerManager::retryRequested, this, &TourRunWidget::onRetryRequested);
+    connect(m_players, &TourPlayerManager::retryRequested, this, &TourRunWidget::onCellRetryRequested);
 
     connect(m_scheduler, &TourScheduler::windowStateChanged, this,
             &TourRunWidget::onWindowStateChanged);
@@ -117,7 +120,6 @@ TourRunWidget::TourRunWidget(TourApi* api, QWidget* parent)
     connect(m_stopButton, &QPushButton::clicked, this, &TourRunWidget::onStopClicked);
     connect(m_nextButton, &QPushButton::clicked, this, &TourRunWidget::onNextBatchClicked);
     connect(m_prevButton, &QPushButton::clicked, this, &TourRunWidget::onPrevBatchClicked);
-    connect(m_retryButton, &QPushButton::clicked, this, &TourRunWidget::onRetryClicked);
 
     updateButtons();
 }
@@ -137,7 +139,9 @@ void TourRunWidget::onSessionReady()
             emit notify(tr("加载布局失败：%1").arg(error), true);
             return;
         }
+        m_layouts = layouts;
         m_listPanel->setLayouts(layouts);
+        refreshGrid();
     });
     m_listPanel->refresh();
 }
@@ -154,9 +158,60 @@ void TourRunWidget::stopTask()
     m_guard = nullptr;
 }
 
+const PlayerLayout* TourRunWidget::layoutById(int layoutId) const
+{
+    for (const PlayerLayout& layout : m_layouts) {
+        if (layout.id == layoutId) {
+            return &layout;
+        }
+    }
+    return nullptr;
+}
+
+void TourRunWidget::refreshGrid()
+{
+    if (!m_players) {
+        return;
+    }
+    // 轮询运行中不改网格：重建会释放正在播放的窗口。
+    if (m_scheduler) {
+        const TourTaskState state = m_scheduler->taskState();
+        if (state == TourTaskState::Running || state == TourTaskState::Paused) {
+            return;
+        }
+    }
+    // 选中方案的布局优先；未选中时用默认布局，都没有则用第一个布局。
+    TourScheme scheme;
+    const PlayerLayout* target = nullptr;
+    if (m_listPanel && m_listPanel->currentScheme(&scheme)) {
+        target = layoutById(scheme.layoutId);
+    }
+    if (!target) {
+        for (const PlayerLayout& layout : m_layouts) {
+            if (layout.isDefault) {
+                target = &layout;
+                break;
+            }
+        }
+    }
+    if (!target && !m_layouts.isEmpty()) {
+        target = &m_layouts.first();
+    }
+    if (target) {
+        m_players->setLayout(*target);
+    }
+}
+
 void TourRunWidget::onStartRequested(const TourScheme& scheme)
 {
     startScheme(scheme);
+}
+
+void TourRunWidget::onSchemeSelected(const TourScheme& scheme)
+{
+    Q_UNUSED(scheme)
+    // 选中方案即刷新右侧网格：未开始轮询时也能看到该方案的窗口布局。
+    refreshGrid();
 }
 
 void TourRunWidget::startScheme(const TourScheme& scheme)
@@ -171,13 +226,9 @@ void TourRunWidget::startScheme(const TourScheme& scheme)
             emit notify(tr("加载布局失败：%1").arg(error), true);
             return;
         }
-        const PlayerLayout* target = nullptr;
-        for (const PlayerLayout& layout : layouts) {
-            if (layout.id == scheme.layoutId) {
-                target = &layout;
-                break;
-            }
-        }
+        m_layouts = layouts;
+        m_listPanel->setLayouts(layouts);
+        const PlayerLayout* target = layoutById(scheme.layoutId);
         if (!target) {
             emit notify(tr("布局 %1 不存在").arg(scheme.layoutId), true);
             return;
@@ -264,20 +315,16 @@ void TourRunWidget::onPrevBatchClicked()
     }
 }
 
-void TourRunWidget::onRetryClicked()
+void TourRunWidget::onRetryRequested(int row)
 {
-    if (!m_scheduler || !m_tableView || !m_tableView->selectionModel()) {
+    if (!m_scheduler) {
         return;
     }
-    const QModelIndexList selection = m_tableView->selectionModel()->selectedRows();
-    if (selection.isEmpty()) {
+    if (row < 0) {
         emit notify(tr("请先在状态表中选择通道"), false);
         return;
     }
-    const int row = selection.first().row();
-    const QVector<TourScheme> empty;
-    Q_UNUSED(empty);
-    if (row < 0 || row >= m_currentScheme.channels.size()) {
+    if (row >= m_currentScheme.channels.size()) {
         return;
     }
     const TourChannelRef ref = m_currentScheme.channels.at(row).ref();
@@ -289,7 +336,7 @@ void TourRunWidget::onRetryClicked()
     m_scheduler->retrySlot(layoutItemId);
 }
 
-void TourRunWidget::onRetryRequested(const QString& layoutItemId)
+void TourRunWidget::onCellRetryRequested(const QString& layoutItemId)
 {
     if (m_scheduler) {
         m_scheduler->retrySlot(layoutItemId);
@@ -311,9 +358,12 @@ void TourRunWidget::onBatchStarted(int batchIndex, int cycle, QVector<TourChanne
 void TourRunWidget::onWindowStateChanged(const QString& layoutItemId, TourChannelState state,
                                          TourChannelRef channel, QString reason)
 {
-    Q_UNUSED(layoutItemId)
     if (!channel.isEmpty()) {
         m_model->setState(channel, state, reason, m_scheduler->currentBatchIndex());
+    }
+    // 窗口角标跟随调度器状态：已跳过/已锁定等只有调度器知道。
+    if (m_players) {
+        m_players->setSlotState(layoutItemId, state, reason);
     }
 }
 
@@ -337,7 +387,7 @@ void TourRunWidget::updateButtons()
     m_stopButton->setEnabled(running);
     m_prevButton->setEnabled(running);
     m_nextButton->setEnabled(running);
-    m_retryButton->setEnabled(running);
+    m_statusPanel->setRetryEnabled(running);
 }
 
 } // namespace rustcam

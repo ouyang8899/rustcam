@@ -16,7 +16,7 @@ namespace rustcam {
 
 class TourApi;
 
-/// 左侧方案列表：新建 / 编辑 / 删除 / 开始。
+/// 左侧方案面板：顶部操作按钮（新建 / 编辑 / 删除 / 开始）+ 下方方案树。
 class TourSchemeListPanel : public QWidget {
     Q_OBJECT
 public:
@@ -31,6 +31,8 @@ public:
 
 signals:
     void startRequested(const TourScheme& scheme);
+    /// 选中项变化；未选中时 scheme 为空。
+    void schemeSelected(const TourScheme& scheme);
     void schemesChanged();
     void notify(const QString& message, bool isError);
 

@@ -1,23 +1,25 @@
 #pragma once
 
+#include "PlayerLayout.h"
 #include "TourScheme.h"
 
+#include <QList>
 #include <QWidget>
 
 class QLabel;
 class QPushButton;
-class QTableView;
 
 namespace rustcam {
 
 class TourApi;
 class TourChannelModel;
+class TourChannelStatusPanel;
 class TourPlayerManager;
 class TourScheduler;
 class TourSchemeListPanel;
 class SingleInstanceGuard;
 
-/// 运行页：左侧方案列表 + 右侧网格/状态表/控制条。
+/// 运行页：左侧方案区（方案树 + 通道状态列表）+ 右侧视频网格/控制条。
 class TourRunWidget : public QWidget {
     Q_OBJECT
 public:
@@ -34,33 +36,40 @@ signals:
 
 private slots:
     void onStartRequested(const TourScheme& scheme);
+    void onSchemeSelected(const TourScheme& scheme);
     void onPauseClicked();
     void onStopClicked();
     void onNextBatchClicked();
     void onPrevBatchClicked();
-    void onRetryClicked();
+    void onRetryRequested(int row);
     void onTaskStateChanged(int state);
     void onBatchStarted(int batchIndex, int cycle, QVector<TourChannelRef> channels);
     void onWindowStateChanged(const QString& layoutItemId, TourChannelState state,
                               TourChannelRef channel, QString reason);
-    void onCountdown(int dwellRemainMs, int batchTimeoutRemainMs);
+    void onCountdown(int dwellRemainMs, int batchTimeoutMs);
     void onPageAtEnd();
-    void onRetryRequested(const QString& layoutItemId);
+    void onCellRetryRequested(const QString& layoutItemId);
 
 private:
     void startScheme(const TourScheme& scheme);
     void updateButtons();
     void showLockedChannels(const TourScheme& scheme, const TourSnapshot& snapshot);
+    /// 按当前选中方案（或默认布局）重建视频网格。
+    void refreshGrid();
+    /// 按布局 id 取布局；找不到返回 nullptr。
+    const PlayerLayout* layoutById(int layoutId) const;
 
     TourApi* m_api = nullptr;
     TourSchemeListPanel* m_listPanel = nullptr;
+    TourChannelStatusPanel* m_statusPanel = nullptr;
     TourPlayerManager* m_players = nullptr;
     TourScheduler* m_scheduler = nullptr;
     TourChannelModel* m_model = nullptr;
     SingleInstanceGuard* m_guard = nullptr;
 
+    QList<PlayerLayout> m_layouts;
+
     QWidget* m_gridHost = nullptr;
-    QTableView* m_tableView = nullptr;
     QLabel* m_schemeLabel = nullptr;
     QLabel* m_batchLabel = nullptr;
     QLabel* m_slotsLabel = nullptr;
@@ -71,7 +80,6 @@ private:
     QPushButton* m_stopButton = nullptr;
     QPushButton* m_prevButton = nullptr;
     QPushButton* m_nextButton = nullptr;
-    QPushButton* m_retryButton = nullptr;
 
     TourScheme m_currentScheme;
 };

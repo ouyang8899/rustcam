@@ -5,9 +5,11 @@ set(PLUGIN_SOURCES
     TourScheme.cpp
     TourBatchPlanner.cpp
     TourApi.cpp
+    TourPlayer.cpp
     TourPlayerManager.cpp
     TourScheduler.cpp
     TourChannelModel.cpp
+    TourChannelStatusPanel.cpp
     TourAuditLog.cpp
     SingleInstanceGuard.cpp
     TourSchemeListPanel.cpp
@@ -21,9 +23,11 @@ set(PLUGIN_HEADERS
     TourScheme.h
     TourBatchPlanner.h
     TourApi.h
+    TourPlayer.h
     TourPlayerManager.h
     TourScheduler.h
     TourChannelModel.h
+    TourChannelStatusPanel.h
     TourAuditLog.h
     SingleInstanceGuard.h
     TourSchemeListPanel.h

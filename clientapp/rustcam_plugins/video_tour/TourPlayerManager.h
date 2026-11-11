@@ -9,54 +9,24 @@
 
 #include "PlayerLayout.h"
 
-class QGridLayout;
-class QLabel;
 class QTimer;
-class QToolButton;
 
 namespace rustcam {
 
-class VideoPlayer;
 class TourApi;
+class TourPlayer;
 
-/// 网格里的一个格子：画面 + 通道名 + 状态角标 + 全屏/音频/重试按钮。
-class TourCell : public QWidget {
-    Q_OBJECT
-public:
-    explicit TourCell(const QString& layoutItemId, QWidget* parent = nullptr);
-
-    QString layoutItemId() const { return m_layoutItemId; }
-    VideoPlayer* player() const { return m_player; }
-    QString title() const;
-    QString statusText() const;
-
-    void setChannelTitle(const QString& text);
-    void setStatusText(const QString& text);
-    void setAudioEnabled(bool enabled);
-
-signals:
-    void retryRequested(const QString& layoutItemId);
-    void fullscreenRequested(const QString& layoutItemId);
-    void audioToggled(const QString& layoutItemId, bool enabled);
-
-private:
-    QString m_layoutItemId;
-    VideoPlayer* m_player = nullptr;
-    QLabel* m_titleLabel = nullptr;
-    QLabel* m_statusLabel = nullptr;
-    QToolButton* m_fullscreenButton = nullptr;
-    QToolButton* m_audioButton = nullptr;
-    QToolButton* m_retryButton = nullptr;
-};
-
-/// 播放器池：按布局创建 VideoPlayer，负责取流地址、看门狗与音频/全屏控制。
+/// 播放器池：按布局创建轮询窗口，负责取流地址、看门狗与音频/全屏控制。
+///
+/// 格子按布局绝对定位：宿主尺寸变化时重新计算每个格子的矩形，
+/// 不使用 QGridLayout，避免网格与画布两套坐标系。
 class TourPlayerManager : public QObject {
     Q_OBJECT
 public:
     explicit TourPlayerManager(TourApi* api, QWidget* gridHost, QObject* parent = nullptr);
     ~TourPlayerManager() override;
 
-    /// 按布局重建网格。
+    /// 按布局重建格子。
     void setLayout(const PlayerLayout& layout);
 
     /// 在指定格子播放某路通道；generation 用于丢弃过期回调。
@@ -64,10 +34,14 @@ public:
     void releaseSlot(const QString& layoutItemId);
     void releaseAll();
 
+    /// 设置窗口角标状态（由调度器状态驱动）。
+    void setSlotState(const QString& layoutItemId, TourChannelState state, const QString& reason = QString());
+
+    /// 同一时刻只让一个窗口出声。
     void setAudio(const QString& layoutItemId, bool enabled);
     void toggleFullscreen(const QString& layoutItemId);
 
-    VideoPlayer* playerFor(const QString& layoutItemId) const;
+    TourPlayer* playerFor(const QString& layoutItemId) const;
     QString channelTitle(const QString& layoutItemId) const;
 
 signals:
@@ -81,26 +55,17 @@ signals:
 private slots:
     void onWatchdog();
 
-private:
-    struct SlotState {
-        quint64 generation = 0;
-        qint64 lastFrames = -1;
-        int stalledTicks = 0;
-        bool playing = false;
-    };
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
-    void onPlayUrlReady(const QString& layoutItemId, quint64 generation, bool success,
-                        const QString& url, const QString& error);
-    void onCellStarted(const QString& layoutItemId);
-    void onCellError(const QString& layoutItemId, const QString& reason);
-    void onCellDisconnected(const QString& layoutItemId);
-    void onCellFullscreen(const QString& layoutItemId, bool fullscreen);
+private:
+    /// 按当前宿主尺寸重算所有格子的位置与大小。
+    void applyLayout();
 
     TourApi* m_api = nullptr;
     QWidget* m_host = nullptr;
-    QGridLayout* m_grid = nullptr;
-    QMap<QString, TourCell*> m_cells;
-    QMap<QString, SlotState> m_states;
+    PlayerLayout m_layout;
+    QMap<QString, TourPlayer*> m_cells;
     QTimer* m_watchdog = nullptr;
 };
 

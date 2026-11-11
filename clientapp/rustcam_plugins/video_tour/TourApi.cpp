@@ -17,6 +17,29 @@ QJsonObject dataOf(const QJsonObject& response)
     return response.value(QStringLiteral("data")).toObject();
 }
 
+/// 构造 rows×cols 的兜底布局，窗口 id 为 cell-N。
+/// 与 DataManager::loadLayouts 的兜底一致：服务端没有布局时给默认窗口，
+/// 否则运行页网格会是空白。
+PlayerLayout makeFallbackLayout(int id, int rows, int cols, const QString& name, bool isDefault)
+{
+    PlayerLayout layout;
+    layout.id = id;
+    layout.name = name;
+    layout.rows = rows;
+    layout.cols = cols;
+    layout.isDefault = isDefault;
+    for (int i = 0; i < rows * cols; ++i) {
+        LayoutItem item;
+        item.id = QStringLiteral("cell-%1").arg(i);
+        item.row = i / cols;
+        item.col = i % cols;
+        item.rowSpan = 1;
+        item.colSpan = 1;
+        layout.layoutJson.append(item);
+    }
+    return layout;
+}
+
 } // namespace
 
 TourApi::TourApi(QObject* parent)
@@ -195,6 +218,12 @@ void TourApi::loadLayouts(LayoutCb cb)
                 for (const QJsonValue& value : array) {
                     layouts.append(PlayerLayout::fromJson(value.toObject()));
                 }
+            }
+            if (layouts.isEmpty()) {
+                // 服务端没有布局时给出兜底窗口，否则运行页网格会是空白。
+                layouts.append(makeFallbackLayout(1, 1, 1, QStringLiteral("1x1"), false));
+                layouts.append(makeFallbackLayout(2, 2, 2, QStringLiteral("2x2"), true));
+                layouts.append(makeFallbackLayout(3, 3, 3, QStringLiteral("3x3"), false));
             }
             if (cb) {
                 cb(success, layouts, success ? QString() : error);
