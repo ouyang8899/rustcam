@@ -9,6 +9,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { LngLatBounds, Map as MapLibreMap, Marker, NavigationControl, setWorkerUrl } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { FENCE_COLORS, fenceRule } from '../../utils/fenceStyle'
 
 // MapLibre 通过 import.meta.url 推导 Worker 地址；经 Vite 预打包/分包后该地址并不存在，
 // GeoJSON 图层（围栏、航线、回放轨迹）会因 Worker 加载失败而完全不渲染。
@@ -124,7 +125,7 @@ function fenceFeatures() {
     features.push({
       type: 'Feature',
       id: f.id || newId(),
-      properties: { name: f.name, type: f.type, shape: f.shape || 'polygon' },
+      properties: { name: f.name, type: fenceRule(f.type), shape: f.shape || 'polygon' },
       geometry: geo,
     })
   }
@@ -371,7 +372,12 @@ function addOverlayLayers() {
     type: 'fill',
     source: 'drone-fences',
     paint: {
-      'fill-color': ['case', ['==', ['get', 'type'], 'allowed'], '#22c55e', '#ef4444'],
+      'fill-color': [
+        'case',
+        ['==', ['get', 'type'], 'allowed'],
+        FENCE_COLORS.allowed.fill,
+        FENCE_COLORS.no_fly.fill,
+      ],
       'fill-opacity': 0.18,
     },
   })
@@ -380,7 +386,12 @@ function addOverlayLayers() {
     type: 'line',
     source: 'drone-fences',
     paint: {
-      'line-color': ['case', ['==', ['get', 'type'], 'allowed'], '#22c55e', '#ef4444'],
+      'line-color': [
+        'case',
+        ['==', ['get', 'type'], 'allowed'],
+        FENCE_COLORS.allowed.outline,
+        FENCE_COLORS.no_fly.outline,
+      ],
       'line-width': 2,
     },
   })

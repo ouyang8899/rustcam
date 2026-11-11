@@ -8,7 +8,7 @@
       </div>
       <div class="page-toolbar">
         <el-radio-group v-model="mapMode" size="small">
-          <el-radio-button value="2d" :disabled="form.shape === 'circle'">2D 绘制</el-radio-button>
+          <el-radio-button value="2d">2D 绘制</el-radio-button>
           <el-radio-button value="3d">3D 绘制</el-radio-button>
         </el-radio-group>
         <el-button :icon="Plus" @click="newFence">新建围栏</el-button>
@@ -27,11 +27,11 @@
           @click="loadFence(f)"
         >
           <div class="fence-name">
-            <span class="dot" :class="f.type === 'allowed' ? 'green' : 'red'"></span>
+            <span class="dot" :style="{ background: fenceColors(f.type).fill }"></span>
             {{ f.name }}
           </div>
           <div class="fence-meta">
-            {{ f.type === 'allowed' ? '允许区' : '禁飞区' }} ·
+            {{ fenceRuleLabel(f.type) }} ·
             {{ f.shape === 'circle' ? `半径 ${Math.round(f.radius_m)}m` : '多边形' }}
             · {{ f.min_alt }}-{{ f.max_alt }}m ·
             {{ fenceScope(f) }}
@@ -85,42 +85,69 @@
           </el-form-item>
         </el-form>
 
-        <div v-if="form.shape === 'polygon'" class="draw-hint">
-          <template v-if="mapMode === '2d'">
-            点击地图添加顶点，双击闭合；拖动顶点可调整，至少 3 个。
+        <div v-if="mapMode === '2d'" class="draw-hint">
+          <template v-if="form.shape === 'polygon'">
+            点击地图添加顶点，右键结束（至少 3 个），再点顶部“保存”。
           </template>
           <template v-else>
-            已选 {{ points.length }} 个顶点，点击地图继续添加，至少 3 个。
+            点击设置圆心，移动鼠标预览半径，右键结束，再点顶部“保存”。
           </template>
-          <el-button text size="small" @click="clearPoints">清空</el-button>
+          <el-button text size="small" @click="clearDraft">清空</el-button>
         </div>
         <div v-else class="draw-hint">
-          {{ circleStep === 0 ? '点击地图设置圆心' : '点击地图设置半径' }}
-          <el-button text size="small" @click="resetCircle">重选</el-button>
+          <template v-if="form.shape === 'polygon'">
+            <template v-if="drawingActive">
+              已选 {{ points.length }} 个顶点，点击地图继续添加，右键结束（至少 3 个）。
+            </template>
+            <template v-else>点击地图开始新绘制（将替换当前图形）。</template>
+          </template>
+          <template v-else>
+            <template v-if="!drawingActive">点击地图设置圆心（将替换当前圆形）。</template>
+            <template v-else-if="circleStep === 1">移动鼠标预览半径，右键结束。</template>
+            <template v-else>可点击调整半径，右键结束。</template>
+          </template>
+          <el-button text size="small" @click="clearDraft">重选</el-button>
         </div>
       </aside>
 
       <div class="fence-map">
         <GeofenceDraw
-          v-if="mapMode === '2d' && form.shape === 'polygon'"
+          v-if="mapMode === '2d'"
+          ref="drawRef"
           :center="mapCenter"
+          :shape="form.shape"
+          :rule="form.type"
           :fences="otherFences"
           :initial-geometry="initialGeometry"
-          @save="onDrawSave"
+          :initial-circle="initialCircle"
+          @change="onDrawChange"
         />
         <CesiumGlobe
           v-else
           ref="globeRef"
           :drones="store.drones"
-          :fences="store.fences"
+          :fences="otherFences"
           :draw-mode="form.shape"
+          :draft-rule="form.type"
+          :drawing-active="drawingActive"
           :draft-points="points"
           :draft-circle="draftCircle"
           @map-click="onMapClick"
+          @finish="onDrawFinish"
         >
           <template #hint>
             <el-tag type="warning" effect="dark">
-              {{ form.shape === 'polygon' ? '点击地球添加多边形顶点' : '点击地球绘制圆形围栏' }}
+              {{
+                form.shape === 'polygon'
+                  ? drawingActive
+                    ? '点击继续添加顶点，右键结束'
+                    : '点击地球开始新绘制'
+                  : drawingActive
+                    ? circleStep === 1
+                      ? '移动鼠标预览半径，右键结束'
+                      : '点击调整半径，右键结束'
+                    : '点击地球设置圆心'
+              }}
             </el-tag>
           </template>
         </CesiumGlobe>
@@ -134,16 +161,20 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { useDroneStore } from '../../stores/droneStore'
+import { fenceColors, fenceRuleLabel } from '../../utils/fenceStyle'
 import CesiumGlobe from '../../components/drone/CesiumGlobe.vue'
 import GeofenceDraw from '../../components/drone/GeofenceDraw.vue'
 
 const store = useDroneStore()
 const globeRef = ref(null)
+const drawRef = ref(null)
 const points = ref([])
 const circle = reactive({ lat: 0, lon: 0, radius_m: 0 })
 const circleStep = ref(0)
-/** 规则 §10.5：多边形围栏默认使用 terra-draw 二维绘制，圆形仍走 Cesium。 */
+/** 规则 §10.5：多边形与圆形默认使用 terra-draw 二维绘制，三维模式走 Cesium。 */
 const mapMode = ref('2d')
+/** 三维正在绘制：首次点击开启新图形，右键结束后回到预览态。 */
+const drawingActive = ref(false)
 
 const form = reactive({
   id: '',
@@ -157,7 +188,7 @@ const form = reactive({
 })
 
 const draftCircle = computed(() =>
-  form.shape === 'circle' && circle.radius_m > 0
+  form.shape === 'circle' && circleStep.value > 0
     ? { lat: circle.lat, lon: circle.lon, radius_m: circle.radius_m }
     : null
 )
@@ -171,14 +202,13 @@ const initialGeometry = computed(() => {
   return { type: 'Polygon', coordinates: [ring] }
 })
 
-const mapCenter = computed(() => {
-  const p = points.value[0]
-  if (p) return { lat: p.lat, lon: p.lon, zoom: 12 }
-  if (form.shape === 'circle' && circle.lon) {
-    return { lat: circle.lat, lon: circle.lon, zoom: 12 }
-  }
-  return { lat: 31.2304, lon: 121.4737, zoom: 10 }
-})
+const initialCircle = computed(() =>
+  form.shape === 'circle' && circle.radius_m > 0
+    ? { lon: circle.lon, lat: circle.lat, radius_m: circle.radius_m }
+    : null
+)
+
+const mapCenter = ref({ lat: 31.2304, lon: 121.4737, zoom: 10 })
 
 const canSave = computed(() => {
   if (!form.name.trim()) return false
@@ -186,8 +216,19 @@ const canSave = computed(() => {
   return points.value.length >= 3
 })
 
-function clearPoints() {
-  points.value = []
+function clearDraw() {
+  try {
+    drawRef.value?.clear(true)
+  } catch (e) {
+    console.error('[fence] 清空二维画布失败', e)
+  }
+}
+
+function clearDraft() {
+  drawingActive.value = false
+  clearDraw()
+  if (form.shape === 'circle') resetCircle()
+  else points.value = []
 }
 
 /** 无人机显示名；空 drone_tag 表示围栏对全部无人机生效。 */
@@ -208,6 +249,7 @@ function fenceScope(fence) {
 }
 
 function newFence() {
+  clearDraw()
   form.id = ''
   form.name = ''
   form.type = 'no_fly'
@@ -218,7 +260,7 @@ function newFence() {
   form.enabled = true
   points.value = []
   resetCircle()
-  mapMode.value = '2d'
+  drawingActive.value = false
 }
 
 function resetCircle() {
@@ -229,9 +271,10 @@ function resetCircle() {
 }
 
 function onShapeChange() {
+  clearDraw()
   points.value = []
   resetCircle()
-  if (form.shape === 'circle') mapMode.value = '3d'
+  drawingActive.value = false
 }
 
 function loadFence(fence) {
@@ -247,14 +290,15 @@ function loadFence(fence) {
   form.min_alt = fence.min_alt || 0
   form.max_alt = fence.max_alt || 120
   form.enabled = fence.enabled
+  clearDraw()
   points.value = []
   resetCircle()
+  drawingActive.value = false
   if (form.shape === 'circle') {
     circle.lat = fence.center_lat
     circle.lon = fence.center_lon
     circle.radius_m = fence.radius_m
     circleStep.value = 1
-    mapMode.value = '3d'
   } else {
     try {
       const geo = JSON.parse(fence.geojson)
@@ -265,7 +309,10 @@ function loadFence(fence) {
     }
   }
   const c = points.value[0] || (form.shape === 'circle' ? { lon: circle.lon, lat: circle.lat } : null)
-  if (c) globeRef.value?.flyTo(c.lon, c.lat, 30000)
+  if (c) {
+    mapCenter.value = { lat: c.lat, lon: c.lon, zoom: 12 }
+    globeRef.value?.flyTo(c.lon, c.lat, 30000)
+  }
 }
 
 function haversine(a, b) {
@@ -280,38 +327,97 @@ function haversine(a, b) {
 
 function onMapClick({ lon, lat }) {
   if (form.shape === 'polygon') {
+    // 与 2D 一致：未在绘制时首次点击清除旧图形，重新开始。
+    if (!drawingActive.value) {
+      points.value = []
+      drawingActive.value = true
+    }
     points.value.push({ lon: Number(lon.toFixed(6)), lat: Number(lat.toFixed(6)) })
     return
   }
-  if (circleStep.value === 0) {
+  if (!drawingActive.value) {
+    resetCircle()
     circle.lat = Number(lat.toFixed(6))
     circle.lon = Number(lon.toFixed(6))
-    circle.radius_m = 0
     circleStep.value = 1
-  } else {
-    circle.radius_m = Math.round(
-      haversine({ lat: circle.lat, lon: circle.lon }, { lat, lon })
-    )
-    if (circle.radius_m < 10) circle.radius_m = 10
-    circleStep.value = 2
+    drawingActive.value = true
+    return
   }
+  circle.radius_m = Math.round(haversine({ lat: circle.lat, lon: circle.lon }, { lat, lon }))
+  if (circle.radius_m < 10) circle.radius_m = 10
+  circleStep.value = 2
 }
 
 /**
- * terra-draw 保存回调：把绘制结果回填为顶点后复用统一的保存流程。
- * @param {any} geometry
+ * 三维右键结束：多边形停止加点，圆形用右键位置落定半径。
+ * @param {{ lon: number, lat: number } | null} pos
  */
-async function onDrawSave(geometry) {
-  const ring = geometry?.coordinates?.[0] || []
-  if (ring.length < 4) {
-    ElMessage.warning('请至少绘制 3 个顶点')
+function onDrawFinish(pos) {
+  if (!drawingActive.value) return
+  if (form.shape === 'polygon') {
+    if (points.value.length < 3) {
+      ElMessage.warning('请至少绘制 3 个顶点')
+      return
+    }
+    drawingActive.value = false
     return
   }
-  points.value = ring.slice(0, -1).map((p) => ({
+  if (circleStep.value === 1) {
+    if (!pos) return
+    circle.radius_m = Math.round(haversine({ lat: circle.lat, lon: circle.lon }, pos))
+    if (circle.radius_m < 10) circle.radius_m = 10
+    circleStep.value = 2
+  }
+  drawingActive.value = false
+}
+
+/** 圆环各顶点均值即圆心；半径取各顶点到圆心的平均距离。 */
+function circleFromRing(ring) {
+  const pts = ring.slice(0, -1)
+  const center = pts.reduce(
+    (acc, p) => ({ lon: acc.lon + p[0], lat: acc.lat + p[1] }),
+    { lon: 0, lat: 0 }
+  )
+  center.lon /= pts.length
+  center.lat /= pts.length
+  const radius =
+    pts.reduce((sum, p) => sum + haversine(center, { lon: p[0], lat: p[1] }), 0) / pts.length
+  return { lon: center.lon, lat: center.lat, radius_m: radius }
+}
+
+/**
+ * terra-draw 变化回调：把绘制结果实时回填为顶点/圆心，顶栏“保存”直接复用。
+ * @param {any} geometry
+ */
+function onDrawChange(geometry) {
+  const ring = geometry?.coordinates?.[0] || []
+  if (form.shape === 'circle') {
+    if (ring.length < 4) {
+      resetCircle()
+      return
+    }
+    const c = circleFromRing(ring)
+    const lon = Number(c.lon.toFixed(6))
+    const lat = Number(c.lat.toFixed(6))
+    const radius = Math.max(10, Math.round(c.radius_m))
+    if (lon === circle.lon && lat === circle.lat && radius === circle.radius_m) return
+    circle.lon = lon
+    circle.lat = lat
+    circle.radius_m = radius
+    circleStep.value = 2
+    return
+  }
+  const next = ring.slice(0, -1).map((p) => ({
     lon: Number(p[0].toFixed(6)),
     lat: Number(p[1].toFixed(6)),
   }))
-  await save()
+  if (
+    next.length === points.value.length &&
+    next.every((p, i) => p.lon === points.value[i].lon && p.lat === points.value[i].lat)
+  ) {
+    return
+  }
+  points.value = next
 }
 
 async function save() {

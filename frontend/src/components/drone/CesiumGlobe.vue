@@ -1,6 +1,10 @@
 <!-- @ts-check -->
 <template>
-  <div ref="container" class="cesium-globe">
+  <div
+    ref="container"
+    class="cesium-globe"
+    :class="{ 'is-drawing': drawMode !== 'none' }"
+  >
     <div v-if="!ready" class="globe-loading">
       <el-icon class="is-loading"><Loading /></el-icon>
       <span>正在加载三维地球…</span>
@@ -17,6 +21,7 @@ import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { Loading } from '@element-plus/icons-vue'
 import { droneTagFromEntityId } from '../../utils/droneVideo.js'
+import { fenceColors } from '../../utils/fenceStyle'
 
 /** 机模地址：默认使用 public/models/drone.glb，可用 VITE_DRONE_MODEL 覆盖。 */
 const DRONE_MODEL_URI = import.meta.env.VITE_DRONE_MODEL || '/models/drone.glb'
@@ -33,15 +38,22 @@ const props = defineProps({
   draftPoints: { type: Array, default: () => [] },
   draftCircle: { type: Object, default: null },
   drawMode: { type: String, default: 'none' },
+  /** @type {'no_fly' | 'allowed'} 正在绘制的围栏规则，决定草稿颜色 */
+  draftRule: { type: String, default: 'no_fly' },
+  /** 正在主动绘制：只有此时才跟随鼠标预览并允许右键结束。 */
+  drawingActive: { type: Boolean, default: false },
   center: { type: Object, default: () => ({ lon: 121.4737, lat: 31.2304, alt: 1800000 }) },
 })
 
-const emit = defineEmits(['map-click', 'ready', 'select'])
+const emit = defineEmits(['map-click', 'ready', 'select', 'finish'])
 
 const container = ref(null)
 const ready = ref(false)
 const viewer = shallowRef(null)
 let clickHandler = null
+let moveHandler = null
+let hoverPosition = null
+let draftRaf = 0
 let droneEntities = new Map()
 let routeEntities = []
 let trackEntities = []
@@ -50,6 +62,42 @@ let draftEntities = []
 
 function setEntity(entity) {
   return entity
+}
+
+/** 屏幕坐标 → 经纬度；点在球体之外时返回 null。 */
+function pickLngLat(position) {
+  const v = viewer.value
+  if (!v) return null
+  const cartesian = v.camera.pickEllipsoid(position, v.scene.globe.ellipsoid)
+  if (!cartesian) return null
+  const cartographic = Cesium.Cartographic.fromCartesian(cartesian)
+  return {
+    lon: Cesium.Math.toDegrees(cartographic.longitude),
+    lat: Cesium.Math.toDegrees(cartographic.latitude),
+  }
+}
+
+function distanceMeters(a, b) {
+  const R = 6371000
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180
+  const dLon = ((b.lon - a.lon) * Math.PI) / 180
+  const lat1 = (a.lat * Math.PI) / 180
+  const lat2 = (b.lat * Math.PI) / 180
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
+function scheduleDraft() {
+  if (draftRaf) return
+  draftRaf = requestAnimationFrame(() => {
+    draftRaf = 0
+    syncDraft()
+  })
+}
+
+/** 绘制时屏蔽浏览器右键菜单，右键用于结束绘制。 */
+function onCanvasContextMenu(e) {
+  if (props.drawMode === 'polygon' || props.drawMode === 'circle') e.preventDefault()
 }
 
 function initViewer() {
@@ -68,6 +116,9 @@ function initViewer() {
     terrainProvider: new Cesium.EllipsoidTerrainProvider(),
     requestRenderMode: false,
   })
+  // 隐藏 Cesium 徽标与数据署名栏（右下角 logo / Data attribution）
+  const creditContainer = v.cesiumWidget?.creditContainer
+  if (creditContainer) creditContainer.style.display = 'none'
   // 离线底图：Cesium 自带 NaturalEarthII，测试/内网环境不依赖外部瓦片服务。
   // 需要在线高清底图时设置 VITE_CESIUM_ONLINE=true。
   const base = (window.CESIUM_BASE_URL || '/cesium/').replace(/\/?$/, '/')
@@ -117,14 +168,26 @@ function initViewer() {
       return
     }
     if (props.drawMode === 'none') return
-    const cartesian = v.camera.pickEllipsoid(movement.position, v.scene.globe.ellipsoid)
-    if (!cartesian) return
-    const cartographic = Cesium.Cartographic.fromCartesian(cartesian)
-    emit('map-click', {
-      lon: Cesium.Math.toDegrees(cartographic.longitude),
-      lat: Cesium.Math.toDegrees(cartographic.latitude),
-    })
+    const p = pickLngLat(movement.position)
+    if (p) emit('map-click', p)
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
+
+  clickHandler.setInputAction((movement) => {
+    if (!props.drawingActive) return
+    if (props.drawMode !== 'polygon' && props.drawMode !== 'circle') return
+    emit('finish', pickLngLat(movement.position) || hoverPosition)
+  }, Cesium.ScreenSpaceEventType.RIGHT_CLICK)
+
+  moveHandler = new Cesium.ScreenSpaceEventHandler(v.scene.canvas)
+  moveHandler.setInputAction((movement) => {
+    if (!props.drawingActive || (props.drawMode !== 'polygon' && props.drawMode !== 'circle')) {
+      hoverPosition = null
+      return
+    }
+    hoverPosition = pickLngLat(movement.endPosition)
+    scheduleDraft()
+  }, Cesium.ScreenSpaceEventType.MOUSE_MOVE)
+  v.scene.canvas.addEventListener('contextmenu', onCanvasContextMenu)
 
   viewer.value = v
   ready.value = true
@@ -337,13 +400,9 @@ function syncFences() {
   if (!v) return
   fenceEntities = clearEntities(fenceEntities) || []
   for (const f of props.fences || []) {
-    const isAllowed = f.type === 'allowed'
-    const color = isAllowed
-      ? Cesium.Color.fromCssColorString('rgba(34,197,94,0.25)')
-      : Cesium.Color.fromCssColorString('rgba(239,68,68,0.25)')
-    const outline = isAllowed
-      ? Cesium.Color.fromCssColorString('#22c55e')
-      : Cesium.Color.fromCssColorString('#ef4444')
+    const colors = fenceColors(f.type)
+    const color = Cesium.Color.fromCssColorString(colors.fillRgba)
+    const outline = Cesium.Color.fromCssColorString(colors.outline)
     if (f.shape === 'circle' && f.radius_m > 0) {
       fenceEntities.push(
         v.entities.add({
@@ -448,34 +507,97 @@ function syncDraft() {
       )
     })
   }
-  if (props.drawMode === 'polygon' && points.length >= 2) {
-    const flat = []
-    for (const p of points) flat.push(p.lon, p.lat)
-    draftEntities.push(
-      v.entities.add({
-        polygon: {
-          hierarchy: Cesium.Cartesian3.fromDegreesArray(flat),
-          height: 0,
-          material: Cesium.Color.fromCssColorString('rgba(239,68,68,0.2)'),
-          outline: true,
-          outlineColor: Cesium.Color.fromCssColorString('#ef4444'),
-        },
-      })
-    )
+  if (props.drawMode === 'polygon' && points.length > 0) {
+    const preview = hoverPosition ? [...points, hoverPosition] : points
+    const draft = fenceColors(props.draftRule)
+    if (preview.length >= 3) {
+      const flat = []
+      for (const p of preview) flat.push(p.lon, p.lat)
+      draftEntities.push(
+        v.entities.add({
+          polygon: {
+            hierarchy: Cesium.Cartesian3.fromDegreesArray(flat),
+            height: 0,
+            material: Cesium.Color.fromCssColorString(draft.fillRgba),
+            outline: true,
+            outlineColor: Cesium.Color.fromCssColorString(draft.outline),
+          },
+        })
+      )
+    }
+    if (hoverPosition && preview.length >= 2) {
+      const path = points.length >= 2 ? [...preview, points[0]] : preview
+      draftEntities.push(
+        v.entities.add({
+          polyline: {
+            positions: path.map((p) => Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 1)),
+            width: 2,
+            material: new Cesium.PolylineDashMaterialProperty({
+              color: Cesium.Color.fromCssColorString(draft.outline),
+            }),
+          },
+        })
+      )
+    }
+    points.forEach((p) => {
+      draftEntities.push(
+        v.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 1),
+          point: {
+            pixelSize: 8,
+            color: Cesium.Color.fromCssColorString(draft.outline),
+            outlineColor: Cesium.Color.WHITE,
+            outlineWidth: 2,
+          },
+        })
+      )
+    })
+    if (hoverPosition) {
+      draftEntities.push(
+        v.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(hoverPosition.lon, hoverPosition.lat, 1),
+          point: {
+            pixelSize: 7,
+            color: Cesium.Color.fromCssColorString('#fbbf24'),
+            outlineColor: Cesium.Color.WHITE,
+            outlineWidth: 2,
+          },
+        })
+      )
+    }
   }
   if (props.drawMode === 'circle' && props.draftCircle) {
     const c = props.draftCircle
+    const draft = fenceColors(props.draftRule)
+    const fixedRadius = Number(c.radius_m) > 0
+    const radius =
+      fixedRadius || !hoverPosition
+        ? Number(c.radius_m)
+        : distanceMeters({ lat: c.lat, lon: c.lon }, hoverPosition)
+    if (radius > 0) {
+      draftEntities.push(
+        v.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(c.lon, c.lat, 0),
+          ellipse: {
+            semiMajorAxis: radius,
+            semiMinorAxis: radius,
+            height: 0,
+            extrudedHeight: 80,
+            material: Cesium.Color.fromCssColorString(draft.fillRgba),
+            outline: true,
+            outlineColor: Cesium.Color.fromCssColorString(draft.outline),
+          },
+        })
+      )
+    }
     draftEntities.push(
       v.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(c.lon, c.lat, 0),
-        ellipse: {
-          semiMajorAxis: c.radius_m,
-          semiMinorAxis: c.radius_m,
-          height: 0,
-          extrudedHeight: 80,
-          material: Cesium.Color.fromCssColorString('rgba(239,68,68,0.2)'),
-          outline: true,
-          outlineColor: Cesium.Color.fromCssColorString('#ef4444'),
+        position: Cesium.Cartesian3.fromDegrees(c.lon, c.lat, 1),
+        point: {
+          pixelSize: 8,
+          color: Cesium.Color.fromCssColorString(draft.outline),
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 2,
         },
       })
     )
@@ -534,7 +656,14 @@ watch(
 watch(() => props.track, syncTrack, { deep: true })
 watch(() => props.fences, syncFences, { deep: true })
 watch(() => props.draftPoints, syncDraft, { deep: true })
-watch(() => props.drawMode, syncDraft)
+watch(() => props.drawMode, () => {
+  hoverPosition = null
+  syncDraft()
+})
+watch(() => props.drawingActive, () => {
+  hoverPosition = null
+  syncDraft()
+})
 watch(() => props.draftCircle, syncDraft, { deep: true })
 watch(() => props.selectedId, (id) => {
   const drone = props.drones.find((d) => d.drone_tag === id)
@@ -545,6 +674,9 @@ watch(() => props.selectedId, (id) => {
 onMounted(initViewer)
 onBeforeUnmount(() => {
   if (clickHandler) clickHandler.destroy()
+  if (moveHandler) moveHandler.destroy()
+  if (draftRaf) cancelAnimationFrame(draftRaf)
+  if (viewer.value) viewer.value.scene.canvas.removeEventListener('contextmenu', onCanvasContextMenu)
   if (viewer.value) viewer.value.destroy()
   viewer.value = null
 })
@@ -567,6 +699,15 @@ defineExpose({ flyTo, viewer, fitRoute })
 .cesium-globe :deep(canvas) {
   width: 100%;
   height: 100%;
+}
+.cesium-globe.is-drawing :deep(canvas) {
+  cursor: crosshair !important;
+}
+/* 隐藏 Cesium logo 与数据署名 */
+.cesium-globe :deep(.cesium-widget-credits),
+.cesium-globe :deep(.cesium-credit-logoContainer),
+.cesium-globe :deep(.cesium-credit-textContainer) {
+  display: none !important;
 }
 .globe-loading {
   position: absolute;

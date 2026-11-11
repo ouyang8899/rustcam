@@ -17,6 +17,19 @@ import {
 
 const WS_KINDS = 'events'
 
+/**
+ * 后端把“允许区”归一化为 work（control.proto: no_fly / work / height），
+ * 前端界面沿用 allowed 语义；这里在入 store 时统一，保证列表、表单和地图配色一致。
+ */
+function normalizeFence(fence) {
+  const type = String(fence.type || '').trim().toLowerCase()
+  const shape = String(fence.shape || '').trim().toLowerCase()
+  const isCircle = shape === 'circle' || (shape === '' && Number(fence.radius_m) > 0)
+  const rule =
+    type === 'work' || type === 'allowed' ? 'allowed' : type === 'height' ? 'height' : 'no_fly'
+  return { ...fence, type: rule, shape: isCircle ? 'circle' : 'polygon' }
+}
+
 export const useDroneStore = defineStore('drone', {
   state: () => ({
     drones: [],
@@ -132,7 +145,7 @@ export const useDroneStore = defineStore('drone', {
      */
     async fetchFences(options = {}) {
       const list = await api.getFences(options)
-      this.fences = Array.isArray(list) ? list.filter(isFence) : []
+      this.fences = Array.isArray(list) ? list.filter(isFence).map(normalizeFence) : []
     },
 
     async saveFence(fence) {
