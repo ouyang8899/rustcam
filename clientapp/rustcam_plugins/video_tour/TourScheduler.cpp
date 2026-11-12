@@ -45,7 +45,13 @@ void TourScheduler::start(const TourScheme& scheme, const TourSnapshot& snapshot
 {
     m_scheme = scheme;
     m_snapshot = snapshot;
+    // 锁定窗口以 snapshot.lockedSet 为准；调用方未显式传入时也不会被轮换占用。
     m_lockedItems = lockedItemIds;
+    for (const LockedSlot& slot : snapshot.lockedSet) {
+        if (!m_lockedItems.contains(slot.layoutItemId)) {
+            m_lockedItems.append(slot.layoutItemId);
+        }
+    }
 
     m_unlockedItems.clear();
     for (const QString& itemId : snapshot.layoutItemIds) {
@@ -81,23 +87,27 @@ void TourScheduler::start(const TourScheme& scheme, const TourSnapshot& snapshot
         setState(TourTaskState::NoSource);
         return;
     }
+    if (!inRunWindow()) {
+        // 不在运行时段内直接过期，避免先播放一段时间再被判定过期。
+        m_tick.stop();
+        setState(TourTaskState::Expired);
+        emit releaseRequested(QStringLiteral("*"));
+        TourAuditLog::log(QStringLiteral("task_expired"));
+        return;
+    }
 
     setState(TourTaskState::Running);
     beginBatch();
 }
 
-void TourScheduler::beginBatch()
+TourScheduler::Batch TourScheduler::makeBatch(int index, const FillResult& plan)
 {
-    const FillResult plan = TourBatchPlanner::fill(m_snapshot.activeQueue, m_cursor, m_s);
-    m_cursor = plan.cursor;
-
     Batch batch;
-    batch.index = m_batchHistory.size();
+    batch.index = index;
     batch.generation = ++m_generation;
     batch.keys = plan.keys;
     batch.batchDeadline = nowMs() + m_scheme.batchTimeoutMs;
 
-    QVector<TourChannelRef> channels;
     for (int i = 0; i < m_s; ++i) {
         SlotAssignment assignment;
         assignment.layoutItemId = m_unlockedItems.at(i);
@@ -105,48 +115,19 @@ void TourScheduler::beginBatch()
             assignment.channel = plan.items.at(i);
         }
         batch.assignments.append(assignment);
-        if (!assignment.channel.isEmpty()) {
-            channels.append(assignment.channel);
-        }
     }
-
-    m_batch = batch;
-
-    for (const SlotAssignment& assignment : m_batch.assignments) {
-        if (assignment.channel.isEmpty()) {
-            emit windowStateChanged(assignment.layoutItemId, TourChannelState::Skipped,
-                                    TourChannelRef(), QStringLiteral("本批无更多设备"));
-            continue;
-        }
-        emit windowStateChanged(assignment.layoutItemId, TourChannelState::Requesting,
-                                assignment.channel, QString());
-        emit playRequested(assignment.layoutItemId, assignment.channel, m_batch.generation);
-    }
-
-    emit batchStarted(m_batch.index, m_cycle, channels);
-    m_tick.start();
-
-    QJsonObject detail;
-    detail.insert(QStringLiteral("batch"), m_batch.index);
-    detail.insert(QStringLiteral("cycle"), m_cycle);
-    detail.insert(QStringLiteral("channels"), channels.size());
-    TourAuditLog::log(QStringLiteral("batch_start"), detail);
+    return batch;
 }
 
-void TourScheduler::replayBatch(const Batch& batch)
+QVector<TourChannelRef> TourScheduler::activateBatch()
 {
-    m_batch = batch;
-    m_batch.generation = ++m_generation;
-    m_batch.displayable = false;
-    m_batch.backfillUsed = 0;
-    m_batch.batchDeadline = nowMs() + m_scheme.batchTimeoutMs;
-    m_batch.dwellDeadline = 0;
-
     QVector<TourChannelRef> channels;
     for (const SlotAssignment& assignment : m_batch.assignments) {
         if (assignment.channel.isEmpty()) {
             emit windowStateChanged(assignment.layoutItemId, TourChannelState::Skipped,
                                     TourChannelRef(), QStringLiteral("本批无更多设备"));
+            // 空槽位要释放上一批残留的画面，避免与“无更多设备”状态矛盾。
+            emit releaseRequested(assignment.layoutItemId);
             continue;
         }
         channels.append(assignment.channel);
@@ -157,6 +138,36 @@ void TourScheduler::replayBatch(const Batch& batch)
 
     emit batchStarted(m_batch.index, m_cycle, channels);
     m_tick.start();
+    return channels;
+}
+
+void TourScheduler::beginBatch()
+{
+    m_gapDeadline = 0;
+    const FillResult plan = TourBatchPlanner::fill(m_snapshot.activeQueue, m_cursor, m_s);
+    m_cursor = plan.cursor;
+    m_batch = makeBatch(m_batchHistory.size(), plan);
+    const QVector<TourChannelRef> channels = activateBatch();
+
+    QJsonObject detail;
+    detail.insert(QStringLiteral("batch"), m_batch.index);
+    detail.insert(QStringLiteral("cycle"), m_cycle);
+    detail.insert(QStringLiteral("channels"), channels.size());
+    TourAuditLog::log(QStringLiteral("batch_start"), detail);
+}
+
+void TourScheduler::replayBatch(const Batch& batch)
+{
+    m_gapDeadline = 0;
+    m_batch = batch;
+    m_batch.generation = ++m_generation;
+    m_batch.displayable = false;
+    m_batch.finished = false;
+    m_batch.backfillUsed = 0;
+    m_batch.replay = true;
+    m_batch.batchDeadline = nowMs() + m_scheme.batchTimeoutMs;
+    m_batch.dwellDeadline = 0;
+    activateBatch();
 
     QJsonObject detail;
     detail.insert(QStringLiteral("batch"), m_batch.index);
@@ -167,6 +178,7 @@ void TourScheduler::replayBatch(const Batch& batch)
 
 void TourScheduler::finishBatch()
 {
+    m_batch.finished = true;
     for (const SlotAssignment& assignment : m_batch.assignments) {
         if (!assignment.channel.isEmpty()) {
             m_covered.insert(assignment.channel.key());
@@ -174,7 +186,10 @@ void TourScheduler::finishBatch()
     }
 
     emit batchFinished(m_batch.index, m_cycle);
-    m_batchHistory.append(m_batch);
+    // 回放的历史批次结束后不重复入历史，避免记录无限增长与翻页错位。
+    if (!m_batch.replay) {
+        m_batchHistory.append(m_batch);
+    }
 
     if (windowExpired()) {
         setState(TourTaskState::Expired);
@@ -203,6 +218,8 @@ void TourScheduler::finishBatch()
         beginBatch();
     } else {
         m_gapDeadline = nowMs() + gap;
+        // 换批间隔内不再有 dwell/首帧计时，倒计时应归零。
+        emit countdown(0, 0);
     }
 }
 
@@ -222,9 +239,11 @@ void TourScheduler::onTick()
     }
 
     if (!m_batch.displayable && now >= m_batch.batchDeadline) {
-        // 首帧超时：批次按可展示继续，仍在等待的窗口标记为失败。
+        // 首帧超时：批次按可展示继续，仍在等待的窗口标记为失败并尝试补位，
+        // 避免这批窗口一直黑屏。
         m_batch.displayable = true;
         m_batch.dwellDeadline = now + m_scheme.dwellMs;
+        QStringList timedOutSlots;
         for (const SlotAssignment& assignment : m_batch.assignments) {
             if (assignment.channel.isEmpty()) {
                 continue;
@@ -233,8 +252,14 @@ void TourScheduler::onTick()
                 continue;
             }
             m_failed.insert(assignment.channel.key());
+            // 失败也算“已尝试”，否则永久失败的通道会让周期永远无法推进。
+            m_covered.insert(assignment.channel.key());
             emit windowStateChanged(assignment.layoutItemId, TourChannelState::Failed,
                                     assignment.channel, QStringLiteral("首帧超时"));
+            timedOutSlots.append(assignment.layoutItemId);
+        }
+        for (const QString& layoutItemId : timedOutSlots) {
+            backfillSlot(layoutItemId);
         }
     }
 
@@ -270,7 +295,7 @@ QString TourScheduler::layoutItemIdForChannel(const TourChannelRef& channel) con
 
 void TourScheduler::onFirstFrame(const QString& layoutItemId, quint64 generation)
 {
-    if (generation != m_batch.generation) {
+    if (generation != m_batch.generation || m_batch.finished) {
         return;
     }
     const int index = slotIndexOf(layoutItemId);
@@ -281,6 +306,8 @@ void TourScheduler::onFirstFrame(const QString& layoutItemId, quint64 generation
     if (channel.isEmpty()) {
         return;
     }
+    // 首帧晚于超时到达时，之前的失败标记应撤销。
+    m_failed.remove(channel.key());
     emit windowStateChanged(layoutItemId, TourChannelState::Playing, channel, QString());
     if (!m_batch.displayable) {
         m_batch.displayable = true;
@@ -290,7 +317,7 @@ void TourScheduler::onFirstFrame(const QString& layoutItemId, quint64 generation
 
 void TourScheduler::onPlayFailed(const QString& layoutItemId, quint64 generation, const QString& reason)
 {
-    if (generation != m_batch.generation) {
+    if (generation != m_batch.generation || m_batch.finished) {
         return;
     }
     const int index = slotIndexOf(layoutItemId);
@@ -302,6 +329,8 @@ void TourScheduler::onPlayFailed(const QString& layoutItemId, quint64 generation
         return;
     }
     m_failed.insert(channel.key());
+    // 失败也算“已尝试”，否则永久失败的通道会让周期永远无法推进。
+    m_covered.insert(channel.key());
     emit windowStateChanged(layoutItemId, TourChannelState::Failed, channel, reason);
 
     QJsonObject detail;
@@ -326,7 +355,7 @@ void TourScheduler::onStalled(const QString& layoutItemId, quint64 generation)
 
 void TourScheduler::backfillSlot(const QString& layoutItemId)
 {
-    if (m_state != TourTaskState::Running) {
+    if (m_state != TourTaskState::Running || m_batch.finished) {
         return;
     }
     if (m_batch.backfillUsed >= m_scheme.backfillLimit) {
@@ -338,7 +367,7 @@ void TourScheduler::backfillSlot(const QString& layoutItemId)
     int newCursor = m_cursor;
     const TourChannelRef replacement = TourBatchPlanner::backfill(
         m_snapshot.activeQueue, m_cursor, m_batch.keys, m_failed,
-        m_scheme.backfillLimit, m_batch.backfillUsed, &newCursor);
+        m_scheme.backfillLimit, m_batch.backfillUsed, &newCursor, &m_covered);
 
     if (replacement.isEmpty()) {
         emit windowStateChanged(layoutItemId, TourChannelState::Skipped, TourChannelRef(),
@@ -374,6 +403,8 @@ void TourScheduler::pause()
     m_frozenTimeout = m_batch.displayable ? -1 : std::max<qint64>(0, m_batch.batchDeadline - now);
     m_tick.stop();
     setState(TourTaskState::Paused);
+    // 暂停时计时冻结，倒计时归零避免界面继续显示旧值。
+    emit countdown(0, 0);
     TourAuditLog::log(QStringLiteral("task_pause"));
 }
 
@@ -413,7 +444,8 @@ void TourScheduler::stop()
 
 void TourScheduler::nextBatch()
 {
-    if (m_state != TourTaskState::Running && m_state != TourTaskState::Paused) {
+    // 暂停时计时被冻结，翻页后无法推进，直接忽略。
+    if (m_state != TourTaskState::Running) {
         return;
     }
 
@@ -429,35 +461,9 @@ void TourScheduler::nextBatch()
     }
 
     m_cursor = plan.cursor;
-    Batch batch;
-    batch.index = m_batch.index + 1;
-    batch.generation = ++m_generation;
-    batch.keys = plan.keys;
-    batch.batchDeadline = nowMs() + m_scheme.batchTimeoutMs;
-    for (int i = 0; i < m_s; ++i) {
-        SlotAssignment assignment;
-        assignment.layoutItemId = m_unlockedItems.at(i);
-        if (i < plan.items.size()) {
-            assignment.channel = plan.items.at(i);
-        }
-        batch.assignments.append(assignment);
-    }
-    m_batch = batch;
-
-    QVector<TourChannelRef> channels;
-    for (const SlotAssignment& assignment : m_batch.assignments) {
-        if (assignment.channel.isEmpty()) {
-            emit windowStateChanged(assignment.layoutItemId, TourChannelState::Skipped,
-                                    TourChannelRef(), QStringLiteral("本批无更多设备"));
-            continue;
-        }
-        channels.append(assignment.channel);
-        emit windowStateChanged(assignment.layoutItemId, TourChannelState::Requesting,
-                                assignment.channel, QString());
-        emit playRequested(assignment.layoutItemId, assignment.channel, m_batch.generation);
-    }
-    emit batchStarted(m_batch.index, m_cycle, channels);
-    m_tick.start();
+    m_gapDeadline = 0;
+    m_batch = makeBatch(m_batch.index + 1, plan);
+    const QVector<TourChannelRef> channels = activateBatch();
 
     // 队列回绕到起点时提示已到队尾。
     if (!channels.isEmpty() && !m_batchHistory.isEmpty()
@@ -470,19 +476,32 @@ void TourScheduler::nextBatch()
 
 void TourScheduler::prevBatch()
 {
-    if (m_state != TourTaskState::Running && m_state != TourTaskState::Paused) {
+    // 暂停时计时被冻结，翻页后无法推进，直接忽略。
+    if (m_state != TourTaskState::Running) {
         return;
     }
     if (m_batch.index <= 0 || m_batchHistory.isEmpty()) {
         emit pageAtEnd();
         return;
     }
-    replayBatch(m_batchHistory.at(m_batch.index - 1));
+    // 手动“下一批”不会入历史，当前序号可能超过历史长度；夹到最后一条有效记录。
+    int target = m_batch.index - 1;
+    if (target >= m_batchHistory.size()) {
+        target = m_batchHistory.size() - 1;
+    }
+    if (target < 0) {
+        emit pageAtEnd();
+        return;
+    }
+    replayBatch(m_batchHistory.at(target));
     TourAuditLog::log(QStringLiteral("batch_prev"));
 }
 
 void TourScheduler::retrySlot(const QString& layoutItemId)
 {
+    if (m_batch.finished) {
+        return;
+    }
     const int index = slotIndexOf(layoutItemId);
     if (index < 0) {
         return;
@@ -514,28 +533,40 @@ void TourScheduler::setFullscreenPaused(bool paused)
     }
 }
 
+bool TourScheduler::inRunWindowAt(const RunWindow& window, const QDateTime& now)
+{
+    const QTime start = parseTime(window.start);
+    const QTime end = parseTime(window.end);
+    if (!start.isValid() || !end.isValid()) {
+        // 时段非法时不做限制，避免误停。
+        return true;
+    }
+
+    const QDate date = now.date();
+    const QTime time = now.time();
+    const auto dayAllowed = [&window](const QDate& day) {
+        return window.weekdays.isEmpty() || window.weekdays.contains(day.dayOfWeek());
+    };
+
+    if (window.crossDay || end < start) {
+        if (time >= start) {
+            return dayAllowed(date);
+        }
+        if (time <= end) {
+            // 凌晨时段属于前一天开启的运行窗口，星期也应按前一天判断。
+            return dayAllowed(date.addDays(-1));
+        }
+        return false;
+    }
+    return dayAllowed(date) && time >= start && time <= end;
+}
+
 bool TourScheduler::inRunWindow() const
 {
     if (!m_scheme.hasRunWindow) {
         return true;
     }
-    const QTime start = parseTime(m_scheme.runWindow.start);
-    const QTime end = parseTime(m_scheme.runWindow.end);
-    if (!start.isValid() || !end.isValid()) {
-        // 时段非法时不做限制，避免误停。
-        return true;
-    }
-    if (!m_scheme.runWindow.weekdays.isEmpty()) {
-        const int today = QDateTime::currentDateTime().date().dayOfWeek();
-        if (!m_scheme.runWindow.weekdays.contains(today)) {
-            return false;
-        }
-    }
-    const QTime now = QDateTime::currentDateTime().time();
-    if (m_scheme.runWindow.crossDay || end < start) {
-        return now >= start || now <= end;
-    }
-    return now >= start && now <= end;
+    return inRunWindowAt(m_scheme.runWindow, QDateTime::currentDateTime());
 }
 
 bool TourScheduler::windowExpired() const

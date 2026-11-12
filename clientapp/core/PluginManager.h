@@ -51,6 +51,8 @@ private:
     bool loadPlugin(const QString& filePath);
     bool initializePlugin(IPlugin* plugin);
     void shutdownPlugin(IPlugin* plugin);
+    /// 按配置里的插件顺序排列插件文件（未配置的排在最后，保持原有相对顺序）
+    void sortByConfiguredOrder(QStringList& files) const;
 
     QMap<QString, QPluginLoader*> m_loaders;
     QMap<QString, IPlugin*> m_plugins;

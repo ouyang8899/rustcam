@@ -6,10 +6,11 @@
 #include <QStringList>
 #include <QColor>
 #include <QFont>
+#include "CoreExport.h"
 
 namespace rustcam {
 
-class ThemeManager : public QObject {
+class RUSTCAM_CORE_API ThemeManager : public QObject {
     Q_OBJECT
 public:
     static ThemeManager* instance();

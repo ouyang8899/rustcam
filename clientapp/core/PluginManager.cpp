@@ -3,6 +3,9 @@
 #include "interfaces/IPlugin.h"
 #include "EventBus.h"
 #include "ConfigManager.h"
+#include "ConfigKeys.h"
+#include "SystemConfig.h"
+#include "PluginOrder.h"
 #include <QDir>
 
 namespace rustcam {
@@ -56,6 +59,8 @@ bool PluginManager::loadPlugins(const QString& pluginDir)
             allPluginFiles.append(fullPath);
         }
     }
+
+    sortByConfiguredOrder(allPluginFiles);
 
     LOG_INFO("PluginManager", QString("Found %1 plugin files").arg(allPluginFiles.size()));
 
@@ -124,6 +129,20 @@ bool PluginManager::initializePlugin(IPlugin* plugin)
     ConfigManager* cfg = ConfigManager::instance();
 
     return plugin->initialize(bus, cfg);
+}
+
+void PluginManager::sortByConfiguredOrder(QStringList& files) const
+{
+    if (files.size() < 2) {
+        return;
+    }
+
+    QStringList configured = SystemConfig::instance()->getValue(CFG_PLUGIN_ORDER).toStringList();
+    if (configured.isEmpty()) {
+        configured = defaultPluginIds();
+    }
+
+    files = sortPluginFiles(files, configured);
 }
 
 void PluginManager::shutdownPlugin(IPlugin* plugin)

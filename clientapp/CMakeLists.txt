@@ -84,7 +84,7 @@ include(${CMAKE_SOURCE_DIR}/cmake/CEF.cmake)
 enable_testing()
 # 测试目录可能被 .gitignore 排除（本地存在但不在版本库里），
 # 只在目录确实存在时才加入构建，保证干净的检出也能 configure。
-foreach(_test_dir cef_smoke bridge_protocol_test map_page_test timeline_test)
+foreach(_test_dir cef_smoke bridge_protocol_test map_page_test timeline_test plugin_order_test tour_layout_picker_test)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/${_test_dir}/CMakeLists.txt")
         add_subdirectory(tests/${_test_dir})
     else()

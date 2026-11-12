@@ -7,6 +7,7 @@
 #include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 
 namespace rustcam {
 
@@ -116,19 +117,73 @@ void SystemConfig::loadFromDb() {
             QString key = QString::fromUtf8(keyStr);
             QString value = QString::fromUtf8(valueStr);
 
-            QJsonParseError error;
-            QJsonDocument doc = QJsonDocument::fromJson(value.toUtf8(), &error);
-
-            if (error.error == QJsonParseError::NoError && doc.isObject()) {
-                m_config.insert(key, doc.object().value("v"));
-            } else {
-                m_config.insert(key, value);
-            }
+            m_config.insert(key, deserializeValue(value));
         }
     }
 
     sqlite3_finalize(stmt);
     sqlite3_close(db);
+}
+
+QString SystemConfig::serializeValue(const QVariant& value) {
+    if (value.type() == QVariant::Map) {
+        QJsonObject obj;
+        obj.insert("v", QJsonObject::fromVariantMap(value.toMap()));
+        return QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    }
+
+    if (value.type() == QVariant::List || value.type() == QVariant::StringList) {
+        QJsonArray arr;
+        for (const QString& item : value.toStringList()) {
+            arr.append(item);
+        }
+        QJsonObject obj;
+        obj.insert("v", arr);
+        return QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    }
+
+    return value.toString();
+}
+
+QVariant SystemConfig::deserializeValue(const QString& text) {
+    QJsonParseError error;
+    QJsonDocument doc = QJsonDocument::fromJson(text.toUtf8(), &error);
+
+    if (error.error != QJsonParseError::NoError) {
+        return text;
+    }
+
+    QJsonValue payload;
+    if (doc.isObject()) {
+        const QJsonObject root = doc.object();
+        if (!root.contains("v")) {
+            // 不是本模块写出来的 JSON 包装格式，按纯文本处理。
+            return text;
+        }
+        payload = root.value("v");
+    } else if (doc.isArray()) {
+        payload = doc.array();
+    } else {
+        return text;
+    }
+
+    if (payload.isArray()) {
+        QStringList list;
+        for (const QJsonValue& item : payload.toArray()) {
+            list.append(item.toString());
+        }
+        return list;
+    }
+
+    if (payload.isObject()) {
+        return payload.toObject().toVariantMap();
+    }
+
+    if (payload.isString()) {
+        return payload.toString();
+    }
+
+    return payload.toVariant();
 }
 
 void SystemConfig::saveToDb(const QString& key, const QVariant& value) {
@@ -137,14 +192,7 @@ void SystemConfig::saveToDb(const QString& key, const QVariant& value) {
         return;
     }
 
-    QString valueStr;
-    if (value.type() == QVariant::Map || value.type() == QVariant::List) {
-        QJsonObject obj;
-        obj.insert("v", value.toJsonValue());
-        valueStr = QJsonDocument(obj).toJson(QJsonDocument::Compact);
-    } else {
-        valueStr = value.toString();
-    }
+    QString valueStr = serializeValue(value);
 
     const char* sql = "INSERT OR REPLACE INTO system_config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)";
     sqlite3_stmt* stmt = nullptr;

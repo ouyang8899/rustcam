@@ -1,6 +1,9 @@
 #include "SettingsWidget.h"
 #include "core/SystemConfig.h"
 #include "core/ConfigKeys.h"
+#include "core/PluginManager.h"
+#include "core/PluginOrder.h"
+#include "interfaces/IPlugin.h"
 #include "common/Logger.h"
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -15,6 +18,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
+#include <QMap>
 
 namespace rustcam {
 
@@ -337,22 +341,35 @@ void SettingsWidget::setupMapTab() {
 void SettingsWidget::refreshPluginList() {
     m_pluginOrderList->clear();
 
-    QStringList order = SystemConfig::instance()->getValue(CFG_PLUGIN_ORDER).toStringList();
-    if (order.isEmpty()) {
-        order = QStringList({"live_video", "alarm", "playback", "map", "settings"});
+    PluginManager* pm = PluginManager::instance();
+    QMap<QString, QString> displayNames;
+    QStringList availableIds;
+    for (IPlugin* plugin : pm->allPlugins()) {
+        availableIds.append(plugin->id());
+        displayNames.insert(plugin->id(), plugin->displayName());
     }
 
-    QMap<QString, QString> displayNames = {
-        {"live_video", tr("Live Video")},
-        {"alarm", tr("Alarm Center")},
-        {"playback", tr("Playback")},
-        {"map", tr("Map")},
-        {"settings", tr("Settings")}
-    };
+    if (availableIds.isEmpty()) {
+        // 插件还没加载出来时，至少给出内置插件，避免列表是空的。
+        availableIds = defaultPluginIds();
+        displayNames = {
+            {"live_video", tr("Live Video")},
+            {"alarm", tr("Alarm Center")},
+            {"playback", tr("Playback")},
+            {"map", tr("Map")},
+            {"settings", tr("Settings")}
+        };
+    }
 
-    for (const QString& id : order) {
+    QStringList configured = SystemConfig::instance()->getValue(CFG_PLUGIN_ORDER).toStringList();
+    if (configured.isEmpty()) {
+        configured = defaultPluginIds();
+    }
+
+    for (const QString& id : orderPluginIds(configured, availableIds)) {
         QString displayName = displayNames.value(id, id);
-        new QListWidgetItem(displayName, m_pluginOrderList);
+        QListWidgetItem* item = new QListWidgetItem(displayName, m_pluginOrderList);
+        item->setData(Qt::UserRole, id);
     }
 }
 
@@ -360,17 +377,7 @@ void SettingsWidget::onPluginOrderChanged() {
     QStringList order;
     for (int i = 0; i < m_pluginOrderList->count(); ++i) {
         QListWidgetItem* item = m_pluginOrderList->item(i);
-        QString text = item->text();
-
-        QMap<QString, QString> idMap = {
-            {tr("Live Video"), "live_video"},
-            {tr("Alarm Center"), "alarm"},
-            {tr("Playback"), "playback"},
-            {tr("Map"), "map"},
-            {tr("Settings"), "settings"}
-        };
-
-        order.append(idMap.value(text, text));
+        order.append(item->data(Qt::UserRole).toString());
     }
 
     SystemConfig::instance()->setValue(CFG_PLUGIN_ORDER, order);

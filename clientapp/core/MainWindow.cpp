@@ -2,7 +2,10 @@
 #include "LeftNavigationBar.h"
 #include "EventBus.h"
 #include "ConfigManager.h"
+#include "ConfigKeys.h"
+#include "SystemConfig.h"
 #include "PluginManager.h"
+#include "PluginOrder.h"
 #include "ThemeManager.h"
 #include "SessionManager.h"
 #include "Logger.h"
@@ -67,8 +70,22 @@ void MainWindow::setupUi()
 void MainWindow::registerPlugins()
 {
     PluginManager* pm = PluginManager::instance();
+
+    QMap<QString, IPlugin*> pluginsById;
+    QStringList availableIds;
     for (IPlugin* plugin : pm->allPlugins()) {
-        QString id = plugin->id();
+        pluginsById.insert(plugin->id(), plugin);
+        availableIds.append(plugin->id());
+    }
+
+    m_pluginIds = orderPluginIds(configuredPluginOrder(), availableIds);
+
+    for (const QString& id : m_pluginIds) {
+        IPlugin* plugin = pluginsById.value(id);
+        if (!plugin) {
+            continue;
+        }
+
         QIcon icon = plugin->icon();
         QString tooltip = plugin->displayName();
 
@@ -93,7 +110,41 @@ void MainWindow::registerPlugins()
     connect(m_navBar, &LeftNavigationBar::navigationChanged,
             this, &MainWindow::onNavigationChanged);
 
+    connect(SystemConfig::instance(), &SystemConfig::valueChanged,
+            this, &MainWindow::onSystemConfigChanged, Qt::UniqueConnection);
+
     restoreLayout();
+}
+
+QStringList MainWindow::configuredPluginOrder() const
+{
+    QStringList configured = SystemConfig::instance()->getValue(CFG_PLUGIN_ORDER).toStringList();
+    if (configured.isEmpty()) {
+        configured = defaultPluginIds();
+    }
+    return configured;
+}
+
+void MainWindow::applyPluginOrder()
+{
+    if (!m_navBar || m_pluginIds.isEmpty()) {
+        return;
+    }
+
+    QStringList ordered = orderPluginIds(configuredPluginOrder(), m_pluginIds);
+    m_pluginIds = ordered;
+    m_navBar->setItemOrder(ordered);
+
+    LOG_INFO("MainWindow", QString("Plugin order updated: %1").arg(ordered.join(", ")));
+}
+
+void MainWindow::onSystemConfigChanged(const QString& key, const QVariant& value)
+{
+    Q_UNUSED(value)
+    if (key != CFG_PLUGIN_ORDER) {
+        return;
+    }
+    applyPluginOrder();
 }
 
 void MainWindow::createToolBar()

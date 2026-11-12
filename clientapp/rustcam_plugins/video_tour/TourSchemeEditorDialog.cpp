@@ -20,6 +20,8 @@
 #include <QVBoxLayout>
 
 #include "TourApi.h"
+#include "TourLayoutPicker.h"
+#include "TourTypes.h"
 #include "core/DataManager.h"
 #include "core/DeviceTree.h"
 
@@ -32,7 +34,7 @@ TourSchemeEditorDialog::TourSchemeEditorDialog(TourApi* api, const QList<PlayerL
     , m_layouts(layouts)
 {
     setWindowTitle(tr("编辑轮询方案"));
-    resize(960, 640);
+    resize(1080, 720);
     setupUi();
 
     if (!DataManager::instance()->isLoaded()) {
@@ -52,6 +54,7 @@ void TourSchemeEditorDialog::setupUi()
 {
     QVBoxLayout* root = new QVBoxLayout(this);
 
+    // 顶部常驻：方案名称与所属布局。
     QHBoxLayout* topRow = new QHBoxLayout();
     topRow->addWidget(new QLabel(tr("方案名称"), this));
     m_nameEdit = new QLineEdit(this);
@@ -67,11 +70,38 @@ void TourSchemeEditorDialog::setupUi()
     topRow->addWidget(m_layoutInfoLabel);
     root->addLayout(topRow);
 
-    QSplitter* splitter = new QSplitter(Qt::Horizontal, this);
+    m_tabs = new QTabWidget(this);
+    root->addWidget(m_tabs, 1);
+
+    setupQueueTab();
+    setupLocalDisplayTab();
+    setupParamTab();
+
+    m_buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    root->addWidget(m_buttonBox);
+
+    connect(m_buttonBox, &QDialogButtonBox::accepted, this, &TourSchemeEditorDialog::onAccept);
+    connect(m_buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(m_layoutCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            &TourSchemeEditorDialog::onLayoutChanged);
+
+    onInfiniteToggled(m_infiniteCheck->isChecked());
+    onRunWindowToggled(m_runWindowCheck->isChecked());
+    updateLayoutItems();
+}
+
+void TourSchemeEditorDialog::setupQueueTab()
+{
+    QWidget* tab = new QWidget(m_tabs);
+    QHBoxLayout* tabLayout = new QHBoxLayout(tab);
+    tabLayout->setContentsMargins(0, 0, 0, 0);
+
+    QSplitter* splitter = new QSplitter(Qt::Horizontal, tab);
 
     QTabWidget* trees = new QTabWidget(splitter);
     m_tree = new DeviceTree(trees);
     trees->addTab(m_tree, tr("地区/分组"));
+    splitter->addWidget(trees);
 
     QWidget* queuePanel = new QWidget(splitter);
     QVBoxLayout* queueLayout = new QVBoxLayout(queuePanel);
@@ -91,31 +121,82 @@ void TourSchemeEditorDialog::setupUi()
     splitter->addWidget(queuePanel);
     splitter->setStretchFactor(1, 1);
 
-    root->addWidget(splitter, 1);
+    tabLayout->addWidget(splitter);
 
-    // 锁定设置
-    QGroupBox* lockBox = new QGroupBox(tr("锁定窗口"), this);
-    QVBoxLayout* lockLayout = new QVBoxLayout(lockBox);
-    QHBoxLayout* lockRow = new QHBoxLayout();
-    m_lockItemCombo = new QComboBox(lockBox);
-    m_lockChannelCombo = new QComboBox(lockBox);
-    QPushButton* addLockButton = new QPushButton(tr("添加锁定"), lockBox);
-    QPushButton* removeLockButton = new QPushButton(tr("移除锁定"), lockBox);
-    lockRow->addWidget(new QLabel(tr("窗口"), lockBox));
-    lockRow->addWidget(m_lockItemCombo, 1);
-    lockRow->addWidget(new QLabel(tr("通道"), lockBox));
-    lockRow->addWidget(m_lockChannelCombo, 1);
-    lockRow->addWidget(addLockButton);
-    lockRow->addWidget(removeLockButton);
-    lockLayout->addLayout(lockRow);
-    m_lockTable = new QTableWidget(0, 3, lockBox);
-    m_lockTable->setHorizontalHeaderLabels(QStringList() << tr("窗口") << tr("设备") << tr("通道"));
+    connect(m_tree, QOverload<QVariantMap>::of(&DeviceTree::itemDoubleClicked), this,
+            &TourSchemeEditorDialog::onChannelActivated);
+    connect(addButton, &QPushButton::clicked, this, &TourSchemeEditorDialog::onAddChannel);
+    connect(removeButton, &QPushButton::clicked, this, &TourSchemeEditorDialog::onRemoveChannel);
+    connect(upButton, &QPushButton::clicked, this, &TourSchemeEditorDialog::onMoveChannelUp);
+    connect(downButton, &QPushButton::clicked, this, &TourSchemeEditorDialog::onMoveChannelDown);
+
+    m_tabs->addTab(tab, tr("通道队列"));
+}
+
+void TourSchemeEditorDialog::setupLocalDisplayTab()
+{
+    QWidget* tab = new QWidget(m_tabs);
+    QVBoxLayout* tabLayout = new QVBoxLayout(tab);
+    tabLayout->setContentsMargins(0, 0, 0, 0);
+
+    QSplitter* splitter = new QSplitter(Qt::Horizontal, tab);
+
+    // 左：布局缩略图，直接点选窗口。
+    QWidget* pickerPanel = new QWidget(splitter);
+    QVBoxLayout* pickerLayout = new QVBoxLayout(pickerPanel);
+    pickerLayout->addWidget(new QLabel(tr("点击布局中的窗口进行选择"), pickerPanel));
+    m_layoutPicker = new TourLayoutPicker(pickerPanel);
+    pickerLayout->addWidget(m_layoutPicker, 1);
+    splitter->addWidget(pickerPanel);
+
+    // 右：通道与操作。
+    QWidget* controlPanel = new QWidget(splitter);
+    QVBoxLayout* controlLayout = new QVBoxLayout(controlPanel);
+    controlLayout->addWidget(new QLabel(tr("通道"), controlPanel));
+    m_lockChannelCombo = new QComboBox(controlPanel);
+    controlLayout->addWidget(m_lockChannelCombo);
+    m_assignLockButton = new QPushButton(tr("设为局部展示"), controlPanel);
+    m_removeLockButton = new QPushButton(tr("取消局部展示"), controlPanel);
+    controlLayout->addWidget(m_assignLockButton);
+    controlLayout->addWidget(m_removeLockButton);
+    m_lockHintLabel = new QLabel(controlPanel);
+    m_lockHintLabel->setWordWrap(true);
+    m_lockHintLabel->setStyleSheet("color: gray; font-size: 11px;");
+    m_lockHintLabel->setText(tr("请在左侧布局中点击选择窗口。"));
+    controlLayout->addWidget(m_lockHintLabel);
+    controlLayout->addStretch(1);
+    m_removeLockButton->setEnabled(false);
+    splitter->addWidget(controlPanel);
+    splitter->setStretchFactor(0, 1);
+
+    tabLayout->addWidget(splitter, 1);
+
+    // 下：局部展示清单。
+    m_lockTable = new QTableWidget(0, 2, tab);
+    m_lockTable->setHorizontalHeaderLabels(QStringList() << tr("窗口") << tr("通道"));
     m_lockTable->horizontalHeader()->setStretchLastSection(true);
-    lockLayout->addWidget(m_lockTable);
-    root->addWidget(lockBox);
+    m_lockTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_lockTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_lockTable->setMaximumHeight(160);
+    tabLayout->addWidget(m_lockTable);
 
-    // 运行参数
-    QGroupBox* paramBox = new QGroupBox(tr("运行参数"), this);
+    m_tabs->addTab(tab, tr("局部展示"));
+
+    connect(m_layoutPicker, &TourLayoutPicker::itemSelected, this,
+            &TourSchemeEditorDialog::onLayoutItemSelected);
+    connect(m_assignLockButton, &QPushButton::clicked, this, &TourSchemeEditorDialog::onAssignLock);
+    connect(m_removeLockButton, &QPushButton::clicked, this, &TourSchemeEditorDialog::onRemoveLock);
+    connect(m_lockTable, &QTableWidget::itemSelectionChanged, this,
+            &TourSchemeEditorDialog::onLockTableSelectionChanged);
+}
+
+void TourSchemeEditorDialog::setupParamTab()
+{
+    QWidget* tab = new QWidget(m_tabs);
+    QVBoxLayout* tabLayout = new QVBoxLayout(tab);
+    tabLayout->setContentsMargins(0, 0, 0, 0);
+
+    QGroupBox* paramBox = new QGroupBox(tr("运行参数"), tab);
     QFormLayout* paramLayout = new QFormLayout(paramBox);
     m_dwellSpin = new QSpinBox(paramBox);
     m_dwellSpin->setRange(1000, 86400000);
@@ -184,29 +265,13 @@ void TourSchemeEditorDialog::setupUi()
     m_safetySpin->setSuffix(tr(" 分钟"));
     paramLayout->addRow(tr("安全兜底时长（0 表示不设置）"), m_safetySpin);
 
-    root->addWidget(paramBox);
+    tabLayout->addWidget(paramBox);
+    tabLayout->addStretch(1);
 
-    m_buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    root->addWidget(m_buttonBox);
-
-    connect(m_buttonBox, &QDialogButtonBox::accepted, this, &TourSchemeEditorDialog::onAccept);
-    connect(m_buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    connect(m_layoutCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-            &TourSchemeEditorDialog::onLayoutChanged);
-    connect(m_tree, QOverload<QVariantMap>::of(&DeviceTree::itemDoubleClicked), this,
-            &TourSchemeEditorDialog::onChannelActivated);
-    connect(addButton, &QPushButton::clicked, this, &TourSchemeEditorDialog::onAddChannel);
-    connect(removeButton, &QPushButton::clicked, this, &TourSchemeEditorDialog::onRemoveChannel);
-    connect(upButton, &QPushButton::clicked, this, &TourSchemeEditorDialog::onMoveChannelUp);
-    connect(downButton, &QPushButton::clicked, this, &TourSchemeEditorDialog::onMoveChannelDown);
-    connect(addLockButton, &QPushButton::clicked, this, &TourSchemeEditorDialog::onAddLock);
-    connect(removeLockButton, &QPushButton::clicked, this, &TourSchemeEditorDialog::onRemoveLock);
     connect(m_infiniteCheck, &QCheckBox::toggled, this, &TourSchemeEditorDialog::onInfiniteToggled);
     connect(m_runWindowCheck, &QCheckBox::toggled, this, &TourSchemeEditorDialog::onRunWindowToggled);
 
-    onInfiniteToggled(m_infiniteCheck->isChecked());
-    onRunWindowToggled(m_runWindowCheck->isChecked());
-    updateLayoutItems();
+    m_tabs->addTab(tab, tr("运行参数"));
 }
 
 void TourSchemeEditorDialog::editScheme(const TourScheme& scheme)
@@ -262,37 +327,98 @@ void TourSchemeEditorDialog::editScheme(const TourScheme& scheme)
     }
     updateLayoutItems();
     updateLockChannels();
+    refreshLockWidgets();
 }
 
 void TourSchemeEditorDialog::updateLayoutItems()
 {
-    m_lockItemCombo->clear();
     const int layoutId = m_layoutCombo->currentData().toInt();
     for (const PlayerLayout& layout : m_layouts) {
         if (layout.id != layoutId) {
             continue;
         }
-        for (const LayoutItem& item : layout.layoutJson) {
-            m_lockItemCombo->addItem(item.id, item.id);
-        }
         m_layoutInfoLabel->setText(tr("窗口数：%1").arg(layout.layoutJson.size()));
+        if (m_layoutPicker) {
+            m_layoutPicker->setLayout(layout);
+        }
+        refreshLockWidgets();
         return;
     }
     m_layoutInfoLabel->setText(tr("未选择布局"));
+    if (m_layoutPicker) {
+        m_layoutPicker->setLayout(PlayerLayout());
+    }
 }
 
 void TourSchemeEditorDialog::updateLockChannels()
 {
     m_lockChannelCombo->clear();
-    for (int i = 0; i < m_queueList->count(); ++i) {
-        QListWidgetItem* item = m_queueList->item(i);
-        m_lockChannelCombo->addItem(item->text(), i);
+    for (const TourChannel& channel : m_queue) {
+        const QString name = channel.name.isEmpty()
+                                 ? channel.deviceTag + QLatin1Char('/') + channel.channelTag
+                                 : channel.name;
+        m_lockChannelCombo->addItem(name, channel.ref().key());
     }
 }
 
 void TourSchemeEditorDialog::updateQueueWidgets()
 {
     updateLockChannels();
+}
+
+QHash<QString, QString> TourSchemeEditorDialog::lockChannelNames() const
+{
+    QHash<QString, QString> names;
+    for (const TourChannel& channel : m_queue) {
+        names.insert(channel.ref().key(),
+                     channel.name.isEmpty()
+                         ? channel.deviceTag + QLatin1Char('/') + channel.channelTag
+                         : channel.name);
+    }
+    return names;
+}
+
+QString TourSchemeEditorDialog::layoutItemName(const QString& layoutItemId) const
+{
+    const int layoutId = m_layoutCombo->currentData().toInt();
+    for (const PlayerLayout& layout : m_layouts) {
+        if (layout.id != layoutId) {
+            continue;
+        }
+        for (const LayoutItem& item : layout.layoutJson) {
+            if (item.id == layoutItemId) {
+                return layoutItemDisplayName(item);
+            }
+        }
+    }
+    return layoutItemId;
+}
+
+QString TourSchemeEditorDialog::channelName(const LockedSlot& slot) const
+{
+    for (const TourChannel& channel : m_queue) {
+        if (channel.deviceTag == slot.deviceTag && channel.channelTag == slot.channelTag) {
+            return channel.name.isEmpty()
+                       ? channel.deviceTag + QLatin1Char('/') + channel.channelTag
+                       : channel.name;
+        }
+    }
+    return slot.deviceTag + QLatin1Char('/') + slot.channelTag;
+}
+
+void TourSchemeEditorDialog::refreshLockWidgets()
+{
+    if (!m_layoutPicker) {
+        return;
+    }
+    m_layoutPicker->setLocks(m_locks, lockChannelNames());
+
+    m_lockTable->setRowCount(m_locks.size());
+    for (int i = 0; i < m_locks.size(); ++i) {
+        const LockedSlot& slot = m_locks.at(i);
+        m_lockTable->setItem(i, 0, new QTableWidgetItem(layoutItemName(slot.layoutItemId)));
+        m_lockTable->setItem(i, 1, new QTableWidgetItem(channelName(slot)));
+    }
 }
 
 void TourSchemeEditorDialog::collectChannels(QVector<TourChannel>* channels) const
@@ -334,6 +460,13 @@ void TourSchemeEditorDialog::onLayoutChanged()
     m_locks.clear();
     updateLayoutItems();
     updateLockChannels();
+    refreshLockWidgets();
+    if (m_lockHintLabel) {
+        m_lockHintLabel->setText(tr("请在左侧布局中点击选择窗口。"));
+    }
+    if (m_removeLockButton) {
+        m_removeLockButton->setEnabled(false);
+    }
 }
 
 void TourSchemeEditorDialog::onChannelActivated(const QVariantMap& meta)
@@ -404,43 +537,113 @@ void TourSchemeEditorDialog::onMoveChannelDown()
     m_queue.swapItemsAt(row, row + 1);
 }
 
-void TourSchemeEditorDialog::onAddLock()
+void TourSchemeEditorDialog::onLayoutItemSelected(const QString& layoutItemId)
 {
-    const QString itemId = m_lockItemCombo->currentData().toString();
-    const int channelIndex = m_lockChannelCombo->currentData().toInt();
-    if (itemId.isEmpty() || channelIndex < 0 || channelIndex >= m_queue.size()) {
+    if (layoutItemId.isEmpty()) {
+        m_lockHintLabel->setText(tr("请在左侧布局中点击选择窗口。"));
         return;
     }
-    const TourChannel& channel = m_queue.at(channelIndex);
+
+    const QString itemName = layoutItemName(layoutItemId);
+    QString lockedChannel;
     for (const LockedSlot& slot : m_locks) {
-        if (slot.layoutItemId == itemId) {
-            QMessageBox::warning(this, tr("重复锁定"),
-                                 tr("窗口 %1 已锁定。").arg(itemId));
-            return;
+        if (slot.layoutItemId == layoutItemId) {
+            lockedChannel = channelName(slot);
+            break;
         }
     }
-    LockedSlot slot;
-    slot.layoutItemId = itemId;
-    slot.deviceTag = channel.deviceTag;
-    slot.channelTag = channel.channelTag;
-    m_locks.append(slot);
 
-    m_lockTable->setRowCount(m_locks.size());
+    if (lockedChannel.isEmpty()) {
+        m_lockHintLabel->setText(tr("已选窗口：%1，尚未设为局部展示。").arg(itemName));
+        m_removeLockButton->setEnabled(false);
+    } else {
+        m_lockHintLabel->setText(tr("已选窗口：%1（局部展示：%2）").arg(itemName, lockedChannel));
+        m_removeLockButton->setEnabled(true);
+    }
+
+    // 清单里已有该窗口时同步选中，方便直接取消局部展示。
     for (int i = 0; i < m_locks.size(); ++i) {
-        m_lockTable->setItem(i, 0, new QTableWidgetItem(m_locks.at(i).layoutItemId));
-        m_lockTable->setItem(i, 1, new QTableWidgetItem(m_locks.at(i).deviceTag));
-        m_lockTable->setItem(i, 2, new QTableWidgetItem(m_locks.at(i).channelTag));
+        if (m_locks.at(i).layoutItemId == layoutItemId) {
+            m_lockTable->selectRow(i);
+            break;
+        }
     }
 }
 
-void TourSchemeEditorDialog::onRemoveLock()
+void TourSchemeEditorDialog::onLockTableSelectionChanged()
 {
     const int row = m_lockTable->currentRow();
     if (row < 0 || row >= m_locks.size()) {
         return;
     }
-    m_locks.remove(row);
-    m_lockTable->removeRow(row);
+    const QString itemId = m_locks.at(row).layoutItemId;
+    if (m_layoutPicker && m_layoutPicker->selectedItemId() != itemId) {
+        m_layoutPicker->selectItem(itemId);
+        onLayoutItemSelected(itemId);
+    }
+}
+
+void TourSchemeEditorDialog::onAssignLock()
+{
+    const QString itemId = m_layoutPicker ? m_layoutPicker->selectedItemId() : QString();
+    if (itemId.isEmpty()) {
+        QMessageBox::information(this, tr("设为局部展示"),
+                                 tr("请先在布局缩略图中点击选择要固定的窗口。"));
+        return;
+    }
+
+    const QString key = m_lockChannelCombo->currentData().toString();
+    if (key.isEmpty()) {
+        QMessageBox::information(this, tr("设为局部展示"),
+                                 tr("请先在通道队列里选择一路通道。"));
+        return;
+    }
+
+    for (const LockedSlot& slot : m_locks) {
+        if (slot.layoutItemId == itemId) {
+            QMessageBox::warning(this, tr("重复锁定"),
+                                 tr("窗口 %1 已经是局部展示。").arg(layoutItemName(itemId)));
+            return;
+        }
+    }
+
+    TourChannel selected;
+    bool found = false;
+    for (const TourChannel& channel : m_queue) {
+        if (channel.ref().key() == key) {
+            selected = channel;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        return;
+    }
+
+    LockedSlot slot;
+    slot.layoutItemId = itemId;
+    slot.deviceTag = selected.deviceTag;
+    slot.channelTag = selected.channelTag;
+    m_locks.append(slot);
+
+    refreshLockWidgets();
+    onLayoutItemSelected(itemId);
+}
+
+void TourSchemeEditorDialog::onRemoveLock()
+{
+    const QString itemId = m_layoutPicker ? m_layoutPicker->selectedItemId() : QString();
+    if (itemId.isEmpty()) {
+        return;
+    }
+    for (int i = 0; i < m_locks.size(); ++i) {
+        if (m_locks.at(i).layoutItemId == itemId) {
+            m_locks.remove(i);
+            refreshLockWidgets();
+            onLayoutItemSelected(itemId);
+            return;
+        }
+    }
 }
 
 void TourSchemeEditorDialog::onInfiniteToggled(bool infinite)

@@ -4,6 +4,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
+#include <QPointer>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -150,16 +151,24 @@ void TourPlayer::play(const TourChannelRef& channel, quint64 generation)
     if (!m_api) {
         return;
     }
+    // 每次请求带序号：重试与原请求可能并发，只有最后一次请求的结果生效。
+    const quint64 requestSeq = ++m_requestSeq;
     const quint64 requestGeneration = generation;
-    m_api->fetchPlayUrl(channel, [this, requestGeneration](bool success, const QString& url,
-                                                           const QString& error) {
-        onPlayUrlReady(requestGeneration, success, url, error);
+    // 窗口可能在取流期间被销毁（停止/切换方案会重建格子），这里用 QPointer 保护。
+    QPointer<TourPlayer> self(this);
+    m_api->fetchPlayUrl(channel, [self, requestGeneration, requestSeq](
+                                     bool success, const QString& url, const QString& error) {
+        if (!self) {
+            return;
+        }
+        self->onPlayUrlReady(requestGeneration, requestSeq, success, url, error);
     });
 }
 
-void TourPlayer::onPlayUrlReady(quint64 generation, bool success, const QString& url, const QString& error)
+void TourPlayer::onPlayUrlReady(quint64 generation, quint64 requestSeq, bool success,
+                                const QString& url, const QString& error)
 {
-    if (generation != m_generation) {
+    if (generation != m_generation || requestSeq != m_requestSeq) {
         // 过期请求：丢弃。
         return;
     }
@@ -177,6 +186,8 @@ void TourPlayer::onPlayUrlReady(quint64 generation, bool success, const QString&
 
 void TourPlayer::release()
 {
+    // 作废仍在途的取流请求，避免释放后又把旧地址播起来。
+    ++m_requestSeq;
     m_video->stop();
     m_playing = false;
     m_stalledTicks = 0;

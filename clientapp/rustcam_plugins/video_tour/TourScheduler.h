@@ -10,7 +10,11 @@
 #include <QTimer>
 #include <QVector>
 
+class QDateTime;
+
 namespace rustcam {
+
+struct FillResult;
 
 /// 轮询调度器：单线程串行状态机。
 ///
@@ -33,6 +37,9 @@ public:
         quint64 generation = 0;
         int backfillUsed = 0;
         bool displayable = false;
+        bool finished = false;      ///< 批次是否已结束（结束后的迟到回调不再生效）
+        bool replay = false;        ///< 是否为历史批次回放（回放结束不再入历史）
+
         qint64 batchDeadline = 0;   ///< 首帧等待截止（单调时钟）
         qint64 dwellDeadline = 0;   ///< 可展示后的 dwell 截止（单调时钟）
     };
@@ -59,6 +66,9 @@ public:
     void onPlayFailed(const QString& layoutItemId, quint64 generation, const QString& reason);
     void onDisconnected(const QString& layoutItemId, quint64 generation);
     void onStalled(const QString& layoutItemId, quint64 generation);
+
+    /// 判断给定时间是否落在运行时段内（便于单测覆盖跨天/星期边界）。
+    static bool inRunWindowAt(const RunWindow& window, const QDateTime& now);
 
     int currentBatchIndex() const { return m_batch.index; }
     TourTaskState taskState() const { return m_state; }
@@ -87,6 +97,10 @@ private slots:
 private:
     qint64 nowMs() const { return m_clock.elapsed(); }
     void setState(TourTaskState state);
+    /// 由填充结果构造批次（分配窗口、递增 generation、设置首帧截止时间）。
+    Batch makeBatch(int index, const FillResult& plan);
+    /// 发布当前批次：逐槽下发状态/播放请求、通知批次开始并启动计时。
+    QVector<TourChannelRef> activateBatch();
     void beginBatch();
     void replayBatch(const Batch& batch);
     void finishBatch();

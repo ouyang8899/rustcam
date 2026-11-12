@@ -7,6 +7,7 @@
 #include <QMouseEvent>
 #include <QStyle>
 #include <QSignalMapper>
+#include <QSet>
 
 namespace rustcam {
 
@@ -95,6 +96,57 @@ void LeftNavigationBar::removeNavigationItem(const QString& id)
 
     if (m_statusDots.contains(id)) {
         m_statusDots.take(id)->deleteLater();
+    }
+}
+
+void LeftNavigationBar::setItemOrder(const QStringList& ids)
+{
+    // 当前布局里的实际排列，未配置的按钮按这个相对顺序保留。
+    QList<QToolButton*> current;
+    for (int i = 0; i < m_iconLayout->count(); ++i) {
+        QToolButton* btn = qobject_cast<QToolButton*>(m_iconLayout->itemAt(i)->widget());
+        if (btn) {
+            current.append(btn);
+        }
+    }
+
+    QList<QToolButton*> ordered;
+    QSet<QString> used;
+
+    for (const QString& id : ids) {
+        QToolButton* btn = m_iconButtons.value(id);
+        if (!btn || used.contains(id)) {
+            continue;
+        }
+        ordered.append(btn);
+        used.insert(id);
+    }
+
+    for (QToolButton* btn : current) {
+        if (used.contains(m_iconButtons.key(btn))) {
+            continue;
+        }
+        ordered.append(btn);
+    }
+
+    if (ordered.isEmpty()) {
+        return;
+    }
+
+    for (QToolButton* btn : ordered) {
+        m_iconLayout->removeWidget(btn);
+    }
+
+    int insertPos = 0;
+    for (QToolButton* btn : ordered) {
+        m_iconLayout->insertWidget(insertPos, btn);
+        insertPos++;
+    }
+    m_iconLayout->activate();
+
+    for (auto it = m_iconButtons.constBegin(); it != m_iconButtons.constEnd(); ++it) {
+        updateBadgePosition(it.key());
+        updateStatusDotPosition(it.key());
     }
 }
 

@@ -3,6 +3,7 @@
 #include "PlayerLayout.h"
 #include "TourScheme.h"
 
+#include <QHash>
 #include <QList>
 #include <QWidget>
 
@@ -54,6 +55,9 @@ private:
     void startScheme(const TourScheme& scheme);
     void updateButtons();
     void showLockedChannels(const TourScheme& scheme, const TourSnapshot& snapshot);
+    /// 锁定窗口不受调度器管理，播放事件需自行回写状态。
+    void updateLockedChannelState(const QString& layoutItemId, quint64 generation,
+                                  TourChannelState state, const QString& reason);
     /// 按当前选中方案（或默认布局）重建视频网格。
     void refreshGrid();
     /// 按布局 id 取布局；找不到返回 nullptr。
@@ -68,6 +72,8 @@ private:
     SingleInstanceGuard* m_guard = nullptr;
 
     QList<PlayerLayout> m_layouts;
+    /// 常驻锁定窗口：layoutItemId -> 通道。
+    QHash<QString, TourChannelRef> m_lockedChannels;
 
     QWidget* m_gridHost = nullptr;
     QLabel* m_schemeLabel = nullptr;

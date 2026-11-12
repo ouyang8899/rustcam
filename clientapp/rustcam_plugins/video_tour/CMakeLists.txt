@@ -14,6 +14,7 @@ set(PLUGIN_SOURCES
     SingleInstanceGuard.cpp
     TourSchemeListPanel.cpp
     TourSchemeEditorDialog.cpp
+    TourLayoutPicker.cpp
     TourRunWidget.cpp
 )
 
@@ -32,6 +33,7 @@ set(PLUGIN_HEADERS
     SingleInstanceGuard.h
     TourSchemeListPanel.h
     TourSchemeEditorDialog.h
+    TourLayoutPicker.h
     TourRunWidget.h
 )
 
@@ -78,6 +80,7 @@ if(Qt5Test_FOUND)
         tests/TourSchemeTest.cpp
         TourScheme.cpp
     )
+    target_compile_definitions(video_tour_scheme_test PRIVATE RUSTCAM_CORE_EXPORTS)
     target_include_directories(video_tour_scheme_test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}
@@ -95,6 +98,21 @@ if(Qt5Test_FOUND)
     )
     target_link_libraries(video_tour_planner_test PRIVATE Qt5::Core Qt5::Test)
     add_test(NAME video_tour_planner_test COMMAND video_tour_planner_test)
+
+    add_executable(video_tour_scheduler_test
+        tests/TourSchedulerTest.cpp
+        TourScheduler.cpp
+        TourBatchPlanner.cpp
+        TourScheme.cpp
+        TourAuditLog.cpp
+    )
+    target_compile_definitions(video_tour_scheduler_test PRIVATE RUSTCAM_CORE_EXPORTS)
+    target_include_directories(video_tour_scheduler_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}
+    )
+    target_link_libraries(video_tour_scheduler_test PRIVATE Qt5::Core Qt5::Test)
+    add_test(NAME video_tour_scheduler_test COMMAND video_tour_scheduler_test)
 endif()
 
 add_custom_command(TARGET ${PLUGIN_ID} POST_BUILD

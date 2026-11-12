@@ -60,13 +60,15 @@ private slots:
     void onAudioToggled(bool checked);
 
 private:
-    void onPlayUrlReady(quint64 generation, bool success, const QString& url, const QString& error);
+    void onPlayUrlReady(quint64 generation, quint64 requestSeq, bool success,
+                        const QString& url, const QString& error);
     void updateStatusText();
     void updateAudioIcon();
 
     TourApi* m_api = nullptr;
     QString m_layoutItemId;
     quint64 m_generation = 0;
+    quint64 m_requestSeq = 0;
     bool m_playing = false;
     qint64 m_lastFrames = -1;
     int m_stalledTicks = 0;

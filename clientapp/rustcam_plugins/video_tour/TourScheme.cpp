@@ -207,7 +207,11 @@ bool TourSchemeCodec::validate(const TourScheme& scheme, int layoutW,
 
     QSet<QString> channels;
     for (const TourChannel& channel : scheme.channels) {
-        channels.insert(channel.ref().key());
+        const QString key = channel.ref().key();
+        if (channels.contains(key)) {
+            return fail(QStringLiteral("通道重复：%1").arg(key));
+        }
+        channels.insert(key);
     }
 
     QSet<QString> lockedItems;
@@ -242,10 +246,14 @@ TourSnapshot TourSchemeCodec::buildSnapshot(const TourScheme& scheme, int layout
     QVector<TourChannel> sorted = scheme.channels;
     std::stable_sort(sorted.begin(), sorted.end(),
                      [](const TourChannel& a, const TourChannel& b) { return a.sort < b.sort; });
+    QSet<QString> seen;
     for (const TourChannel& channel : sorted) {
-        if (!locked.contains(channel.ref().key())) {
-            snapshot.activeQueue.append(channel.ref());
+        const QString key = channel.ref().key();
+        if (locked.contains(key) || seen.contains(key)) {
+            continue;
         }
+        seen.insert(key);
+        snapshot.activeQueue.append(channel.ref());
     }
     return snapshot;
 }

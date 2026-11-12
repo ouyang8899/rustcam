@@ -3,7 +3,21 @@
 #include <QString>
 #include <QMetaType>
 
+#include "core/PlayerLayout.h"
+
 namespace rustcam {
+
+/// 布局窗口的可读名称：优先用布局里配置的标签，否则用「第N行第M列」。
+///
+/// 布局窗口的 id 是设计器生成的 uuid，直接展示没有意义，
+/// 这里统一给出人能看懂的名称。
+inline QString layoutItemDisplayName(const LayoutItem& item)
+{
+    if (!item.label.isEmpty()) {
+        return item.label;
+    }
+    return QStringLiteral("第%1行第%2列").arg(item.row + 1).arg(item.col + 1);
+}
 
 /// 轮询任务状态。
 enum class TourTaskState {

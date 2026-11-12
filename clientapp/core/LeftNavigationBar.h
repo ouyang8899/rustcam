@@ -22,6 +22,10 @@ public:
                           const QString& tooltip);
     void removeNavigationItem(const QString& id);
 
+    /// 按给定的 id 顺序重排导航按钮。
+    /// ids 里没有的按钮保持原有相对顺序，排在最后。
+    void setItemOrder(const QStringList& ids);
+
     void setCurrentItem(const QString& id);
     QString currentItem() const { return m_currentId; }
 

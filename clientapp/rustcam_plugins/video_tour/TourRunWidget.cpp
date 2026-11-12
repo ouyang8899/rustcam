@@ -29,14 +29,18 @@ TourRunWidget::TourRunWidget(TourApi* api, QWidget* parent)
     QSplitter* leftSplitter = new QSplitter(Qt::Vertical, splitter);
 
     m_listPanel = new TourSchemeListPanel(m_api, leftSplitter);
-    m_listPanel->setMinimumWidth(280);
-    m_listPanel->setMaximumWidth(360);
     leftSplitter->addWidget(m_listPanel);
 
     m_statusPanel = new TourChannelStatusPanel(leftSplitter);
     leftSplitter->addWidget(m_statusPanel);
     leftSplitter->setStretchFactor(0, 1);
     leftSplitter->setStretchFactor(1, 1);
+
+    // 左侧整列限宽：通道状态表的 sizeHint 会被列内容撑到几百像素，
+    // 若不限宽，左列会被撑宽而方案列表仍卡在 360px，方案区与视频区之间
+    // 就会出现一大片空白。这里把宽度上限加在列容器上。
+    leftSplitter->setMinimumWidth(280);
+    leftSplitter->setMaximumWidth(360);
 
     splitter->addWidget(leftSplitter);
 
@@ -109,6 +113,27 @@ TourRunWidget::TourRunWidget(TourApi* api, QWidget* parent)
             [this](const QString&, bool fullscreen) { m_scheduler->setFullscreenPaused(fullscreen); });
     connect(m_players, &TourPlayerManager::retryRequested, this, &TourRunWidget::onCellRetryRequested);
 
+    // 锁定窗口（generation 0）不经过调度器，状态由这里自行回写。
+    connect(m_players, &TourPlayerManager::firstFrame, this,
+            [this](const QString& layoutItemId, quint64 generation) {
+                updateLockedChannelState(layoutItemId, generation, TourChannelState::Playing,
+                                         tr("常驻锁定"));
+            });
+    connect(m_players, &TourPlayerManager::playFailed, this,
+            [this](const QString& layoutItemId, quint64 generation, const QString& reason) {
+                updateLockedChannelState(layoutItemId, generation, TourChannelState::Failed, reason);
+            });
+    connect(m_players, &TourPlayerManager::disconnected, this,
+            [this](const QString& layoutItemId, quint64 generation) {
+                updateLockedChannelState(layoutItemId, generation, TourChannelState::Failed,
+                                         tr("连接断开"));
+            });
+    connect(m_players, &TourPlayerManager::stalled, this,
+            [this](const QString& layoutItemId, quint64 generation) {
+                updateLockedChannelState(layoutItemId, generation, TourChannelState::Failed,
+                                         tr("画面卡顿"));
+            });
+
     connect(m_scheduler, &TourScheduler::windowStateChanged, this,
             &TourRunWidget::onWindowStateChanged);
     connect(m_scheduler, &TourScheduler::batchStarted, this, &TourRunWidget::onBatchStarted);
@@ -154,6 +179,7 @@ void TourRunWidget::stopTask()
     if (m_players) {
         m_players->releaseAll();
     }
+    m_lockedChannels.clear();
     delete m_guard;
     m_guard = nullptr;
 }
@@ -257,6 +283,8 @@ void TourRunWidget::startScheme(const TourScheme& scheme)
             return;
         }
 
+        // 启动新方案前先停掉旧任务，避免旧计时器继续驱动即将重建的窗口。
+        m_scheduler->stop();
         m_players->setLayout(*target);
         m_model->reset(scheme.channels);
         showLockedChannels(scheme, snapshot);
@@ -275,12 +303,35 @@ void TourRunWidget::startScheme(const TourScheme& scheme)
 void TourRunWidget::showLockedChannels(const TourScheme& scheme, const TourSnapshot& snapshot)
 {
     Q_UNUSED(scheme)
+    m_lockedChannels.clear();
     for (const LockedSlot& slot : snapshot.lockedSet) {
         TourChannelRef ref;
         ref.deviceTag = slot.deviceTag;
         ref.channelTag = slot.channelTag;
+        m_lockedChannels.insert(slot.layoutItemId, ref);
         // generation 0 表示该窗口不受调度器管理（常驻锁定）。
         m_players->play(slot.layoutItemId, ref, 0);
+        m_players->setSlotState(slot.layoutItemId, TourChannelState::Locked, tr("常驻锁定"));
+        m_model->setState(ref, TourChannelState::Locked, tr("常驻锁定"));
+    }
+}
+
+void TourRunWidget::updateLockedChannelState(const QString& layoutItemId, quint64 generation,
+                                             TourChannelState state, const QString& reason)
+{
+    if (generation != 0) {
+        return;
+    }
+    const auto it = m_lockedChannels.constFind(layoutItemId);
+    if (it == m_lockedChannels.constEnd()) {
+        return;
+    }
+    if (m_players) {
+        m_players->setSlotState(layoutItemId, state, reason);
+    }
+    if (m_model) {
+        const int batch = m_scheduler ? m_scheduler->currentBatchIndex() : -1;
+        m_model->setState(it.value(), state, reason, batch);
     }
 }
 
@@ -338,6 +389,19 @@ void TourRunWidget::onRetryRequested(int row)
 
 void TourRunWidget::onCellRetryRequested(const QString& layoutItemId)
 {
+    if (!m_players) {
+        return;
+    }
+    // 锁定窗口不在调度器内，直接重新拉起播放。
+    const auto it = m_lockedChannels.constFind(layoutItemId);
+    if (it != m_lockedChannels.constEnd()) {
+        m_players->play(layoutItemId, it.value(), 0);
+        m_players->setSlotState(layoutItemId, TourChannelState::Requesting, tr("常驻锁定"));
+        if (m_model) {
+            m_model->setState(it.value(), TourChannelState::Requesting, tr("常驻锁定"));
+        }
+        return;
+    }
     if (m_scheduler) {
         m_scheduler->retrySlot(layoutItemId);
     }
@@ -381,13 +445,15 @@ void TourRunWidget::onPageAtEnd()
 void TourRunWidget::updateButtons()
 {
     const TourTaskState state = m_scheduler ? m_scheduler->taskState() : TourTaskState::Idle;
-    const bool running = state == TourTaskState::Running || state == TourTaskState::Paused;
-    m_pauseButton->setEnabled(running);
+    const bool active = state == TourTaskState::Running || state == TourTaskState::Paused;
+    const bool running = state == TourTaskState::Running;
+    m_pauseButton->setEnabled(active);
     m_pauseButton->setText(state == TourTaskState::Paused ? tr("恢复") : tr("暂停"));
-    m_stopButton->setEnabled(running);
+    m_stopButton->setEnabled(active);
+    // 暂停时计时冻结，翻页无法推进，因此只在运行态允许翻页。
     m_prevButton->setEnabled(running);
     m_nextButton->setEnabled(running);
-    m_statusPanel->setRetryEnabled(running);
+    m_statusPanel->setRetryEnabled(active);
 }
 
 } // namespace rustcam

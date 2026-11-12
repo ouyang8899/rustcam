@@ -5,6 +5,7 @@ set(CORE_LIB_SOURCES
     ConfigManager.cpp
     ThemeManager.cpp
     PluginManager.cpp
+    PluginOrder.cpp
     LeftNavigationBar.cpp
     SessionManager.cpp
     ServerConfig.cpp
@@ -51,6 +52,7 @@ set(CORE_LIB_HEADERS
     ConfigKeys.h
     ThemeManager.h
     PluginManager.h
+    PluginOrder.h
     LeftNavigationBar.h
     SessionManager.h
     ServerConfig.h

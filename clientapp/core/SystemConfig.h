@@ -33,6 +33,13 @@ public:
 
     QStringList allKeys() const;
 
+    /// 把配置值序列化成可以写进数据库的文本。
+    /// 列表（QStringList / QVariantList）和字典（QVariantMap）走 JSON，
+    /// 其余类型存成纯文本。
+    static QString serializeValue(const QVariant& value);
+    /// 把数据库里的文本还原成配置值，JSON 数组还原成 QStringList。
+    static QVariant deserializeValue(const QString& text);
+
 signals:
     void valueChanged(const QString& key, const QVariant& value);
     void configReloaded();
