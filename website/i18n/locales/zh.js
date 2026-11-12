@@ -26,8 +26,8 @@ export default {
     developer: '开发者',
     community: '社区',
     contact: '联系',
-    tagline: 'Rust 驱动的视频监控网关与信令控制平台。',
-    rights: 'MIT License',
+    tagline: '固定机位 + 移动视点，一套可私有化部署的视频监控平台。',
+    rights: 'MIT 协议',
     builtWith: '用 Nuxt 构建'
   }
 }

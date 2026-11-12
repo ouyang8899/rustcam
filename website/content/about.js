@@ -2,29 +2,31 @@ export default {
   zh: {
     meta: {
       title: '关于 · RustCam',
-      description: 'RustCam 的项目定位、架构理念、路线图、贡献指南与开源许可。'
+      description: 'RustCam 的项目定位、产品原则、路线图、贡献指南与开源许可。'
     },
     intro: {
       title: '关于 RustCam',
-      desc: 'RustCam-Media 是一个现代化的视频监控网关与信令控制平台：Rust 后端负责协议接入、媒体转发与信令控制，Vue 前端提供 Web 控制台，Qt 客户端面向桌面运维场景。项目以 MIT 协议开源。'
-    },    principles: {
-      title: '架构理念',
+      desc: 'RustCam-Media 是一套可私有化部署的视频监控平台：把不同品牌、不同楼层的摄像机、编码器与无人机接入同一个后台，让实时观看、录像留存、告警处置与事后取证在同一个界面里完成。开源 MIT 协议，可自行部署与二次开发。'
+    },
+    principles: {
+      title: '产品原则',
       items: [
-        { title: '分层而非堆砌', desc: 'HTTP 处理器 → 应用服务 → 领域模型与端口 → 基础设施实现，业务规则不依赖具体协议或存储。' },
-        { title: '端口与适配器', desc: '协议侧由 SignalAdapter 统一抽象 GB28181 / ONVIF / RTSP / WebSocket，媒体侧由 MediaServerAdapter 对接媒体服务器。' },
-        { title: '媒体与信令分离', desc: '传输与媒体数据面（transport / media）负责 SIP 信令与 RTP 收发，通过 MediaNode 中间件链完成音频格式转换与重采样。' },
-        { title: '安全默认开启', desc: 'JWT + Casbin 贯穿全部业务接口，TLS 由 rustls 实现，HTTPS 与 WSS 开箱可用。' }
+        { title: '私有化优先', desc: '视频不出内网，数据留在客户自己的服务器上；不按路数按月收费，也不把画面交给第三方。' },
+        { title: '一套后台，一种用法', desc: '固定摄像机与无人机共用同一份录像、同一条告警流和同一套权限，机种不同，操作方式不变。' },
+        { title: '兼容存量设备', desc: '主流协议开箱支持，仓库里的设备不用换；新增设备只需填个地址，不需要二次开发。' },
+        { title: '移动眼按需调度', desc: '需要时才飞过去看，省掉布线、杆件与长期维护；航线、围栏与告警规则由配置组合，不锁死在某个场景。' },
+        { title: '安全默认开启', desc: '登录令牌与分级权限贯穿全部业务接口，权限边界与操作审计开箱可用。' }
       ]
     },
     roadmap: {
       title: '路线图',
       items: [
-        { status: 'done', title: 'GB28181 全链路', desc: 'SIP 信令、PS 流解析、云台控制、平台广播与语音对讲均已完成。' },
-        { status: 'done', title: 'ONVIF 发现与控制', desc: 'WS-Discovery 探测、ContinuousMove / AbsoluteMove 与 Backchannel 对讲已完成。' },
-        { status: 'done', title: 'RTSP 与媒体服务器', desc: 'RTSP 接入与媒体服务器集群已完成，Hook 事件链路打通。' },
-        { status: 'progress', title: '媒体服务器适配', desc: '媒体服务器适配层已抽象完毕，部分实现仍在推进中。' },
-        { status: 'done', title: '移动眼', desc: '无人机作为会动的视点接入监控域：PX4 / ArduPilot 飞控、Cesium 3D 实时视图、机载摄像头关联与直播自动取流、航线、围栏、控制权与审计已落地，并内置 MAVLink 模拟器测试环境。' },
-        { status: 'next', title: '能力持续演进', desc: '监控墙布局、录像策略、地图选点等能力持续迭代。' }
+        { status: 'done', title: 'GB28181 全链路', desc: '主流摄像机与编码器接入、云台控制、平台广播与语音对讲均已完成。' },
+        { status: 'done', title: 'ONVIF 发现与控制', desc: '自动发现网络内设备、转动变倍与语音对讲已完成。' },
+        { status: 'done', title: 'RTSP 与媒体服务', desc: '第三方设备接入与媒体服务集群已完成，故障自动切换。' },
+        { status: 'progress', title: '媒体服务多厂商适配', desc: '适配层已抽象完毕，部分厂商的实现仍在推进中。' },
+        { status: 'done', title: '移动眼', desc: '无人机作为会动的视点接入监控域：飞控接入、三维实时视图、机载摄像机自动出流、航线、围栏、控制权与审计已落地，并内置模拟器测试环境。' },
+        { status: 'next', title: '能力持续演进', desc: '模板化场景、移动眼与监控墙联动演示，以及录像策略、地图选点等能力的持续迭代。' }
       ]
     },
     contribute: {
@@ -42,30 +44,31 @@ export default {
   en: {
     meta: {
       title: 'About · RustCam',
-      description: 'RustCam project positioning, architecture principles, roadmap, contribution guide and open-source licence.'
+      description: 'RustCam project positioning, product principles, roadmap, contribution guide and open-source licence.'
     },
     intro: {
       title: 'About RustCam',
-      desc: 'RustCam-Media is a modern video surveillance gateway and signalling control platform: a Rust backend handling protocol ingestion, media forwarding and signalling control, a Vue web console, and a Qt client for desktop operations. Released under the MIT licence.'
+      desc: 'RustCam-Media is a self-hostable video surveillance platform: cameras, encoders and drones from different vendors and floors all join one backend, so live viewing, retention, alarm handling and later evidence work happen in a single console. Released under the MIT licence, you can deploy and extend it yourself.'
     },
     principles: {
-      title: 'Architecture principles',
+      title: 'Product principles',
       items: [
-        { title: 'Layers, not a pile', desc: 'HTTP handlers → application services → domain model and ports → infrastructure; business rules never depend on a protocol or a database.' },
-        { title: 'Ports and adapters', desc: 'SignalAdapter unifies GB28181 / ONVIF / RTSP / WebSocket; MediaServerAdapter targets media servers.' },
-        { title: 'Media separated from signalling', desc: 'The transport and media planes handle SIP signalling and RTP, with a MediaNode middleware chain performing audio conversion and resampling.' },
-        { title: 'Secure by default', desc: 'JWT + Casbin guard every business endpoint, TLS is implemented with rustls, so HTTPS and WSS work out of the box.' }
+        { title: 'Self-hosting first', desc: 'Video never leaves the intranet and data stays on your own server — no per-channel subscription, no third party holding your footage.' },
+        { title: 'One backend, one way of working', desc: 'Fixed cameras and drones share the same recordings, the same alarm stream and the same permissions; the device type changes, the workflow does not.' },
+        { title: 'Works with what you own', desc: 'Mainstream protocols are supported out of the box, so the hardware you already have keeps working and a new device only needs an address.' },
+        { title: 'Dispatch on demand', desc: 'Send a drone only when it is needed, saving cabling, poles and long-term maintenance; routes, geofences and alarm rules are composed by configuration instead of locking you into one scenario.' },
+        { title: 'Secure by default', desc: 'Tokens and tiered permissions guard every business endpoint, with permission boundaries and action auditing available out of the box.' }
       ]
     },
     roadmap: {
       title: 'Roadmap',
       items: [
-        { status: 'done', title: 'Full GB28181 chain', desc: 'SIP signalling, PS stream parsing, PTZ, platform broadcast and two-way talk are all complete.' },
-        { status: 'done', title: 'ONVIF discovery and control', desc: 'WS-Discovery probing, ContinuousMove / AbsoluteMove and Backchannel talk are complete.' },
-        { status: 'done', title: 'RTSP and media servers', desc: 'RTSP ingestion and the media server cluster are complete, with the hook event chain wired up.' },
-        { status: 'progress', title: 'Media server adapters', desc: 'The adapter layer is finished; some integrations are still partially implemented.' },
-        { status: 'done', title: 'Mobile Eye', desc: 'Drones join the surveillance domain as moving vantage points: PX4 / ArduPilot flight control, a Cesium 3D live view, camera device association with automatic live streams, routes, geofences, control leases and audit are delivered, with a built-in MAVLink simulator for testing.' },
-        { status: 'next', title: 'Continuous evolution', desc: 'Video wall layouts, recording policies and map pickers keep iterating.' }
+        { status: 'done', title: 'Full GB28181 chain', desc: 'Mainstream camera and encoder onboarding, PTZ control, platform broadcast and two-way talk are all complete.' },
+        { status: 'done', title: 'ONVIF discovery and control', desc: 'Automatic discovery on the network, movement, zoom and two-way talk are complete.' },
+        { status: 'done', title: 'RTSP and media services', desc: 'Third-party device onboarding and the media server cluster are complete, with automatic failover.' },
+        { status: 'progress', title: 'Multi-vendor media adapters', desc: 'The adapter layer is finished; some vendor integrations are still partially implemented.' },
+        { status: 'done', title: 'Mobile Eye', desc: 'Drones join the surveillance domain as moving vantage points: flight control, a live 3D view, automatic onboard camera streams, routes, geofences, control authority and audit are delivered, with a built-in simulator test environment.' },
+        { status: 'next', title: 'Continuous evolution', desc: 'Scenario templates, the Mobile Eye and video wall integration demo, plus recording policies and map picking keep iterating.' }
       ]
     },
     contribute: {

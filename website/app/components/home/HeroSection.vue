@@ -64,8 +64,8 @@ const lines = computed(() => props.data.title.split('\n'))
             >
           </div>
           <div class="absolute -right-6 -bottom-6 hidden rounded-xl border border-accent/25 bg-ink-900/95 px-4 py-3 backdrop-blur lg:block">
-            <p class="text-accent font-mono text-xs">Rust + Axum + Tokio</p>
-            <p class="text-muted mt-1 text-xs">102 条受保护 API · 14 条公开路由</p>
+            <p class="text-accent text-xs">{{ data.badge.title }}</p>
+            <p class="text-muted mt-1 text-xs">{{ data.badge.note }}</p>
           </div>
         </div>
       </div>

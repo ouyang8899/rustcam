@@ -26,7 +26,7 @@ export default {
     developer: 'Developer',
     community: 'Community',
     contact: 'Contact',
-    tagline: 'A video surveillance gateway and signalling control platform written in Rust.',
+    tagline: 'Fixed cameras and moving eyes in one self-hostable video surveillance platform.',
     rights: 'MIT License',
     builtWith: 'Built with Nuxt'
   }

@@ -5,10 +5,13 @@ export default {
       description: 'RustCam 的环境要求、目录结构、快速开始、配置说明、API 概览与常见问题。'
     },
     requirements: [
-      { name: 'Rust', version: '1.88+' },
-      { name: 'PostgreSQL', version: '14+' },
+      { name: 'Rust', version: '1.95+' },
+      { name: 'PostgreSQL', version: '14+（需 PostGIS 扩展）' },
+      { name: 'TimescaleDB', version: 'PostgreSQL 扩展（遥测时序必需）' },
       { name: 'Redis', version: '6+' },
-      { name: 'Node.js', version: '18+（前端构建）' }
+      { name: 'Node.js', version: '18+（前端构建）' },
+      { name: 'ZLMediaKit', version: '任意近期版本（推流 / 拉流 / 转推）' },
+      { name: 'Qt + CMake', version: 'Qt 5.15.2 / 6.2+、CMake 3.16+（仅桌面客户端）' }
     ],
     structure: {
       title: '项目结构',
@@ -18,6 +21,8 @@ export default {
         { path: 'crates/rustcam-drone-service/', desc: '移动眼控制面：注册表、遥测影子、控制权、指令、围栏、审计' },
         { path: 'crates/rustcam-drone-adapter/', desc: '机载适配：MAVLink / PX4 / ArduPilot 接入' },
         { path: 'crates/rustcam-drone-sim/', desc: 'MAVLink 机体模拟器（测试/演示）' },
+        { path: 'crates/rustcam-drone-proto/', desc: '移动眼 gRPC 契约' },
+        { path: 'crates/rustcam-drone-core/', desc: '共享类型与常量' },
         { path: 'frontend/', desc: 'Vue 3 控制台（Vite + Element Plus + Pinia + Cesium）' },
         { path: 'testenv/', desc: '移动眼一键测试环境（start.ps1 / stop.ps1 / 截图）' },
         { path: 'clientapp/', desc: 'Qt 桌面客户端（CMake + FFmpeg）' },
@@ -29,20 +34,20 @@ export default {
       title: '快速开始',
       items: [
         { title: '初始化数据库', code: 'psql -U postgres -c "CREATE DATABASE rustcam;"\npsql -U postgres -d rustcam -f sql/schema.sql', lang: 'bash' },
-        { title: '启动后端', code: 'cargo run\n# 或发布构建\ncargo build --release\n./target/release/rustcam-media', lang: 'bash' },
+        { title: '启动后端', code: 'cargo run -p rustcam-server\n# 或发布构建\ncargo build --release -p rustcam-server\n./target/release/rustcam-media', lang: 'bash' },
         { title: '启动 Web 控制台', code: 'cd frontend\nnpm install\nnpm run dev', lang: 'bash' },
         { title: '一键移动眼测试环境（无需真实飞控）', code: 'pwsh -File testenv\\start.ps1\n# 登录：admin / admin123\n# 内置 MAVLink 模拟器：PX4 / ArduPilot', lang: 'powershell' },
-        { title: '登录并获取令牌', code: 'curl -s -X POST http://127.0.0.1:8081/api/v1/auth/login \\\n  -H \'Content-Type: application/json\' \\\n  -d \'{"username":"admin","password":"admin123"}\'', lang: 'bash' }
+        { title: '登录并获取令牌', code: 'curl -s -X POST http://127.0.0.1:8081/api/v1/auth/login \\\n  -H \'Content-Type: application/json\' \\\n  -d \'{"username":"admin","password":"admin"}\'', lang: 'bash' }
       ]
     },
     config: {
       title: '配置文件',
-      desc: '编辑仓库根目录的 config.toml。生产环境务必修改 JWT secret 与数据库口令。',
-      code: '[server]\nhost = "0.0.0.0"\nport = 8081\ntls_enabled = false\n\n[database]\nurl = "postgres://user:pass@localhost:5432/rustcam"\nmax_connections = 10\n\n[redis]\nurl = "redis://localhost:6379"\npool_size = 5\n\n[drone]\nservice_addr = "http://127.0.0.1:50051"\n\n[[media_servers.servers]]\nname = "zlmediakit"\nurl = "http://127.0.0.1:80"\napi_key = "your_api_key"\nserver_type = "zlmediakit"   # zlmediakit / srs / xiu\nweight = 100\nenabled = true\nserver_tag = "default"\n\n[jwt]\nsecret = "change-me-in-production"'
+      desc: '编辑仓库根目录的 config.toml。下方是可启动的最小完整配置：server、database、redis、media_servers、cluster、session、onvif、rtsp_auth、signaling_server、jwt 均为必填段，缺任一段后端启动即报错。生产环境务必修改 JWT secret 与数据库口令。',
+      code: '[server]\nhost = "0.0.0.0"\nport = 8081\ntls_enabled = false\n\n[database]\nurl = "postgres://user:pass@localhost:5432/rustcam"\nmax_connections = 10\n\n[redis]\nurl = "redis://localhost:6379"\npool_size = 5\n\n[[media_servers.servers]]\nname = "zlmediakit"\nurl = "http://127.0.0.1:80"\napi_key = "your_api_key"\nserver_type = "zlmediakit"   # zlmediakit / srs / xiu\nweight = 100\nenabled = true\nserver_tag = "default"\n\n[cluster]\nstrategy = "round_robin"\nhealth_check_interval_secs = 30\nmax_session_per_server = 1000\n\n[session]\nexpiration_secs = 300\nmax_per_user = 10\n\n[onvif]\ndiscovery_enabled = false\nscopes = ["onvif://www.onvif.org/Profile/Streaming", "onvif://www.onvif.org/Profile/PTZ"]\n\n[rtsp_auth]\nenabled = true\nrealm = "RustCam"\n\n[signaling_server]\nserver_gb_id = "31011500001000000001"\nserver_gb_domain = "3101150000"\nbind_ip = "0.0.0.0"\ntcp_signaling_port = 5060\nudp_signaling_port = 5061\nrtp_port_start = 15000\nrtp_port_end = 15100\nrtp_bind_addr = "0.0.0.0"\n\n[jwt]\nsecret = "change-me-in-production"\naccess_token_expire_minutes = 60\nrefresh_token_expire_days = 30\n\n[drone]\nservice_addr = "http://127.0.0.1:50051"'
     },
     api: {
       title: 'API 概览',
-      desc: '后端基于 Axum 暴露 HTTP + WebSocket 接口，业务接口统一前缀 /api/v1，共 120 条受保护路由与 15 条公开路由（含移动眼 19 条）。',
+      desc: '后端基于 Axum 暴露 HTTP + WebSocket 接口，业务接口统一前缀 /api/v1，覆盖用户权限、设备通道、云台、流、录像、告警、监控墙与移动眼等分组；完整接口清单见仓库 public/api.md。',
       authTitle: '认证方式',
       authDesc: '除公开端点外，所有接口都需在请求头携带 JWT：Authorization: Bearer <access_token>',
       groupsTitle: '分组速览',
@@ -61,7 +66,7 @@ export default {
         { group: '移动眼（drone）', count: 19, endpoints: 'GET/POST /drone/drones、POST /drone/{id}/command、GET/POST /drone/routes、GET/POST /drone/fences、POST /drone/control/acquire' },
         { group: '会话 / 告警 / 统计', count: 5, endpoints: 'GET /sessions、GET /alarms、GET /api/v1/stats' }
       ],
-      publicTitle: '公开路由（15 条，无需认证）',
+      publicTitle: '公开路由（无需认证）',
       publicRows: [
         { path: 'POST /api/v1/auth/login、/api/v1/auth/refresh', desc: '登录 / 刷新令牌' },
         { path: 'GET /api/v1/health、/api/v1/metrics、/api/v1/stats', desc: '健康 / 指标 / 统计' },
@@ -78,7 +83,7 @@ export default {
       items: [
         { q: '支持哪些设备接入方式？', a: 'GB28181（SIP 注册）、ONVIF（WS-Discovery 发现）、RTSP 直连以及 WebSocket 接入，统一抽象为设备与通道模型。' },
         { q: '云台控制设备离线时返回什么？', a: 'GB28181 设备离线时返回 503，适配器会自动重新注册设备。' },
-        { q: '是否支持 HTTPS？', a: '支持。在 config.toml 中配置 tls_enabled、tls_cert 与 tls_key，由 rustls 实现 HTTPS 与 WSS。' },
+        { q: '是否支持 HTTPS？', a: '支持，但平台后端未内置 TLS 监听：请在前面放一台反向代理（如 Nginx）终止 TLS 后再转发到后端；WSS 走同一入口，代理需开启 WebSocket 升级。' },
         { q: '语音对讲如何实现？', a: '媒体侧通过 MediaNode 中间件链完成 G711 ⇄ PCM 转换与重采样，支撑 GB28181 广播与 ONVIF Backchannel 语音对讲。' },
         { q: '没有无人机硬件可以体验移动眼吗？', a: '可以。仓库内置 rustcam-drone-sim，可模拟 PX4 / ArduPilot 心跳、遥测与指令 ACK；执行 pwsh -File testenv\\start.ps1 即可拉起模拟器、适配器、控制面、主服务与前端。' },
         { q: '移动眼支持哪些飞控？', a: '通过 MAVLink 支持 PX4 与 ArduPilot，按 HEARTBEAT.autopilot 自动识别；连接方式支持 UDP / TCP / 串口。' },
@@ -93,10 +98,13 @@ export default {
       description: 'RustCam requirements, project layout, quick start, configuration, API overview and FAQ.'
     },
     requirements: [
-      { name: 'Rust', version: '1.88+' },
-      { name: 'PostgreSQL', version: '14+' },
+      { name: 'Rust', version: '1.95+' },
+      { name: 'PostgreSQL', version: '14+ (PostGIS extension required)' },
+      { name: 'TimescaleDB', version: 'PostgreSQL extension (telemetry series)' },
       { name: 'Redis', version: '6+' },
-      { name: 'Node.js', version: '18+ (frontend build)' }
+      { name: 'Node.js', version: '18+ (frontend build)' },
+      { name: 'ZLMediaKit', version: 'Any recent version (ingest / pull / relay)' },
+      { name: 'Qt + CMake', version: 'Qt 5.15.2 / 6.2+, CMake 3.16+ (desktop client only)' }
     ],
     structure: {
       title: 'Project layout',
@@ -106,6 +114,8 @@ export default {
         { path: 'crates/rustcam-drone-service/', desc: 'Mobile Eye control plane: registry, telemetry shadow, leases, commands, geofences, audit' },
         { path: 'crates/rustcam-drone-adapter/', desc: 'Airborne adapter: MAVLink / PX4 / ArduPilot' },
         { path: 'crates/rustcam-drone-sim/', desc: 'MAVLink vehicle simulator for tests and demos' },
+        { path: 'crates/rustcam-drone-proto/', desc: 'Mobile Eye gRPC contract' },
+        { path: 'crates/rustcam-drone-core/', desc: 'Shared types and constants' },
         { path: 'frontend/', desc: 'Vue 3 console (Vite + Element Plus + Pinia + Cesium)' },
         { path: 'testenv/', desc: 'One-command Mobile Eye test environment (start.ps1 / stop.ps1 / screenshots)' },
         { path: 'clientapp/', desc: 'Qt desktop client (CMake + FFmpeg)' },
@@ -117,20 +127,20 @@ export default {
       title: 'Quick start',
       items: [
         { title: 'Initialise the database', code: 'psql -U postgres -c "CREATE DATABASE rustcam;"\npsql -U postgres -d rustcam -f sql/schema.sql', lang: 'bash' },
-        { title: 'Start the backend', code: 'cargo run\n# or a release build\ncargo build --release\n./target/release/rustcam-media', lang: 'bash' },
+        { title: 'Start the backend', code: 'cargo run -p rustcam-server\n# or a release build\ncargo build --release -p rustcam-server\n./target/release/rustcam-media', lang: 'bash' },
         { title: 'Start the web console', code: 'cd frontend\nnpm install\nnpm run dev', lang: 'bash' },
         { title: 'One-command Mobile Eye test environment', code: 'pwsh -File testenv\\start.ps1\n# login: admin / admin123\n# built-in MAVLink simulator: PX4 / ArduPilot', lang: 'powershell' },
-        { title: 'Log in and get a token', code: 'curl -s -X POST http://127.0.0.1:8081/api/v1/auth/login \\\n  -H \'Content-Type: application/json\' \\\n  -d \'{"username":"admin","password":"admin123"}\'', lang: 'bash' }
+        { title: 'Log in and get a token', code: 'curl -s -X POST http://127.0.0.1:8081/api/v1/auth/login \\\n  -H \'Content-Type: application/json\' \\\n  -d \'{"username":"admin","password":"admin"}\'', lang: 'bash' }
       ]
     },
     config: {
       title: 'Configuration file',
-      desc: 'Edit config.toml at the repository root. Always change the JWT secret and database password in production.',
-      code: '[server]\nhost = "0.0.0.0"\nport = 8081\ntls_enabled = false\n\n[database]\nurl = "postgres://user:pass@localhost:5432/rustcam"\nmax_connections = 10\n\n[redis]\nurl = "redis://localhost:6379"\npool_size = 5\n\n[drone]\nservice_addr = "http://127.0.0.1:50051"\n\n[[media_servers.servers]]\nname = "zlmediakit"\nurl = "http://127.0.0.1:80"\napi_key = "your_api_key"\nserver_type = "zlmediakit"   # zlmediakit / srs / xiu\nweight = 100\nenabled = true\nserver_tag = "default"\n\n[jwt]\nsecret = "change-me-in-production"'
+      desc: 'Edit config.toml at the repository root. The block below is the minimal configuration that actually starts: server, database, redis, media_servers, cluster, session, onvif, rtsp_auth, signaling_server and jwt are all required, and the backend refuses to start without them. Always change the JWT secret and database password in production.',
+      code: '[server]\nhost = "0.0.0.0"\nport = 8081\ntls_enabled = false\n\n[database]\nurl = "postgres://user:pass@localhost:5432/rustcam"\nmax_connections = 10\n\n[redis]\nurl = "redis://localhost:6379"\npool_size = 5\n\n[[media_servers.servers]]\nname = "zlmediakit"\nurl = "http://127.0.0.1:80"\napi_key = "your_api_key"\nserver_type = "zlmediakit"   # zlmediakit / srs / xiu\nweight = 100\nenabled = true\nserver_tag = "default"\n\n[cluster]\nstrategy = "round_robin"\nhealth_check_interval_secs = 30\nmax_session_per_server = 1000\n\n[session]\nexpiration_secs = 300\nmax_per_user = 10\n\n[onvif]\ndiscovery_enabled = false\nscopes = ["onvif://www.onvif.org/Profile/Streaming", "onvif://www.onvif.org/Profile/PTZ"]\n\n[rtsp_auth]\nenabled = true\nrealm = "RustCam"\n\n[signaling_server]\nserver_gb_id = "31011500001000000001"\nserver_gb_domain = "3101150000"\nbind_ip = "0.0.0.0"\ntcp_signaling_port = 5060\nudp_signaling_port = 5061\nrtp_port_start = 15000\nrtp_port_end = 15100\nrtp_bind_addr = "0.0.0.0"\n\n[jwt]\nsecret = "change-me-in-production"\naccess_token_expire_minutes = 60\nrefresh_token_expire_days = 30\n\n[drone]\nservice_addr = "http://127.0.0.1:50051"'
     },
     api: {
       title: 'API overview',
-      desc: 'The Axum backend exposes HTTP + WebSocket endpoints under the /api/v1 prefix: 120 protected routes and 15 public routes (19 for the Mobile Eye).',
+      desc: 'The Axum backend exposes HTTP + WebSocket endpoints under the /api/v1 prefix, grouped by users and permissions, devices and channels, PTZ, streams, recording, alarms, video walls and the Mobile Eye. The complete list lives in public/api.md in the repository.',
       authTitle: 'Authentication',
       authDesc: 'Every endpoint except the public ones requires a JWT in the request header: Authorization: Bearer <access_token>',
       groupsTitle: 'Endpoint groups',
@@ -149,7 +159,7 @@ export default {
         { group: 'Mobile Eye (drone)', count: 19, endpoints: 'GET/POST /drone/drones, POST /drone/{id}/command, GET/POST /drone/routes, GET/POST /drone/fences, POST /drone/control/acquire' },
         { group: 'Sessions / alarms / stats', count: 5, endpoints: 'GET /sessions, GET /alarms, GET /api/v1/stats' }
       ],
-      publicTitle: 'Public routes (15, no authentication)',
+      publicTitle: 'Public routes (no authentication)',
       publicRows: [
         { path: 'POST /api/v1/auth/login, /auth/refresh', desc: 'Login / token refresh' },
         { path: 'GET /api/v1/health, /metrics, /stats', desc: 'Health / metrics / stats' },
@@ -166,7 +176,7 @@ export default {
       items: [
         { q: 'How are devices onboarded?', a: 'Through GB28181 SIP registration, ONVIF WS-Discovery, direct RTSP or WebSocket — all unified into one device and channel model.' },
         { q: 'What happens when a PTZ device is offline?', a: 'GB28181 returns 503 and the adapter automatically re-registers the device.' },
-        { q: 'Is HTTPS supported?', a: 'Yes. Set tls_enabled, tls_cert and tls_key in config.toml; HTTPS and WSS are implemented with rustls.' },
+        { q: 'Is HTTPS supported?', a: 'Yes, but the backend has no built-in TLS listener: put a reverse proxy (Nginx, for example) in front of it to terminate TLS. WSS uses the same entry point, so the proxy must allow WebSocket upgrades.' },
         { q: 'How does two-way talk work?', a: 'The MediaNode middleware chain performs G711 ⇄ PCM conversion and resampling, backing GB28181 broadcast and ONVIF Backchannel talk.' },
         { q: 'Can I try the Mobile Eye without drone hardware?', a: 'Yes. The repository ships rustcam-drone-sim, which simulates PX4 / ArduPilot heartbeats, telemetry and command ACKs. Run pwsh -File testenv\\start.ps1 to launch the simulator, adapter, control plane, server and web console.' },
         { q: 'Which flight controllers are supported?', a: 'PX4 and ArduPilot over MAVLink, detected automatically from HEARTBEAT.autopilot, with UDP / TCP / serial links.' },

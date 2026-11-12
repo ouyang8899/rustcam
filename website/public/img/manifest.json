@@ -1,7 +1,7 @@
 {
   "console-overview.webp": {
     "width": 1920,
-    "height": 1082,
+    "height": 979,
     "source": "screenshot/2026-10-29/系统概览.png"
   },
   "console-devices.webp": {
@@ -14,10 +14,10 @@
     "height": 1082,
     "source": "screenshot/2026-10-29/设备管理-通道列表.png"
   },
-  "console-map-points.webp": {
+  "console-map-video.webp": {
     "width": 1920,
     "height": 1082,
-    "source": "screenshot/2026-10-29/设备列表-电子地图2.png"
+    "source": "screenshot/2026-10-29/设备列表-电子地图-视频查看.png"
   },
   "console-tvwall.webp": {
     "width": 1920,
@@ -28,6 +28,51 @@
     "width": 1920,
     "height": 1082,
     "source": "screenshot/2026-10-29/录像管理-录像回放.png"
+  },
+  "console-alarms.webp": {
+    "width": 1920,
+    "height": 1082,
+    "source": "screenshot/2026-10-29/报警记录.png"
+  },
+  "console-media-servers.webp": {
+    "width": 1920,
+    "height": 1082,
+    "source": "screenshot/2026-10-29/媒体服务器.png"
+  },
+  "console-users.webp": {
+    "width": 1920,
+    "height": 979,
+    "source": "screenshot/2026-10-29/管理-用户管理.png"
+  },
+  "mobile-eye-live.webp": {
+    "width": 1600,
+    "height": 812,
+    "source": "screenshot/2026-11-10/移动眼-实时飞控.png"
+  },
+  "mobile-eye-drones.webp": {
+    "width": 1600,
+    "height": 816,
+    "source": "screenshot/2026-11-10/移动眼-无人机列表.png"
+  },
+  "mobile-eye-route.webp": {
+    "width": 1600,
+    "height": 816,
+    "source": "screenshot/2026-11-10/移动眼-航线规划.png"
+  },
+  "mobile-eye-fence.webp": {
+    "width": 1600,
+    "height": 812,
+    "source": "screenshot/2026-11-10/移动眼-电子围栏.png"
+  },
+  "mobile-eye-track.webp": {
+    "width": 1600,
+    "height": 816,
+    "source": "screenshot/2026-11-10/移动眼-轨迹回放.png"
+  },
+  "mobile-eye-control.webp": {
+    "width": 1600,
+    "height": 816,
+    "source": "screenshot/2026-11-10/移动眼-控制权管理.png"
   },
   "desktop-live.webp": {
     "width": 1920,

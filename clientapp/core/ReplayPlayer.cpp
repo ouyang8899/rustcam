@@ -24,6 +24,19 @@ std::vector<BridgePlayer::MediaPlayer::Ptr>& retainedPlayers() {
     return *players;
 }
 
+// 播放器不用之后必须从 PlayerManager 里摘掉，否则管理器会一直持有它：
+// 先停播，再 remove_player；实例本身留在常驻容器里（MediaPlayer 析构会破坏栈）。
+void releaseBridgePlayer(uint64_t playerId, const BridgePlayer::MediaPlayer::Ptr& player) {
+    if (playerId == 0) {
+        return;
+    }
+    BridgePlayer::PlayerManager::instance().stop(playerId);
+    BridgePlayer::PlayerManager::instance().remove_player(playerId);
+    if (player) {
+        retainedPlayers().push_back(player);
+    }
+}
+
 // bridge_player 的渲染目标使用较小的自增 ID（与 bridge_player 官方示例一致）
 //std::atomic<quint64>& nextRenderTargetId() {
 //    static auto* seq = new std::atomic<quint64>(1);
@@ -125,7 +138,10 @@ bool ReplayPlayer::createBridgePlayer() {
     const uint64_t previousId = m_playerId.load();
     BridgePlayer::MediaPlayer::Ptr previousPlayer = m_player;
     if (previousId > 0) {
-        BridgePlayer::PlayerManager::instance().stop(previousId);
+        // 旧播放器不再使用：从 PlayerManager 摘掉，实例保留到进程结束
+        releaseBridgePlayer(previousId, previousPlayer);
+        m_playerId.store(0);
+        m_player.reset();
     }
 
     const quint64 nativeWindowId = static_cast<quint64>(winId());
@@ -147,6 +163,9 @@ bool ReplayPlayer::createBridgePlayer() {
 
     if (!m_player) {
         reportError(QString("loadFile: failed to get player, playerId=%1").arg(playerId));
+        // 刚申请的播放器拿不到实例，同样要从 PlayerManager 里摘掉
+        releaseBridgePlayer(playerId, nullptr);
+        m_playerId.store(0);
         return false;
     }
 
@@ -161,11 +180,6 @@ bool ReplayPlayer::createBridgePlayer() {
                  .arg(outputHeight)
                  .arg(isVisible() ? "true" : "false")
                  .arg(static_cast<qulonglong>(playerId)));
-
-    // bridge_player 的 MediaPlayer 析构会破坏栈，上一个播放器只能常驻到进程结束
-    if (previousPlayer) {
-        retainedPlayers().push_back(previousPlayer);
-    }
 
     // 回调里只持弱引用：播放器常驻后仍可能在 ReplayPlayer 销毁后触发事件
     QPointer<ReplayPlayer> self(this);
@@ -210,6 +224,10 @@ void ReplayPlayer::startBridgePlayback() {
     setState(State::Loading);
     auto player = BridgePlayer::PlayerManager::instance().get_player(playerId);
     if (!player) {
+        // 取不到实例：这个播放器不会再被使用，从 PlayerManager 摘掉
+        releaseBridgePlayer(playerId, m_player);
+        m_playerId.store(0);
+        m_player.reset();
         return;
     }
     QSize size = this->size();
@@ -218,6 +236,10 @@ void ReplayPlayer::startBridgePlayback() {
 
     if (!BridgePlayer::PlayerManager::instance().play(playerId,m_url.toUtf8().toStdString())) {
         reportError("startBridgePlayback: play rejected by player");
+        // 起播失败，这个播放器不会被用了：从 PlayerManager 摘掉
+        releaseBridgePlayer(playerId, m_player);
+        m_playerId.store(0);
+        m_player.reset();
         return;
     }
     LOG_INFO("ReplayPlayer",
@@ -272,17 +294,12 @@ void ReplayPlayer::play() {
             setState(State::Playing);
         }
     } else if (m_state == State::Completed && !m_url.isEmpty()) {
+        // 播完之后重播：重建播放器（旧的会先从 PlayerManager 摘掉）
         setState(State::Loading);
-        BridgePlayer::PlayerConfig config;
-        auto pid =  BridgePlayer::PlayerManager::instance().add_media_player(0, config);
-        this->m_playerId.store(pid);
-        auto result = BridgePlayer::PlayerManager::instance().play(pid, m_url.toUtf8().toStdString());
-        if (result) {
-      /*      reportError(QString("play: restart failed: %1")
-                            .arg(QString::number(m_playerId.load())));*/
-        } else if (!result) {
-            reportError("play: restart rejected by player");
+        if (!createBridgePlayer()) {
+            return;
         }
+        startBridgePlayback();
     }
 }
 
@@ -317,7 +334,10 @@ void ReplayPlayer::stop() {
 
     const uint64_t playerId = m_playerId.load();
     if (playerId > 0) {
-        BridgePlayer::PlayerManager::instance().stop(playerId);
+        // 停止后这个播放器就不再使用：从 PlayerManager 摘掉，实例保留到进程结束
+        releaseBridgePlayer(playerId, m_player);
+        m_playerId.store(0);
+        m_player.reset();
     }
 
     setState(State::Idle);

@@ -118,6 +118,10 @@ void VideoPlayer::play(const QString& url) {
 
     if (!m_player) {
         LOG_ERROR("VideoPlayer", QString("play: failed to get player, playerId=%1").arg(m_playerId));
+        // add_player 申请的播放器即使没拿到实例，也必须从 PlayerManager 里摘掉，
+        // 否则解码资源会一直挂在管理器上。
+        BridgePlayer::PlayerManager::instance().remove_player(m_playerId);
+        m_playerId = 0;
         emit error("Failed to create player");
         setState(State::Error);
         return;

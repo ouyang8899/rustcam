@@ -7,6 +7,7 @@ const active = ref(null)
 
 const groups = computed(() => [
   { title: props.data.web.title, items: props.data.web.items },
+  { title: props.data.mobile.title, items: props.data.mobile.items },
   { title: props.data.desktop.title, items: props.data.desktop.items }
 ])
 
