@@ -44,7 +44,7 @@ pub struct RtpServerManager {
 
 impl RtpServerManager {
     pub fn new(port_range: RtpPortRange, bind_addr: String, timeout_secs: u64) -> Self {
-        let start = port_range.start;
+        let start = (port_range.start/2) *2;
         Self {
             port_range,
             bind_addr,

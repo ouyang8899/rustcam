@@ -19,6 +19,9 @@ pub struct SipTcpServerConfig {
     pub bind_addr: String,
     pub max_connections: usize,
     pub read_buffer_size: usize,
+    /// Fallback idle timeout (seconds) used when the protocol adapter does not
+    /// define its own. Connections are reaped once they stop sending traffic,
+    /// never because of their age.
     pub connection_timeout: u64,
     pub keepalive_interval_secs: u64,
     pub read_timeout_secs: u64,
@@ -190,7 +193,6 @@ impl SipTcpServer {
     fn start_cleanup_task(&self) -> tokio::task::JoinHandle<()> {
         let connections = self.connections.clone();
         let event_bus = self.event_bus.clone();
-        let idle_timeout_secs = self.config.keepalive_interval_secs as i64;
         let connection_timeout = self.config.connection_timeout;
         let shutdown_token = self.shutdown_token.clone();
 
@@ -202,7 +204,6 @@ impl SipTcpServer {
                         Self::cleanup_connections(
                             &connections,
                             &event_bus,
-                            idle_timeout_secs,
                             connection_timeout,
                         ).await;
                     }
@@ -214,10 +215,14 @@ impl SipTcpServer {
         })
     }
 
+    /// Drops connections that stopped exchanging SIP traffic.
+    ///
+    /// Staleness is measured by inactivity, never by connection age: a device
+    /// that keeps sending keepalives must stay connected for as long as it
+    /// likes, while a connection that went silent is reaped.
     async fn cleanup_connections(
         connections: &Arc<DashMap<String, Arc<TcpConnectionEntry>>>,
         event_bus: &Arc<EventBus>,
-        _idle_timeout_secs: i64,
         connection_timeout: u64,
     ) {
         let addrs: Vec<String> = connections.iter()
@@ -235,14 +240,20 @@ impl SipTcpServer {
                     drop(guard);
                     let mut guard = adapter.lock().await;
                     guard.handle_registration_timeout().await;
-                    guard.idle_timeout().unwrap_or(300) as i64
+                    guard.idle_timeout().unwrap_or(connection_timeout) as i64
                 } else {
-                    guard.idle_timeout().unwrap_or(300) as i64
+                    guard.idle_timeout().unwrap_or(connection_timeout) as i64
                 }
             };
 
             if entry_arc.is_idle(idle_timeout) {
                 if let Some((_, entry)) = connections.remove(&addr_key) {
+                    tracing::warn!(
+                        "[SipTcpServer] Removing idle connection {} (open for {}s, no traffic for {}s)",
+                        addr_key,
+                        entry.connected_at.elapsed().as_secs(),
+                        idle_timeout
+                    );
 
                     let remote_addr = entry.remote_addr;
                     let device_tag = entry.get_device_tag().await;
@@ -264,23 +275,6 @@ impl SipTcpServer {
                         }
                     }
                 }
-            }
-        }
-
-        let stale_timeout = connection_timeout as u64 * 3;
-        let stale: Vec<String> = connections.iter()
-            .filter(|entry| {
-                entry.value().connected_at.elapsed().as_secs() > stale_timeout
-            })
-            .map(|entry| entry.key().clone())
-            .collect();
-
-        for addr_key in stale {
-            if let Some((_, entry)) = connections.remove(&addr_key) {
-                tracing::warn!("[SipTcpServer] Removing stale connection {}", addr_key);
-                let adapter = entry.adapter.clone();
-                let mut guard = adapter.lock().await;
-                let _ = guard.on_disconnected().await;
             }
         }
     }
@@ -419,5 +413,63 @@ impl SipTcpServer {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicI64;
+
+    const REMOTE: &str = "192.168.1.211:45957";
+
+    fn test_entry(age: Duration, idle: Duration) -> Arc<TcpConnectionEntry> {
+        let adapter: Box<dyn SignalAdapter + Send + Sync> = Box::new(Gb28181Adapter::new(
+            ProtocolDeps::for_test(),
+            Arc::new(|_, _| {}),
+            Arc::new(|_| {}),
+        ));
+
+        Arc::new(TcpConnectionEntry {
+            adapter: Arc::new(Mutex::new(adapter)),
+            device_tag: Mutex::new(None),
+            connected_at: std::time::Instant::now() - age,
+            last_message_at: AtomicI64::new(
+                chrono::Utc::now().timestamp() - idle.as_secs() as i64,
+            ),
+            remote_addr: REMOTE.parse().unwrap(),
+        })
+    }
+
+    #[tokio::test]
+    async fn cleanup_keeps_long_lived_active_connection() {
+        let connections = Arc::new(DashMap::new());
+        connections.insert(
+            REMOTE.to_string(),
+            test_entry(Duration::from_secs(3600), Duration::from_secs(0)),
+        );
+
+        SipTcpServer::cleanup_connections(&connections, &Arc::new(EventBus::new()), 60).await;
+
+        assert!(
+            connections.contains_key(REMOTE),
+            "an active connection must not be dropped just because it has been open for a long time"
+        );
+    }
+
+    #[tokio::test]
+    async fn cleanup_removes_connection_without_traffic() {
+        let connections = Arc::new(DashMap::new());
+        connections.insert(
+            REMOTE.to_string(),
+            test_entry(Duration::from_secs(60), Duration::from_secs(3600)),
+        );
+
+        SipTcpServer::cleanup_connections(&connections, &Arc::new(EventBus::new()), 60).await;
+
+        assert!(
+            !connections.contains_key(REMOTE),
+            "a connection that stopped sending traffic must be dropped"
+        );
     }
 }

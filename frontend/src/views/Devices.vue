@@ -539,7 +539,6 @@ const defaultForm = () => ({
   gb_device_type: '132',
   gb_industry_code: '00',
   gb_network_code: '0',
-  gb_transport: 'UDP',
   sip_id_suffix: '',
   extended: {},
   enable_stream_config: false,
@@ -552,6 +551,7 @@ const defaultForm = () => ({
     packaging_mode: 'HIS',
     sprop_parameter_sets: '',
     stream_mode: 'recvonly',
+    media_transport: '',
   },
 })
 
@@ -899,7 +899,6 @@ async function submitDevice() {
       rtsp_mode: data.protocol === 'Rtsp' ? (data.rtsp_mode || null) : null,
       rtsp_full_url: data.protocol === 'Rtsp' && data.rtsp_mode === 'pull' ? (data.rtsp_full_url || null) : null,
       rtmp_mode: data.protocol === 'Rtmp' ? (data.rtmp_mode || null) : null,
-      gb_transport: data.protocol === 'Gb28181' ? (data.gb_transport || null) : null,
     },
   }
 
@@ -914,6 +913,7 @@ async function submitDevice() {
       packaging_mode: data.stream_config.packaging_mode || null,
       sprop_parameter_sets: data.stream_config.sprop_parameter_sets || null,
       stream_mode: data.stream_config.stream_mode || null,
+      media_transport: data.stream_config.media_transport || null,
     }
   }
 

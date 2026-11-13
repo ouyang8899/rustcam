@@ -49,7 +49,6 @@
                   <el-descriptions :column="2" border size="small">
                     <el-descriptions-item label="SIP ID">{{ device.extended?.gb_id || device.device_tag || '-' }}</el-descriptions-item>
                     <el-descriptions-item label="所属地区">{{ device.region_code || '-' }}</el-descriptions-item>
-                    <el-descriptions-item label="传输协议">{{ device.extended?.gb_transport || 'UDP' }}</el-descriptions-item>
                     <el-descriptions-item label="视频编码">{{ device.extended?.stream_config?.video_codec || 'PS' }}</el-descriptions-item>
                     <el-descriptions-item label="音频编码">{{ device.extended?.stream_config?.audio_codec || 'PCMA' }}</el-descriptions-item>
                   </el-descriptions>

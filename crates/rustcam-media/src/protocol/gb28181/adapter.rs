@@ -177,11 +177,18 @@ pub struct SubSession {
     pub via_branch: String,
 
     pub server_ip: String,
+    pub signaling_ip: String,
     pub server_port: u16,
     pub transport: TransportType,
     pub device_host: String,
     pub device_port: u16,
     pub rtp_port: u16,
+    /// Transport the media stream of this session is negotiated with.
+    pub media_transport: RtpTransport,
+    /// Set once the session already fell back from TCP media to UDP media.
+    pub udp_fallback_used: bool,
+    /// Requested recording range of a playback session.
+    pub playback_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
     pub state: SubSessionState,
     pub retry_count: u32,
     pub max_retries: u32,
@@ -258,6 +265,7 @@ struct RequestHeaders {
     call_id: String,
     cseq: String,
     via_branch: String,
+    contact: Option<String>,
 }
 
 /// A response that was already sent for a given SIP transaction.
@@ -1033,6 +1041,53 @@ impl Gb28181Adapter {
         }
     }
 
+    fn signaling_via(transport: TransportType, ip: &str, port: u16, branch: &str) -> String {
+        match transport {
+            TransportType::Tcp => format!("SIP/2.0/TCP {}:{};branch={};rport", ip, port, branch),
+            TransportType::Udp => format!("SIP/2.0/UDP {}:{};branch={};rport", ip, port, branch),
+            _ => unreachable!("GB28181 only supports TCP and UDP transport"),
+        }
+    }
+
+    fn signaling_transport(&self) -> TransportType {
+        self.transport
+    }
+
+    /// Transport of the media link. The media follows the transport of the SIP
+    /// connection unless the device overrides it with `media_transport`. An
+    /// unknown override falls back to UDP, which every GB28181 device supports.
+    fn resolve_media_transport(
+        stream_config: Option<&crate::domain::device::StreamConfig>,
+        signaling: TransportType,
+    ) -> RtpTransport {
+        let forced = stream_config
+            .and_then(|c| c.media_transport.as_deref())
+            .map(|value| value.trim().to_ascii_lowercase());
+
+        match forced.as_deref() {
+            Some("udp") => RtpTransport::Udp,
+            Some("tcp") | Some("tcp_passive") | Some("tcp-passive") => RtpTransport::TcpPassive,
+            None => match signaling {
+                TransportType::Tcp => RtpTransport::TcpPassive,
+                _ => RtpTransport::Udp,
+            },
+            Some(_) => RtpTransport::Udp,
+        }
+    }
+
+    fn gb28181_ssrc(channel_id: &str) -> String {
+        let digits: String = channel_id.chars().filter(|c| c.is_ascii_digit()).collect();
+        if digits.is_empty() {
+            return "0000000000".to_string();
+        }
+        let tail = if digits.len() > 10 {
+            digits[digits.len() - 10..].to_string()
+        } else {
+            digits
+        };
+        format!("{:0>10}", tail)
+    }
+
     fn call_id_str(&self) -> String {
         self.call_id
             .clone()
@@ -1138,6 +1193,90 @@ impl Gb28181Adapter {
         )
     }
 
+    fn build_ack_message(
+        session: &SubSession,
+        ack_target: &str,
+        ack_to_uri: &str,
+        to_tag: &str,
+    ) -> String {
+        let via = Self::signaling_via(session.transport, &session.signaling_ip, session.server_port, &session.via_branch);
+
+        let from_uri_full = if session.from_uri.starts_with("sip:") {
+            session.from_uri.clone()
+        } else {
+            format!("sip:{}", session.from_uri)
+        };
+
+        let to_tag_part = if to_tag.is_empty() {
+            String::new()
+        } else {
+            format!(";tag={}", to_tag)
+        };
+
+        format!(
+            "ACK {ack_target} SIP/2.0\r\n\
+             Via: {via}\r\n\
+             From: <{from_uri}>;tag={from_tag}\r\n\
+             To: <sip:{to_uri}>{to_tag}\r\n\
+             Call-ID: {call_id}\r\n\
+             CSeq: {seq} ACK\r\n\
+             Max-Forwards: 70\r\n\
+             User-Agent: {user_agent}\r\n\
+             Content-Length: 0\r\n\
+             \r\n",
+            ack_target = ack_target,
+            via = via,
+            from_uri = from_uri_full,
+            from_tag = session.from_tag,
+            to_uri = ack_to_uri,
+            to_tag = to_tag_part,
+            call_id = session.call_id,
+            seq = session.seq,
+            user_agent = GB28181_USER_AGENT
+        )
+    }
+
+    fn build_register_ok_response(&self, req: &RequestHeaders) -> String {
+        self.build_sip_response_only_headers_with_to(
+            200,
+            "OK",
+            &req.via_branch,
+            &req.cseq,
+            Some(&req.from_uri),
+            req.from_tag.as_deref(),
+            Some(&req.to_uri),
+            Some(&req.to_tag),
+            Self::contact_uri(req.contact.as_deref()),
+            Some(&req.call_id),
+            None,
+        )
+    }
+
+    fn contact_line(contact: Option<&str>) -> String {
+        match contact {
+            Some(raw) => {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    String::new()
+                } else if trimmed.starts_with('<') {
+                    format!("Contact: {}\r\n", trimmed)
+                } else {
+                    format!("Contact: <{}>\r\n", trimmed)
+                }
+            }
+            None => String::new(),
+        }
+    }
+
+    fn contact_uri(contact: Option<&str>) -> Option<&str> {
+        contact.map(|raw| {
+            raw.trim()
+                .trim_start_matches('<')
+                .trim_end_matches('>')
+                .trim()
+        })
+    }
+
     fn build_401_response(&self, req: &RequestHeaders, realm: &str) -> String {
         let nonce = generate_nonce();
         let from_uri = self.echoed_from_uri(req);
@@ -1157,6 +1296,7 @@ impl Gb28181Adapter {
             format!(";tag={}", req.to_tag)
         };
         let www_auth = format!(r#"Digest realm="{}", nonce="{}""#, realm, nonce);
+        let contact_line = Self::contact_line(req.contact.as_deref());
         format!(
             "SIP/2.0 401 Unauthorized\r\n\
              Via: {}\r\n\
@@ -1164,6 +1304,7 @@ impl Gb28181Adapter {
              To: <{}>{}\r\n\
              CSeq: {}\r\n\
              Call-ID: {}\r\n\
+             {contact_line}\
              User-Agent: {}\r\n\
              WWW-Authenticate: {}\r\n\
              Content-Length: 0\r\n\r\n",
@@ -1357,6 +1498,7 @@ impl Gb28181Adapter {
         config: Option<&crate::domain::device::StreamConfig>,
         start_time: Option<DateTime<Utc>>,
         end_time: Option<DateTime<Utc>>,
+        media_transport: RtpTransport,
     ) -> String {
         let video_codec = config
             .and_then(|c| c.video_codec.clone())
@@ -1381,13 +1523,28 @@ impl Gb28181Adapter {
         let (video_encoding, video_clock) = Self::codec_to_rtp_map(&video_codec);
         let (_audio_encoding, _audio_clock) = Self::codec_to_audio_rtp_map(&audio_codec);
 
-        let mut video_line = format!("m=video {} RTP/AVP {}\r\n", rtp_port, video_pt);
-        video_line.push_str(&format!("a={}\r\n", stream_mode));
-        video_line.push_str(&format!(
-            "a=rtpmap:{} {}/{}\r\n",
-            video_pt, video_encoding, video_clock
-        ));
-        video_line.push_str(&format!("a=rtcp:{}\r\n", rtp_port + 1));
+        let mut video_line = match media_transport {
+            RtpTransport::Udp => {
+                let mut line = format!("m=video {} RTP/AVP {}\r\n", rtp_port, video_pt);
+                line.push_str(&format!("a={}\r\n", stream_mode));
+                line.push_str(&format!(
+                    "a=rtpmap:{} {}/{}\r\n",
+                    video_pt, video_encoding, video_clock
+                ));
+                line.push_str(&format!("a=rtcp:{}\r\n", rtp_port + 1));
+                line
+            }
+            _ => {
+                let mut line = format!("m=video {} TCP/RTP/AVP {}\r\n", rtp_port, video_pt);
+                line.push_str(&format!("a={}\r\n", stream_mode));
+                line.push_str(&format!(
+                    "a=rtpmap:{} {}/{}\r\n",
+                    video_pt, video_encoding, video_clock
+                ));
+                line.push_str("a=setup:passive\r\n");
+                line
+            }
+        };
 
         if let Some(ref pli) = profile_level_id {
             if video_codec == "PS" {
@@ -1448,7 +1605,7 @@ impl Gb28181Adapter {
             _ => "264",
         };
 
-        let f_line = format!("f=v/{}/1920*1080/25/1/2048\r\n", video_encoding_for_f);
+        let f_line = format!("f=v/{}/90000/25/1/2048\r\n", video_encoding_for_f);
         sdp.push_str(&f_line);
 
         sdp
@@ -1551,6 +1708,7 @@ impl Gb28181Adapter {
         &self,
         stream_key: &str,
         server_name: Option<&str>,
+        transport: RtpTransport,
     ) -> Result<(u16, String, String)> {
         let adapter = if let Some(name) = server_name {
             self.deps.cluster.get_server(name)
@@ -1581,13 +1739,8 @@ impl Gb28181Adapter {
         };
 
         let tag = adapter.tag().to_string();
-        match adapter
-            .open_rtp_server(stream_key, 0, RtpTransport::Udp)
-            .await
-        {
-            Ok((port, ip)) => {
-                Ok((port, ip, tag))
-            }
+        match adapter.open_rtp_server(stream_key, 0, transport).await {
+            Ok((port, ip)) => Ok((port, ip, tag)),
             Err(e) => {
                 tracing::warn!("[GB28181] RTP failed on {}, trying fallback: {}", tag, e);
                 if server_name.is_some() {
@@ -1595,7 +1748,7 @@ impl Gb28181Adapter {
                         Some(fallback) => {
                             let fb_tag = fallback.tag().to_string();
                             fallback
-                                .open_rtp_server(stream_key, 0, RtpTransport::Udp)
+                                .open_rtp_server(stream_key, 0, transport)
                                 .await
                                 .map(|(port, ip)| {
                                     (port, ip, fb_tag)
@@ -1640,6 +1793,7 @@ impl Gb28181Adapter {
             call_id,
             cseq: Self::parse_cseq_line(headers),
             via_branch: Self::parse_via_branch(headers),
+            contact: Self::get_header(headers, "Contact").map(|v| v.trim().to_string()),
         }
     }
 
@@ -1891,12 +2045,7 @@ impl Gb28181Adapter {
 
                 (
                     Some(event),
-                    Some(self.build_sip_response_only_headers_with_to(
-                        200, "OK", &req.via_branch, &req.cseq,
-                        Some(&req.from_uri), req.from_tag.as_deref(),
-                        Some(&req.to_uri), Some(&req.to_tag),
-                        None, Some(&req.call_id), None,
-                    )),
+                    Some(self.build_register_ok_response(&req)),
                 )
             }
             _ => (None, Some(self.build_403_response(&req))),
@@ -2386,7 +2535,7 @@ impl Gb28181Adapter {
         &mut self,
         first_line: &str,
         headers: &[(String, String)],
-        _body: &str,
+        body: &str,
     ) -> (Option<SignalEvent>, Option<String>) {
         let call_id = Self::get_header(headers, "Call-ID").unwrap_or_default();
         let cseq_line = Self::get_header(headers, "CSeq").unwrap_or_default();
@@ -2514,6 +2663,21 @@ impl Gb28181Adapter {
             return (None, None);
         }
 
+        // The device answered with UDP media although the platform offered TCP.
+        // Such a device cannot push over TCP, so the offer is repeated with a
+        // UDP port: the device needs a reachable UDP port to send the stream to.
+        let device_answered_udp = session.media_transport == RtpTransport::TcpPassive
+            && !session.udp_fallback_used
+            && matches!(
+                session.session_type,
+                SessionType::Play | SessionType::Playback
+            )
+            && Self::answered_media_transport(body) == Some(SetupMode::Udp);
+
+        if device_answered_udp && self.fallback_to_udp_media(&session).await.is_ok() {
+            return (None, None);
+        }
+
         let _udp_peer_str = self
             .udp_peer
             .map(|a| a.to_string())
@@ -2612,51 +2776,7 @@ impl Gb28181Adapter {
             }
         };
 
-        let via = if session.transport == TransportType::Tcp {
-            format!(
-                "SIP/2.0/TCP {}:{};rport;branch={}",
-                session.server_ip, session.server_port, session.via_branch
-            )
-        } else {
-            format!(
-                "SIP/2.0/UDP {}:{};rport;branch={}",
-                session.server_ip, session.server_port, session.via_branch
-            )
-        };
-
-        let from_uri_full = if session.from_uri.starts_with("sip:") {
-            session.from_uri.clone()
-        } else {
-            format!("sip:{}", session.from_uri)
-        };
-
-        let to_tag_part = if to_tag_to_use.is_empty() {
-            String::new()
-        } else {
-            format!(";tag={}", to_tag_to_use)
-        };
-
-        let ack = format!(
-            "ACK {ack_target} SIP/2.0\r\n\
-             Via: {via}\r\n\
-             From: <{from_uri}>;tag={from_tag}\r\n\
-             To: <sip:{to_uri}>{to_tag}\r\n\
-             Call-ID: {call_id}\r\n\
-             CSeq: {seq} ACK\r\n\
-             Max-Forwards: 70\r\n\
-             User-Agent: {user_agent}\r\n\
-             Content-Length: 0\r\n\
-             \r\n",
-            ack_target = ack_target,
-            via = via,
-            from_uri = from_uri_full,
-            from_tag = session.from_tag,
-            to_uri = ack_to_uri,
-            to_tag = to_tag_part,
-            call_id = session.call_id,
-            seq = session.seq,
-            user_agent = GB28181_USER_AGENT
-        );
+        let ack = Self::build_ack_message(&session, &ack_target, &ack_to_uri, &to_tag_to_use);
 
         if let Err(e) = self.send(ack.as_bytes()).await {
             tracing::error!("[GB28181] ACK send failed: {}", e);
@@ -2730,7 +2850,10 @@ impl Gb28181Adapter {
                 device_tag: Some(session.channel_id.clone()),
                 session_id: session.stream_key.clone(),
                 channel_id: Some(session.channel_id.clone()),
-                transport: TransportType::Udp,
+                transport: match session.media_transport {
+                    RtpTransport::Udp => TransportType::Udp,
+                    _ => TransportType::Tcp,
+                },
                 media_server_name: Some(session.media_server_name.clone()),
                 session_type: session.session_type.clone(),
             }),
@@ -2981,6 +3104,8 @@ impl Gb28181Adapter {
                                 let response_sdp =
                                     self.build_audio_invite_response_udp(port, if ssrc != 0 { ssrc } else { allocated_ssrc }, direction);
 
+                                let session_media_transport = RtpTransport::Udp;
+
                                 let to_hdr = Self::get_header(headers, "To").unwrap_or_default();
                                 let (to_uri, _) = Self::parse_from_to_uri_and_tag(&to_hdr);
 
@@ -3015,11 +3140,15 @@ impl Gb28181Adapter {
                                     to_tag: self.to_tag.clone(),
                                     via_branch: via_branch.to_string(),
                                     server_ip: self.deps.config.signaling_server.rtp_bind_addr.clone(),
+                                    signaling_ip: self.deps.config.signaling_server.rtp_bind_addr.clone(),
                                     server_port: port,
                                     transport: TransportType::Tcp,
                                     device_host: device_ip.clone(),
                                     device_port: device_audio_port,
                                     rtp_port: port,
+                                    media_transport: session_media_transport,
+                                    udp_fallback_used: false,
+                                    playback_range: None,
                                     state: SubSessionState::Ok,
                                     retry_count: 0,
                                     max_retries: 3,
@@ -3127,6 +3256,8 @@ impl Gb28181Adapter {
                                 let response_sdp =
                                     self.build_audio_invite_response_tcp(port, if ssrc != 0 { ssrc } else { allocated_ssrc });
 
+                                let session_media_transport = RtpTransport::TcpPassive;
+
                                 let to_hdr = Self::get_header(headers, "To").unwrap_or_default();
                                 let (to_uri, _) = Self::parse_from_to_uri_and_tag(&to_hdr);
                                 let contact_uri = format!(
@@ -3158,11 +3289,15 @@ impl Gb28181Adapter {
                                     to_tag: self.to_tag.clone(),
                                     via_branch: via_branch.to_string(),
                                     server_ip: self.deps.config.signaling_server.rtp_bind_addr.clone(),
+                                    signaling_ip: self.deps.config.signaling_server.rtp_bind_addr.clone(),
                                     server_port: port,
                                     transport: TransportType::Tcp,
                                     device_host: device_ip.clone(),
                                     device_port: device_audio_port,
                                     rtp_port: port,
+                                    media_transport: session_media_transport,
+                                    udp_fallback_used: false,
+                                    playback_range: None,
                                     state: SubSessionState::Ok,
                                     retry_count: 0,
                                     max_retries: 3,
@@ -3272,6 +3407,8 @@ impl Gb28181Adapter {
                                     if ssrc != 0 { ssrc } else { allocated_ssrc },
                                 );
 
+                                let session_media_transport = RtpTransport::TcpActive;
+
                                 let to_hdr = Self::get_header(headers, "To").unwrap_or_default();
                                 let (to_uri, _) = Self::parse_from_to_uri_and_tag(&to_hdr);
                                 let contact_uri = format!(
@@ -3303,11 +3440,15 @@ impl Gb28181Adapter {
                                     to_tag: self.to_tag.clone(),
                                     via_branch: via_branch.to_string(),
                                     server_ip: self.deps.config.signaling_server.rtp_bind_addr.clone(),
+                                    signaling_ip: self.deps.config.signaling_server.rtp_bind_addr.clone(),
                                     server_port: port,
                                     transport: TransportType::Tcp,
                                     device_host: device_ip.clone(),
                                     device_port: device_audio_port,
                                     rtp_port: port,
+                                    media_transport: session_media_transport,
+                                    udp_fallback_used: false,
+                                    playback_range: None,
                                     state: SubSessionState::Ok,
                                     retry_count: 0,
                                     max_retries: 3,
@@ -3661,6 +3802,347 @@ impl Gb28181Adapter {
             .collect()
     }
 
+    /// Sends the INVITE that asks the device for the media stream.
+    /// `forced_media_transport` overrides the transport of the media link, it is
+    /// used when the device turns out to be unable to push over the negotiated
+    /// transport.
+    async fn start_with_transport(
+        &mut self,
+        device_tag: &str,
+        channel_tag: &str,
+        forced_media_transport: Option<RtpTransport>,
+    ) -> Result<()> {
+        let device = self
+            .deps
+            .device_lookup
+            .find_by_tag(device_tag)
+            .await
+            .ok_or_else(|| AppError::NotFound(format!("Device not found: {}", device_tag)))?;
+
+        let transport = self.signaling_transport();
+        let media_transport = forced_media_transport.unwrap_or_else(|| {
+            Self::resolve_media_transport(device.stream_config.as_ref(), transport)
+        });
+
+        let sn = self.seq.fetch_add(1, Ordering::SeqCst);
+        let call_id = uuid::Uuid::new_v4().to_string().replace("-", "");
+        let from_tag = uuid::Uuid::new_v4().to_string().replace("-", "");
+        let branch = format!("z9hG4bK{}", &call_id[..7]);
+        let server_port = match transport {
+            TransportType::Tcp => self.deps.config.signaling_server.tcp_signaling_port,
+            TransportType::Udp => self.deps.config.signaling_server.udp_signaling_port,
+            _ => unreachable!("GB28181 only supports TCP and UDP transport"),
+        };
+        let server_gb_id = &self.deps.config.signaling_server.server_gb_id;
+        let _server_gb_domain = &self.deps.config.signaling_server.server_gb_domain;
+
+        let channel_id = if channel_tag.is_empty() {
+            device_tag.to_string()
+        } else {
+            channel_tag.to_string()
+        };
+        let ssrc = Self::gb28181_ssrc(&channel_id);
+        let stream_key = format!("{}_{}", device_tag, channel_id);
+        let (rtp_port, server_ip, media_server_name) = self
+            .alloc_rtp_port(
+                &stream_key,
+                device.media_server_tag.as_deref(),
+                media_transport,
+            )
+            .await?;
+        let device_host = device.host.clone();
+        let device_port = device.port;
+
+        let local_ip = if let Some(ref local) = self.local_addr {
+            local.ip().to_string()
+        } else if let Some(ref ext_ip) = self.deps.config.signaling_server.external_ip {
+            ext_ip.clone()
+        } else if let Some(ref detected) = crate::protocol::gb28181::detect_local_ip(&device_host) {
+            detected.clone()
+        } else {
+            self.remote_addr
+                .map(|a| a.ip().to_string())
+                .unwrap_or_else(|| "127.0.0.1".to_string())
+        };
+
+        let via = Self::signaling_via(transport, &local_ip, server_port, &branch);
+
+        let sdp = self.build_sdp(
+            &server_gb_id,
+            &server_ip,
+            rtp_port,
+            &ssrc,
+            device.stream_config.as_ref(),
+            None,
+            None,
+            media_transport,
+        );
+        let sdp_len = sdp.len();
+
+        let to_uri = format!("{}@{}:{}", channel_id, device_host, device_port);
+
+        let from_uri = format!("{}@{}:{}", server_gb_id, local_ip, server_port);
+
+        let subject = format!(
+            "{}:0,{}:0",
+            Self::truncate_20(&channel_id),
+            Self::truncate_20(server_gb_id)
+        );
+
+        let session = SubSession {
+            call_id: call_id.clone(),
+            session_type: SessionType::Play,
+            device_tag: device_tag.to_string(),
+            seq: sn,
+            channel_id: channel_id.clone(),
+            stream_key: stream_key.clone(),
+            media_server_name: media_server_name.clone(),
+            from_uri: from_uri.clone(),
+            to_uri: to_uri.clone(),
+            from_tag: from_tag.clone(),
+            to_tag: None,
+            via_branch: branch.clone(),
+            server_ip: server_ip.clone(),
+            signaling_ip: local_ip.clone(),
+            server_port,
+            transport: transport,
+            device_host: device_host.clone(),
+            device_port,
+            rtp_port,
+            media_transport,
+            udp_fallback_used: forced_media_transport.is_some(),
+            playback_range: None,
+            state: SubSessionState::Pending,
+            retry_count: 0,
+            max_retries: 3,
+            device_nated_ip: None,
+            device_nated_port: None,
+            node_id: None,
+        };
+
+        let old_session = {
+            let sessions = &mut *self.sessions.write().await;
+            let idx = sessions.iter().position(|s| {
+                s.channel_id == session.channel_id && s.device_tag == session.device_tag
+            });
+            if let Some(idx) = idx {
+                let old = sessions.remove(idx);
+                if old.state == SubSessionState::Ok {
+                    if let Some(app) = self.get_device_app(&old.channel_id).await {
+                        let _ = self
+                            .deps
+                            .stream_manager
+                            .stop_stream(&app, &old.stream_key)
+                            .await;
+                    }
+                }
+                Some(old)
+            } else {
+                None
+            }
+        };
+        let _ = old_session;
+        self.sessions.write().await.push(session);
+
+        let invite = format!(
+            "INVITE sip:{to_uri} SIP/2.0\r\n\
+             Via: {via}\r\n\
+             From: <sip:{from_uri}>;tag={from_tag}\r\n\
+             To: <sip:{to_uri}>\r\n\
+             Call-ID: {call_id}\r\n\
+             CSeq: {sn} INVITE\r\n\
+             User-Agent: {user_agent}\r\n\
+             Subject: {subject}\r\n\
+             Content-Type: application/sdp\r\n\
+             Content-Length: {sdp_len}\r\n\
+             \r\n\
+             {sdp}",
+            to_uri = to_uri,
+            via = via,
+            from_uri = from_uri,
+            from_tag = from_tag,
+            call_id = call_id,
+            sn = sn,
+            subject = subject,
+            sdp_len = sdp_len,
+            sdp = sdp,
+            user_agent = GB28181_USER_AGENT
+        );
+
+        self.send(invite.as_bytes()).await?;
+
+        Ok(())
+    }
+
+    /// Sends the INVITE that asks the device for a recording. It works like
+    /// [`Self::start_with_transport`], the transport of the media link can be
+    /// forced when the device cannot push over the negotiated transport.
+    async fn start_playback_with_transport(
+        &mut self,
+        device_tag: &str,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+        forced_media_transport: Option<RtpTransport>,
+    ) -> Result<()> {
+        let device = self
+            .deps
+            .device_lookup
+            .find_by_tag(device_tag)
+            .await
+            .ok_or_else(|| AppError::NotFound(format!("Device not found: {}", device_tag)))?;
+
+        let transport = self.signaling_transport();
+        let media_transport = forced_media_transport.unwrap_or_else(|| {
+            Self::resolve_media_transport(device.stream_config.as_ref(), transport)
+        });
+
+        let sn = self.seq.fetch_add(1, Ordering::SeqCst);
+        let call_id = uuid::Uuid::new_v4().to_string().replace("-", "");
+        let from_tag = uuid::Uuid::new_v4().to_string().replace("-", "");
+        let branch = format!("z9hG4bK{}", &call_id[..7]);
+        let server_port = match transport {
+            TransportType::Tcp => self.deps.config.signaling_server.tcp_signaling_port,
+            TransportType::Udp => self.deps.config.signaling_server.udp_signaling_port,
+            _ => unreachable!("GB28181 only supports TCP and UDP transport"),
+        };
+        let server_gb_id = &self.deps.config.signaling_server.server_gb_id;
+        let _server_gb_domain = &self.deps.config.signaling_server.server_gb_domain;
+
+        let channel_id = device_tag.to_string();
+        let ssrc = Self::gb28181_ssrc(&channel_id);
+        let stream_key = format!("{}_{}", device_tag, channel_id);
+        let (rtp_port, server_ip, media_server_name) = self
+            .alloc_rtp_port(
+                &stream_key,
+                device.media_server_tag.as_deref(),
+                media_transport,
+            )
+            .await?;
+        let device_host = device.host.clone();
+        let device_port = device.port;
+
+        let local_ip = if let Some(ref local) = self.local_addr {
+            local.ip().to_string()
+        } else if let Some(ref ext_ip) = self.deps.config.signaling_server.external_ip {
+            ext_ip.clone()
+        } else if let Some(ref detected) = crate::protocol::gb28181::detect_local_ip(&device_host) {
+            detected.clone()
+        } else {
+            self.remote_addr
+                .map(|a| a.ip().to_string())
+                .unwrap_or_else(|| "127.0.0.1".to_string())
+        };
+
+        let via = Self::signaling_via(transport, &local_ip, server_port, &branch);
+
+        let sdp = self.build_sdp(
+            &server_gb_id,
+            &server_ip,
+            rtp_port,
+            &ssrc,
+            device.stream_config.as_ref(),
+            Some(start_time),
+            Some(end_time),
+            media_transport,
+        );
+        let sdp_len = sdp.len();
+        let to_uri = format!("{}@{}:{}", channel_id, device_host, device_port);
+        let from_uri = format!("{}@{}:{}", server_gb_id, local_ip, server_port);
+        let start_ntp = Self::datetime_to_ntp_string(start_time);
+        let end_ntp = Self::datetime_to_ntp_string(end_time);
+        let subject = format!(
+            "{}:{}:{},{}",
+            Self::truncate_20(&channel_id),
+            Self::truncate_20(server_gb_id),
+            start_ntp,
+            end_ntp
+        );
+
+        let session = SubSession {
+            call_id: call_id.clone(),
+            session_type: SessionType::Playback,
+            device_tag: device_tag.to_string(),
+            seq: sn,
+            channel_id: channel_id.clone(),
+            stream_key: stream_key.clone(),
+            media_server_name: media_server_name.clone(),
+            from_uri: from_uri.clone(),
+            to_uri: to_uri.clone(),
+            from_tag: from_tag.clone(),
+            to_tag: None,
+            via_branch: branch.clone(),
+            server_ip: server_ip.clone(),
+            signaling_ip: local_ip.clone(),
+            server_port,
+            transport: transport,
+            device_host: device_host.clone(),
+            device_port,
+            rtp_port,
+            media_transport,
+            udp_fallback_used: forced_media_transport.is_some(),
+            playback_range: Some((start_time, end_time)),
+            state: SubSessionState::Pending,
+            retry_count: 0,
+            max_retries: 3,
+            device_nated_ip: None,
+            device_nated_port: None,
+            node_id: None,
+        };
+
+        let old_session = {
+            let sessions = &mut *self.sessions.write().await;
+            let idx = sessions.iter().position(|s| {
+                s.channel_id == session.channel_id && s.device_tag == session.device_tag
+            });
+            if let Some(idx) = idx {
+                let old = sessions.remove(idx);
+                if old.state == SubSessionState::Ok {
+                    if let Some(app) = self.get_device_app(&old.channel_id).await {
+                        let _ = self
+                            .deps
+                            .stream_manager
+                            .stop_stream(&app, &old.stream_key)
+                            .await;
+                    }
+                }
+                Some(old)
+            } else {
+                None
+            }
+        };
+        let _ = old_session;
+        self.sessions.write().await.push(session);
+
+        let invite = format!(
+            "INVITE sip:{to_uri} SIP/2.0\r\n\
+             Via: {via}\r\n\
+             From: <sip:{from_uri}>;tag={from_tag}\r\n\
+             To: <sip:{to_uri}>\r\n\
+             Call-ID: {call_id}\r\n\
+             CSeq: {sn} INVITE\r\n\
+             User-Agent: {user_agent}\r\n\
+             Subject: {subject}\r\n\
+             Content-Type: application/sdp\r\n\
+             Content-Length: {sdp_len}\r\n\
+             \r\n\
+             {sdp}",
+            to_uri = to_uri,
+            via = via,
+            from_uri = from_uri,
+            from_tag = from_tag,
+            call_id = call_id,
+            sn = sn,
+            subject = subject,
+            sdp_len = sdp_len,
+            sdp = sdp,
+            user_agent = GB28181_USER_AGENT
+        );
+
+        self.send(invite.as_bytes()).await?;
+
+        Ok(())
+    }
+
 }
 
 #[async_trait]
@@ -3878,173 +4360,9 @@ impl SignalAdapter for Gb28181Adapter {
     }
 
     async fn start(&mut self, device_tag: &str, channel_tag: &str) -> Result<()> {
-        let device = self
-            .deps
-            .device_lookup
-            .find_by_tag(device_tag)
-            .await
-            .ok_or_else(|| AppError::NotFound(format!("Device not found: {}", device_tag)))?;
-
-        if let Some(ext) = &device.extended {
-            if let Some(transport) = ext.get("gb_transport").and_then(|v| v.as_str()) {
-                let _transport_str = match transport.to_uppercase().as_str() {
-                    "TCP" => {
-                        self.transport = TransportType::Tcp;
-                        "TCP"
-                    }
-                    _ => {
-                        self.transport = TransportType::Udp;
-                        "UDP"
-                    }
-                };
-            }
-        }
-
-        let sn = self.seq.fetch_add(1, Ordering::SeqCst);
-        let ssrc = format!("{:08x}", rand::random::<u32>());
-        let call_id = uuid::Uuid::new_v4().to_string().replace("-", "");
-        let from_tag = uuid::Uuid::new_v4().to_string().replace("-", "");
-        let branch = format!("z9hG4bK{}", &call_id[..7]);
-        let server_port = match self.transport {
-            TransportType::Tcp => self.deps.config.signaling_server.tcp_signaling_port,
-            TransportType::Udp => self.deps.config.signaling_server.udp_signaling_port,
-            _ => unreachable!("GB28181 only supports TCP and UDP transport"),
-        };
-        let server_gb_id = &self.deps.config.signaling_server.server_gb_id;
-        let _server_gb_domain = &self.deps.config.signaling_server.server_gb_domain;
-
-        let channel_id = if channel_tag.is_empty() {
-            device_tag.to_string()
-        } else {
-            channel_tag.to_string()
-        };
-        let stream_key = format!("{}_{}", device_tag, channel_id);
-        let (rtp_port, server_ip, media_server_name) = self
-            .alloc_rtp_port(&stream_key, device.media_server_tag.as_deref())
-            .await?;
-        let device_host = device.host.clone();
-        let device_port = device.port;
-
-        let local_ip = if let Some(ref local) = self.local_addr {
-            local.ip().to_string()
-        } else if let Some(ref ext_ip) = self.deps.config.signaling_server.external_ip {
-            ext_ip.clone()
-        } else if let Some(ref detected) = crate::protocol::gb28181::detect_local_ip(&device_host) {
-            detected.clone()
-        } else {
-            self.remote_addr
-                .map(|a| a.ip().to_string())
-                .unwrap_or_else(|| "127.0.0.1".to_string())
-        };
-
-        let via = if self.transport == TransportType::Tcp {
-            format!("SIP/2.0/TCP {local_ip}:{server_port};branch={branch};rport")
-        } else {
-            format!("SIP/2.0/UDP {local_ip}:{server_port};branch={branch};rport")
-        };
-
-        let sdp = self.build_sdp(
-            &server_gb_id,
-            &server_ip,
-            rtp_port,
-            &ssrc,
-            device.stream_config.as_ref(),
-            None,
-            None,
-        );
-        let sdp_len = sdp.len();
-
-        let to_uri = format!("{}@{}:{}", channel_id, device_host, device_port);
-
-        let from_uri = format!("{}@{}:{}", server_gb_id, local_ip, server_port);
-
-        let subject = format!(
-            "{}:0,{}:0",
-            Self::truncate_20(&channel_id),
-            Self::truncate_20(server_gb_id)
-        );
-
-        let session = SubSession {
-            call_id: call_id.clone(),
-            session_type: SessionType::Play,
-            device_tag: device_tag.to_string(),
-            seq: sn,
-            channel_id: channel_id.clone(),
-            stream_key: stream_key.clone(),
-            media_server_name: media_server_name.clone(),
-            from_uri: from_uri.clone(),
-            to_uri: to_uri.clone(),
-            from_tag: from_tag.clone(),
-            to_tag: None,
-            via_branch: branch.clone(),
-            server_ip: server_ip.clone(),
-            server_port,
-            transport: self.transport,
-            device_host: device_host.clone(),
-            device_port,
-            rtp_port,
-            state: SubSessionState::Pending,
-            retry_count: 0,
-            max_retries: 3,
-            device_nated_ip: None,
-            device_nated_port: None,
-            node_id: None,
-        };
-
-        let old_session = {
-            let sessions = &mut *self.sessions.write().await;
-            let idx = sessions.iter().position(|s| {
-                s.channel_id == session.channel_id && s.device_tag == session.device_tag
-            });
-            if let Some(idx) = idx {
-                let old = sessions.remove(idx);
-                if old.state == SubSessionState::Ok {
-                    if let Some(app) = self.get_device_app(&old.channel_id).await {
-                        let _ = self
-                            .deps
-                            .stream_manager
-                            .stop_stream(&app, &old.stream_key)
-                            .await;
-                    }
-                }
-                Some(old)
-            } else {
-                None
-            }
-        };
-        if old_session.is_some() {
-        }
-        self.sessions.write().await.push(session);
-
-        let invite = format!(
-            "INVITE sip:{to_uri} SIP/2.0\r\n\
-             Via: {via}\r\n\
-             From: <sip:{from_uri}>;tag={from_tag}\r\n\
-             To: <sip:{to_uri}>\r\n\
-             Call-ID: {call_id}\r\n\
-             CSeq: {sn} INVITE\r\n\
-             User-Agent: {user_agent}\r\n\
-             Subject: {subject}\r\n\
-             Content-Type: application/sdp\r\n\
-             Content-Length: {sdp_len}\r\n\
-             \r\n\
-             {sdp}",
-            to_uri = to_uri,
-            via = via,
-            from_uri = from_uri,
-            from_tag = from_tag,
-            call_id = call_id,
-            sn = sn,
-            subject = subject,
-            sdp_len = sdp_len,
-            sdp = sdp,
-            user_agent = GB28181_USER_AGENT
-        );
-
-        self.send(invite.as_bytes()).await?;
-
-        Ok(())
+        self.start_with_transport(device_tag, channel_tag, None).await
     }
+
 
     async fn start_playback(
         &mut self,
@@ -4052,155 +4370,10 @@ impl SignalAdapter for Gb28181Adapter {
         start_time: DateTime<Utc>,
         end_time: DateTime<Utc>,
     ) -> Result<()> {
-        let device = self
-            .deps
-            .device_lookup
-            .find_by_tag(device_tag)
+        self.start_playback_with_transport(device_tag, start_time, end_time, None)
             .await
-            .ok_or_else(|| AppError::NotFound(format!("Device not found: {}", device_tag)))?;
-
-        let sn = self.seq.fetch_add(1, Ordering::SeqCst);
-        let ssrc = format!("{:08x}", rand::random::<u32>());
-        let call_id = uuid::Uuid::new_v4().to_string().replace("-", "");
-        let from_tag = uuid::Uuid::new_v4().to_string().replace("-", "");
-        let branch = format!("z9hG4bK{}", &call_id[..7]);
-        let server_port = match self.transport {
-            TransportType::Tcp => self.deps.config.signaling_server.tcp_signaling_port,
-            TransportType::Udp => self.deps.config.signaling_server.udp_signaling_port,
-            _ => unreachable!("GB28181 only supports TCP and UDP transport"),
-        };
-        let server_gb_id = &self.deps.config.signaling_server.server_gb_id;
-        let _server_gb_domain = &self.deps.config.signaling_server.server_gb_domain;
-
-        let channel_id = device_tag.to_string();
-        let stream_key = format!("{}_{}", device_tag, channel_id);
-        let (rtp_port, server_ip, media_server_name) = self
-            .alloc_rtp_port(&stream_key, device.media_server_tag.as_deref())
-            .await?;
-        let device_host = device.host.clone();
-        let device_port = device.port;
-
-        let local_ip = if let Some(ref local) = self.local_addr {
-            local.ip().to_string()
-        } else if let Some(ref ext_ip) = self.deps.config.signaling_server.external_ip {
-            ext_ip.clone()
-        } else if let Some(ref detected) = crate::protocol::gb28181::detect_local_ip(&device_host) {
-            detected.clone()
-        } else {
-            self.remote_addr
-                .map(|a| a.ip().to_string())
-                .unwrap_or_else(|| "127.0.0.1".to_string())
-        };
-
-        let via = if self.transport == TransportType::Tcp {
-            format!("SIP/2.0/TCP {local_ip}:{server_port};branch={branch};rport")
-        } else {
-            format!("SIP/2.0/UDP {local_ip}:{server_port};branch={branch};rport")
-        };
-
-        let sdp = self.build_sdp(
-            &server_gb_id,
-            &server_ip,
-            rtp_port,
-            &ssrc,
-            device.stream_config.as_ref(),
-            Some(start_time),
-            Some(end_time),
-        );
-        let sdp_len = sdp.len();
-        let to_uri = format!("{}@{}:{}", channel_id, device_host, device_port);
-        let from_uri = format!("{}@{}:{}", server_gb_id, local_ip, server_port);
-        let start_ntp = Self::datetime_to_ntp_string(start_time);
-        let end_ntp = Self::datetime_to_ntp_string(end_time);
-        let subject = format!(
-            "{}:{}:{},{}",
-            Self::truncate_20(&channel_id),
-            Self::truncate_20(server_gb_id),
-            start_ntp,
-            end_ntp
-        );
-
-        let session = SubSession {
-            call_id: call_id.clone(),
-            session_type: SessionType::Playback,
-            device_tag: device_tag.to_string(),
-            seq: sn,
-            channel_id: channel_id.clone(),
-            stream_key: stream_key.clone(),
-            media_server_name: media_server_name.clone(),
-            from_uri: from_uri.clone(),
-            to_uri: to_uri.clone(),
-            from_tag: from_tag.clone(),
-            to_tag: None,
-            via_branch: branch.clone(),
-            server_ip: server_ip.clone(),
-            server_port,
-            transport: self.transport,
-            device_host: device_host.clone(),
-            device_port,
-            rtp_port,
-            state: SubSessionState::Pending,
-            retry_count: 0,
-            max_retries: 3,
-            device_nated_ip: None,
-            device_nated_port: None,
-            node_id: None,
-        };
-
-        let old_session = {
-            let sessions = &mut *self.sessions.write().await;
-            let idx = sessions.iter().position(|s| {
-                s.channel_id == session.channel_id && s.device_tag == session.device_tag
-            });
-            if let Some(idx) = idx {
-                let old = sessions.remove(idx);
-                if old.state == SubSessionState::Ok {
-                    if let Some(app) = self.get_device_app(&old.channel_id).await {
-                        let _ = self
-                            .deps
-                            .stream_manager
-                            .stop_stream(&app, &old.stream_key)
-                            .await;
-                    }
-                }
-                Some(old)
-            } else {
-                None
-            }
-        };
-        if old_session.is_some() {
-        }
-        self.sessions.write().await.push(session);
-
-        let invite = format!(
-            "INVITE sip:{to_uri} SIP/2.0\r\n\
-             Via: {via}\r\n\
-             From: <sip:{from_uri}>;tag={from_tag}\r\n\
-             To: <sip:{to_uri}>\r\n\
-             Call-ID: {call_id}\r\n\
-             CSeq: {sn} INVITE\r\n\
-             User-Agent: {user_agent}\r\n\
-             Subject: {subject}\r\n\
-             Content-Type: application/sdp\r\n\
-             Content-Length: {sdp_len}\r\n\
-             \r\n\
-             {sdp}",
-            to_uri = to_uri,
-            via = via,
-            from_uri = from_uri,
-            from_tag = from_tag,
-            call_id = call_id,
-            sn = sn,
-            subject = subject,
-            sdp_len = sdp_len,
-            sdp = sdp,
-            user_agent = GB28181_USER_AGENT
-        );
-
-        self.send(invite.as_bytes()).await?;
-
-        Ok(())
     }
+
 
 
     async fn ptz_control(
@@ -4383,22 +4556,11 @@ impl SignalAdapter for Gb28181Adapter {
         let device_audio_port = device.port;
         let channel_tag = device_tag.to_string();
 
-        let transport = if let Some(ext) = &device.extended {
-            if let Some(t) = ext.get("gb_transport").and_then(|v| v.as_str()) {
-                match t.to_uppercase().as_str() {
-                    "TCP" => TransportType::Tcp,
-                    _ => TransportType::Udp,
-                }
-            } else {
-                TransportType::Udp
-            }
-        } else {
-            TransportType::Udp
-        };
+        let transport = self.signaling_transport();
 
         let stream_key = format!("{}_{}_audio", device_tag, channel_tag);
         let (platform_audio_port, _, _) = self
-            .alloc_rtp_port(&stream_key, device.media_server_tag.as_deref())
+            .alloc_rtp_port(&stream_key, device.media_server_tag.as_deref(), RtpTransport::Udp)
             .await?;
 
         self.start_audio_talk(
@@ -4751,6 +4913,51 @@ a=ssrc:{}
         )
     }
 
+    /// Repeats the INVITE of a session with UDP media. The device answered the
+    /// TCP offer with UDP media, so the platform allocates a UDP port and sends
+    /// a new INVITE the device can answer.
+    async fn fallback_to_udp_media(&mut self, session: &SubSession) -> Result<()> {
+        if let Some(server) = self.deps.cluster.get_server(&session.media_server_name) {
+            if let Err(e) = server.close_rtp_server(&session.stream_key).await {
+                tracing::warn!(
+                    "[GB28181] Failed to close the TCP media port of {}: {}",
+                    session.stream_key,
+                    e
+                );
+            }
+        }
+
+        let device_tag = session.device_tag.clone();
+        let channel_id = session.channel_id.clone();
+
+        tracing::warn!(
+            "[GB28181] Device {} answered the TCP media offer with UDP, repeating the INVITE with UDP: channel={}",
+            device_tag,
+            channel_id
+        );
+
+        match session.session_type {
+            SessionType::Playback => {
+                let Some((start_time, end_time)) = session.playback_range else {
+                    return Err(AppError::Internal(
+                        "Playback session without a recording range".to_string(),
+                    ));
+                };
+                self.start_playback_with_transport(
+                    &device_tag,
+                    start_time,
+                    end_time,
+                    Some(RtpTransport::Udp),
+                )
+                .await
+            }
+            _ => {
+                self.start_with_transport(&device_tag, &channel_id, Some(RtpTransport::Udp))
+                    .await
+            }
+        }
+    }
+
     fn parse_setup_mode(&self, sdp: &str) -> SetupMode {
         let has_tcp = sdp.contains("TCP/RTP/AVP") || sdp.contains("TCP");
         if !has_tcp {
@@ -4768,6 +4975,27 @@ a=ssrc:{}
                 }
             }
             None => SetupMode::TcpPassive,
+        }
+    }
+
+    /// Transport the device answered with in its SDP. `None` when the answer
+    /// carries no video media line at all.
+    fn answered_media_transport(sdp: &str) -> Option<SetupMode> {
+        let video_line = sdp
+            .lines()
+            .find(|line| line.trim_start().starts_with("m=video"))?;
+        let proto = video_line.split_whitespace().nth(2)?;
+
+        if !proto.to_ascii_uppercase().starts_with("TCP") {
+            return Some(SetupMode::Udp);
+        }
+
+        match sdp
+            .lines()
+            .find(|line| line.trim_start().starts_with("a=setup:"))
+        {
+            Some(line) if line.contains("active") => Some(SetupMode::TcpActive),
+            _ => Some(SetupMode::TcpPassive),
         }
     }
 
@@ -5109,46 +5337,49 @@ a=ssrc:{}
         }
     }
 
-    async fn send_bye_to_session(&self, session: &SubSession) -> Result<()> {
-        let (platform_id, platform_ip, platform_port) =
+    fn build_bye_message(session: &SubSession) -> String {
+        let (platform_id, _platform_ip, _platform_port) =
             crate::protocol::gb28181::get_gb28181_platform_config()
                 .get()
                 .map(|(id, _, ip, port)| (id.as_str(), ip.as_str(), *port))
                 .unwrap_or(("34020000000000000000", "0.0.0.0", 5060));
 
-        let device_tag = self.device_tag_str();
-        let via_transport = match session.transport {
-            TransportType::Tcp => "TCP",
-            TransportType::Udp => "UDP",
-            _ => unreachable!("GB28181 only supports TCP and UDP transport"),
-        };
-        let sip_msg = format!(
+        let branch = format!("z9hG4bK{}", chrono::Utc::now().timestamp_millis());
+        let via = Self::signaling_via(
+            session.transport,
+            &session.signaling_ip,
+            session.server_port,
+            &branch,
+        );
+
+        format!(
             "BYE sip:{}@{}:{} SIP/2.0\r\n\
-             Via: SIP/2.0/{} {}:{};branch=z9hG4bK{};rport\r\n\
+             Via: {via}\r\n\
              From: <sip:{}@{}:{}>;tag={}\r\n\
              To: <sip:{}@{}:{}>;tag={}\r\n\
              Call-ID: {}\r\n\
-             CSeq: 2 BYE\r\n\
+             CSeq: {} BYE\r\n\
              User-Agent: {}\r\n\
              Content-Length: 0\r\n\r\n",
-            device_tag,
+            session.device_tag,
             session.device_host,
             session.device_port,
-            via_transport,
-            platform_ip,
-            platform_port,
-            chrono::Utc::now().timestamp_millis(),
             platform_id,
-            platform_ip,
-            platform_port,
+            session.signaling_ip,
+            session.server_port,
             &session.from_tag,
-            device_tag,
+            session.device_tag,
             session.device_host,
             session.device_port,
             session.to_tag.as_deref().unwrap_or(""),
             &session.call_id,
+            session.seq + 1,
             GB28181_USER_AGENT
-        );
+        )
+    }
+
+    async fn send_bye_to_session(&self, session: &SubSession) -> Result<()> {
+        let sip_msg = Self::build_bye_message(session);
 
         let send_once = || async {
             match session.transport {
@@ -5188,68 +5419,6 @@ a=ssrc:{}
         }
 
         tracing::warn!("[GB28181] All 3 BYE attempts failed, giving up");
-        Ok(())
-    }
-
-    async fn send_bye_to_clear_session(&self, device_tag: &str) -> Result<()> {
-        let (platform_id, platform_ip, platform_port) =
-            crate::protocol::gb28181::get_gb28181_platform_config()
-                .get()
-                .map(|(id, _, ip, port)| (id.as_str(), ip.as_str(), *port))
-                .unwrap_or(("34020000000000000000", "0.0.0.0", 5060));
-
-        let device = match self.deps.device_lookup.find_by_tag(device_tag).await {
-            Some(d) => d,
-            None => {
-                tracing::warn!("[GB28181] send_bye_to_clear_session: device not found {}", device_tag);
-                return Ok(());
-            }
-        };
-
-        let device_host = device.host.clone();
-        let device_port = device.port;
-        let call_id = uuid::Uuid::new_v4().to_string().replace("-", "");
-        let from_tag = uuid::Uuid::new_v4().to_string().replace("-", "");
-
-        let sip_msg = format!(
-            "BYE sip:{}@{}:{} SIP/2.0\r\n\
-             Via: SIP/2.0/UDP {}:{};branch=z9hG4bK{};rport\r\n\
-             From: <sip:{}@{}:{}>;tag={}\r\n\
-             To: <sip:{}@{}:{}>\r\n\
-             Call-ID: {}\r\n\
-             CSeq: 2 BYE\r\n\
-             User-Agent: {}\r\n\
-             Content-Length: 0\r\n\r\n",
-            device_tag,
-            device_host,
-            device_port,
-            platform_ip,
-            platform_port,
-            &call_id[..7],
-            platform_id,
-            platform_ip,
-            platform_port,
-            from_tag,
-            device_tag,
-            device_host,
-            device_port,
-            call_id,
-            GB28181_USER_AGENT
-        );
-
-        if let Some(sender) = crate::protocol::gb28181::get_udp_sender() {
-            let addr = format!("{}:{}", device_host, device_port);
-            sip_log::log_sent(addr.parse().ok(), &sip_msg);
-            for attempt in 1..=3 {
-                if let Err(e) = sender.send_to(sip_msg.as_bytes(), &addr).await {
-                    tracing::warn!("[GB28181] BYE clear attempt {} failed: {}", attempt, e);
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                    continue;
-                }
-                return Ok(());
-            }
-            tracing::warn!("[GB28181] All BYE clear attempts failed");
-        }
         Ok(())
     }
 }
@@ -5613,6 +5782,7 @@ mod tests {
             call_id: "call_id_789".to_string(),
             cseq: "1 REGISTER".to_string(),
             via_branch: "z9hG4bKbranch".to_string(),
+            contact: None,
         };
 
         let response = adapter.build_401_response(&req, "realm123");
@@ -5642,6 +5812,7 @@ mod tests {
             call_id: "call_id_789".to_string(),
             cseq: "1 REGISTER".to_string(),
             via_branch: "z9hG4bKbranch".to_string(),
+            contact: None,
         };
 
         let response = adapter.build_403_response(&req);
@@ -6967,6 +7138,157 @@ mod tests {
     }
 
     #[test]
+    fn test_build_sdp_uses_gb28181_clock_rate_and_decimal_ssrc() {
+        let deps = ProtocolDeps::for_test();
+        let adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+
+        let sdp = adapter.build_sdp(
+            "31011500001000000001",
+            "192.168.1.7",
+            33050,
+            "1320000011",
+            None,
+            None,
+            None,
+            RtpTransport::Udp,
+        );
+
+        assert!(
+            sdp.contains("f=v/PS/90000/25/1/2048\r\n"),
+            "GB28181 SDP must use the 90000 clock rate: {}",
+            sdp
+        );
+        assert!(
+            sdp.contains("y=1320000011\r\n"),
+            "GB28181 SDP must carry the decimal SSRC: {}",
+            sdp
+        );
+    }
+
+    #[test]
+    fn test_build_sdp_tcp_media_offers_tcp_transport_with_passive_setup() {
+        let deps = ProtocolDeps::for_test();
+        let adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+
+        let sdp = adapter.build_sdp(
+            "31011500001000000001",
+            "192.168.1.7",
+            33050,
+            "1320000011",
+            None,
+            None,
+            None,
+            RtpTransport::TcpPassive,
+        );
+
+        assert!(
+            sdp.contains("m=video 33050 TCP/RTP/AVP 96\r\n"),
+            "TCP media must be negotiated as TCP/RTP/AVP: {}",
+            sdp
+        );
+        assert!(
+            sdp.contains("a=setup:passive\r\n"),
+            "The platform listens on the TCP port and the device connects: {}",
+            sdp
+        );
+        assert!(
+            !sdp.contains("a=rtcp:"),
+            "RTCP shares the TCP connection, there is no separate RTCP port: {}",
+            sdp
+        );
+    }
+
+    #[test]
+    fn test_build_sdp_udp_media_keeps_the_rtcp_port() {
+        let deps = ProtocolDeps::for_test();
+        let adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+
+        let sdp = adapter.build_sdp(
+            "31011500001000000001",
+            "192.168.1.7",
+            33050,
+            "1320000011",
+            None,
+            None,
+            None,
+            RtpTransport::Udp,
+        );
+
+        assert!(
+            sdp.contains("m=video 33050 RTP/AVP 96\r\n"),
+            "UDP media must stay RTP/AVP: {}",
+            sdp
+        );
+        assert!(
+            sdp.contains("a=rtcp:33051\r\n"),
+            "UDP media needs the neighbouring RTCP port: {}",
+            sdp
+        );
+        assert!(
+            !sdp.contains("a=setup:"),
+            "UDP media must not carry a setup attribute: {}",
+            sdp
+        );
+    }
+
+    #[test]
+    fn test_resolve_media_transport_follows_the_signaling_connection() {
+        assert_eq!(
+            Gb28181Adapter::resolve_media_transport(None, TransportType::Tcp),
+            RtpTransport::TcpPassive
+        );
+        assert_eq!(
+            Gb28181Adapter::resolve_media_transport(None, TransportType::Udp),
+            RtpTransport::Udp
+        );
+    }
+
+    #[test]
+    fn test_resolve_media_transport_honours_the_device_override() {
+        let mut config = crate::domain::device::StreamConfig::default();
+
+        config.media_transport = Some("udp".to_string());
+        assert_eq!(
+            Gb28181Adapter::resolve_media_transport(Some(&config), TransportType::Tcp),
+            RtpTransport::Udp
+        );
+
+        config.media_transport = Some("tcp".to_string());
+        assert_eq!(
+            Gb28181Adapter::resolve_media_transport(Some(&config), TransportType::Udp),
+            RtpTransport::TcpPassive
+        );
+    }
+
+    #[test]
+    fn test_resolve_media_transport_falls_back_to_udp_for_an_unknown_override() {
+        let mut config = crate::domain::device::StreamConfig::default();
+        config.media_transport = Some("carrier-pigeon".to_string());
+
+        assert_eq!(
+            Gb28181Adapter::resolve_media_transport(Some(&config), TransportType::Tcp),
+            RtpTransport::Udp
+        );
+    }
+
+    #[test]
+    fn test_answered_media_transport_reads_the_media_line_of_the_answer() {
+        let udp_answer = "v=0\r\nm=video 15060 RTP/AVP 96\r\na=sendonly\r\n";
+        assert_eq!(
+            Gb28181Adapter::answered_media_transport(udp_answer),
+            Some(SetupMode::Udp)
+        );
+
+        let tcp_answer = "v=0\r\nm=video 15060 TCP/RTP/AVP 96\r\na=sendonly\r\na=setup:passive\r\n";
+        assert_eq!(
+            Gb28181Adapter::answered_media_transport(tcp_answer),
+            Some(SetupMode::TcpPassive)
+        );
+
+        assert_eq!(Gb28181Adapter::answered_media_transport("v=0\r\n"), None);
+    }
+
+    #[test]
     fn test_subscription_needs_refresh_at_half_life() {
         use chrono::{Duration, Utc};
 
@@ -6991,5 +7313,195 @@ mod tests {
             ..sub
         };
         assert!(Gb28181Adapter::subscription_needs_refresh(&due, now));
+    }
+
+    fn test_session() -> SubSession {
+        SubSession {
+            call_id: "call-id-1".to_string(),
+            session_type: SessionType::Play,
+            device_tag: "12010100001320000011".to_string(),
+            seq: 4,
+            channel_id: "12010100001320000011".to_string(),
+            stream_key: "stream-key".to_string(),
+            media_server_name: "zlmediakit-1".to_string(),
+            from_uri: "31011500001000000001@192.168.1.7:5060".to_string(),
+            to_uri: "12010100001320000011@192.168.1.211:5060".to_string(),
+            from_tag: "from-tag".to_string(),
+            to_tag: Some("to-tag".to_string()),
+            via_branch: "z9hG4bK1234567".to_string(),
+            server_ip: "10.0.0.9".to_string(),
+            signaling_ip: "192.168.1.7".to_string(),
+            server_port: 5060,
+            transport: TransportType::Tcp,
+            device_host: "192.168.1.211".to_string(),
+            device_port: 5060,
+            rtp_port: 33050,
+            media_transport: RtpTransport::TcpPassive,
+            udp_fallback_used: false,
+            playback_range: None,
+            state: SubSessionState::Pending,
+            retry_count: 0,
+            max_retries: 3,
+            device_nated_ip: None,
+            device_nated_port: None,
+            node_id: None,
+        }
+    }
+
+    #[test]
+    fn test_gb28181_ssrc_is_the_ten_digit_decimal_code() {
+        assert_eq!(
+            Gb28181Adapter::gb28181_ssrc("12010100001320000011"),
+            "1320000011"
+        );
+        assert_eq!(
+            Gb28181Adapter::gb28181_ssrc("12010100001370000011"),
+            "1370000011"
+        );
+        assert_eq!(Gb28181Adapter::gb28181_ssrc("123"), "0000000123");
+        assert_eq!(Gb28181Adapter::gb28181_ssrc(""), "0000000000");
+        assert_eq!(Gb28181Adapter::gb28181_ssrc("no-digits"), "0000000000");
+    }
+
+    #[test]
+    fn test_signaling_via_matches_the_transport_of_the_connection() {
+        assert_eq!(
+            Gb28181Adapter::signaling_via(
+                TransportType::Tcp,
+                "192.168.1.7",
+                5060,
+                "z9hG4bK1234567"
+            ),
+            "SIP/2.0/TCP 192.168.1.7:5060;branch=z9hG4bK1234567;rport"
+        );
+        assert_eq!(
+            Gb28181Adapter::signaling_via(
+                TransportType::Udp,
+                "192.168.1.7",
+                5061,
+                "z9hG4bK1234567"
+            ),
+            "SIP/2.0/UDP 192.168.1.7:5061;branch=z9hG4bK1234567;rport"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_signaling_transport_follows_the_registration_connection() {
+        let deps = ProtocolDeps::for_test();
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+
+        adapter
+            .set_udp_peer("192.168.1.211:5060".parse().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(adapter.signaling_transport(), TransportType::Udp);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (connect_result, accept_result) =
+            tokio::join!(tokio::net::TcpStream::connect(addr), listener.accept());
+        let client = connect_result.unwrap();
+        let (_read_half, write_half) = client.into_split();
+        adapter.set_tcp_write(write_half);
+
+        assert_eq!(adapter.signaling_transport(), TransportType::Tcp);
+    }
+
+    #[test]
+    fn test_ack_via_uses_the_platform_signaling_address() {
+        let session = test_session();
+
+        let ack = Gb28181Adapter::build_ack_message(
+            &session,
+            "sip:12010100001320000011@192.168.1.211:5060",
+            "12010100001320000011@192.168.1.211:5060",
+            "to-tag",
+        );
+
+        assert!(
+            ack.contains("Via: SIP/2.0/TCP 192.168.1.7:5060;branch=z9hG4bK1234567;rport"),
+            "the ACK must be sent from the platform signaling address: {}",
+            ack
+        );
+        assert!(
+            !ack.contains("10.0.0.9"),
+            "the media server address must not be used as signaling address: {}",
+            ack
+        );
+        assert!(ack.contains("CSeq: 4 ACK"), "got: {}", ack);
+    }
+
+    #[test]
+    fn test_bye_uses_the_session_transport_and_a_higher_cseq() {
+        let mut session = test_session();
+        session.transport = TransportType::Udp;
+        session.server_port = 5061;
+
+        let bye = Gb28181Adapter::build_bye_message(&session);
+
+        assert!(
+            bye.contains("Via: SIP/2.0/UDP 192.168.1.7:5061;branch="),
+            "the BYE must use the transport and port of the session: {}",
+            bye
+        );
+        assert!(
+            bye.contains("CSeq: 5 BYE"),
+            "the BYE CSeq must be higher than the INVITE CSeq: {}",
+            bye
+        );
+        assert!(bye.contains("Call-ID: call-id-1"), "got: {}", bye);
+    }
+
+    #[test]
+    fn test_401_response_echoes_the_contact_header() {
+        let deps = ProtocolDeps::for_test();
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+        adapter.device_tag = Some("12010100001320000011".to_string());
+
+        let req = RequestHeaders {
+            from_uri: "sip:12010100001320000011@3101150000".to_string(),
+            from_tag: Some("from_tag_123".to_string()),
+            to_uri: "sip:31011500001000000001@3101150000".to_string(),
+            to_tag: "to_tag_456".to_string(),
+            call_id: "call_id_789".to_string(),
+            cseq: "1 REGISTER".to_string(),
+            via_branch: "z9hG4bKbranch".to_string(),
+            contact: Some("<sip:12010100001320000011@192.168.1.211:5060>".to_string()),
+        };
+
+        let response = adapter.build_401_response(&req, "realm123");
+
+        assert!(
+            response.contains("Contact: <sip:12010100001320000011@192.168.1.211:5060>"),
+            "got: {}",
+            response
+        );
+    }
+
+    #[test]
+    fn test_register_ok_response_carries_the_contact() {
+        let deps = ProtocolDeps::for_test();
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+        adapter.device_tag = Some("12010100001320000011".to_string());
+
+        let req = RequestHeaders {
+            from_uri: "sip:12010100001320000011@3101150000".to_string(),
+            from_tag: Some("from_tag_123".to_string()),
+            to_uri: "sip:31011500001000000001@3101150000".to_string(),
+            to_tag: "to_tag_456".to_string(),
+            call_id: "call_id_789".to_string(),
+            cseq: "2 REGISTER".to_string(),
+            via_branch: "z9hG4bKbranch".to_string(),
+            contact: Some("<sip:12010100001320000011@192.168.1.211:5060>".to_string()),
+        };
+
+        let response = adapter.build_register_ok_response(&req);
+
+        assert!(response.contains("SIP/2.0 200 OK"), "got: {}", response);
+        assert!(
+            response.contains("Contact: <sip:12010100001320000011@192.168.1.211:5060>"),
+            "got: {}",
+            response
+        );
     }
 }

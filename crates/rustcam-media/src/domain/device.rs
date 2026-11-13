@@ -40,6 +40,11 @@ pub struct StreamConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub stream_mode: Option<String>,
+
+    /// Transport of the media link: `None` follows the transport of the SIP
+    /// connection, `udp` and `tcp` force one of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_transport: Option<String>,
 }
 
 fn default_video_codec() -> Option<String> {
@@ -69,6 +74,7 @@ impl Default for StreamConfig {
             packaging_mode: Some("HIS".to_string()),
             sprop_parameter_sets: None,
             stream_mode: Some(default_stream_mode().unwrap()),
+            media_transport: None,
         }
     }
 }

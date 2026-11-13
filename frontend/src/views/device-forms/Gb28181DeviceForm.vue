@@ -174,17 +174,9 @@
     </el-row>
 
     <el-row :gutter="12">
-      <el-col :span="12">
+      <el-col :span="24">
         <el-form-item label="SIP 密码 *" required>
           <el-input v-model="localForm.device_password" type="password" show-password placeholder="设备SIP认证密码" />
-        </el-form-item>
-      </el-col>
-      <el-col :span="12">
-        <el-form-item label="传输协议">
-          <el-select v-model="localForm.gb_transport" placeholder="选择协议" style="width: 100%">
-            <el-option label="UDP (推荐)" value="UDP" />
-            <el-option label="TCP" value="TCP" />
-          </el-select>
         </el-form-item>
       </el-col>
     </el-row>
@@ -253,6 +245,17 @@
               <el-select v-model="localForm.stream_config.packaging_mode" placeholder="选择模式" style="width: 100%">
                 <el-option label="HIS (96字节头)" value="HIS" />
                 <el-option label="NALU (标准)" value="NALU" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :span="6">
+            <el-form-item label="媒体传输">
+              <el-select v-model="localForm.stream_config.media_transport" placeholder="跟随 SIP 连接" style="width: 100%">
+                <el-option label="跟随 SIP 连接" value="" />
+                <el-option label="UDP" value="udp" />
+                <el-option label="TCP (设备主动连接平台)" value="tcp" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -334,7 +337,6 @@ const localForm = reactive({
   gb_device_type: '132',
   gb_industry_code: '00',
   gb_network_code: '0',
-  gb_transport: 'UDP',
   sip_id_suffix: '',
   enable_stream_config: false,
   stream_config: {
@@ -346,6 +348,7 @@ const localForm = reactive({
     packaging_mode: 'HIS',
     sprop_parameter_sets: '',
     stream_mode: 'recvonly',
+    media_transport: '',
   },
   enable_recording: false,
   recording: {
@@ -432,7 +435,6 @@ function getData() {
     device_tag: deviceTag,
     region_code: sipIdPrefix.value || null,
     extended: {
-      gb_transport: localForm.gb_transport,
       stream_config: localForm.enable_stream_config ? localForm.stream_config : null,
     },
   }
@@ -457,7 +459,6 @@ async function loadData(deviceTag) {
     localForm.playback_password = fullDevice.playback_password || ''
     localForm.is_public = fullDevice.is_public || false
     localForm.app = fullDevice.app || 'rtp'
-    localForm.gb_transport = ext.gb_transport || 'UDP'
     localForm.enable_stream_config = !!devStreamConfig && Object.keys(devStreamConfig).length > 0
     localForm.stream_config = {
       video_codec: devStreamConfig.video_codec || 'PS',
@@ -468,6 +469,7 @@ async function loadData(deviceTag) {
       packaging_mode: devStreamConfig.packaging_mode || 'HIS',
       sprop_parameter_sets: devStreamConfig.sprop_parameter_sets || '',
       stream_mode: devStreamConfig.stream_mode || 'recvonly',
+      media_transport: devStreamConfig.media_transport || '',
     }
     const devRecording = ext.recording || {}
     localForm.enable_recording = !!devRecording && devRecording.enabled === true

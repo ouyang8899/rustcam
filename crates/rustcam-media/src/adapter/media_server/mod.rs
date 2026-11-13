@@ -65,7 +65,7 @@ pub fn base_host_from_config(config: &MediaServerConfig) -> String {
     host
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum RtpTransport {
     #[default]
     Udp,
