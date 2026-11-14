@@ -10,7 +10,7 @@ use super::models::{Permission, Role, User};
 use super::repository::{UserRepository, RoleRepository, PermissionRepository};
 
 pub struct PostgresAuthRepository {
-    rb: RBatis,
+    pub(crate) rb: RBatis,
 }
 
 impl PostgresAuthRepository {
@@ -33,7 +33,7 @@ impl PostgresAuthRepository {
         Ok(repo)
     }
 
-    async fn init_tables(&self) {
+    pub(crate) async fn init_tables(&self) {
         let tables = [
             "CREATE TABLE IF NOT EXISTS permissions (id UUID PRIMARY KEY, name VARCHAR(255) NOT NULL UNIQUE, description TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
             "CREATE TABLE IF NOT EXISTS roles (id UUID PRIMARY KEY, name VARCHAR(255) NOT NULL UNIQUE, description TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
@@ -41,6 +41,7 @@ impl PostgresAuthRepository {
             "CREATE TABLE IF NOT EXISTS user_roles (user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE, PRIMARY KEY (user_id, role_id))",
             "CREATE TABLE IF NOT EXISTS role_permissions (role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE, permission_id UUID NOT NULL REFERENCES permissions(id) ON DELETE CASCADE, PRIMARY KEY (role_id, permission_id))",
             "CREATE TABLE IF NOT EXISTS role_inheritance (parent_role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE, child_role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE, PRIMARY KEY (parent_role_id, child_role_id), CHECK (parent_role_id <> child_role_id))",
+            "CREATE TABLE IF NOT EXISTS user_sessions (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, client_type VARCHAR(32) NOT NULL DEFAULT 'web', client_name VARCHAR(128), client_ip VARCHAR(45), user_agent TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), revoked_at TIMESTAMPTZ)",
         ];
         for sql in tables {
             if let Err(e) = self.rb.exec(sql, vec![]).await {
@@ -51,11 +52,23 @@ impl PostgresAuthRepository {
             "CREATE INDEX IF NOT EXISTS idx_role_permissions_permission ON role_permissions (permission_id)",
             "CREATE INDEX IF NOT EXISTS idx_user_roles_role ON user_roles (role_id)",
             "CREATE INDEX IF NOT EXISTS idx_role_inheritance_child ON role_inheritance (child_role_id)",
+            "CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions (user_id, revoked_at)",
         ];
         for sql in indexes {
             if let Err(e) = self.rb.exec(sql, vec![]).await {
                 tracing::warn!("[AuthDB] init_indexes warning: {}", e);
             }
+        }
+        // 超级用户标志：老库需要补列，新库由上面的建表语句直接带上。
+        if let Err(e) = self
+            .rb
+            .exec(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_super BOOLEAN NOT NULL DEFAULT FALSE",
+                vec![],
+            )
+            .await
+        {
+            tracing::warn!("[AuthDB] init_users.is_super warning: {}", e);
         }
     }
 
@@ -87,7 +100,8 @@ impl PostgresAuthRepository {
             }
         };
 
-        if let Err(e) = self.rb.exec("INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES ($1::uuid, $2, $3, $4, $5)",
+        // 初始化的默认管理员同时是超级用户：拥有全部权限，并能管理超级用户标志。
+        if let Err(e) = self.rb.exec("INSERT INTO users (id, username, password_hash, is_super, created_at, updated_at) VALUES ($1::uuid, $2, $3, TRUE, $4, $5)",
                      vec![rbs::value![admin_user_id.to_string()], rbs::value![default_username], rbs::value![hash], rbs::value![now.clone()], rbs::value![now.clone()]]).await {
             tracing::warn!("[AuthDB] seed_default_data (user may exist): {}", e);
         }
@@ -108,13 +122,14 @@ impl Clone for PostgresAuthRepository {
 impl UserRepository for PostgresAuthRepository {
     async fn find_by_id(&self, id: Uuid) -> Result<Option<User>> {
         let rows: Vec<Value> = self.rb.exec_decode(
-            "SELECT id, username, password_hash, created_at, updated_at FROM users WHERE id = $1::uuid",
+            "SELECT id, username, password_hash, is_super, created_at, updated_at FROM users WHERE id = $1::uuid",
             vec![rbs::value![id.to_string()]],
         ).await?;
         Ok(rows.into_iter().next().map(|r| User {
             id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
             username: r["username"].as_str().unwrap_or("").to_string(),
             password_hash: r["password_hash"].as_str().unwrap_or("").to_string(),
+            is_super: r["is_super"].as_bool().unwrap_or(false),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }))
@@ -122,21 +137,22 @@ impl UserRepository for PostgresAuthRepository {
 
     async fn find_by_username(&self, username: &str) -> Result<Option<User>> {
         let rows: Vec<Value> = self.rb.exec_decode(
-            "SELECT id, username, password_hash, created_at, updated_at FROM users WHERE username = $1",
+            "SELECT id, username, password_hash, is_super, created_at, updated_at FROM users WHERE username = $1",
             vec![rbs::value![username]],
         ).await?;
         Ok(rows.into_iter().next().map(|r| User {
             id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
             username: r["username"].as_str().unwrap_or("").to_string(),
             password_hash: r["password_hash"].as_str().unwrap_or("").to_string(),
+            is_super: r["is_super"].as_bool().unwrap_or(false),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }))
     }
 
     async fn create(&self, user: &User) -> Result<()> {
-        self.rb.exec("INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES ($1::uuid, $2, $3, $4::timestamptz, $5::timestamptz)",
-                     vec![rbs::value![user.id.to_string()], rbs::value![user.username.clone()], rbs::value![user.password_hash.clone()], rbs::value![user.created_at.to_rfc3339()], rbs::value![user.updated_at.to_rfc3339()]]).await?;
+        self.rb.exec("INSERT INTO users (id, username, password_hash, is_super, created_at, updated_at) VALUES ($1::uuid, $2, $3, $4, $5::timestamptz, $6::timestamptz)",
+                     vec![rbs::value![user.id.to_string()], rbs::value![user.username.clone()], rbs::value![user.password_hash.clone()], rbs::value![user.is_super], rbs::value![user.created_at.to_rfc3339()], rbs::value![user.updated_at.to_rfc3339()]]).await?;
         Ok(())
     }
 
@@ -151,12 +167,24 @@ impl UserRepository for PostgresAuthRepository {
         Ok(())
     }
 
+    async fn set_super_flag(&self, id: Uuid, is_super: bool) -> Result<bool> {
+        let result = self
+            .rb
+            .exec(
+                "UPDATE users SET is_super = $1, updated_at = NOW() WHERE id = $2::uuid",
+                vec![rbs::value![is_super], rbs::value![id.to_string()]],
+            )
+            .await?;
+        Ok(result.rows_affected > 0)
+    }
+
     async fn list(&self) -> Result<Vec<User>> {
-        let rows: Vec<Value> = self.rb.exec_decode("SELECT id, username, password_hash, created_at, updated_at FROM users", vec![]).await?;
+        let rows: Vec<Value> = self.rb.exec_decode("SELECT id, username, password_hash, is_super, created_at, updated_at FROM users", vec![]).await?;
         Ok(rows.into_iter().map(|r| User {
             id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
             username: r["username"].as_str().unwrap_or("").to_string(),
             password_hash: r["password_hash"].as_str().unwrap_or("").to_string(),
+            is_super: r["is_super"].as_bool().unwrap_or(false),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }).collect())
@@ -164,7 +192,7 @@ impl UserRepository for PostgresAuthRepository {
 
     async fn list_paginated(&self, offset: usize, limit: usize) -> Result<Vec<User>> {
         let rows: Vec<Value> = self.rb.exec_decode(
-            "SELECT id, username, password_hash, created_at, updated_at FROM users \
+            "SELECT id, username, password_hash, is_super, created_at, updated_at FROM users \
              ORDER BY created_at, id LIMIT $1 OFFSET $2",
             vec![rbs::value![limit as i64], rbs::value![offset as i64]],
         ).await?;
@@ -172,6 +200,7 @@ impl UserRepository for PostgresAuthRepository {
             id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
             username: r["username"].as_str().unwrap_or("").to_string(),
             password_hash: r["password_hash"].as_str().unwrap_or("").to_string(),
+            is_super: r["is_super"].as_bool().unwrap_or(false),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }).collect())

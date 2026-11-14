@@ -1,7 +1,12 @@
 import { request, setTokens, clearTokens } from '../utils/request'
 
 export async function login(username, password) {
-  const res = await request.post('/auth/login', { username, password })
+  const res = await request.post('/auth/login', {
+    username,
+    password,
+    client_type: 'web',
+    client_name: navigator.userAgent,
+  })
   const data = res.data.data
   setTokens(data.access_token, data.refresh_token)
   localStorage.setItem('rustcam_user', JSON.stringify(data.user))
@@ -29,5 +34,10 @@ export async function getCurrentUser() {
 }
 
 export async function logout() {
+  try {
+    await request.post('/auth/logout')
+  } catch {
+    // 会话可能已在服务端失效，清理本地状态即可
+  }
   clearTokens()
 }

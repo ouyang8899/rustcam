@@ -48,12 +48,16 @@ TourRunWidget::TourRunWidget(TourApi* api, QWidget* parent)
     QVBoxLayout* rightLayout = new QVBoxLayout(right);
     rightLayout->setContentsMargins(0, 0, 0, 0);
 
+    // 顶栏初值留空：几个 "-" 排在一起会被看成一条虚线，不是想要的状态条。
+    // 状态标签由 updateButtons() 写入当前任务状态。
     QHBoxLayout* topBar = new QHBoxLayout();
-    m_schemeLabel = new QLabel(QStringLiteral("-"), right);
-    m_batchLabel = new QLabel(QStringLiteral("-"), right);
-    m_slotsLabel = new QLabel(QStringLiteral("-"), right);
-    m_remainLabel = new QLabel(QStringLiteral("-"), right);
-    m_stateLabel = new QLabel(QStringLiteral("-"), right);
+    // 顶栏文字与上边框留出间距：贴着框线显得局促。
+    topBar->setContentsMargins(8, 8, 8, 4);
+    m_schemeLabel = new QLabel(QString(), right);
+    m_batchLabel = new QLabel(QString(), right);
+    m_slotsLabel = new QLabel(QString(), right);
+    m_remainLabel = new QLabel(QString(), right);
+    m_stateLabel = new QLabel(QString(), right);
     topBar->addWidget(m_schemeLabel);
     topBar->addWidget(m_batchLabel);
     topBar->addWidget(m_slotsLabel);
@@ -68,6 +72,11 @@ TourRunWidget::TourRunWidget(TourApi* api, QWidget* parent)
     rightLayout->addWidget(m_gridHost, 1);
 
     QHBoxLayout* controls = new QHBoxLayout();
+    // 方案级动作放在左侧：点之前能看见上方正在轮询的方案与状态。
+    m_startButton = new QPushButton(tr("开始"), right);
+    m_retryButton = new QPushButton(tr("重试"), right);
+    controls->addWidget(m_startButton);
+    controls->addWidget(m_retryButton);
     m_pauseButton = new QPushButton(tr("暂停"), right);
     m_stopButton = new QPushButton(tr("停止"), right);
     m_prevButton = new QPushButton(tr("上一批"), right);
@@ -89,13 +98,13 @@ TourRunWidget::TourRunWidget(TourApi* api, QWidget* parent)
     m_players = new TourPlayerManager(m_api, m_gridHost, this);
     m_model = m_statusPanel->model();
 
-    connect(m_listPanel, &TourSchemeListPanel::startRequested, this, &TourRunWidget::onStartRequested);
     connect(m_listPanel, &TourSchemeListPanel::schemeSelected, this, &TourRunWidget::onSchemeSelected);
     connect(m_listPanel, &TourSchemeListPanel::notify, this, [this](const QString& message, bool isError) {
         emit notify(message, isError);
     });
 
-    connect(m_statusPanel, &TourChannelStatusPanel::retryRequested, this, &TourRunWidget::onRetryRequested);
+    connect(m_startButton, &QPushButton::clicked, this, &TourRunWidget::onStartClicked);
+    connect(m_retryButton, &QPushButton::clicked, this, &TourRunWidget::onRetryClicked);
 
     connect(m_scheduler, &TourScheduler::playRequested, m_players, &TourPlayerManager::play);
     connect(m_scheduler, &TourScheduler::releaseRequested, this, [this](const QString& layoutItemId) {
@@ -228,16 +237,25 @@ void TourRunWidget::refreshGrid()
     }
 }
 
-void TourRunWidget::onStartRequested(const TourScheme& scheme)
+void TourRunWidget::onStartClicked()
 {
+    TourScheme scheme;
+    if (!m_listPanel || !m_listPanel->currentScheme(&scheme)) {
+        emit notify(tr("请先在方案列表中选择方案"), true);
+        return;
+    }
     startScheme(scheme);
 }
 
 void TourRunWidget::onSchemeSelected(const TourScheme& scheme)
 {
-    Q_UNUSED(scheme)
     // 选中方案即刷新右侧网格：未开始轮询时也能看到该方案的窗口布局。
     refreshGrid();
+    // 运行中画面放的是正在跑的方案，选中变化不覆盖标题，避免标题与画面对不上。
+    if (!isTaskActive()) {
+        m_schemeLabel->setText(scheme.name.isEmpty() ? QString() : tr("方案 %1").arg(scheme.name));
+    }
+    updateButtons();
 }
 
 void TourRunWidget::startScheme(const TourScheme& scheme)
@@ -290,7 +308,7 @@ void TourRunWidget::startScheme(const TourScheme& scheme)
         showLockedChannels(scheme, snapshot);
         m_scheduler->start(scheme, snapshot, QStringList());
 
-        m_schemeLabel->setText(scheme.name);
+        m_schemeLabel->setText(tr("方案 %1").arg(scheme.name));
         m_slotsLabel->setText(tr("可用槽位 %1").arg(snapshot.layoutW - snapshot.lockedSet.size()));
 
         QJsonObject detail;
@@ -366,11 +384,13 @@ void TourRunWidget::onPrevBatchClicked()
     }
 }
 
-void TourRunWidget::onRetryRequested(int row)
+void TourRunWidget::onRetryClicked()
 {
     if (!m_scheduler) {
         return;
     }
+    // 重试对状态表中当前选中的通道生效，行号由通道状态表给出。
+    const int row = m_statusPanel ? m_statusPanel->selectedRow() : -1;
     if (row < 0) {
         emit notify(tr("请先在状态表中选择通道"), false);
         return;
@@ -442,18 +462,35 @@ void TourRunWidget::onPageAtEnd()
     emit notify(tr("已到队尾"), false);
 }
 
+bool TourRunWidget::hasSelectedScheme() const
+{
+    TourScheme scheme;
+    return m_listPanel && m_listPanel->currentScheme(&scheme);
+}
+
+bool TourRunWidget::isTaskActive() const
+{
+    if (!m_scheduler) {
+        return false;
+    }
+    const TourTaskState state = m_scheduler->taskState();
+    return state == TourTaskState::Running || state == TourTaskState::Paused;
+}
+
 void TourRunWidget::updateButtons()
 {
     const TourTaskState state = m_scheduler ? m_scheduler->taskState() : TourTaskState::Idle;
     const bool active = state == TourTaskState::Running || state == TourTaskState::Paused;
     const bool running = state == TourTaskState::Running;
+    m_stateLabel->setText(tourTaskStateText(state));
+    m_startButton->setEnabled(hasSelectedScheme());
+    m_retryButton->setEnabled(active);
     m_pauseButton->setEnabled(active);
     m_pauseButton->setText(state == TourTaskState::Paused ? tr("恢复") : tr("暂停"));
     m_stopButton->setEnabled(active);
     // 暂停时计时冻结，翻页无法推进，因此只在运行态允许翻页。
     m_prevButton->setEnabled(running);
     m_nextButton->setEnabled(running);
-    m_statusPanel->setRetryEnabled(active);
 }
 
 } // namespace rustcam

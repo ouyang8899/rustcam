@@ -4,6 +4,7 @@
 #include <QString>
 #include <QJsonObject>
 #include <QMap>
+#include <QMutex>
 #include <QVariantMap>
 #include <functional>
 #include "CoreExport.h"
@@ -54,6 +55,8 @@ private:
     static size_t headerCallback(void* contents, size_t size, size_t nmemb, void* userp);
 
     QString m_authToken;
+    // 令牌可能被 GUI 线程写入、工作线程读取（WebSocket 取票），加锁避免数据竞争。
+    mutable QMutex m_tokenMutex;
 };
 
 }

@@ -2,31 +2,211 @@ use crate::api::FullState;
 use crate::application::ws_broadcaster::WsBroadcaster;
 use crate::domain::device::Protocol;
 
-use crate::error::AppError;
+use crate::auth::middleware::CurrentUser;
 use crate::media::{
     AudioCodec, BasicMediaNode, LinearPcmToG711Middleware, MediaNode, MediaNodeId,
     MediaNodeType, SendToReceiversMiddleware, WebSocketMediaNodeTransport,
 };
 use crate::protocol::adapter_manager::{ self };
 
-use axum::extract::ws::{Message, WebSocket};
-use axum::extract::{Path, State, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use axum::extract::{ConnectInfo, Extension, Path, State, WebSocketUpgrade};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use bytes::{ BytesMut };
+use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
 
+use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::{ broadcast, mpsc };
+use uuid::Uuid;
+
+pub struct WsTicketStore {
+    ttl: Duration,
+    tickets: DashMap<String, WsTicketData>,
+}
+
+struct WsTicketData {
+    user_id: Uuid,
+    sid: Uuid,
+    expires_at: Instant,
+}
+
+pub struct WsTicket {
+    pub user_id: Uuid,
+    pub sid: Uuid,
+}
+
+impl WsTicketStore {
+    pub fn new(ttl_seconds: u64) -> Self {
+        Self {
+            ttl: Duration::from_secs(ttl_seconds),
+            tickets: DashMap::new(),
+        }
+    }
+
+    pub fn issue(&self, user_id: Uuid, sid: Uuid) -> String {
+        let ticket = Uuid::new_v4().to_string();
+        self.tickets.insert(
+            ticket.clone(),
+            WsTicketData {
+                user_id,
+                sid,
+                expires_at: Instant::now() + self.ttl,
+            },
+        );
+        ticket
+    }
+
+    fn redeem(&self, ticket: &str) -> Option<WsTicket> {
+        let (_, data) = self.tickets.remove(ticket)?;
+        if data.expires_at < Instant::now() {
+            return None;
+        }
+        Some(WsTicket {
+            user_id: data.user_id,
+            sid: data.sid,
+        })
+    }
+}
+
+impl axum::extract::FromRequestParts<Arc<FullState>> for WsTicket {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &Arc<FullState>,
+    ) -> Result<Self, Self::Rejection> {
+        let ticket = parts
+            .headers
+            .get("x-ws-ticket")
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| (StatusCode::UNAUTHORIZED, "missing ws ticket").into_response())?;
+
+        let store = parts
+            .extensions
+            .get::<Arc<WsTicketStore>>()
+            .cloned()
+            .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, "ws ticket store missing").into_response())?;
+
+        store
+            .redeem(ticket)
+            .ok_or_else(|| (StatusCode::FORBIDDEN, "invalid ws ticket").into_response())
+    }
+}
+
+fn extract_ws_ticket(headers: &HeaderMap) -> Option<(String, bool)> {
+    if let Some(v) = headers.get("x-ws-ticket").and_then(|v| v.to_str().ok()) {
+        let v = v.trim();
+        if !v.is_empty() {
+            return Some((v.to_string(), false));
+        }
+    }
+    headers
+        .get("sec-websocket-protocol")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .map(|v| (v, true))
+}
+
+fn extract_ws_ticket_from_query(uri: &axum::http::Uri) -> Option<String> {
+    let query = uri.query()?;
+    for pair in query.split('&') {
+        let mut parts = pair.splitn(2, '=');
+        let key = parts.next().unwrap_or("");
+        let value = parts.next().unwrap_or("");
+        if key == "ticket" {
+            let decoded = percent_decode(value);
+            if !decoded.is_empty() {
+                return Some(decoded);
+            }
+        }
+    }
+    None
+}
+
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("");
+            if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                out.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+pub async fn issue_ws_ticket(
+    State(_state): State<Arc<FullState>>,
+    Extension(tickets): Extension<Arc<WsTicketStore>>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> axum::Json<crate::api::response::ApiResponse<serde_json::Value>> {
+    let ticket = tickets.issue(current_user.user.id, current_user.sid);
+    axum::Json(crate::api::response::ApiResponse::success(
+        serde_json::json!({ "ticket": ticket }),
+    ))
+}
 
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+    Extension(tickets): Extension<Arc<WsTicketStore>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<Arc<FullState>>,
-) -> Result<axum::response::Response, AppError> {
-    let broadcaster = state.app.registry.ws_broadcaster.clone();
+) -> Response {
+    let (ticket_text, via_protocol) = match extract_ws_ticket(&headers) {
+        Some(v) => v,
+        None => match extract_ws_ticket_from_query(&uri) {
+            Some(v) => (v, false),
+            None => return (StatusCode::UNAUTHORIZED, "missing ws ticket").into_response(),
+        },
+    };
+    let ticket = match tickets.redeem(&ticket_text) {
+        Some(t) => t,
+        None => return (StatusCode::FORBIDDEN, "invalid ws ticket").into_response(),
+    };
 
-    Ok(ws.on_upgrade(move |socket| handle_socket(socket, broadcaster)))
+    match state.auth.is_session_active(ticket.sid).await {
+        Ok(true) => {}
+        _ => return (StatusCode::UNAUTHORIZED, "session revoked").into_response(),
+    }
+
+    let ws = if via_protocol {
+        ws.protocols([ticket_text])
+    } else {
+        ws
+    };
+
+    let broadcaster = state.app.registry.ws_broadcaster.clone();
+    let revoker = state.auth.revoker.subscribe();
+    tracing::info!(
+        "[WebSocket] client connected addr={} user={}",
+        addr,
+        ticket.user_id
+    );
+
+    ws.on_upgrade(move |socket| handle_socket(socket, broadcaster, ticket.sid, revoker))
 }
 
-async fn handle_socket(socket: WebSocket, broadcaster: Arc<WsBroadcaster>) {
+async fn handle_socket(
+    socket: WebSocket,
+    broadcaster: Arc<WsBroadcaster>,
+    sid: Uuid,
+    mut revoker: broadcast::Receiver<Uuid>,
+) {
     let (mut sender, mut receiver) = socket.split();
     let mut broadcast_rx = broadcaster.subscribe();
 
@@ -73,6 +253,23 @@ async fn handle_socket(socket: WebSocket, broadcaster: Arc<WsBroadcaster>) {
                     }
                 }
             }
+
+            revoke = revoker.recv() => {
+                match revoke {
+                    Ok(revoked) if revoked == sid => {
+                        let _ = sender
+                            .send(Message::Close(Some(CloseFrame {
+                                code: 4401,
+                                reason: "session revoked".into(),
+                            })))
+                            .await;
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => {}
+                }
+            }
         }
     }
 
@@ -80,10 +277,47 @@ async fn handle_socket(socket: WebSocket, broadcaster: Arc<WsBroadcaster>) {
 
 pub async fn audio_talk_handler(
     ws: WebSocketUpgrade,
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+    Extension(tickets): Extension<Arc<WsTicketStore>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path((device_tag, channel_id)): Path<(String, String)>,
     State(state): State<Arc<FullState>>,
-) -> Result<axum::response::Response, AppError> {
-    Ok(ws.on_upgrade(move |socket| handle_audio_talk(socket, device_tag, channel_id, state)))
+) -> Response {
+    let (ticket_text, via_protocol) = match extract_ws_ticket(&headers) {
+        Some(v) => v,
+        None => match extract_ws_ticket_from_query(&uri) {
+            Some(v) => (v, false),
+            None => return (StatusCode::UNAUTHORIZED, "missing ws ticket").into_response(),
+        },
+    };
+    let ticket = match tickets.redeem(&ticket_text) {
+        Some(t) => t,
+        None => return (StatusCode::FORBIDDEN, "invalid ws ticket").into_response(),
+    };
+
+    match state.auth.is_session_active(ticket.sid).await {
+        Ok(true) => {}
+        _ => return (StatusCode::UNAUTHORIZED, "session revoked").into_response(),
+    }
+
+    let ws = if via_protocol {
+        ws.protocols([ticket_text])
+    } else {
+        ws
+    };
+
+    let revoker = state.auth.revoker.subscribe();
+    tracing::info!(
+        "[AudioTalk] client connected addr={} user={} device={}",
+        addr,
+        ticket.user_id,
+        device_tag
+    );
+
+    ws.on_upgrade(move |socket| {
+        handle_audio_talk(socket, device_tag, channel_id, state, ticket.sid, revoker)
+    })
 }
 
 async fn handle_audio_talk(
@@ -91,6 +325,8 @@ async fn handle_audio_talk(
     device_tag: String,
     channel_id: String,
     state: Arc<FullState>,
+    sid: Uuid,
+    mut revoker: broadcast::Receiver<Uuid>,
 ) {
     let (tx, _rx) = broadcast::channel::<BytesMut>(100);
 
@@ -212,6 +448,7 @@ async fn handle_audio_talk(
     let ws_node_clone = ws_node.clone();
 
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+    let (close_tx, close_rx) = mpsc::channel::<u16>(1);
     let transport_clone = transport.clone();
     transport.run(
         socket,
@@ -254,6 +491,7 @@ async fn handle_audio_talk(
             }
         },
         Some(shutdown_tx.clone()),
+        Some(close_rx),
     );
 
     let mut event_rx = state.app.registry.infra.event_bus.subscribe();
@@ -295,6 +533,16 @@ async fn handle_audio_talk(
                         }
                     }
                     break;
+                }
+                revoke = revoker.recv() => {
+                    match revoke {
+                        Ok(revoked) if revoked == sid => {
+                            let _ = close_tx.send(4401).await;
+                            break;
+                        }
+                        Ok(_) => {}
+                        Err(_) => {}
+                    }
                 }
             }
         }

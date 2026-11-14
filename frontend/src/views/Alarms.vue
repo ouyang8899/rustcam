@@ -79,6 +79,7 @@ import { ElMessageBox, ElMessage, ElNotification } from 'element-plus'
 import { Search, Refresh, Bell } from '@element-plus/icons-vue'
 import { getAlarms, markAlarmProcessed } from '../api/alarms'
 import { getDevices } from '../api/devices'
+import { useWsConnection } from '../composables/useWsConnection'
 import MetricCard from '../components/common/MetricCard.vue'
 import DataCard from '../components/common/DataCard.vue'
 
@@ -90,36 +91,14 @@ const processedFilter = ref('')
 const currentPage = ref(1)
 const pageSize = 20
 const total = ref(0)
-let ws = null
-let wsReconnectTimer = null
+const { connect: connectWs, onMessage } = useWsConnection()
+let offWs = null
 
 const unprocessedCount = computed(() => alarms.value.filter(a => !a.processed).length)
 
-function initAlarmWs() {
-  if (ws && ws.readyState === WebSocket.OPEN) return
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  ws = new WebSocket(`${protocol}//${window.location.host}/ws`)
-  ws.onopen = () => { console.log('[Alarms] WebSocket connected') }
-  ws.onclose = () => {
-    console.log('[Alarms] WebSocket closed, reconnecting...')
-    wsReconnectTimer = setTimeout(initAlarmWs, 5000)
-  }
-  ws.onerror = (e) => { console.warn('[Alarms] WebSocket error', e) }
-  ws.onmessage = (event) => {
-    try {
-      const msg = JSON.parse(event.data)
-      if (msg.msg_type === 'alarm') {
-        handleNewAlarm(msg.data)
-      }
-    } catch (e) { /* ignore parse errors */ }
-  }
-}
-
-function closeAlarmWs() {
-  clearTimeout(wsReconnectTimer)
-  if (ws) {
-    ws.close()
-    ws = null
+function handleWsMessage(msg) {
+  if (msg.msg_type === 'alarm') {
+    handleNewAlarm(msg.data)
   }
 }
 
@@ -149,11 +128,12 @@ const filteredAlarms = computed(() => {
 onMounted(async () => {
   await fetchAlarms()
   await fetchDevices()
-  initAlarmWs()
+  offWs = onMessage(handleWsMessage)
+  connectWs()
 })
 
 onUnmounted(() => {
-  closeAlarmWs()
+  if (offWs) offWs()
 })
 
 async function fetchAlarms() {

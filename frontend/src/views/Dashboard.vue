@@ -222,11 +222,12 @@ import { getStreams } from '../api/streams'
 import { getSessions } from '../api/sessions'
 import { getOnlineDevices } from '../api/devices'
 import { useDroneStore } from '../stores/droneStore'
+import { useWsConnection } from '../composables/useWsConnection'
 import StatusDot from '../components/common/StatusDot.vue'
 import MetricCard from '../components/common/MetricCard.vue'
 import DataCard from '../components/common/DataCard.vue'
 
-const wsConnected = ref(false)
+const { wsConnected, connect: connectWs, onMessage } = useWsConnection()
 const dashData = ref(null)
 const droneStore = useDroneStore()
 /** 无人机数据是可选的：没有权限或 drone-service 未接入时整块隐藏。 */
@@ -241,7 +242,7 @@ const reloading = ref(false)
 const currentTime = ref('')
 let refreshTimer = null
 let droneTimer = null
-let ws = null
+let offWs = null
 
 const onlineDevices = ref([])
 const activeStreams = ref([])
@@ -358,13 +359,14 @@ onMounted(async () => {
   loadDroneStats()
   refreshTimer = setInterval(() => { fetchDashboard() }, 10000)
   droneTimer = setInterval(() => { loadDroneStats() }, 10000)
-  initWs()
+  connectWs()
+  offWs = onMessage((msg) => { if (msg.msg_type) fetchDashboard() })
 })
 
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
   if (droneTimer) clearInterval(droneTimer)
-  if (ws) ws.close()
+  if (offWs) offWs()
 })
 
 async function fetchDashboard() {
@@ -399,18 +401,6 @@ async function loadSessionsByPage(page) {
     activeSessions.value = data?.items || []
     totalSessions.value = data?.total || 0
   } catch (e) { console.error(e) }
-}
-
-function initWs() {
-  try {
-    ws = new WebSocket(`ws://${window.location.host}/ws`)
-    ws.onopen = () => { wsConnected.value = true }
-    ws.onclose = () => { wsConnected.value = false; setTimeout(initWs, 5000) }
-    ws.onmessage = (event) => {
-      try { const m = JSON.parse(event.data); if (m.msg_type) fetchDashboard() } catch (e) {}
-    }
-    ws.onerror = () => { wsConnected.value = false }
-  } catch (e) { wsConnected.value = false }
 }
 
 function updateTime() {

@@ -3,7 +3,6 @@
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QPushButton>
 #include <QTableView>
 #include <QVBoxLayout>
 
@@ -24,8 +23,6 @@ TourChannelStatusPanel::TourChannelStatusPanel(QWidget* parent)
     m_titleLabel = new QLabel(tr("轮询通道状态"), this);
     header->addWidget(m_titleLabel);
     header->addStretch(1);
-    m_retryButton = new QPushButton(tr("重试"), this);
-    header->addWidget(m_retryButton);
     layout->addLayout(header);
 
     m_tableView = new QTableView(this);
@@ -40,8 +37,6 @@ TourChannelStatusPanel::TourChannelStatusPanel(QWidget* parent)
     viewHeader->setSectionResizeMode(TourChannelModel::ReasonColumn, QHeaderView::Stretch);
     viewHeader->setSectionResizeMode(TourChannelModel::BatchColumn, QHeaderView::ResizeToContents);
     layout->addWidget(m_tableView, 1);
-
-    connect(m_retryButton, &QPushButton::clicked, this, &TourChannelStatusPanel::onRetryClicked);
 }
 
 int TourChannelStatusPanel::selectedRow() const
@@ -54,16 +49,6 @@ int TourChannelStatusPanel::selectedRow() const
         return -1;
     }
     return selection.first().row();
-}
-
-void TourChannelStatusPanel::setRetryEnabled(bool enabled)
-{
-    m_retryButton->setEnabled(enabled);
-}
-
-void TourChannelStatusPanel::onRetryClicked()
-{
-    emit retryRequested(selectedRow());
 }
 
 } // namespace rustcam

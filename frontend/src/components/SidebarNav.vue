@@ -103,10 +103,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/authStore'
 import { useThemeStore } from '../stores/themeStore'
+import { useWsConnection } from '../composables/useWsConnection'
 
 const emit = defineEmits(['navigate'])
 
@@ -114,13 +115,12 @@ const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
 const theme = useThemeStore()
+const { wsConnected, connect: connectWs } = useWsConnection()
 const collapsed = ref(false)
-const wsConnected = ref(false)
 const menuTreeRef = ref(null)
 const currentUsername = computed(() => auth.user?.username || 'admin')
 const isAdmin = computed(() => auth.isAdmin)
 const currentPath = computed(() => route.path)
-let ws = null
 
 const navItems = [
   { path: '/', label: '监控台', icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>' },
@@ -165,16 +165,6 @@ const menuTree = computed(() => {
 })
 
 onMounted(() => connectWs())
-onUnmounted(() => { if (ws) ws.close() })
-
-function connectWs() {
-  try {
-    ws = new WebSocket(`ws://${window.location.host}/ws`)
-    ws.onopen = () => { wsConnected.value = true }
-    ws.onclose = () => { wsConnected.value = false; setTimeout(connectWs, 5000) }
-    ws.onerror = () => { wsConnected.value = false }
-  } catch (e) { wsConnected.value = false }
-}
 
 function onNavClick(path) {
   emit('navigate', path)

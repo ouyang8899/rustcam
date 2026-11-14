@@ -9,6 +9,11 @@ pub struct Claims {
     pub sub: String,
     pub username: String,
     pub roles: Vec<String>,
+    #[serde(default)]
+    pub sid: String,
+    /// 超级用户标志：随令牌下发，标志变更会强制该用户重新登录。
+    #[serde(default)]
+    pub is_super: bool,
     pub exp: i64,
     pub iat: i64,
     pub token_type: String,
@@ -20,6 +25,8 @@ impl Claims {
         username: &str,
         roles: Vec<String>,
         token_type: &str,
+        sid: &str,
+        is_super: bool,
         expires_in: Duration,
     ) -> Self {
         let now = Utc::now();
@@ -27,6 +34,8 @@ impl Claims {
             sub: user_id.to_string(),
             username: username.to_string(),
             roles,
+            sid: sid.to_string(),
+            is_super,
             exp: (now + expires_in).timestamp(),
             iat: now.timestamp(),
             token_type: token_type.to_string(),
@@ -39,10 +48,12 @@ pub fn encode_token(
     username: &str,
     roles: Vec<String>,
     token_type: &str,
+    sid: &str,
+    is_super: bool,
     expires_in: Duration,
     secret: &str,
 ) -> Result<String, AuthError> {
-    let claims = Claims::new(user_id, username, roles, token_type, expires_in);
+    let claims = Claims::new(user_id, username, roles, token_type, sid, is_super, expires_in);
     let header = Header::new(Algorithm::HS256);
 
     encode(
@@ -69,13 +80,18 @@ pub fn decode_token(token: &str, secret: &str) -> Result<Claims, AuthError> {
     })
 }
 
-pub fn generate_tokens(user: &UserInfo, config: &JwtConfig) -> Result<(String, String), AuthError> {
-
+pub fn generate_tokens(
+    user: &UserInfo,
+    sid: &str,
+    config: &JwtConfig,
+) -> Result<(String, String), AuthError> {
     let access_token = encode_token(
         user.id,
         &user.username,
         user.roles.clone(),
         "access",
+        sid,
+        user.is_super,
         Duration::minutes(config.access_token_expire_minutes),
         &config.secret,
     )?;
@@ -85,6 +101,8 @@ pub fn generate_tokens(user: &UserInfo, config: &JwtConfig) -> Result<(String, S
         &user.username,
         user.roles.clone(),
         "refresh",
+        sid,
+        user.is_super,
         Duration::days(config.refresh_token_expire_days),
         &config.secret,
     )?;

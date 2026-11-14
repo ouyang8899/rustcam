@@ -23,11 +23,9 @@ TourSchemeListPanel::TourSchemeListPanel(TourApi* api, QWidget* parent)
     m_newButton = new QPushButton(tr("新建"), this);
     m_editButton = new QPushButton(tr("编辑"), this);
     m_deleteButton = new QPushButton(tr("删除"), this);
-    m_startButton = new QPushButton(tr("开始"), this);
     buttons->addWidget(m_newButton);
     buttons->addWidget(m_editButton);
     buttons->addWidget(m_deleteButton);
-    buttons->addWidget(m_startButton);
     layout->addLayout(buttons);
 
     m_list = new QListWidget(this);
@@ -39,7 +37,6 @@ TourSchemeListPanel::TourSchemeListPanel(TourApi* api, QWidget* parent)
     connect(m_newButton, &QPushButton::clicked, this, &TourSchemeListPanel::onNewScheme);
     connect(m_editButton, &QPushButton::clicked, this, &TourSchemeListPanel::onEditScheme);
     connect(m_deleteButton, &QPushButton::clicked, this, &TourSchemeListPanel::onDeleteScheme);
-    connect(m_startButton, &QPushButton::clicked, this, &TourSchemeListPanel::onStartScheme);
 
     onSelectionChanged();
 }
@@ -98,7 +95,6 @@ void TourSchemeListPanel::onSelectionChanged()
     const bool hasSelection = m_list->currentItem() != nullptr;
     m_editButton->setEnabled(hasSelection);
     m_deleteButton->setEnabled(hasSelection);
-    m_startButton->setEnabled(hasSelection);
 
     TourScheme scheme;
     if (hasSelection && currentScheme(&scheme)) {
@@ -189,16 +185,6 @@ void TourSchemeListPanel::onDeleteScheme()
         TourAuditLog::log(QStringLiteral("scheme_deleted"));
         refresh();
     });
-}
-
-void TourSchemeListPanel::onStartScheme()
-{
-    TourScheme scheme;
-    if (!currentScheme(&scheme)) {
-        return;
-    }
-    // 全锁校验需要布局窗口数，由运行页在启动前给出。
-    emit startRequested(scheme);
 }
 
 } // namespace rustcam

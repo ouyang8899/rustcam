@@ -9,6 +9,7 @@
 #include "MainWindow.h"
 #include "LoginWindow.h"
 #include "SessionManager.h"
+#include "WebSocketClient.h"
 #include "Utils.h"
 #include "EventBus.h"
 #include "interfaces/IPlugin.h"
@@ -88,6 +89,9 @@ bool App::initialize()
 
 void App::run()
 {
+    connect(WebSocketClient::instance(), &WebSocketClient::sessionInvalid,
+            this, &App::onSessionInvalid);
+
     m_loginWindow = new LoginWindow();
     m_loginWindow->setAttribute(Qt::WA_DeleteOnClose);
     connect(m_loginWindow, &LoginWindow::loginSuccess, this, &App::onLoginSuccess);
@@ -110,6 +114,24 @@ void App::onLoginSuccess(const QJsonObject& userInfo)
 
     EventBus::instance()->publish(TOPIC_SESSION_LOGGED_IN);
     LOG_INFO("App", "Published session/loggedIn event");
+
+    WebSocketClient::instance()->setEnabled(true);
+}
+
+void App::onSessionInvalid()
+{
+    LOG_WARNING("App", "Session invalidated by server, returning to login");
+
+    WebSocketClient::instance()->setEnabled(false);
+    SessionManager::instance()->clearSession();
+    ServerApi::instance()->clearAuthToken();
+
+    MainWindow::instance()->hide();
+
+    m_loginWindow = new LoginWindow();
+    m_loginWindow->setAttribute(Qt::WA_DeleteOnClose);
+    connect(m_loginWindow, &LoginWindow::loginSuccess, this, &App::onLoginSuccess);
+    m_loginWindow->show();
 }
 
 void App::loadMapSettings()

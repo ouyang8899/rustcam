@@ -93,6 +93,7 @@
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import Hls from 'hls.js'
 import flvjs from 'flv.js'
+import { request } from '../utils/request'
 
 const props = defineProps({
   src: String,
@@ -655,7 +656,10 @@ async function startBroadcast() {
     const wsUrl = `${wsProtocol}//${wsHost}/ws/audio-talk/${props.deviceTag}/${channelTag}`
     console.log('[Broadcast] Connecting to:', wsUrl)
 
-    talkWs = new WebSocket(wsUrl)
+    const ticketRes = await request.post('/ws/ticket')
+    const ticket = ticketRes.data.data.ticket
+
+    talkWs = new WebSocket(wsUrl, [ticket])
 
     talkWs.onopen = () => {
       console.log('[Broadcast] WebSocket connected')

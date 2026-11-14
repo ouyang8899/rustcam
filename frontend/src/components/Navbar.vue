@@ -46,28 +46,18 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/authStore'
+import { useWsConnection } from '../composables/useWsConnection'
 
 const router = useRouter()
 const auth = useAuthStore()
-const wsConnected = ref(false)
+const { wsConnected, connect: connectWs } = useWsConnection()
 const currentUsername = computed(() => auth.user?.username || 'admin')
 const isAdmin = computed(() => auth.isAdmin)
-let ws = null
 
 onMounted(() => connectWs())
-onUnmounted(() => { if (ws) ws.close() })
-
-function connectWs() {
-  try {
-    ws = new WebSocket(`ws://${window.location.host}/ws`)
-    ws.onopen = () => { wsConnected.value = true }
-    ws.onclose = () => { wsConnected.value = false; setTimeout(connectWs, 5000) }
-    ws.onerror = () => { wsConnected.value = false }
-  } catch (e) { wsConnected.value = false }
-}
 
 function logout() {
   auth.logout()

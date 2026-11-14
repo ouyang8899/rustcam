@@ -36,6 +36,7 @@ signals:
 
 private slots:
     void onLoginSuccess(const QJsonObject& userInfo);
+    void onSessionInvalid();
 
 private:
     explicit App(QObject* parent = nullptr);

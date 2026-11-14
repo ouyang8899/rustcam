@@ -42,7 +42,7 @@ pub async fn authorize(mut req: axum::extract::Request, next: Next) -> Response 
         }
     };
 
-    if !any_allowed(&casbin, &user.0, acts).await {
+    if !any_allowed(&casbin, &user.user, acts).await {
         return AppError::Forbidden(format!(
             "权限不足：需要 {}:{}",
             PERM_OBJECT,
@@ -76,7 +76,7 @@ impl<S: Send + Sync> FromRequestParts<S> for DroneUser {
         parts
             .extensions
             .get::<CurrentUser>()
-            .map(|u| DroneUser(u.0.clone()))
+            .map(|u| DroneUser(u.user.clone()))
             .ok_or_else(|| AppError::Auth("未认证：请求缺少用户身份".to_string()))
     }
 }

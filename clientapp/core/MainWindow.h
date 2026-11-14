@@ -7,6 +7,8 @@
 #include <QStackedWidget>
 #include <QVariant>
 
+#include "platform/SystemUsageProbe.h"
+
 class QToolBar;
 class QStatusBar;
 class QLabel;
@@ -18,6 +20,7 @@ class LeftNavigationBar;
 class EventBus;
 class ConfigManager;
 class PluginManager;
+class SystemUsageMonitor;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -33,7 +36,6 @@ public:
     QWidget* centralWorkspace() const { return m_workspace; }
 
     void setStatusMessage(const QString& message, int timeout = 0);
-    void setConnectionStatus(bool connected);
     void setAlarmCount(int count);
 
     void showFullscreenVideo();
@@ -50,6 +52,8 @@ public slots:
 private slots:
     /// 状态栏时钟刷新
     void onClockTick();
+    /// 刷新状态栏的 CPU / GPU / 内存占用
+    void onUsageChanged(const rustcam::SystemUsage& usage);
     /// 配置变化（例如插件顺序被调整）后同步左侧导航栏
     void onSystemConfigChanged(const QString& key, const QVariant& value);
 
@@ -68,6 +72,8 @@ private:
     QString formatShortcut(Qt::KeyboardModifiers modifiers, int key);
     /// 按配置的插件顺序重新排列左侧导航栏
     void applyPluginOrder();
+    /// 按 GPU 数量增减状态栏里的显卡标签
+    void updateGpuLabels(const QList<GpuUsage>& gpus);
     /// 读取配置里的插件顺序，配置为空时用默认顺序
     QStringList configuredPluginOrder() const;
 
@@ -79,11 +85,13 @@ private:
     QStringList m_pluginIds;
 
     QLabel* m_connectionStatusLabel = nullptr;
-    QLabel* m_fpsLabel = nullptr;
-    QLabel* m_bitrateLabel = nullptr;
-    QLabel* m_gpuLabel = nullptr;
     QLabel* m_cpuLabel = nullptr;
+    QLabel* m_memoryLabel = nullptr;
+    /// 多块 GPU 时每块卡一段，容器里按卡数增减标签。
+    QWidget* m_gpuBox = nullptr;
+    QList<QLabel*> m_gpuLabels;
     QLabel* m_timeLabel = nullptr;
+    SystemUsageMonitor* m_usageMonitor = nullptr;
     QWidget* m_topRightWidget = nullptr;
     QLabel* m_userLabel = nullptr;
     QComboBox* m_themeCombo = nullptr;

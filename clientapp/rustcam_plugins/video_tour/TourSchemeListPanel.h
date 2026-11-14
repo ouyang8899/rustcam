@@ -16,7 +16,10 @@ namespace rustcam {
 
 class TourApi;
 
-/// 左侧方案面板：顶部操作按钮（新建 / 编辑 / 删除 / 开始）+ 下方方案树。
+/// 左侧方案面板：顶部操作按钮（新建 / 编辑 / 删除）+ 下方方案树。
+///
+/// 「开始」不在这里：它按当前选中的方案启动轮询，属于运行页的动作，
+/// 放在视频窗口下方，用户点之前能看见正在轮询的方案。
 class TourSchemeListPanel : public QWidget {
     Q_OBJECT
 public:
@@ -30,7 +33,6 @@ public:
     void setLayouts(const QList<PlayerLayout>& layouts) { m_layouts = layouts; }
 
 signals:
-    void startRequested(const TourScheme& scheme);
     /// 选中项变化；未选中时 scheme 为空。
     void schemeSelected(const TourScheme& scheme);
     void schemesChanged();
@@ -40,7 +42,6 @@ private slots:
     void onNewScheme();
     void onEditScheme();
     void onDeleteScheme();
-    void onStartScheme();
     void onItemActivated(QListWidgetItem* item);
     void onSelectionChanged();
 
@@ -52,7 +53,6 @@ private:
     QPushButton* m_newButton = nullptr;
     QPushButton* m_editButton = nullptr;
     QPushButton* m_deleteButton = nullptr;
-    QPushButton* m_startButton = nullptr;
     QVector<TourScheme> m_schemes;
     QList<PlayerLayout> m_layouts;
 };

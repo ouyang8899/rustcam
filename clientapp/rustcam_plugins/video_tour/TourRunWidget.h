@@ -36,13 +36,13 @@ signals:
     void notify(const QString& message, bool isError);
 
 private slots:
-    void onStartRequested(const TourScheme& scheme);
+    void onStartClicked();
     void onSchemeSelected(const TourScheme& scheme);
     void onPauseClicked();
     void onStopClicked();
     void onNextBatchClicked();
     void onPrevBatchClicked();
-    void onRetryRequested(int row);
+    void onRetryClicked();
     void onTaskStateChanged(int state);
     void onBatchStarted(int batchIndex, int cycle, QVector<TourChannelRef> channels);
     void onWindowStateChanged(const QString& layoutItemId, TourChannelState state,
@@ -54,6 +54,10 @@ private slots:
 private:
     void startScheme(const TourScheme& scheme);
     void updateButtons();
+    /// 方案树里是否有选中项。
+    bool hasSelectedScheme() const;
+    /// 轮询任务是否正在进行或暂停。
+    bool isTaskActive() const;
     void showLockedChannels(const TourScheme& scheme, const TourSnapshot& snapshot);
     /// 锁定窗口不受调度器管理，播放事件需自行回写状态。
     void updateLockedChannelState(const QString& layoutItemId, quint64 generation,
@@ -82,6 +86,8 @@ private:
     QLabel* m_remainLabel = nullptr;
     QLabel* m_stateLabel = nullptr;
 
+    QPushButton* m_startButton = nullptr;
+    QPushButton* m_retryButton = nullptr;
     QPushButton* m_pauseButton = nullptr;
     QPushButton* m_stopButton = nullptr;
     QPushButton* m_prevButton = nullptr;

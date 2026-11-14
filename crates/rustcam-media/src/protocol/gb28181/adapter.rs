@@ -730,11 +730,39 @@ impl Gb28181Adapter {
     }
 
     fn parse_xml_field(xml: &str, tag: &str) -> Option<String> {
-        let doc = Document::parse(xml).ok()?;
-        doc.root_element()
-            .descendants()
-            .find(|n| n.has_tag_name(tag))
-            .and_then(|n| n.text().map(|s| s.trim().to_string()))
+        if let Ok(doc) = Document::parse(xml) {
+            return doc
+                .root_element()
+                .descendants()
+                .find(|n| n.has_tag_name(tag))
+                .and_then(|n| n.text().map(|s| s.trim().to_string()));
+        }
+        // 设备端 XML 常有未转义的 '<',整篇解析失败时退回按标签扫描。
+        Self::scan_tag_text(xml, tag)
+    }
+
+    /// 在非严格 XML 中按标签扫描文本内容：容忍未闭合标签、未转义特殊字符。
+    fn scan_tag_text(xml: &str, tag: &str) -> Option<String> {
+        let mut cursor = 0usize;
+        while let Some(offset) = xml[cursor..].find('<') {
+            let tag_start = cursor + offset;
+            let rest = &xml[tag_start + 1..];
+            let name_end = rest.find(|c: char| {
+                c == '>' || c == '/' || c.is_whitespace()
+            })?;
+            if &rest[..name_end] == tag {
+                let content_start = xml[tag_start..].find('>')? + tag_start + 1;
+                let closing = format!("</{tag}>");
+                let content_end = xml[content_start..].find(&closing)? + content_start;
+                let text = xml[content_start..content_end].trim();
+                if text.is_empty() {
+                    return None;
+                }
+                return Some(text.to_string());
+            }
+            cursor = tag_start + 1;
+        }
+        None
     }
 
     fn parse_channel_id(body: &str) -> Option<String> {
@@ -6708,6 +6736,26 @@ mod tests {
         let xml = r#"<Name>Camera <Front> 1</Name>"#;
         let result = Gb28181Adapter::parse_xml_field(xml, "Name");
         assert_eq!(result, Some("Camera <Front> 1".to_string()));
+    }
+
+    #[test]
+    fn test_parse_xml_field_with_escaped_special_chars() {
+        let xml = r#"<Response><Name>Camera &lt;Front&gt; 1</Name></Response>"#;
+        let result = Gb28181Adapter::parse_xml_field(xml, "Name");
+        assert_eq!(result, Some("Camera <Front> 1".to_string()));
+    }
+
+    #[test]
+    fn test_parse_xml_field_missing_tag_returns_none() {
+        let xml = r#"<Response><Name>Camera 1</Name></Response>"#;
+        assert_eq!(Gb28181Adapter::parse_xml_field(xml, "DeviceID"), None);
+    }
+
+    #[test]
+    fn test_parse_xml_field_malformed_document_falls_back_to_scan() {
+        let xml = r#"<Response><DeviceID>34020000001110000001</DeviceID><Name>Cam <Front> 1</Name>"#;
+        let result = Gb28181Adapter::parse_xml_field(xml, "DeviceID");
+        assert_eq!(result, Some("34020000001110000001".to_string()));
     }
 
     #[test]

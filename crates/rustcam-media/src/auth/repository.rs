@@ -13,6 +13,8 @@ pub trait UserRepository: Send + Sync {
     async fn create(&self, user: &User) -> Result<()>;
     async fn update(&self, user: &User) -> Result<()>;
     async fn delete(&self, id: Uuid) -> Result<()>;
+    /// 设置超级用户标志，返回是否命中该用户。
+    async fn set_super_flag(&self, id: Uuid, is_super: bool) -> Result<bool>;
     async fn list(&self) -> Result<Vec<User>>;
 
     /// 按创建时间排序取一页（`offset` 之后的 `limit` 条）。
@@ -155,6 +157,17 @@ impl UserRepository for InMemoryAuthRepository {
             self.user_roles.remove(&id);
         }
         Ok(())
+    }
+
+    async fn set_super_flag(&self, id: Uuid, is_super: bool) -> Result<bool> {
+        let mut user = match self.users.get(&id) {
+            Some(user) => user.clone(),
+            None => return Ok(false),
+        };
+        user.is_super = is_super;
+        user.updated_at = chrono::Utc::now();
+        self.users.insert(id, user);
+        Ok(true)
     }
 
     async fn list(&self) -> Result<Vec<User>> {

@@ -22,6 +22,7 @@
 #include <QtMath>
 #include <QCoreApplication>
 #include <QSpinBox>
+#include <QSysInfo>
 #include <cmath>
 
 namespace rustcam {
@@ -271,6 +272,8 @@ void LoginWindow::onLoginClicked()
     QJsonObject body;
     body["username"] = m_usernameEdit->text().trimmed();
     body["password"] = m_passwordEdit->text();
+    body["client_type"] = "desktop";
+    body["client_name"] = QSysInfo::machineHostName();
 
     ServerApi::instance()->post("/api/v1/auth/login", body, [this](bool success, const QJsonObject& response, const QString& error) {
         if (success) {

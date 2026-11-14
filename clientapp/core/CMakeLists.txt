@@ -1,6 +1,8 @@
 set(CORE_LIB_SOURCES
     App.cpp
     MainWindow.cpp
+    SystemUsageMonitor.cpp
+    WebSocketClient.cpp
     EventBus.cpp
     ConfigManager.cpp
     ThemeManager.cpp
@@ -44,9 +46,21 @@ set(CORE_LIB_SOURCES
     PTZControlPanel.ui
 )
 
+# 资源占用采样按平台选实现：各平台取不到的数据由上层显示为 "--"。
+if(WIN32)
+    set(CORE_LIB_SOURCES ${CORE_LIB_SOURCES} platform/SystemUsageProbeWin.cpp)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(CORE_LIB_SOURCES ${CORE_LIB_SOURCES} platform/SystemUsageProbeLinux.cpp)
+else()
+    set(CORE_LIB_SOURCES ${CORE_LIB_SOURCES} platform/SystemUsageProbeStub.cpp)
+endif()
+set(CORE_LIB_HEADERS ${CORE_LIB_HEADERS} platform/SystemUsageProbe.h)
+
 set(CORE_LIB_HEADERS
     App.h
     MainWindow.h
+    SystemUsageMonitor.h
+    WebSocketClient.h
     EventBus.h
     ConfigManager.h
     ConfigKeys.h
@@ -115,20 +129,22 @@ target_link_libraries(rustcam-core PUBLIC
 
 if(Qt5_FOUND)
     target_link_libraries(rustcam-core PUBLIC
-        Qt5::Core
-        Qt5::Widgets
-        Qt5::Network
-        Qt5::Svg
-        Qt5::Concurrent
-    )
+    Qt5::Core
+    Qt5::Widgets
+    Qt5::Network
+    Qt5::Svg
+    Qt5::Concurrent
+    Qt5::WebSockets
+)
 else()
     target_link_libraries(rustcam-core PUBLIC
-        Qt6::Core
-        Qt6::Widgets
-        Qt6::Network
-        Qt6::Svg
-        Qt6::Concurrent
-    )
+    Qt6::Core
+    Qt6::Widgets
+    Qt6::Network
+    Qt6::Svg
+    Qt6::Concurrent
+    Qt6::WebSockets
+)
 endif()
 
 set(BOOST_ROOT "${CMAKE_SOURCE_DIR}/3rd_party/boost")
@@ -178,6 +194,11 @@ target_link_libraries(rustcam-core PRIVATE
     ${JSONCPP_LIBRARY}
     bridge_player
 )
+
+if(WIN32)
+    # PDH：读取 \GPU Engine(*) 计数器；DXGI：按 LUID 取显卡名。
+    target_link_libraries(rustcam-core PRIVATE pdh.lib dxgi.lib)
+endif()
 
 set_target_properties(rustcam-core PROPERTIES
     OUTPUT_NAME "rustcam-core"

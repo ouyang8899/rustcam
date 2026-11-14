@@ -8,9 +8,12 @@
 #include "PluginOrder.h"
 #include "ThemeManager.h"
 #include "SessionManager.h"
+#include "SystemUsageMonitor.h"
+#include "WebSocketClient.h"
 #include "Logger.h"
 #include "NotificationWidget.h"
 #include "interfaces/IPlugin.h"
+#include <QJsonDocument>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QToolBar>
@@ -39,6 +42,45 @@ MainWindow::MainWindow(QWidget* parent)
     Q_UNUSED(notifier);
 
     setupUi();
+
+    connect(WebSocketClient::instance(), &WebSocketClient::connectedChanged, this,
+            [this](bool connected) {
+                m_connectionStatusLabel->setText(connected ? tr("Connected") : tr("Disconnected"));
+                m_connectionStatusLabel->setStyleSheet(
+                    connected ? "color: #4caf50;" : "color: #f44336;");
+            });
+
+    connect(WebSocketClient::instance(), &WebSocketClient::notificationReceived, this,
+            [this](const QString& type, const QJsonObject& data) {
+                QString message;
+                NotificationEventData::Status status = NotificationEventData::Info;
+
+                if (type == "alarm") {
+                    message = data.value("message").toString();
+                    if (message.isEmpty()) {
+                        message = tr("Alarm triggered");
+                    }
+                    status = NotificationEventData::Warning;
+                } else if (type == "device_offline") {
+                    message = tr("Device offline: %1")
+                                  .arg(data.value("device_id").toVariant().toString());
+                    status = NotificationEventData::Error;
+                } else if (type == "server_offline") {
+                    message = tr("Server offline: %1")
+                                  .arg(data.value("server_name").toString());
+                    status = NotificationEventData::Error;
+                } else {
+                    LOG_INFO("MainWindow", QString("WS event %1: %2")
+                                               .arg(type)
+                                               .arg(QString::fromUtf8(
+                                                   QJsonDocument(data).toJson(QJsonDocument::Compact))));
+                    return;
+                }
+
+                EventBus::instance()->publish(
+                    TOPIC_NOTIFICATION_SHOW,
+                    EventDataPtr(new NotificationEventData(message, status)));
+            });
 
     EventBus::instance()->subscribe(TOPIC_SESSION_LOGGED_IN, [this](const QString& topic, EventDataPtr) {
         QMetaObject::invokeMethod(this, [this]() {
@@ -227,17 +269,17 @@ void MainWindow::createStatusBar()
 
     statusBar->addPermanentWidget(new QLabel("|"));
 
-    m_fpsLabel = new QLabel("0 fps");
-    statusBar->addPermanentWidget(m_fpsLabel);
-
-    m_bitrateLabel = new QLabel("0 Kbps");
-    statusBar->addPermanentWidget(m_bitrateLabel);
-
-    m_gpuLabel = new QLabel("GPU: 0%");
-    statusBar->addPermanentWidget(m_gpuLabel);
-
-    m_cpuLabel = new QLabel("CPU: 0%");
+    m_cpuLabel = new QLabel("CPU: --");
     statusBar->addPermanentWidget(m_cpuLabel);
+
+    m_memoryLabel = new QLabel(tr("内存: --"));
+    statusBar->addPermanentWidget(m_memoryLabel);
+
+    m_gpuBox = new QWidget(statusBar);
+    QHBoxLayout* gpuLayout = new QHBoxLayout(m_gpuBox);
+    gpuLayout->setContentsMargins(0, 0, 0, 0);
+    gpuLayout->setSpacing(8);
+    statusBar->addPermanentWidget(m_gpuBox);
 
     statusBar->addPermanentWidget(new QLabel("|"));
 
@@ -248,11 +290,62 @@ void MainWindow::createStatusBar()
     connect(timer, &QTimer::timeout, this, &MainWindow::onClockTick);
     timer->start(1000);
     m_timeLabel->setText(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss"));
+
+    m_usageMonitor = new SystemUsageMonitor(this);
+    connect(m_usageMonitor, &SystemUsageMonitor::usageChanged, this, &MainWindow::onUsageChanged);
 }
 
 void MainWindow::onClockTick()
 {
     m_timeLabel->setText(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss"));
+}
+
+void MainWindow::onUsageChanged(const SystemUsage& usage)
+{
+    m_cpuLabel->setText(usage.cpuValid ? tr("CPU: %1%").arg(qRound(usage.cpuPercent))
+                                       : tr("CPU: --"));
+    if (usage.memoryValid) {
+        const double usedGb = usage.memory.usedBytes / (1024.0 * 1024.0 * 1024.0);
+        const double totalGb = usage.memory.totalBytes / (1024.0 * 1024.0 * 1024.0);
+        m_memoryLabel->setText(tr("内存: %1% (%2/%3 GB)")
+                                   .arg(qRound(usage.memory.percent))
+                                   .arg(usedGb, 0, 'f', 1)
+                                   .arg(totalGb, 0, 'f', 1));
+    } else {
+        m_memoryLabel->setText(tr("内存: --"));
+    }
+    updateGpuLabels(usage.gpus);
+}
+
+void MainWindow::updateGpuLabels(const QList<GpuUsage>& gpus)
+{
+    QHBoxLayout* box = m_gpuBox ? qobject_cast<QHBoxLayout*>(m_gpuBox->layout()) : nullptr;
+    if (!box) {
+        return;
+    }
+    while (m_gpuLabels.size() > gpus.size()) {
+        QLabel* label = m_gpuLabels.takeLast();
+        box->removeWidget(label);
+        label->deleteLater();
+    }
+    while (m_gpuLabels.size() < gpus.size()) {
+        QLabel* label = new QLabel(m_gpuBox);
+        box->addWidget(label);
+        m_gpuLabels.append(label);
+    }
+    for (int i = 0; i < gpus.size(); ++i) {
+        const GpuUsage& gpu = gpus.at(i);
+        QString text = tr("%1: 渲染 %2%").arg(gpu.name).arg(qRound(gpu.renderPercent));
+        if (gpu.decodeValid) {
+            text += tr(" · 解码 %1%").arg(qRound(gpu.decodePercent));
+        }
+        if (gpu.memoryValid) {
+            const double usedGb = gpu.memoryUsedBytes / (1024.0 * 1024.0 * 1024.0);
+            const double totalGb = gpu.memoryTotalBytes / (1024.0 * 1024.0 * 1024.0);
+            text += tr(" · 显存 %1/%2 GB").arg(usedGb, 0, 'f', 1).arg(totalGb, 0, 'f', 1);
+        }
+        m_gpuLabels.at(i)->setText(text);
+    }
 }
 
 void MainWindow::restoreLayout()
@@ -284,17 +377,6 @@ void MainWindow::saveLayout()
 void MainWindow::setStatusMessage(const QString& message, int timeout)
 {
     statusBar()->showMessage(message, timeout);
-}
-
-void MainWindow::setConnectionStatus(bool connected)
-{
-    if (connected) {
-        m_connectionStatusLabel->setText(tr("Connected"));
-        m_connectionStatusLabel->setStyleSheet("color: #4caf50;");
-    } else {
-        m_connectionStatusLabel->setText(tr("Disconnected"));
-        m_connectionStatusLabel->setStyleSheet("color: #f44336;");
-    }
 }
 
 void MainWindow::setAlarmCount(int count)

@@ -7,7 +7,7 @@ use futures_util::SinkExt;
 use std::collections::HashMap;
 use crate::media::errors::{MediaError, Result};
 use crate::media::node::{ DataType, MediaNode };
-use axum::extract::ws::{Message, WebSocket};
+use axum::extract::ws::{CloseFrame, Message, WebSocket};
 
 pub struct WebSocketMediaTransport {
     receiver: Arc<Mutex<mpsc::Receiver<BytesMut>>>,
@@ -107,6 +107,7 @@ impl WebSocketMediaNodeTransport {
         on_media_data: impl Fn(HashMap<DataType, BytesMut>) -> R + Send + Sync + 'static,
         on_text: impl Fn(String) + Send + Sync + 'static,
         shutdown_tx: Option<mpsc::Sender<()>>,
+        close_rx: Option<mpsc::Receiver<u16>>,
     )
     where
         R: Future<Output = ()> + Send + 'static,
@@ -117,9 +118,35 @@ impl WebSocketMediaNodeTransport {
         let ws_sender = Arc::new(Mutex::new(ws_sender));
         let ws_sender_clone = ws_sender.clone();
         let mut rx = sender.subscribe();
+        let mut close_rx = close_rx;
         tokio::spawn(async move {
             loop {
                 tokio::select! {
+                    code = async {
+                        match close_rx.as_mut() {
+                            Some(rx) => rx.recv().await.unwrap_or(0),
+                            None => std::future::pending::<u16>().await,
+                        }
+                    } => {
+                        if code != 0 {
+                            let reason = if code == 4401 {
+                                "session revoked"
+                            } else {
+                                ""
+                            };
+                            let mut s = ws_sender_clone.lock().await;
+                            let _ = s
+                                .send(Message::Close(Some(CloseFrame {
+                                    code,
+                                    reason: reason.into(),
+                                })))
+                                .await;
+                        }
+                        if let Some(tx) = shutdown_tx.clone() {
+                            let _ = tx.send(()).await;
+                        }
+                        break;
+                    }
                     msg = ws_receiver.next() => {
                         match msg {
                             Some(Ok(Message::Binary(data))) => {

@@ -7,6 +7,10 @@ pub mod handlers;
 pub mod models;
 pub mod repository;
 pub mod auth_db;
+pub mod session;
+pub mod session_db;
+pub mod session_cache;
+pub mod session_policy;
 pub mod macros;
 
 pub use config::JwtConfig;
@@ -15,3 +19,6 @@ pub use jwt::{decode_token, encode_token, generate_tokens, Claims};
 pub use models::*;
 pub use middleware::{jwt_auth_layer, CurrentUser, AuthState};
 pub use casbin::CasbinManager;
+pub use session::SessionRepository;
+pub use session_cache::SessionCache;
+pub use session_policy::{decide_limit, LimitDecision};

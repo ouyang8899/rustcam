@@ -125,10 +125,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/authStore'
 import { useThemeStore } from '../stores/themeStore'
+import { useWsConnection } from '../composables/useWsConnection'
 import { Monitor, VideoCamera, DataLine, VideoPlay, Cpu, Compass, Grid, User, Sunny, Moon, FolderOpened, DArrowLeft, DArrowRight } from '@element-plus/icons-vue'
 
 
@@ -137,13 +138,12 @@ const router = useRouter()
 const auth = useAuthStore()
 const theme = useThemeStore()
 
+const { wsConnected, connect: connectWs } = useWsConnection()
 const collapsed = ref(false)
-const wsConnected = ref(false)
 const recentItems = ref([])
 const currentUsername = computed(() => auth.user?.username || 'admin')
 const isAdmin = computed(() => auth.isAdmin)
 const currentPath = computed(() => route.path)
-let ws = null
 
 const routeMap = {
   '/': '监控台', '/devices': '设备管理', '/devices/': '设备详情',
@@ -191,17 +191,7 @@ function removeItem(path) {
   recentItems.value.splice(idx, 1)
 }
 
-function connectWs() {
-  try {
-    ws = new WebSocket(`ws://${window.location.host}/ws`)
-    ws.onopen = () => { wsConnected.value = true }
-    ws.onclose = () => { wsConnected.value = false; setTimeout(connectWs, 5000) }
-    ws.onerror = () => { wsConnected.value = false }
-  } catch (e) { wsConnected.value = false }
-}
-
 onMounted(() => connectWs())
-onUnmounted(() => { if (ws) ws.close() })
 
 function logout() {
   auth.logout()

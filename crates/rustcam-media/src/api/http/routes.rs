@@ -46,9 +46,12 @@ async fn trace_layer(request: Request, next: Next) -> axum::response::Response {
 pub fn create_routes(state: FullState) -> Router {
     let state = Arc::new(state);
     let tickets = Arc::new(crate::drone_gateway::ticket::TicketStore::new(60));
+    let ws_tickets = Arc::new(crate::api::websocket::WsTicketStore::new(
+        state.auth.auth_config.ws_ticket_ttl_seconds,
+    ));
 
-    let protected: Router = protected_routes(state.clone(), tickets.clone());
-    let public: Router = public_routes(state, tickets);
+    let protected: Router = protected_routes(state.clone(), tickets.clone(), ws_tickets.clone());
+    let public: Router = public_routes(state, tickets, ws_tickets);
 
     protected.merge(public)
 
@@ -57,6 +60,7 @@ pub fn create_routes(state: FullState) -> Router {
 fn protected_routes(
     state: Arc<FullState>,
     tickets: Arc<crate::drone_gateway::ticket::TicketStore>,
+    ws_tickets: Arc<crate::api::websocket::WsTicketStore>,
 ) -> Router {
     Router::new()
 
@@ -179,6 +183,7 @@ fn protected_routes(
         .route("/api/v1/users/{id}", put(crate::auth::handlers::update_user))
         .route("/api/v1/users/{id}", delete(crate::auth::handlers::delete_user))
         .route("/api/v1/users/{id}/roles", put(crate::auth::handlers::assign_user_roles))
+        .route("/api/v1/users/{id}/super", put(crate::auth::handlers::set_user_super))
         .route("/api/v1/roles", get(crate::auth::handlers::list_roles))
         .route("/api/v1/roles", post(crate::auth::handlers::create_role))
         .route("/api/v1/roles/{id}", get(crate::auth::handlers::get_role))
@@ -190,6 +195,13 @@ fn protected_routes(
         .route("/api/v1/permissions", post(crate::auth::handlers::create_permission))
         .route("/api/v1/permissions/{id}", put(crate::auth::handlers::update_permission))
         .route("/api/v1/permissions/{id}", delete(crate::auth::handlers::delete_permission))
+
+        .route("/api/v1/auth/logout", post(crate::auth::handlers::logout))
+        .route("/api/v1/auth/sessions", get(crate::auth::handlers::list_my_sessions))
+        .route("/api/v1/auth/sessions/all", get(crate::auth::handlers::list_all_sessions))
+        .route("/api/v1/auth/sessions/{id}", delete(crate::auth::handlers::revoke_my_session))
+
+        .route("/api/v1/ws/ticket", post(crate::api::websocket::issue_ws_ticket))
 
         // drone 网关路由：必须在本 router 的 route_layer(jwt_auth_layer) 之前 merge，
         // 否则会绕过 JWT 鉴权。
@@ -210,12 +222,15 @@ fn protected_routes(
             crate::auth::middleware::jwt_auth_layer,
         ))
 
+        .layer(axum::Extension(ws_tickets))
+
         .with_state(state)
 }
 
 fn public_routes(
     state: Arc<FullState>,
     tickets: Arc<crate::drone_gateway::ticket::TicketStore>,
+    ws_tickets: Arc<crate::api::websocket::WsTicketStore>,
 ) -> Router {
     let drone_api = state.app.drone.clone().unwrap_or_else(|| {
         Arc::new(crate::drone_gateway::client::NoopDroneApi)
@@ -243,6 +258,8 @@ fn public_routes(
         .merge(crate::drone_gateway::ws::router(drone_api, tickets))
 
         .layer(axum::middleware::from_fn(trace_layer))
+
+        .layer(axum::Extension(ws_tickets))
 
         .route("/alarm/{stream_key}", post(alarm_hook_handler))
         .with_state(state)

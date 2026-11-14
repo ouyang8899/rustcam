@@ -270,13 +270,20 @@ impl ServiceRegistry {
         }
 
         let auth_repo = Arc::new(PostgresAuthRepository::with_rb(self.infra.db.rb().clone()));
+        // 共享主库的 RBatis 连接时不会走 new()，这里补一次建表，保证 user_sessions 等表存在。
+        auth_repo.init_tables().await;
 
         let casbin = Arc::new(
             CasbinManager::new(auth_repo.clone()).await
                 .map_err(|e| anyhow::anyhow!("Casbin init failed: {}", e))?
         );
 
-        Ok(AuthState::new(jwt_config, casbin, auth_repo))
+        Ok(AuthState::new(
+            jwt_config,
+            self.infra.config().auth.clone(),
+            casbin,
+            auth_repo,
+        ))
     }
 
     pub async fn start_all(&self) {

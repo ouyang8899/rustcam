@@ -1,6 +1,8 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 use axum::{
-    extract::{Extension, Path, Query, State},
+    extract::{ConnectInfo, Extension, Path, Query, State},
+    http::HeaderMap,
     Json,
 };
 use argon2::{
@@ -10,12 +12,16 @@ use password_hash::phc::SaltString;
 use password_hash::PasswordHasher;
 use serde::Deserialize;
 use uuid::Uuid;
+use serde::Serialize;
+
 use crate::api::FullState;
 use crate::api::http::handlers::device_handler::PaginatedResponse;
 use crate::error::{AppError, Result as AppResult};
 use crate::auth::models::*;
 use crate::auth::middleware::CurrentUser;
 use crate::auth::repository::{UserRepository, RoleRepository, PermissionRepository};
+use crate::auth::session::SessionRepository;
+use crate::auth::session_policy::{decide_limit, LimitDecision};
 
 /// 列表分页参数。
 ///
@@ -36,13 +42,18 @@ impl PageQuery {
 }
 
 /// 校验当前用户是否具备指定权限；任一角色命中即放行。
+///
+/// 超级用户自动拥有全部权限，不再逐条查 casbin。
 async fn require_permission(
     state: &Arc<FullState>,
     current_user: &CurrentUser,
     obj: &str,
     act: &str,
 ) -> AppResult<()> {
-    for role in &current_user.0.roles {
+    if is_super_admin(&current_user.user) {
+        return Ok(());
+    }
+    for role in &current_user.user.roles {
         if state.auth.casbin.enforce(role, obj, act).await {
             return Ok(());
         }
@@ -51,6 +62,11 @@ async fn require_permission(
         "Permission denied: {}:{}",
         obj, act
     )))
+}
+
+/// 超级管理员判定：以数据库里的超级用户标志为准（随令牌下发，标志变更后需重新登录）。
+fn is_super_admin(user: &UserInfo) -> bool {
+    user.is_super
 }
 
 /// 角色/权限变更后立即刷新内存策略，避免权限改动延迟生效。
@@ -65,6 +81,8 @@ async fn reload_casbin(state: &Arc<FullState>) -> AppResult<()> {
 
 pub async fn login(
     State(state): State<Arc<FullState>>,
+    headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(req): Json<LoginRequest>,
 ) -> AppResult<Json<ApiResponse<LoginResponse>>> {
 
@@ -105,13 +123,72 @@ pub async fn login(
         id: user.id,
         username: user.username.clone(),
         roles: roles.clone(),
+        is_super: user.is_super,
     };
 
+    let client_type = req
+        .client_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("web")
+        .to_string();
+
+    let active = SessionRepository::list_active_for_user(&*state.auth.repo, user.id)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    match decide_limit(&active, &client_type, &state.auth.auth_config) {
+        LimitDecision::Allow => {}
+        LimitDecision::Reject(message) => return Err(AppError::Conflict(message)),
+        LimitDecision::Evict(ids) => {
+            for sid in ids {
+                tracing::warn!(
+                    "[Auth] evicting session {} of user {} (client_type={})",
+                    sid,
+                    user.username,
+                    client_type
+                );
+                let _ = state.auth.revoke_session(sid).await;
+            }
+        }
+    }
+
+    let sid = Uuid::new_v4();
+
+    let client_ip = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| addr.ip().to_string());
+
+    let user_agent = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+
+    SessionRepository::create(
+        &*state.auth.repo,
+        &NewSession {
+            id: sid,
+            user_id: user.id,
+            client_type: client_type.clone(),
+            client_name: req.client_name.clone(),
+            client_ip: Some(client_ip),
+            user_agent,
+        },
+    )
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    state.auth.session_cache.mark(sid);
+
+    let sid_text = sid.to_string();
     let (access_token, refresh_token) =
-        crate::auth::jwt::generate_tokens(&user_info, &state.auth.jwt_config)
-            .map_err(|e| {
-                AppError::Auth(e.to_string())
-            })?;
+        crate::auth::jwt::generate_tokens(&user_info, &sid_text, &state.auth.jwt_config)
+            .map_err(|e| AppError::Auth(e.to_string()))?;
 
     Ok(Json(ApiResponse::success(LoginResponse {
         access_token,
@@ -136,6 +213,22 @@ pub async fn refresh(
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|_| AppError::Auth("Invalid user ID".to_string()))?;
 
+    let sid = Uuid::parse_str(&claims.sid)
+        .map_err(|_| AppError::Auth("Missing session id".to_string()))?;
+
+    if SessionRepository::find_active(&*state.auth.repo, sid)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .is_none()
+    {
+        return Err(AppError::Auth("Session revoked or expired".to_string()));
+    }
+
+    SessionRepository::touch(&*state.auth.repo, sid)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    state.auth.session_cache.mark(sid);
+
     let user = UserRepository::find_by_id(&*state.auth.repo, user_id)
         .await
         .map_err(|e| AppError::Auth(e.to_string()))?
@@ -145,9 +238,10 @@ pub async fn refresh(
         .await
         .map_err(|e| AppError::Auth(e.to_string()))?;
 
-    let user_info = UserInfo { id: user.id, username: user.username.clone(), roles };
-    let (access_token, refresh_token) = crate::auth::jwt::generate_tokens(&user_info, &state.auth.jwt_config)
-        .map_err(|e| AppError::Auth(e.to_string()))?;
+    let user_info = UserInfo { id: user.id, username: user.username.clone(), roles, is_super: user.is_super };
+    let (access_token, refresh_token) =
+        crate::auth::jwt::generate_tokens(&user_info, &claims.sid, &state.auth.jwt_config)
+            .map_err(|e| AppError::Auth(e.to_string()))?;
 
     Ok(Json(ApiResponse::success(LoginResponse {
         access_token, refresh_token,
@@ -159,7 +253,7 @@ pub async fn refresh(
 pub async fn me(
     Extension(current_user): Extension<CurrentUser>,
 ) -> Json<ApiResponse<UserInfo>> {
-    Json(ApiResponse::success(current_user.0))
+    Json(ApiResponse::success(current_user.user))
 }
 
 pub async fn list_users(
@@ -745,4 +839,185 @@ pub async fn delete_permission(
     reload_casbin(&state).await?;
 
     Ok(Json(ApiResponse::success(())))
+}
+
+#[derive(Debug, Serialize)]
+pub struct SessionDto {
+    #[serde(flatten)]
+    pub session: UserSession,
+    pub current: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SessionPage {
+    pub items: Vec<SessionDto>,
+    pub total: i64,
+    pub limit: usize,
+    pub offset: usize,
+}
+
+pub async fn logout(
+    State(state): State<Arc<FullState>>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    state
+        .auth
+        .revoke_session(current_user.sid)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    Ok(Json(ApiResponse::success(serde_json::json!({}))))
+}
+
+/// 当前登录用户的会话列表：归属一律取自令牌，不接受调用方指定用户。
+pub async fn list_my_sessions(
+    State(state): State<Arc<FullState>>,
+    Extension(current_user): Extension<CurrentUser>,
+    Query(q): Query<PageQuery>,
+) -> AppResult<Json<ApiResponse<SessionPage>>> {
+    let (sessions, total) = SessionRepository::list_active_for_user_paged(
+        &*state.auth.repo,
+        current_user.user.id,
+        q.offset() as i64,
+        q.limit() as i64,
+    )
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))?;
+    let items = sessions
+        .into_iter()
+        .map(|session| SessionDto {
+            current: session.id == current_user.sid,
+            session,
+            username: None,
+        })
+        .collect();
+    Ok(Json(ApiResponse::success(SessionPage {
+        items,
+        total,
+        limit: q.limit(),
+        offset: q.offset(),
+    })))
+}
+
+/// 超级管理员查看全部用户的登录会话。
+pub async fn list_all_sessions(
+    State(state): State<Arc<FullState>>,
+    Extension(current_user): Extension<CurrentUser>,
+    Query(q): Query<PageQuery>,
+) -> AppResult<Json<ApiResponse<SessionPage>>> {
+    if !is_super_admin(&current_user.user) {
+        return Err(AppError::Forbidden("仅超级管理员可查看全部会话".to_string()));
+    }
+    let (sessions, total) =
+        SessionRepository::list_all_active_paged(&*state.auth.repo, q.offset() as i64, q.limit() as i64)
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+    let items = sessions
+        .into_iter()
+        .map(|entry| SessionDto {
+            current: entry.session.id == current_user.sid,
+            session: entry.session,
+            username: Some(entry.username),
+        })
+        .collect();
+    Ok(Json(ApiResponse::success(SessionPage {
+        items,
+        total,
+        limit: q.limit(),
+        offset: q.offset(),
+    })))
+}
+
+/// 设置超级用户标志。
+///
+/// 只有超级用户能改这个标志，且操作时从数据库实时复核调用人身份；
+/// 标志变更后会吊销目标用户的全部会话，强制其重新登录以拿到新标志。
+pub async fn set_user_super(
+    State(state): State<Arc<FullState>>,
+    Extension(current_user): Extension<CurrentUser>,
+    Path(user_id): Path<Uuid>,
+    Json(body): Json<SetSuperRequest>,
+) -> AppResult<Json<ApiResponse<UserWithRoles>>> {
+    let caller = UserRepository::find_by_id(&*state.auth.repo, current_user.user.id)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .ok_or_else(|| AppError::Auth("当前用户不存在".to_string()))?;
+    if !caller.is_super {
+        return Err(AppError::Forbidden("仅超级用户可修改超级用户标志".to_string()));
+    }
+    require_permission(&state, &current_user, "user", "write").await?;
+
+    if user_id == current_user.user.id {
+        return Err(AppError::BadRequest(
+            "不能修改自己的超级用户标志".to_string(),
+        ));
+    }
+
+    let target = UserRepository::find_by_id(&*state.auth.repo, user_id)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .ok_or_else(|| AppError::NotFound("用户不存在".to_string()))?;
+
+    let updated = UserRepository::set_super_flag(&*state.auth.repo, user_id, body.is_super)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    if !updated {
+        return Err(AppError::NotFound("用户不存在".to_string()));
+    }
+
+    // 标志随令牌下发：吊销该用户的会话，强制重新登录后生效。
+    let sessions = SessionRepository::list_active_for_user(&*state.auth.repo, user_id)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    for session in sessions {
+        state
+            .auth
+            .revoke_session(session.id)
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+    }
+
+    let roles = UserRepository::get_user_roles(&*state.auth.repo, user_id)
+        .await
+        .map_err(|e| AppError::Auth(e.to_string()))?;
+    let role_ids = UserRepository::get_user_role_ids(&*state.auth.repo, user_id)
+        .await
+        .map_err(|e| AppError::Auth(e.to_string()))?;
+
+    Ok(Json(ApiResponse::success(UserWithRoles {
+        user: User {
+            is_super: body.is_super,
+            ..target
+        },
+        roles,
+        role_ids,
+    })))
+}
+
+/// 吊销一个登录会话：本人可吊销自己的会话，超级管理员可吊销任意会话。
+///
+/// 会话列表只按归属人查询：本人走 `list_my_sessions`，管理员走 `list_all_sessions`，
+/// 不提供"按任意 user_id 查询"的接口，避免越权面。
+pub async fn revoke_my_session(
+    State(state): State<Arc<FullState>>,
+    Extension(current_user): Extension<CurrentUser>,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    let session = SessionRepository::find_active(&*state.auth.repo, id)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .ok_or_else(|| AppError::NotFound("Session not found".to_string()))?;
+
+    // 只有会话归属人本人，或超级管理员，才能踢掉该会话。
+    if session.user_id != current_user.user.id && !is_super_admin(&current_user.user) {
+        return Err(AppError::Forbidden("只能吊销自己的会话".to_string()));
+    }
+
+    state
+        .auth
+        .revoke_session(id)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    Ok(Json(ApiResponse::success(serde_json::json!({}))))
 }

@@ -35,7 +35,7 @@ pub async fn list_tour_schemes_handler(
     State(state): State<Arc<FullState>>,
     Extension(user): Extension<CurrentUser>,
 ) -> Result<Json<ApiResponse<Vec<TourScheme>>>> {
-    require_tour_permission(&state, &user.0, "view").await?;
+    require_tour_permission(&state, &user.user, "view").await?;
     let schemes = state.app.registry.tour_scheme_service.list().await?;
     Ok(Json(ApiResponse::success(schemes)))
 }
@@ -45,7 +45,7 @@ pub async fn get_tour_scheme_handler(
     Extension(user): Extension<CurrentUser>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<TourScheme>>> {
-    require_tour_permission(&state, &user.0, "view").await?;
+    require_tour_permission(&state, &user.user, "view").await?;
     let scheme = state
         .app
         .registry
@@ -61,7 +61,7 @@ pub async fn create_tour_scheme_handler(
     Extension(user): Extension<CurrentUser>,
     Json(req): Json<CreateTourSchemeRequest>,
 ) -> Result<Json<ApiResponse<TourScheme>>> {
-    require_tour_permission(&state, &user.0, "manage").await?;
+    require_tour_permission(&state, &user.user, "manage").await?;
     let scheme = state.app.registry.tour_scheme_service.create(req).await?;
     Ok(Json(ApiResponse::success(scheme)))
 }
@@ -72,7 +72,7 @@ pub async fn update_tour_scheme_handler(
     Path(id): Path<i64>,
     Json(req): Json<UpdateTourSchemeRequest>,
 ) -> Result<Json<ApiResponse<()>>> {
-    require_tour_permission(&state, &user.0, "manage").await?;
+    require_tour_permission(&state, &user.user, "manage").await?;
     state
         .app
         .registry
@@ -87,7 +87,7 @@ pub async fn delete_tour_scheme_handler(
     Extension(user): Extension<CurrentUser>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<()>>> {
-    require_tour_permission(&state, &user.0, "manage").await?;
+    require_tour_permission(&state, &user.user, "manage").await?;
     state.app.registry.tour_scheme_service.delete(id).await?;
     Ok(Json(ApiResponse::success(())))
 }

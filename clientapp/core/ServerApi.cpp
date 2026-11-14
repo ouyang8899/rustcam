@@ -31,12 +31,16 @@ ServerApi* ServerApi::instance()
 
 void ServerApi::setAuthToken(const QString& token)
 {
-    m_authToken = token;
+    {
+        QMutexLocker locker(&m_tokenMutex);
+        m_authToken = token;
+    }
     LOG_INFO("ServerApi", QString("setAuthToken called, token length: %1").arg(token.length()));
 }
 
 void ServerApi::clearAuthToken()
 {
+    QMutexLocker locker(&m_tokenMutex);
     m_authToken.clear();
 }
 
@@ -108,13 +112,19 @@ bool ServerApi::performRequest(HttpMethod method, const QString& url,
     headers = curl_slist_append(headers, "Accept: application/json");
     headers = curl_slist_append(headers, "User-Agent: rustcam-client/1.0");
 
-    if (!m_authToken.isEmpty()) {
-        std::string authHeader = "Authorization: Bearer " + m_authToken.toStdString();
+    QString authToken;
+    {
+        QMutexLocker locker(&m_tokenMutex);
+        authToken = m_authToken;
+    }
+    if (!authToken.isEmpty()) {
+        std::string authHeader = "Authorization: Bearer " + authToken.toStdString();
         headers = curl_slist_append(headers, authHeader.c_str());
-        LOG_DEBUG("ServerApi", QString("Using auth token, length: %1").arg(m_authToken.length()));
+        LOG_DEBUG("ServerApi", QString("Using auth token, length: %1").arg(authToken.length()));
     } else {
         LOG_DEBUG("ServerApi", "No auth token available");
     }
+
 
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_URL, url.toUtf8().constData());
@@ -144,10 +154,15 @@ bool ServerApi::performRequest(HttpMethod method, const QString& url,
     }
 
     std::string postFields;
-    if (method != HttpMethod::Get && !body.isEmpty()) {
-        QJsonDocument doc(body);
-        postFields = doc.toJson(QJsonDocument::Compact).toStdString();
+    if (method != HttpMethod::Get) {
+        // 必须显式给出正文：libcurl 在只设置 CURLOPT_POST 时会启用默认读回调从 stdin 取正文，
+        // 在 GUI 线程上会永久阻塞在 fread()（整个界面卡死）。空 body 也按 "{}" 发送。
+        const QByteArray payload = body.isEmpty()
+            ? QByteArrayLiteral("{}")
+            : QJsonDocument(body).toJson(QJsonDocument::Compact);
+        postFields = payload.toStdString();
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postFields.c_str());
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(postFields.size()));
     }
 
     CURLcode res = curl_easy_perform(curl);

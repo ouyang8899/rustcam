@@ -827,6 +827,15 @@ QToolBar#VideoToolbar QComboBox {
     background-color: @video_area_bg;
 }
 
+/* 视频轮询格子：画面与状态条同面，格子之间由页面底色形成分割 */
+#TourPlayer {
+    background-color: @video_area_bg;
+}
+
+#TourCellBar {
+    background-color: @video_area_bg;
+}
+
 /* class 属性由 setProperty("class", "LayoutNavButton") 设置 */
 .LayoutNavButton {
     border: 1px solid @border;

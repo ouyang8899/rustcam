@@ -89,6 +89,13 @@ secret = "change-me-in-production"
 access_token_expire_minutes = 60
 refresh_token_expire_days = 30
 
+[auth]
+max_sessions_per_user = 0
+max_sessions_per_client_type = 0
+session_limit_policy = "evict"
+session_cache_ttl_seconds = 30
+ws_ticket_ttl_seconds = 60
+
 [log]
 level = "info"
 sql = false

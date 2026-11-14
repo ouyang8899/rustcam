@@ -146,7 +146,10 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = TcpListener::bind(&http_addr).await?;
     let http_server = async move {
-        let server = axum::serve(listener, app);
+        let server = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        );
         if let Err(e) = server.await {
             error!("HTTP server error: {}", e);
         }
