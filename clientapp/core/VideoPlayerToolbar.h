@@ -33,6 +33,10 @@ public:
     void setCapabilities(bool screenshot, bool audio, bool fullscreen, bool mediaRate);
     void setPlaybackControlsEnabled(bool enabled);
     void refreshPlaybackState();
+    /// 有可广播的通道信息时显示麦克风按钮。
+    void setBroadcastAvailable(bool available);
+    /// 0=Idle 1=Connecting 2=Inviting 3=Ready 4=Error
+    void setBroadcastState(int state, const QString& message = QString());
 
     void stop();
     bool isPlaying() const;
@@ -45,6 +49,7 @@ public:
 
 signals:
     void clicked();
+    void broadcastToggled(bool start);
 
 protected:
     void mousePressEvent(QMouseEvent* event) override;
@@ -64,6 +69,7 @@ private slots:
     void onFullscreenClicked();
     void onAudioClicked();
     void onMediaRateClicked();
+    void onBroadcastClicked();
     void onThemeChanged();
 
 private:
@@ -74,6 +80,7 @@ private:
     void createCollapseMenu();
     void updateZoomLabel();
     void updateAudioIcon();
+    void updateBroadcastIcon();
     void updateCollapseState();
     void refreshIcons();
     QPoint mapToVideoPlayer(const QPoint& pos);
@@ -95,6 +102,7 @@ private:
     QMenu* m_zoomMenu = nullptr;
     QToolButton* m_fullscreenBtn = nullptr;
     QToolButton* m_audioBtn = nullptr;
+    QToolButton* m_broadcastBtn = nullptr;
     QToolButton* m_mediaRateBtn = nullptr;
     QToolButton* m_moreBtn = nullptr;
     QMenu* m_collapseMenu = nullptr;
@@ -103,6 +111,7 @@ private:
     QAction* m_collapseMirrorAction = nullptr;
     QAction* m_collapseZoomAction = nullptr;
     QAction* m_collapseAudioAction = nullptr;
+    QAction* m_collapseBroadcastAction = nullptr;
     QAction* m_collapseMediaRateAction = nullptr;
     QList<QAction*> m_collapseActions;
 
@@ -121,9 +130,12 @@ private:
     bool m_mediaRateEnabled = true;
     bool m_capScreenshot = true;
     bool m_capAudio = true;
+    bool m_capBroadcast = false;
     bool m_capFullscreen = true;
     bool m_capMediaRate = true;
     bool m_playbackControlsEnabled = false;
+    int m_broadcastState = 0;
+    QString m_broadcastMessage;
     QColor m_iconColor = Qt::white;
 
     QPoint m_dragPosition;

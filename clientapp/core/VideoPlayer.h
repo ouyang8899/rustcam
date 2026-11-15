@@ -20,6 +20,8 @@ class QMouseEvent;
 
 namespace rustcam {
 
+class AudioTalkClient;
+
 class RUSTCAM_CORE_API VideoPlayer : public QWidget, public IVideoControls {
     Q_OBJECT
 public:
@@ -64,6 +66,8 @@ public:
     void setWatermarkAccount(const QString& account) override;
     void setDeviceName(const QString& deviceName) override;
     QString deviceName() const override { return m_deviceName; }
+    /// 设置语音广播目标；传空字符串表示当前播放器不支持广播。
+    void setTalkTarget(const QString& deviceTag, const QString& channelTag);
     void toggleFullscreen() override;
     void setAudioEnabled(bool enabled) override;
     bool isAudioEnabled() const;
@@ -99,6 +103,7 @@ protected:
 
 private slots:
     void onSystemConfigChanged(const QString& key, const QVariant& value);
+    void onBroadcastToggled(bool start);
 
 private:
     void onPlayerStatus(int code);
@@ -124,6 +129,9 @@ private:
     bool m_pressed = false;
     QString m_watermarkAccount;
     QString m_deviceName;
+    QString m_talkDeviceTag;
+    QString m_talkChannelTag;
+    AudioTalkClient* m_audioTalk = nullptr;
     bool m_fullscreen = false;
     bool m_audioEnabled = true;
     double m_zoomScale = 1.0;

@@ -3,6 +3,7 @@ set(CORE_LIB_SOURCES
     MainWindow.cpp
     SystemUsageMonitor.cpp
     WebSocketClient.cpp
+    AudioTalkClient.cpp
     EventBus.cpp
     ConfigManager.cpp
     ThemeManager.cpp
@@ -44,9 +45,11 @@ set(CORE_LIB_SOURCES
     AlarmSidePanel.cpp
     PTZControlPanel.cpp
     PTZControlPanel.ui
+    PlayLinks.cpp
+    CellChannelRegistry.cpp
 )
 
-# 资源占用采样按平台选实现：各平台取不到的数据由上层显示为 "--"。
+# 资源占用采样按平台选实现：各平台取不到的数据由上层显示�?"--"�?
 if(WIN32)
     set(CORE_LIB_SOURCES ${CORE_LIB_SOURCES} platform/SystemUsageProbeWin.cpp)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -61,6 +64,7 @@ set(CORE_LIB_HEADERS
     MainWindow.h
     SystemUsageMonitor.h
     WebSocketClient.h
+    AudioTalkClient.h
     EventBus.h
     ConfigManager.h
     ConfigKeys.h
@@ -105,6 +109,8 @@ set(CORE_LIB_HEADERS
     PlaybackSidePanel.h
     AlarmSidePanel.h
     PTZControlPanel.h
+    PlayLinks.h
+    CellChannelRegistry.h
 )
 
 add_library(rustcam-core SHARED
@@ -135,6 +141,7 @@ if(Qt5_FOUND)
     Qt5::Svg
     Qt5::Concurrent
     Qt5::WebSockets
+    Qt5::Multimedia
 )
 else()
     target_link_libraries(rustcam-core PUBLIC
@@ -144,6 +151,7 @@ else()
     Qt6::Svg
     Qt6::Concurrent
     Qt6::WebSockets
+    Qt6::Multimedia
 )
 endif()
 
@@ -196,8 +204,9 @@ target_link_libraries(rustcam-core PRIVATE
 )
 
 if(WIN32)
-    # PDH：读取 \GPU Engine(*) 计数器；DXGI：按 LUID 取显卡名。
-    target_link_libraries(rustcam-core PRIVATE pdh.lib dxgi.lib)
+    # PDH：读取"GPU Engine(*)"计数器；DXGI：按 LUID 取显卡名
+    # ole32：语音广播在采集线程里初始化 COM（WASAPI 依赖）
+    target_link_libraries(rustcam-core PRIVATE pdh.lib dxgi.lib ole32.lib)
 endif()
 
 set_target_properties(rustcam-core PROPERTIES

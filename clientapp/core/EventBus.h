@@ -12,6 +12,8 @@
 #define TOPIC_VIDEO_STREAM_REQUEST "video/stream/request"
 #define TOPIC_VIDEO_STREAM_STOP "video/stream/stop"
 #define TOPIC_VIDEO_CELL_SELECTED "video/cell/selected"
+/// 某一路通道开始播放：payload 带 cellId / deviceTag / channelTag
+#define TOPIC_VIDEO_CHANNEL_PLAYED "video/channel/played"
 #define TOPIC_DEVICE_ONLINE "device/online"
 #define TOPIC_DEVICE_OFFLINE "device/offline"
 #define TOPIC_ALARM_TRIGGERED "alarm/triggered"

@@ -2,7 +2,6 @@
 #include "core/EventBus.h"
 #include "core/ServerApi.h"
 #include "core/DeviceTreeNode.h"
-#include "core/NotificationWidget.h"
 #include "common/Logger.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -12,85 +11,10 @@
 
 namespace rustcam {
 
-VideoCell::VideoCell(const QString& cellId, QWidget* parent)
-    : QWidget(parent)
-    , m_cellId(cellId)
-    , m_playing(false)
-{
-    setupUi();
-}
-
-void VideoCell::setTitle(const QString& title)
-{
-    m_titleLabel->setText(title);
-}
-
-void VideoCell::setPlaying(bool playing)
-{
-    m_playing = playing;
-    if (playing) {
-        m_overlayWidget->hide();
-    } else {
-        m_overlayWidget->show();
-    }
-}
-
-void VideoCell::updateOsd(const QString& info)
-{
-    m_osdLabel->setText(info);
-}
-
-void VideoCell::onCellClicked()
-{
-    emit cellSelected(m_cellId);
-}
-
-void VideoCell::setupUi()
-{
-    setObjectName("VideoCell");
-    setAttribute(Qt::WA_StyledBackground);
-
-    QVBoxLayout* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(0, 0, 0, 0);
-
-    m_videoLabel = new QLabel(this);
-    m_videoLabel->setObjectName("VideoLabel");
-    m_videoLabel->setAlignment(Qt::AlignCenter);
-    m_videoLabel->setText(tr("NO SIGNAL"));
-    layout->addWidget(m_videoLabel);
-
-    m_overlayWidget = new QWidget(this);
-    m_overlayWidget->setObjectName("VideoOverlay");
-    QVBoxLayout* overlayLayout = new QVBoxLayout(m_overlayWidget);
-    overlayLayout->setAlignment(Qt::AlignCenter);
-    overlayLayout->setContentsMargins(0, 0, 0, 0);
-    QLabel* iconLabel = new QLabel("📹", m_overlayWidget);
-    iconLabel->setAlignment(Qt::AlignCenter);
-    overlayLayout->addWidget(iconLabel);
-    QLabel* textLabel = new QLabel(tr("Offline"), m_overlayWidget);
-    textLabel->setObjectName("OverlayText");
-    textLabel->setAlignment(Qt::AlignCenter);
-    overlayLayout->addWidget(textLabel);
-
-    m_osdLabel = new QLabel(this);
-    m_osdLabel->setObjectName("OsdLabel");
-    m_osdLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-    m_osdLabel->hide();
-
-    m_titleLabel = new QLabel(this);
-    m_titleLabel->setObjectName("TitleLabel");
-    m_titleLabel->setAlignment(Qt::AlignLeft | Qt::AlignBottom);
-    m_titleLabel->hide();
-
-    setMinimumSize(320, 180);
-}
-
 bool LiveVideoPlugin::initialize(EventBus* bus, QObject* cfg)
 {
     Q_UNUSED(bus)
     Q_UNUSED(cfg)
-    m_currentLayout = 4;
-    m_maxCells = 16;
     m_videoContainer = nullptr;
     m_allDataWatcher = nullptr;
 
@@ -432,42 +356,6 @@ QWidget* LiveVideoPlugin::createSidePanel(QWidget* parent)
     return m_sidePanel;
 }
 
-void LiveVideoPlugin::updateLayout()
-{
-}
-
-VideoCell* LiveVideoPlugin::getCell(const QString& cellId)
-{
-    return m_cells.value(cellId);
-}
-
-void LiveVideoPlugin::setLayout(int cells)
-{
-    m_currentLayout = cells;
-    updateLayout();
-}
-
-void LiveVideoPlugin::playStream(const QString& cellId, const QString& url, const QString& title)
-{
-    VideoCell* cell = getCell(cellId);
-    if (cell) {
-        cell->setTitle(title);
-        cell->setPlaying(true);
-        LOG_INFO("LiveVideoPlugin", QString("Playing: %1 -> %2").arg(cellId).arg(url));
-        emit streamStarted(cellId);
-    }
-}
-
-void LiveVideoPlugin::stopStream(const QString& cellId)
-{
-    VideoCell* cell = getCell(cellId);
-    if (cell) {
-        cell->setPlaying(false);
-        LOG_INFO("LiveVideoPlugin", QString("Stopped: %1").arg(cellId));
-        emit streamStopped(cellId);
-    }
-}
-
 void LiveVideoPlugin::onStreamRequested(const QString& topic, EventDataPtr)
 {
     Q_UNUSED(topic)
@@ -480,92 +368,44 @@ void LiveVideoPlugin::onStreamStop(const QString& topic, EventDataPtr)
 
 void LiveVideoPlugin::onDeviceTreeItemClicked(const QVariantMap& meta)
 {
-    QString type = meta["type"].toString();
-    if (type == "device") {
-        QString deviceTag = meta["device_tag"].toString();
-        if (!deviceTag.isEmpty() && m_videoContainer) {
-            QString title = meta["name"].toString();
-            QString itemId = QString("%1/%1").arg(deviceTag);
-            QtConcurrent::run([this, deviceTag, title, itemId]() {
-                // 设备级播放也交给后端生成地址（以 device_tag 作为默认通道）
-                QString endpoint = QString("/api/v1/channels/%1/%1/play-links").arg(deviceTag);
-                QJsonObject response;
-                QString error;
-                bool success = ServerApi::instance()->getSync(endpoint, response, error);
-                QMetaObject::invokeMethod(this, [this, success, response, error, title, itemId]() {
-                    onChannelPlayLinksReceived(success, response, error, title, itemId);
-                }, Qt::QueuedConnection);
-            });
-        }
-    } else if (type == "channel") {
-        QString deviceTag = meta["device_tag"].toString();
-        QString channelTag = meta["channel_tag"].toString();
-        if (!deviceTag.isEmpty() && !channelTag.isEmpty() && m_videoContainer) {
-            QString title = meta["name"].toString();
-            QString itemId = QString("%1/%2").arg(deviceTag).arg(channelTag);
-            QtConcurrent::run([this, deviceTag, channelTag, title, itemId]() {
-                QJsonObject response;
-                QString error;
-                QString endpoint = QString("/api/v1/channels/%1/%2/play-links").arg(deviceTag).arg(channelTag);
-                bool success = ServerApi::instance()->getSync(endpoint, response, error);
-                QMetaObject::invokeMethod(this, [this, success, response, error, title, itemId]() {
-                    onChannelPlayLinksReceived(success, response, error, title, itemId);
-                }, Qt::QueuedConnection);
-            });
-        }
-    }
-}
-
-void LiveVideoPlugin::onChannelPlayLinksReceived(bool success, const QJsonObject& response, const QString& error, const QString& title, const QString& itemId)
-{
-    LOG_INFO("LiveVideoPlugin", QString("onChannelPlayLinksReceived: success=%1, title=%2").arg(success).arg(title));
-    if (!success) {
-        LOG_ERROR("LiveVideoPlugin", QString("Failed to get play links: %1").arg(error));
-        EventBus::instance()->publish(TOPIC_NOTIFICATION_SHOW,
-            QSharedPointer<NotificationEventData>(new NotificationEventData(tr("Playback failed: %1").arg(error), NotificationEventData::Error)));
-        return;
-    }
-    QJsonObject data = response["data"].toObject();
-    QString url = data["rtsp_media"].toString();
-    if (url.isEmpty()) {
-        url = data["hls"].toString();
-    }
-    if (url.isEmpty()) {
-        url = data["flv"].toString();
-    }
-    if (url.isEmpty()) {
-        LOG_ERROR("LiveVideoPlugin", "No playable URL found in play links response");
-        EventBus::instance()->publish(TOPIC_NOTIFICATION_SHOW,
-            QSharedPointer<NotificationEventData>(new NotificationEventData(tr("No playable URL available"), NotificationEventData::Warning)));
-        return;
-    }
-    LOG_INFO("LiveVideoPlugin", QString("Playing: %1 -> %2").arg(title).arg(url));
-    EventBus::instance()->publish(TOPIC_NOTIFICATION_SHOW,
-        QSharedPointer<NotificationEventData>(new NotificationEventData(tr("Playing: %1").arg(title), NotificationEventData::Success)));
-    if (m_videoContainer) {
-        m_videoContainer->playStream(QString(), url, title);
-        if (m_ptzPanel) {
-            m_ptzPanel->loadPresets(itemId);
-        }
-    } else {
+    if (!m_videoContainer) {
         LOG_ERROR("LiveVideoPlugin", "m_videoContainer is null!");
+        return;
     }
+
+    const QString type = meta["type"].toString();
+    const QString deviceTag = meta["device_tag"].toString();
+    if (deviceTag.isEmpty()) {
+        return;
+    }
+
+    // 设备级播放也交给后端生成地址（以 device_tag 作为默认通道）
+    QString channelTag = deviceTag;
+    if (type == "channel") {
+        channelTag = meta["channel_tag"].toString();
+        if (channelTag.isEmpty()) {
+            return;
+        }
+    } else if (type != "device") {
+        return;
+    }
+
+    m_videoContainer->playChannel(deviceTag, channelTag, meta["name"].toString());
 }
 
 void LiveVideoPlugin::onPtzCommand(const QString& command, const QVariant& value) {
-    QString itemId = m_videoContainer->getSelectedItemId();
-    if (itemId.isEmpty()) {
-        LOG_WARNING("LiveVideoPlugin", "No item selected for PTZ command");
+    if (!m_ptzPanel) {
+        LOG_WARNING("LiveVideoPlugin", "No PTZ panel");
         return;
     }
 
-    QStringList parts = itemId.split("/");
-    if (parts.size() != 2) {
-        LOG_ERROR("LiveVideoPlugin", QString("Invalid itemId format: %1").arg(itemId));
+    // PTZ 控制的是面板当前的目标通道（画面格子 id 和通道身份是两回事）
+    const QString deviceTag = m_ptzPanel->deviceId();
+    const QString channelTag = m_ptzPanel->channelId();
+    if (deviceTag.isEmpty() || channelTag.isEmpty()) {
+        LOG_WARNING("LiveVideoPlugin", "No PTZ target channel selected");
         return;
     }
-    QString deviceTag = parts[0];
-    QString channelTag = parts[1];
 
     LOG_INFO("LiveVideoPlugin", QString("PTZ command: %1, value: %2, device: %3, channel: %4").arg(command).arg(value.toString()).arg(deviceTag).arg(channelTag));
 
@@ -600,7 +440,7 @@ void LiveVideoPlugin::onPtzCommand(const QString& command, const QVariant& value
                 LOG_ERROR("LiveVideoPlugin", QString("Add preset failed: %1").arg(error));
             } else {
                 LOG_INFO("LiveVideoPlugin", "Preset added successfully");
-                emit m_ptzPanel->loadPresets(m_videoContainer->getSelectedItemId());
+                m_ptzPanel->reloadPresets();
             }
         });
     } else if (command == "delete_preset") {
@@ -610,7 +450,7 @@ void LiveVideoPlugin::onPtzCommand(const QString& command, const QVariant& value
                 LOG_ERROR("LiveVideoPlugin", QString("Delete preset failed: %1").arg(error));
             } else {
                 LOG_INFO("LiveVideoPlugin", "Preset deleted successfully");
-                emit m_ptzPanel->loadPresets(m_videoContainer->getSelectedItemId());
+                m_ptzPanel->reloadPresets();
             }
         });
     } else if (command == "preset") {

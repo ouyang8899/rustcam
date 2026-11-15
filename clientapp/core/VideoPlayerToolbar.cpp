@@ -195,6 +195,16 @@ void VideoPlayerToolbar::setupUi() {
     connect(m_audioBtn, &QToolButton::clicked, this, &VideoPlayerToolbar::onAudioClicked);
     m_toolbarLayout->addWidget(m_audioBtn);
 
+    m_broadcastBtn = new QToolButton(m_toolbarWidget);
+    m_broadcastBtn->setObjectName("ToolbarButton");
+    m_broadcastBtn->setIcon(createColoredIcon(":/icons/ic_toolbar_broadcast.svg", m_iconColor));
+    m_broadcastBtn->setToolTip(tr("语音广播"));
+    m_broadcastBtn->setFixedSize(32, 32);
+    m_broadcastBtn->setCheckable(true);
+    m_broadcastBtn->hide();
+    connect(m_broadcastBtn, &QToolButton::clicked, this, &VideoPlayerToolbar::onBroadcastClicked);
+    m_toolbarLayout->addWidget(m_broadcastBtn);
+
     m_mediaRateBtn = new QToolButton(m_toolbarWidget);
     m_mediaRateBtn->setObjectName("ToolbarButton");
     m_mediaRateBtn->setIcon(createColoredIcon(":/icons/ic_toolbar_mediainfo.svg", m_iconColor));
@@ -221,11 +231,13 @@ void VideoPlayerToolbar::setupUi() {
     m_collapseMirrorAction = new QAction(tr("Mirror"), this);
     m_collapseZoomAction = new QAction(tr("Zoom"), this);
     m_collapseAudioAction = new QAction(tr("Audio On/Off"), this);
+    m_collapseBroadcastAction = new QAction(tr("语音广播"), this);
     m_collapseMediaRateAction = new QAction(tr("Media Rate"), this);
     connect(m_collapseAudioAction, &QAction::triggered, this, &VideoPlayerToolbar::onAudioClicked);
+    connect(m_collapseBroadcastAction, &QAction::triggered, this, &VideoPlayerToolbar::onBroadcastClicked);
     connect(m_collapseMediaRateAction, &QAction::triggered, this, &VideoPlayerToolbar::onMediaRateClicked);
     m_collapseActions = {m_collapseRotateAction, m_collapseMirrorAction, m_collapseZoomAction,
-                          m_collapseAudioAction, m_collapseMediaRateAction};
+                          m_collapseAudioAction, m_collapseBroadcastAction, m_collapseMediaRateAction};
 
     m_moreBtn = new QToolButton(m_toolbarWidget);
     m_moreBtn->setObjectName("ToolbarButton");
@@ -240,7 +252,7 @@ void VideoPlayerToolbar::setupUi() {
     m_toolbarLayout->addStretch();
 
     m_primaryButtons = {m_stopBtn, m_screenshotBtn, m_fullscreenBtn};
-    m_secondaryButtons = {m_rotateBtn, m_mirrorBtn, m_zoomBtn, m_audioBtn, m_mediaRateBtn};
+    m_secondaryButtons = {m_rotateBtn, m_mirrorBtn, m_zoomBtn, m_audioBtn, m_broadcastBtn, m_mediaRateBtn};
 
     refreshIcons();
 }
@@ -257,6 +269,23 @@ void VideoPlayerToolbar::setPlaybackControlsEnabled(bool enabled) {
     m_playbackControlsEnabled = enabled;
     applyCapabilities();
     refreshPlaybackState();
+}
+
+void VideoPlayerToolbar::setBroadcastAvailable(bool available) {
+    m_capBroadcast = available;
+    if (!available) {
+        m_broadcastState = 0;
+        m_broadcastMessage.clear();
+    }
+    applyCapabilities();
+    updateBroadcastIcon();
+    updateCollapseState();
+}
+
+void VideoPlayerToolbar::setBroadcastState(int state, const QString& message) {
+    m_broadcastState = state;
+    m_broadcastMessage = message;
+    updateBroadcastIcon();
 }
 
 void VideoPlayerToolbar::refreshPlaybackState() {
@@ -281,8 +310,11 @@ void VideoPlayerToolbar::applyCapabilities() {
     if (m_capScreenshot) m_primaryButtons.append(m_screenshotBtn);
     if (m_capFullscreen) m_primaryButtons.append(m_fullscreenBtn);
 
+    if (m_broadcastBtn) m_broadcastBtn->setVisible(m_capBroadcast);
+
     m_secondaryButtons = {m_rotateBtn, m_mirrorBtn, m_zoomBtn};
     if (m_capAudio) m_secondaryButtons.append(m_audioBtn);
+    if (m_capBroadcast) m_secondaryButtons.append(m_broadcastBtn);
     if (m_capMediaRate) m_secondaryButtons.append(m_mediaRateBtn);
 }
 
@@ -551,6 +583,7 @@ void VideoPlayerToolbar::updateCollapseState() {
         m_collapseMirrorAction->setIcon(createColoredIcon(":/icons/ic_toolbar_mirror_h.svg", m_iconColor));
         m_collapseZoomAction->setIcon(createColoredIcon(":/icons/ic_toolbar_zoom.svg", m_iconColor));
         m_collapseAudioAction->setIcon(createColoredIcon(":/icons/ic_toolbar_audio_on.svg", m_iconColor));
+        m_collapseBroadcastAction->setIcon(createColoredIcon(":/icons/ic_toolbar_broadcast.svg", m_iconColor));
         m_collapseMediaRateAction->setIcon(createColoredIcon(":/icons/ic_toolbar_mediainfo.svg", m_iconColor));
 
         if (m_rotateBtn && m_rotateBtn->menu()) {
@@ -570,6 +603,10 @@ void VideoPlayerToolbar::updateCollapseState() {
 
         if (m_audioBtn && m_capAudio) {
             m_collapseMenu->addAction(m_collapseAudioAction);
+        }
+
+        if (m_broadcastBtn && m_capBroadcast) {
+            m_collapseMenu->addAction(m_collapseBroadcastAction);
         }
 
         if (m_mediaRateBtn && m_capMediaRate) {
@@ -686,6 +723,60 @@ void VideoPlayerToolbar::updateAudioIcon() {
     }
 }
 
+void VideoPlayerToolbar::onBroadcastClicked() {
+    if (!m_capBroadcast) {
+        return;
+    }
+    const bool active = m_broadcastState >= 1 && m_broadcastState <= 3;
+    const bool start = !active;
+    m_broadcastBtn->setChecked(start);
+    emit broadcastToggled(start);
+}
+
+void VideoPlayerToolbar::updateBroadcastIcon() {
+    if (!m_broadcastBtn) {
+        return;
+    }
+
+    QColor color = m_iconColor;
+    QColor accent = ThemeManager::instance()->getColor("accent");
+    if (!accent.isValid()) {
+        accent = QColor(0, 120, 212);
+    }
+
+    QString tip = tr("语音广播");
+    const bool active = m_broadcastState >= 1 && m_broadcastState <= 3;
+    if (active) {
+        color = accent;
+    }
+
+    switch (m_broadcastState) {
+    case 1:
+        tip = tr("广播连接中…");
+        break;
+    case 2:
+        tip = tr("正在请求对讲…");
+        break;
+    case 3:
+        tip = tr("广播中（再次点击停止）");
+        break;
+    case 4:
+        tip = m_broadcastMessage.isEmpty() ? tr("广播失败") : m_broadcastMessage;
+        break;
+    default:
+        break;
+    }
+
+    m_broadcastBtn->setChecked(active);
+    m_broadcastBtn->setToolTip(tip);
+    m_broadcastBtn->setIcon(createColoredIcon(":/icons/ic_toolbar_broadcast.svg", color));
+
+    if (m_collapseBroadcastAction) {
+        m_collapseBroadcastAction->setText(active ? tr("停止广播") : tr("语音广播"));
+        m_collapseBroadcastAction->setIcon(createColoredIcon(":/icons/ic_toolbar_broadcast.svg", color));
+    }
+}
+
 void VideoPlayerToolbar::onMediaRateClicked() {
     if (!m_capMediaRate) {
         return;
@@ -738,6 +829,7 @@ void VideoPlayerToolbar::refreshIcons() {
     }
     if (m_fullscreenBtn) m_fullscreenBtn->setIcon(createColoredIcon(":/icons/ic_toolbar_fullscreen.svg", m_iconColor));
     if (m_moreBtn) m_moreBtn->setIcon(createColoredIcon(":/icons/ic_toolbar_more.svg", m_iconColor));
+    updateBroadcastIcon();
 }
 
 }

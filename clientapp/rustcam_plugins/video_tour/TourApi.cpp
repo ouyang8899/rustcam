@@ -6,6 +6,7 @@
 #include <QtConcurrent>
 
 #include "core/ServerApi.h"
+#include "core/PlayLinks.h"
 
 namespace rustcam {
 
@@ -178,8 +179,7 @@ void TourApi::deleteScheme(qint64 id, VoidCb cb)
 
 void TourApi::fetchPlayUrl(const TourChannelRef& channel, UrlCb cb)
 {
-    const QString endpoint = QStringLiteral("/api/v1/channels/%1/%2/play-links")
-                                 .arg(channel.deviceTag, channel.channelTag);
+    const QString endpoint = playLinksEndpoint(channel.deviceTag, channel.channelTag);
     runAsync(
         [endpoint](bool& success, QJsonObject& response, QString& error) {
             success = ServerApi::instance()->getSync(endpoint, response, error);
@@ -187,14 +187,7 @@ void TourApi::fetchPlayUrl(const TourChannelRef& channel, UrlCb cb)
         [cb](bool success, const QJsonObject& response, const QString& error) {
             QString url;
             if (success) {
-                const QJsonObject data = dataOf(response);
-                url = data.value(QStringLiteral("rtsp_media")).toString();
-                if (url.isEmpty()) {
-                    url = data.value(QStringLiteral("hls")).toString();
-                }
-                if (url.isEmpty()) {
-                    url = data.value(QStringLiteral("flv")).toString();
-                }
+                url = selectPlayableUrl(response);
                 if (url.isEmpty()) {
                     success = false;
                 }

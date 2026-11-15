@@ -36,12 +36,19 @@ PTZControlPanel::PTZControlPanel(QWidget* parent)
     m_videoCellSubscription = EventBus::instance()->subscribe(TOPIC_VIDEO_CELL_SELECTED, [this](const QString& topic, EventDataPtr data) {
         onVideoCellSelected(topic, data);
     });
+
+    m_videoChannelSubscription = EventBus::instance()->subscribe(TOPIC_VIDEO_CHANNEL_PLAYED, [this](const QString& topic, EventDataPtr data) {
+        onVideoChannelPlayed(topic, data);
+    });
 }
 
 PTZControlPanel::~PTZControlPanel()
 {
     if (!m_videoCellSubscription.isEmpty()) {
         EventBus::instance()->unsubscribe(m_videoCellSubscription);
+    }
+    if (!m_videoChannelSubscription.isEmpty()) {
+        EventBus::instance()->unsubscribe(m_videoChannelSubscription);
     }
 }
 
@@ -149,7 +156,7 @@ void PTZControlPanel::togglePresetList()
     }
 }
 
-void PTZControlPanel::setEnabled(bool enabled)
+void PTZControlPanel::setControlsEnabled(bool enabled)
 {
     m_enabled = enabled;
 
@@ -171,11 +178,35 @@ void PTZControlPanel::setEnabled(bool enabled)
     ui.presetListView->setEnabled(enabled);
 }
 
-void PTZControlPanel::onDeviceSelected(const QString& deviceId, const QString& channelId)
+void PTZControlPanel::setTarget(const QString& deviceTag, const QString& channelTag)
 {
-    m_deviceId = deviceId;
-    m_channelId = channelId;
-    LOG_INFO("PTZControlPanel", QString("Device selected: %1, Channel: %2").arg(deviceId).arg(channelId));
+    // 目标通道必须完整，半截标识只会把指令打到错误的设备上
+    if (deviceTag.isEmpty() || channelTag.isEmpty()) {
+        m_deviceId.clear();
+        m_channelId.clear();
+        m_presetModel->setStringList(QStringList());
+        setControlsEnabled(false);
+        LOG_INFO("PTZControlPanel", "PTZ target cleared");
+        return;
+    }
+
+    if (m_deviceId == deviceTag && m_channelId == channelTag) {
+        return;
+    }
+
+    m_deviceId = deviceTag;
+    m_channelId = channelTag;
+    setControlsEnabled(true);
+    LOG_INFO("PTZControlPanel", QString("PTZ target: %1/%2").arg(deviceTag, channelTag));
+    loadPresets(deviceTag, channelTag);
+}
+
+void PTZControlPanel::reloadPresets()
+{
+    if (m_deviceId.isEmpty() || m_channelId.isEmpty()) {
+        return;
+    }
+    loadPresets(m_deviceId, m_channelId);
 }
 
 void PTZControlPanel::onDirectionClicked(const QString& direction)
@@ -215,15 +246,11 @@ void PTZControlPanel::onRemovePreset()
     }
 }
 
-void PTZControlPanel::loadPresets(const QString& itemId)
+void PTZControlPanel::loadPresets(const QString& deviceTag, const QString& channelTag)
 {
-    QStringList parts = itemId.split("/");
-    if (parts.size() != 2) {
-        LOG_ERROR("PTZControlPanel", QString("Invalid itemId format: %1").arg(itemId));
+    if (deviceTag.isEmpty() || channelTag.isEmpty()) {
         return;
     }
-    QString deviceTag = parts[0];
-    QString channelTag = parts[1];
 
     QString apiPath = QString("/api/v1/channels/%1/%2/ptz/presets").arg(deviceTag, channelTag);
     ServerApi::instance()->get(apiPath, [this](bool success, const QJsonObject& resp, const QString& error) {
@@ -248,13 +275,25 @@ void PTZControlPanel::loadPresets(const QString& itemId)
 void PTZControlPanel::onVideoCellSelected(const QString& topic, EventDataPtr data)
 {
     Q_UNUSED(topic)
-    if (data && data->m_payload.contains("itemId")) {
-        QString itemId = data->m_payload["itemId"].toString();
-        LOG_INFO("PTZControlPanel", QString("Video cell selected: %1").arg(itemId));
-        QMetaObject::invokeMethod(this, [this, itemId]() {
-            loadPresets(itemId);
-        }, Qt::QueuedConnection);
+    if (!data) {
+        return;
     }
+    // 选中格子时 PTZ 跟着切到该格子正在播的通道；该格子没画面就没有目标
+    const QString deviceTag = data->m_payload.value("deviceTag").toString();
+    const QString channelTag = data->m_payload.value("channelTag").toString();
+    LOG_INFO("PTZControlPanel", QString("Video cell selected, target=%1/%2").arg(deviceTag, channelTag));
+    setTarget(deviceTag, channelTag);
+}
+
+void PTZControlPanel::onVideoChannelPlayed(const QString& topic, EventDataPtr data)
+{
+    Q_UNUSED(topic)
+    if (!data) {
+        return;
+    }
+    // 播到哪一路，PTZ 就控制哪一路
+    setTarget(data->m_payload.value("deviceTag").toString(),
+              data->m_payload.value("channelTag").toString());
 }
 
 }

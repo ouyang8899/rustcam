@@ -19,13 +19,13 @@ if(POLICY CMP0143)
     cmake_policy(SET CMP0143 NEW)
 endif()
 
-find_package(Qt5 COMPONENTS Core Widgets Network Concurrent Svg WebSockets QUIET)
+find_package(Qt5 COMPONENTS Core Widgets Network Concurrent Svg WebSockets Multimedia QUIET)
 if(Qt5_FOUND)
     set(QT_VERSION_MAJOR 5)
     set(QT_VERSION_STRING ${Qt5_VERSION})
     message(STATUS "Detected Qt5: ${Qt5_VERSION}")
 else()
-    find_package(Qt6 COMPONENTS Core Widgets Network Concurrent WebSockets QUIET)
+    find_package(Qt6 COMPONENTS Core Widgets Network Concurrent Svg WebSockets Multimedia QUIET)
     if(Qt6_FOUND)
         set(QT_VERSION_MAJOR 6)
         set(QT_VERSION_STRING ${Qt6_VERSION})
@@ -40,10 +40,10 @@ set(RUSTCAM_QT_VERSION_MAJOR ${QT_VERSION_MAJOR})
 set(RUSTCAM_QT_VERSION_STRING ${QT_VERSION_STRING})
 
 if(QT_VERSION_MAJOR EQUAL 6)
-    set(QT_COMPONENTS Core Widgets Network Concurrent WebSockets)
+    set(QT_COMPONENTS Core Widgets Network Concurrent WebSockets Multimedia)
     set(QT_DISABLE_DEPRECATED_BEFORE 0x060300)
 else()
-    set(QT_COMPONENTS Core Widgets Network Concurrent WebSockets)
+    set(QT_COMPONENTS Core Widgets Network Concurrent WebSockets Multimedia)
     set(QT_DISABLE_DEPRECATED_BEFORE 0x051500)
 endif()
 
@@ -82,9 +82,9 @@ set_target_properties(bridge_player PROPERTIES
 include(${CMAKE_SOURCE_DIR}/cmake/CEF.cmake)
 
 enable_testing()
-# 测试目录可能被 .gitignore 排除（本地存在但不在版本库里），
-# 只在目录确实存在时才加入构建，保证干净的检出也能 configure。
-foreach(_test_dir cef_smoke bridge_protocol_test map_page_test timeline_test plugin_order_test tour_layout_picker_test server_api_post_test ws_client_test)
+# 测试目录可能�?.gitignore 排除（本地存在但不在版本库里），
+# 只在目录确实存在时才加入构建，保证干净的检出也�?configure�?
+foreach(_test_dir cef_smoke bridge_protocol_test map_page_test timeline_test plugin_order_test tour_layout_picker_test server_api_post_test ws_client_test audio_talk_client_test live_video_channel_test)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/${_test_dir}/CMakeLists.txt")
         add_subdirectory(tests/${_test_dir})
     else()
@@ -167,7 +167,7 @@ set(THIRD_PARTY_RUNTIME_FILES
 # derived from the imported Qt target because the imported location of a
 # multi-config generator is not per configuration.
 set(QT_RUNTIME_FILES "")
-set(QT_RUNTIME_MODULES Core Gui Widgets Network Svg Concurrent WebSockets)
+set(QT_RUNTIME_MODULES Core Gui Widgets Network Svg Concurrent WebSockets Multimedia)
 if(TARGET Qt5::Core)
     get_target_property(_qt_core_location Qt5::Core LOCATION)
     if(_qt_core_location)
@@ -222,6 +222,19 @@ if(QT_PLATFORM_FILES)
             ${QT_PLATFORM_FILES}
             $<TARGET_FILE_DIR:rustcam-client>/platforms/
     )
+endif()
+
+# QAudioInput 需要 Qt 的 audio 后端插件（Windows 下为 qtaudio_windows.dll）。
+if(TARGET Qt5::Multimedia AND _qt_root)
+    if(IS_DIRECTORY "${_qt_root}/plugins/audio")
+        add_custom_command(TARGET runtime_files POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                $<TARGET_FILE_DIR:rustcam-client>/audio
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${_qt_root}/plugins/audio
+                $<TARGET_FILE_DIR:rustcam-client>/audio
+        )
+    endif()
 endif()
 
 message(STATUS "=================================================")

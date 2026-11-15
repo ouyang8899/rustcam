@@ -1,5 +1,8 @@
 #include "VideoPlayer.h"
+#include "AudioTalkClient.h"
 #include "ConfigKeys.h"
+#include "EventBus.h"
+#include "NotificationWidget.h"
 #include "SystemConfig.h"
 #include "common/Logger.h"
 #include <QDebug>
@@ -77,6 +80,8 @@ VideoPlayer::VideoPlayer(QWidget* parent)
     m_toolbar->setControls(this);
     m_toolbar->setFixedHeight(40);
     m_toolbar->hide();
+    connect(m_toolbar, &VideoPlayerToolbar::broadcastToggled,
+            this, &VideoPlayer::onBroadcastToggled);
 
     style()->polish(this);
     update();
@@ -95,6 +100,9 @@ void VideoPlayer::play(const QString& url) {
         LOG_INFO("VideoPlayer", "play: was playing, stopping first");
         stop();
     }
+
+    // 新流默认没有广播目标，由容器在 play 之后按通道信息重新设置。
+    setTalkTarget(QString(), QString());
 
     QMutexLocker locker(&m_mutex);
 
@@ -175,6 +183,16 @@ void VideoPlayer::stop() {
         BridgePlayer::PlayerManager::instance().remove_player(m_playerId);
         m_playerId = 0;
         m_player.reset();
+    }
+
+    if (m_audioTalk) {
+        m_audioTalk->stop();
+    }
+    m_talkDeviceTag.clear();
+    m_talkChannelTag.clear();
+    if (m_toolbar) {
+        m_toolbar->setBroadcastState(0);
+        m_toolbar->setBroadcastAvailable(false);
     }
 
     setState(State::Stopped);
@@ -537,6 +555,56 @@ void VideoPlayer::setWatermarkAccount(const QString& account) {
 
 void VideoPlayer::setDeviceName(const QString& deviceName) {
     m_deviceName = deviceName;
+}
+
+void VideoPlayer::setTalkTarget(const QString& deviceTag, const QString& channelTag) {
+    const bool available = !deviceTag.isEmpty() && !channelTag.isEmpty();
+
+    if (m_talkDeviceTag == deviceTag && m_talkChannelTag == channelTag) {
+        m_toolbar->setBroadcastAvailable(available);
+        return;
+    }
+
+    if (m_audioTalk && m_audioTalk->isActive()) {
+        m_audioTalk->stop();
+    }
+
+    m_talkDeviceTag = deviceTag;
+    m_talkChannelTag = channelTag;
+
+    m_toolbar->setBroadcastAvailable(available);
+    m_toolbar->setBroadcastState(0);
+}
+
+void VideoPlayer::onBroadcastToggled(bool start) {
+    if (start) {
+        if (m_talkDeviceTag.isEmpty() || m_talkChannelTag.isEmpty()) {
+            m_toolbar->setBroadcastState(0);
+            return;
+        }
+
+        if (!m_audioTalk) {
+            m_audioTalk = new AudioTalkClient(this);
+            connect(m_audioTalk, &AudioTalkClient::stateChanged, this,
+                    [this](AudioTalkClient::State state) {
+                        m_toolbar->setBroadcastState(static_cast<int>(state));
+                    });
+            connect(m_audioTalk, &AudioTalkClient::errorOccurred, this,
+                    [this](const QString& message) {
+                        LOG_ERROR("VideoPlayer", QString("语音广播失败：%1").arg(message));
+                        EventBus::instance()->publish(TOPIC_NOTIFICATION_SHOW,
+                            QSharedPointer<NotificationEventData>(new NotificationEventData(
+                                message, NotificationEventData::Error)));
+                    });
+        }
+
+        LOG_INFO("VideoPlayer", QString("开始语音广播：%1/%2")
+            .arg(m_talkDeviceTag, m_talkChannelTag));
+        m_audioTalk->start(m_talkDeviceTag, m_talkChannelTag);
+    } else if (m_audioTalk) {
+        LOG_INFO("VideoPlayer", "停止语音广播");
+        m_audioTalk->stop();
+    }
 }
 
 void VideoPlayer::toggleFullscreen() {

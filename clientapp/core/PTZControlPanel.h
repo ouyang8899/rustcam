@@ -23,15 +23,20 @@ public:
     explicit PTZControlPanel(QWidget* parent = nullptr);
     ~PTZControlPanel();
 
-    void setEnabled(bool enabled);
-    bool isEnabled() const { return m_enabled; }
-    void loadPresets(const QString& itemId);
+    /// 设置当前 PTZ 控制的通道；device_tag / channel_tag 任一为空表示没有目标。
+    void setTarget(const QString& deviceTag, const QString& channelTag);
+    /// 当前 PTZ 目标的设备标识
+    QString deviceId() const { return m_deviceId; }
+    /// 当前 PTZ 目标的通道标识
+    QString channelId() const { return m_channelId; }
+    /// 重新拉取当前目标的预置位
+    void reloadPresets();
+    /// 启用/禁用面板上的操作按钮
+    void setControlsEnabled(bool enabled);
+    bool controlsEnabled() const { return m_enabled; }
 
 signals:
     void ptzCommand(const QString& command, const QVariant& value = QVariant());
-
-public slots:
-    void onDeviceSelected(const QString& deviceId, const QString& channelId);
 
 private slots:
     void toggleCollapsed();
@@ -43,9 +48,11 @@ private slots:
     void onAddPreset();
     void onRemovePreset();
     void onVideoCellSelected(const QString& topic, EventDataPtr data);
+    void onVideoChannelPlayed(const QString& topic, EventDataPtr data);
 
 private:
     void setupConnections();
+    void loadPresets(const QString& deviceTag, const QString& channelTag);
 
     Ui::PTZControlPanel ui;
     bool m_collapsed = false;
@@ -59,6 +66,7 @@ private:
     QSignalMapper* m_presetMapper = nullptr;
     QSignalMapper* m_auxMapper = nullptr;
     QString m_videoCellSubscription;
+    QString m_videoChannelSubscription;
 };
 
 }

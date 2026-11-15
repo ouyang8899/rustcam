@@ -2,6 +2,8 @@
 #include "NavigationBar.h"
 #include "core/VideoPlayer.h"
 #include "core/EventBus.h"
+#include "core/NotificationWidget.h"
+#include "core/PlayLinks.h"
 #include "common/Logger.h"
 #include <QVBoxLayout>
 #include <QDebug>
@@ -65,7 +67,7 @@ void VideoPlayerContainer::onLayoutsReady() {
 void VideoPlayerContainer::onLayoutSelected(int index) {
     if (index < 0 || index >= m_layouts.size()) return;
 
-    m_selectedItemId.clear();
+    m_selectedCellId.clear();
     m_currentLayout = m_layouts[index];
     calculateVideoLayout(m_currentLayout);
 }
@@ -108,6 +110,9 @@ void VideoPlayerContainer::calculateVideoLayout(const PlayerLayout& layout) {
             connect(player, &VideoPlayer::clicked, this, &VideoPlayerContainer::onPlayerClicked);
             connect(player, &VideoPlayer::playerDropped, this, &VideoPlayerContainer::onPlayerDropped);
             connect(player, &VideoPlayer::deviceDropped, this, &VideoPlayerContainer::onDeviceDropped);
+            connect(player, &VideoPlayer::stopped, this, [this, player]() {
+                onPlayerStopped(itemIdOfUid(player->uid()));
+            });
         } else {
             wrapper = m_playerWrappers.value(item.id);
         }
@@ -115,9 +120,9 @@ void VideoPlayerContainer::calculateVideoLayout(const PlayerLayout& layout) {
         const int borderWidth = 1;
         wrapper->setGeometry(x, y, w, h);
         player->setGeometry(borderWidth, borderWidth, w - borderWidth * 2, h - borderWidth * 2);
-        player->setSelected(item.id == m_selectedItemId);
+        player->setSelected(item.id == m_selectedCellId);
 
-        bool isSelected = (item.id == m_selectedItemId);
+        bool isSelected = (item.id == m_selectedCellId);
         wrapper->setStyleSheet(isSelected
             ? "QWidget#VideoPlayerWrapper { border: 2px solid #0078D4; background-color: #1a1a1a; }"
             : "QWidget#VideoPlayerWrapper { border: 2px solid #1a1a1a; background-color: #1a1a1a; }");
@@ -132,16 +137,18 @@ void VideoPlayerContainer::calculateVideoLayout(const PlayerLayout& layout) {
                 wrapper->deleteLater();
             }
             VideoWidgetManager::instance().unregisterPlayer(itemId);
+            m_playingUrls.remove(itemId);
+            m_cellChannels.remove(itemId);
         }
     }
 }
 
-void VideoPlayerContainer::onVideoPlayerClicked(const QString& itemId) {
-    if (itemId.isEmpty()) {
+void VideoPlayerContainer::onVideoPlayerClicked(const QString& cellId) {
+    if (cellId.isEmpty()) {
         return;
     }
-    QString oldSelected = m_selectedItemId;
-    m_selectedItemId = itemId;
+    QString oldSelected = m_selectedCellId;
+    m_selectedCellId = cellId;
 
     if (!oldSelected.isEmpty()) {
         VideoPlayer* oldPlayer = VideoWidgetManager::instance().getPlayer(oldSelected);
@@ -151,14 +158,20 @@ void VideoPlayerContainer::onVideoPlayerClicked(const QString& itemId) {
         }
     }
 
-    VideoPlayer* newPlayer = VideoWidgetManager::instance().getPlayer(itemId);
+    VideoPlayer* newPlayer = VideoWidgetManager::instance().getPlayer(cellId);
     if (newPlayer) newPlayer->setSelected(true);
-    if (QWidget* newWrapper = m_playerWrappers.value(itemId)) {
+    if (QWidget* newWrapper = m_playerWrappers.value(cellId)) {
         newWrapper->setStyleSheet("#VideoPlayerWrapper { border: 2px solid #0078D4; }");
     }
 
     EventDataPtr eventData = EventData::create();
-    eventData->m_payload["itemId"] = itemId;
+    eventData->m_payload["itemId"] = cellId;
+    // 带上该格子正在播的通道，PTZ 才能切到对应的设备上
+    QString deviceTag;
+    QString channelTag;
+    m_cellChannels.channelOf(cellId, &deviceTag, &channelTag);
+    eventData->m_payload["deviceTag"] = deviceTag;
+    eventData->m_payload["channelTag"] = channelTag;
     EventBus::instance()->publish(TOPIC_VIDEO_CELL_SELECTED, eventData);
 }
 
@@ -208,13 +221,13 @@ void VideoPlayerContainer::applySelectionStyles() {
     for (const QString& itemId : VideoWidgetManager::instance().getPlayerIds()) {
         VideoPlayer* player = VideoWidgetManager::instance().getPlayer(itemId);
         if (player) {
-            player->setSelected(itemId == m_selectedItemId);
+            player->setSelected(itemId == m_selectedCellId);
         }
         QWidget* wrapper = m_playerWrappers.value(itemId);
         if (!wrapper) {
             continue;
         }
-        wrapper->setStyleSheet(itemId == m_selectedItemId
+        wrapper->setStyleSheet(itemId == m_selectedCellId
             ? "QWidget#VideoPlayerWrapper { border: 2px solid #0078D4; background-color: #1a1a1a; }"
             : "QWidget#VideoPlayerWrapper { border: 2px solid #1a1a1a; background-color: #1a1a1a; }");
     }
@@ -269,6 +282,8 @@ void VideoPlayerContainer::onPlayerDropped(const QString& targetUid, const QStri
     VideoWidgetManager::instance().registerPlayer(sourceItemId, target);
     m_playingUrls.insert(targetItemId, sourceUrl);
     m_playingUrls.insert(sourceItemId, targetUrl);
+    // 通道也跟着换位，PTZ 才不会控到别的通道
+    m_cellChannels.swapCells(sourceItemId, targetItemId);
 
     applySelectionStyles();
 }
@@ -277,42 +292,112 @@ void VideoPlayerContainer::onStreamRequested(const QString& topic) {
     Q_UNUSED(topic)
 }
 
-void VideoPlayerContainer::playStream(const QString& itemId, const QString& url, const QString& title) {
-    QString targetId = itemId;
-
-    if (targetId.isEmpty()) {
-        targetId = selectTargetItem();
-    }
-
-    LOG_INFO("VideoPlayerContainer", QString("playStream: targetId=%1, url=%2, title=%3").arg(targetId).arg(url).arg(title));
-
-    if (targetId.isEmpty()) {
-        LOG_ERROR("VideoPlayerContainer", "playStream: targetId is empty!");
+void VideoPlayerContainer::playStream(const QString& cellId, const QString& url, const QString& title,
+                                      const QString& deviceTag, const QString& channelTag) {
+    if (cellId.isEmpty()) {
+        LOG_ERROR("VideoPlayerContainer", "playStream: cellId is empty!");
         return;
     }
 
-    VideoPlayer* player = VideoWidgetManager::instance().getPlayer(targetId);
-    if (player) {
-        m_playingUrls[targetId] = url;
-        if (!title.isEmpty()) {
-            player->setDeviceName(title);
-        }
-        player->play(url);
-    } else {
-        LOG_ERROR("VideoPlayerContainer", QString("playStream: player not found for targetId=%1, available players: %2")
-            .arg(targetId)
+    VideoPlayer* player = VideoWidgetManager::instance().getPlayer(cellId);
+    if (!player) {
+        LOG_ERROR("VideoPlayerContainer", QString("playStream: player not found for cellId=%1, available players: %2")
+            .arg(cellId)
             .arg(VideoWidgetManager::instance().getPlayerIds().join(", ")));
+        return;
     }
+
+    LOG_INFO("VideoPlayerContainer", QString("playStream: cellId=%1, url=%2, title=%3").arg(cellId).arg(url).arg(title));
+
+    m_playingUrls[cellId] = url;
+    m_cellChannels.set(cellId, deviceTag, channelTag);
+    if (!title.isEmpty()) {
+        player->setDeviceName(title);
+    }
+    player->play(url);
+    player->setTalkTarget(deviceTag, channelTag);
+}
+
+void VideoPlayerContainer::playChannel(const QString& deviceTag, const QString& channelTag,
+                                       const QString& title, const QString& cellId) {
+    if (deviceTag.isEmpty() || channelTag.isEmpty()) {
+        LOG_WARNING("VideoPlayerContainer", "playChannel: empty device/channel tag");
+        return;
+    }
+
+    QString targetCellId = cellId;
+    if (targetCellId.isEmpty() || !VideoWidgetManager::instance().getPlayer(targetCellId)) {
+        targetCellId = selectTargetItem();
+    }
+    if (targetCellId.isEmpty()) {
+        LOG_ERROR("VideoPlayerContainer", "playChannel: no target cell available");
+        return;
+    }
+
+    // 播放地址统一由后端生成，避免客户端拼接 RTSP URL
+    const QString endpoint = playLinksEndpoint(deviceTag, channelTag);
+    QtConcurrent::run([this, endpoint, title, targetCellId, deviceTag, channelTag]() {
+        QJsonObject response;
+        QString error;
+        bool success = ServerApi::instance()->getSync(endpoint, response, error);
+        QMetaObject::invokeMethod(this, [this, success, response, error, title, targetCellId, deviceTag, channelTag]() {
+            onPlayLinksReceived(success, response, error, title, targetCellId, deviceTag, channelTag);
+        }, Qt::QueuedConnection);
+    });
+}
+
+void VideoPlayerContainer::onPlayLinksReceived(bool success, const QJsonObject& response, const QString& error,
+                                               const QString& title, const QString& cellId,
+                                               const QString& deviceTag, const QString& channelTag)
+{
+    if (!success) {
+        LOG_ERROR("VideoPlayerContainer", QString("Failed to get play links: %1").arg(error));
+        EventBus::instance()->publish(TOPIC_NOTIFICATION_SHOW,
+            QSharedPointer<NotificationEventData>(new NotificationEventData(
+                tr("Playback failed: %1").arg(error), NotificationEventData::Error)));
+        return;
+    }
+
+    const QString url = selectPlayableUrl(response);
+    if (url.isEmpty()) {
+        LOG_ERROR("VideoPlayerContainer", "No playable URL found in play links response");
+        EventBus::instance()->publish(TOPIC_NOTIFICATION_SHOW,
+            QSharedPointer<NotificationEventData>(new NotificationEventData(
+                tr("No playable URL available"), NotificationEventData::Warning)));
+        return;
+    }
+
+    playStream(cellId, url, title, deviceTag, channelTag);
+
+    EventBus::instance()->publish(TOPIC_NOTIFICATION_SHOW,
+        QSharedPointer<NotificationEventData>(new NotificationEventData(
+            tr("Playing: %1").arg(title), NotificationEventData::Success)));
+
+    // 播到哪一路通道，PTZ 就该控制哪一路
+    EventDataPtr eventData = EventData::create();
+    eventData->m_payload["cellId"] = cellId;
+    eventData->m_payload["deviceTag"] = deviceTag;
+    eventData->m_payload["channelTag"] = channelTag;
+    eventData->m_payload["title"] = title;
+    EventBus::instance()->publish(TOPIC_VIDEO_CHANNEL_PLAYED, eventData);
+}
+
+void VideoPlayerContainer::onPlayerStopped(const QString& cellId) {
+    if (cellId.isEmpty()) {
+        return;
+    }
+    m_playingUrls.remove(cellId);
+    m_cellChannels.remove(cellId);
 }
 
 QString VideoPlayerContainer::selectTargetItem() {
-    LOG_INFO("VideoPlayerContainer", QString("selectTargetItem: m_selectedItemId=%1, layoutJson.size=%2")
-        .arg(m_selectedItemId).arg(m_currentLayout.layoutJson.size()));
-    if (!m_selectedItemId.isEmpty()) {
-        VideoPlayer* selected = VideoWidgetManager::instance().getPlayer(m_selectedItemId);
+    LOG_INFO("VideoPlayerContainer", QString("selectTargetItem: m_selectedCellId=%1, layoutJson.size=%2")
+        .arg(m_selectedCellId).arg(m_currentLayout.layoutJson.size()));
+    if (!m_selectedCellId.isEmpty()) {
+        VideoPlayer* selected = VideoWidgetManager::instance().getPlayer(m_selectedCellId);
         if (selected && !selected->isPlaying()) {
-            LOG_INFO("VideoPlayerContainer", QString("selectTargetItem: returning selected item %1").arg(m_selectedItemId));
-            return m_selectedItemId;
+            LOG_INFO("VideoPlayerContainer", QString("selectTargetItem: returning selected cell %1").arg(m_selectedCellId));
+            return m_selectedCellId;
         }
     }
 
@@ -356,67 +441,31 @@ void VideoPlayerContainer::dropEvent(QDropEvent* event) {
     QVariantMap meta = doc.object().toVariantMap();
 
     // 优先播到鼠标落点所在的格子；落在空隙/导航栏时退回当前选中格
-    QString targetItemId;
+    QString targetCellId;
     const QPoint pos = m_videoArea->mapFrom(this, event->pos());
     for (auto it = m_playerWrappers.constBegin(); it != m_playerWrappers.constEnd(); ++it) {
         if (it.value() && it.value()->geometry().contains(pos)) {
-            targetItemId = it.key();
+            targetCellId = it.key();
             break;
         }
     }
 
-    handleDrop(meta, targetItemId);
+    handleDrop(meta, targetCellId);
     event->acceptProposedAction();
 }
 
-void VideoPlayerContainer::handleDrop(const QVariantMap& meta, const QString& targetItemId) {
-    QString targetId = targetItemId;
-    if (targetId.isEmpty() || !VideoWidgetManager::instance().getPlayer(targetId)) {
-        targetId = selectTargetItem();
-    }
-
+void VideoPlayerContainer::handleDrop(const QVariantMap& meta, const QString& targetCellId) {
     if (meta["type"].toString() != "channel") {
         return;
     }
 
-    QString deviceTag = meta["device_tag"].toString();
-    QString channelTag = meta["channel_tag"].toString();
+    const QString deviceTag = meta["device_tag"].toString();
+    const QString channelTag = meta["channel_tag"].toString();
     if (deviceTag.isEmpty() || channelTag.isEmpty()) {
         return;
     }
 
-    QString title = meta["name"].toString();
-    QtConcurrent::run([this, deviceTag, channelTag, title, targetId]() {
-        // 播放地址统一由后端生成，避免客户端拼接 RTSP URL
-        QString endpoint = QString("/api/v1/channels/%1/%2/play-links").arg(deviceTag, channelTag);
-        QJsonObject response;
-        QString error;
-        bool success = ServerApi::instance()->getSync(endpoint, response, error);
-        QMetaObject::invokeMethod(this, [this, success, response, error, title, targetId]() {
-            onChannelPlayLinksReceived(success, response, error, title, targetId);
-        }, Qt::QueuedConnection);
-    });
-}
-
-void VideoPlayerContainer::onChannelPlayLinksReceived(bool success, const QJsonObject& response, const QString& error, const QString& title, const QString& targetId)
-{
-    if (!success) {
-        qWarning() << "Failed to get play links:" << error;
-        return;
-    }
-    QJsonObject data = response["data"].toObject();
-    QString url = data["rtsp_media"].toString();
-    if (url.isEmpty()) {
-        url = data["hls"].toString();
-    }
-    if (url.isEmpty()) {
-        url = data["flv"].toString();
-    }
-    if (url.isEmpty()) {
-        qWarning() << "No playable URL found in play links response";
-        return;
-    }
-    playStream(targetId, url, title);
+    playChannel(deviceTag, channelTag, meta["name"].toString(), targetCellId);
 }
 
 void VideoPlayerContainer::resizeEvent(QResizeEvent* event) {

@@ -5,6 +5,7 @@
 #include "core/ServerApi.h"
 #include "core/VideoPlayer.h"
 #include "core/NotificationWidget.h"
+#include "core/PlayLinks.h"
 #include "common/Logger.h"
 #include <QCoreApplication>
 #include <QDir>
@@ -25,7 +26,6 @@
 #include <QDialog>
 #include <QtConcurrent>
 #include <QJsonArray>
-#include <QUrl>
 #include <QSharedPointer>
 
 namespace rustcam {
@@ -409,9 +409,7 @@ void MapPlugin::onMarkerClicked(const QString& markerId)
 
 void MapPlugin::playCamera(const QString& deviceTag, const QString& channelTag, const QString& name)
 {
-    const QString endpoint = QStringLiteral("/api/v1/channels/%1/%2/play-links")
-                                 .arg(QString::fromUtf8(QUrl::toPercentEncoding(deviceTag)))
-                                 .arg(QString::fromUtf8(QUrl::toPercentEncoding(channelTag)));
+    const QString endpoint = playLinksEndpoint(deviceTag, channelTag);
 
     // ServerApi 是同步实现，放到后台线程避免卡住界面。
     QtConcurrent::run([this, endpoint, name]() {
@@ -427,10 +425,7 @@ void MapPlugin::playCamera(const QString& deviceTag, const QString& channelTag, 
                 return;
             }
 
-            const QJsonObject data = response.value(QStringLiteral("data")).toObject();
-            QString url = data.value(QStringLiteral("rtsp_media")).toString();
-            if (url.isEmpty()) url = data.value(QStringLiteral("hls")).toString();
-            if (url.isEmpty()) url = data.value(QStringLiteral("flv")).toString();
+            const QString url = selectPlayableUrl(response);
             if (url.isEmpty()) {
                 LOG_ERROR("MapPlugin", "No playable url in play links response");
                 EventBus::instance()->publish(TOPIC_NOTIFICATION_SHOW,
