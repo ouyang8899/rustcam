@@ -9,6 +9,7 @@ use crate::api::state::FullState;
 use crate::api::response::ApiResponse;
 use crate::error::AppError;
 use crate::domain::alarm::{ Alarm };
+use crate::protocol::event::SignalEvent;
 
 #[derive(Debug, Deserialize)]
 pub struct AlarmQuery {
@@ -97,11 +98,22 @@ pub async fn mark_alarm_processed_handler(
 ) -> Result<Json<ApiResponse<()>>, AppError> {
     let registry = &state.app.registry;
 
-    if registry.infra.db.get_alarm(id).await?.is_none() {
-        return Err(AppError::NotFound(format!("Alarm {} not found", id)));
-    }
+    let alarm = registry.infra.db.get_alarm(id).await?
+        .ok_or_else(|| AppError::NotFound(format!("Alarm {} not found", id)))?;
 
     registry.infra.db.mark_alarm_processed(id, req.processed).await
         .map_err(|e| AppError::Internal(format!("DB error: {}", e)))?;
+
+    // 首次标记为已处理：视为告警恢复，通知录像调度器结束对应的报警录像会话
+    if req.processed && !alarm.processed {
+        let _ = registry.infra.event_bus.publish(SignalEvent::AlarmRecovered {
+            device_id: alarm.device_id.to_string(),
+            device_tag: alarm.device_tag.clone(),
+            channel_tag: alarm.channel_tag.clone(),
+            alarm_type: alarm.alarm_type.clone(),
+            timestamp: Utc::now(),
+        }).await;
+    }
+
     Ok(Json(ApiResponse::success(())))
 }

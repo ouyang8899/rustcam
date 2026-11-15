@@ -120,6 +120,7 @@ pub enum SignalEvent {
         channel_tag: Option<String>,
         alarm_type: String,
         message: String,
+        alarm_id: Option<String>,
         timestamp: DateTime<Utc>,
     },
     /// 告警已经落库，携带真实的告警 id
@@ -133,6 +134,8 @@ pub enum SignalEvent {
     },
     AlarmRecovered {
         device_id: String,
+        device_tag: String,
+        channel_tag: Option<String>,
         alarm_type: String,
         timestamp: DateTime<Utc>,
     },
@@ -378,7 +381,7 @@ impl SignalEvent {
             SignalEvent::PlaybackResult { device_tag, .. } => device_tag.clone(),
             SignalEvent::PtzControl { device_id, .. } => Some(device_id.clone()),
             SignalEvent::Alarm { device_id, .. } => Some(device_id.clone()),
-            SignalEvent::AlarmRecovered { device_id, .. } => Some(device_id.clone()),
+            SignalEvent::AlarmRecovered { device_tag, .. } => Some(device_tag.clone()),
             SignalEvent::QueryDeviceInfo { device_tag, .. } => device_tag.clone(),
             SignalEvent::QueryDeviceStatus { device_tag, .. } => device_tag.clone(),
             SignalEvent::QueryDeviceConfig { device_tag, .. } => device_tag.clone(),

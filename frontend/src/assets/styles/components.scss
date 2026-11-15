@@ -562,18 +562,28 @@ html, body {
   --el-menu-selected-bg-color: var(--color-accent-dim);
   --el-menu-selected-text-color: var(--color-accent);
   --el-menu-item-height: 40px;
+  // 层级缩进：子菜单项每深入一级再缩进一个 --space-4
+  --el-menu-base-level-padding: var(--space-4);
+  --el-menu-level-padding: var(--space-4);
   border-right: none !important;
   font-family: var(--font-sans);
 
   .el-menu-item, .el-sub-menu__title {
     border-radius: var(--radius-base);
     margin: 2px 0;
-    padding-left: var(--space-4) !important;
     transition: background-color 0.15s, color 0.15s;
 
     &:hover {
       background-color: var(--color-accent-dim);
       color: var(--color-accent);
+    }
+  }
+
+  // 只统一顶级项的左边距；子项沿用 Element Plus 的层级缩进，避免父子同级
+  &:not(.el-menu--inline):not(.el-menu--popup) {
+    > .el-menu-item,
+    > .el-sub-menu > .el-sub-menu__title {
+      padding-left: var(--space-4) !important;
     }
   }
 

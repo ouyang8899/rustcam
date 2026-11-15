@@ -4,18 +4,18 @@
 
 <insert id="alarm_insert">
 INSERT INTO alarms (
-    device_id, device_tag, channel_tag, alarm_type, alarm_time,
+    device_id, device_tag, channel_tag, alarm_id, alarm_type, alarm_time,
     alarm_method, alarm_priority, description
 ) VALUES (
-    #{device_id}, #{device_tag}, #{channel_tag}, #{alarm_type}, #{alarm_time},
+    #{device_id}, #{device_tag}, #{channel_tag}, #{alarm_id}, #{alarm_type}, #{alarm_time},
     #{alarm_method}, #{alarm_priority}, #{description}
 )
-RETURNING id, device_id, device_tag, channel_tag, alarm_type, alarm_time,
+RETURNING id, device_id, device_tag, channel_tag, alarm_id, alarm_type, alarm_time,
           alarm_method, alarm_priority, description, processed, created_at
 </insert>
 
 <select id="alarm_select_by_device">
-SELECT id, device_id, device_tag, channel_tag, alarm_type, alarm_time,
+SELECT id, device_id, device_tag, channel_tag, alarm_id, alarm_type, alarm_time,
        alarm_method, alarm_priority, description, processed, created_at
 FROM alarms
 WHERE device_id = #{device_id}
@@ -24,7 +24,7 @@ LIMIT #{limit} OFFSET #{offset}
 </select>
 
 <select id="alarm_select_all">
-SELECT id, device_id, device_tag, channel_tag, alarm_type, alarm_time,
+SELECT id, device_id, device_tag, channel_tag, alarm_id, alarm_type, alarm_time,
        alarm_method, alarm_priority, description, processed, created_at
 FROM alarms
 ORDER BY alarm_time DESC
@@ -38,7 +38,7 @@ LIMIT #{limit} OFFSET #{offset}
   这里必须用小写 and，否则会残留前导 AND 导致 SQL 语法错误。
 -->
 <select id="alarm_select_filtered">
-SELECT id, device_id, device_tag, channel_tag, alarm_type, alarm_time, alarm_method,
+SELECT id, device_id, device_tag, channel_tag, alarm_id, alarm_type, alarm_time, alarm_method,
        alarm_priority, description, processed, created_at
 FROM alarms
 <where>

@@ -3774,15 +3774,70 @@ impl Gb28181Adapter {
 
         let alarm_type =
             Self::parse_xml_field(body, "AlarmType").unwrap_or_else(|| "unknown".to_string());
+        let timestamp = Self::parse_alarm_time(body);
+        let channel_tag = self.parse_alarm_channel(body);
+
+        let status = Self::parse_xml_field(body, "AlarmStatus").map(|s| s.to_ascii_lowercase());
+        if matches!(status.as_deref(), Some("end")) {
+            let device_tag = self
+                .device_tag
+                .clone()
+                .or_else(|| Self::parse_xml_field(body, "DeviceID"))
+                .unwrap_or_default();
+            return Some(SignalEvent::AlarmRecovered {
+                device_id: self.device_id_i64().to_string(),
+                device_tag,
+                channel_tag,
+                alarm_type,
+                timestamp,
+            });
+        }
+
         let alarm_msg = Self::parse_xml_field(body, "AlarmDescription").unwrap_or_default();
+        let alarm_id = Self::parse_xml_field(body, "AlarmID");
         Some(SignalEvent::Alarm {
             device_id: self.device_id_i64().to_string(),
             device_tag: self.device_tag.clone(),
-            channel_tag: Self::parse_channel_id(body),
+            channel_tag,
             alarm_type,
             message: alarm_msg,
-            timestamp: chrono::Utc::now(),
+            alarm_id,
+            timestamp,
         })
+    }
+
+    fn parse_alarm_time(body: &str) -> DateTime<Utc> {
+        use chrono::{Local, NaiveDateTime, TimeZone};
+
+        let Some(raw) = Self::parse_xml_field(body, "AlarmTime") else {
+            return Utc::now();
+        };
+
+        if let Ok(parsed) = DateTime::parse_from_rfc3339(&raw) {
+            return parsed.with_timezone(&Utc);
+        }
+
+        for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"] {
+            if let Ok(naive) = NaiveDateTime::parse_from_str(&raw, fmt) {
+                if let Some(local) = Local.from_local_datetime(&naive).earliest() {
+                    return local.with_timezone(&Utc);
+                }
+            }
+        }
+
+        Utc::now()
+    }
+
+    fn parse_alarm_channel(&self, body: &str) -> Option<String> {
+        if let Some(channel) = Self::parse_xml_field(body, "ChannelID") {
+            return Some(channel);
+        }
+
+        let device_id = Self::parse_xml_field(body, "DeviceID")?;
+        match self.device_tag.as_deref() {
+            Some(tag) if tag != device_id => Some(device_id),
+            _ => None,
+        }
     }
 
     fn subscription_needs_refresh(
@@ -5466,6 +5521,7 @@ fn rand_u32() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
 
     #[test]
     fn test_encode_ptz_cmd_compound_up_right() {
@@ -6903,6 +6959,164 @@ mod tests {
         assert!(request.contains("Content-Type: Application/MANSCDP+xml\r\n"));
         assert!(request.contains("<CmdType>Alarm</CmdType>"));
         assert!(!request.contains("Event: alarm\r\n"));
+    }
+
+    #[test]
+    fn test_parse_alarm_start_carries_alarm_id_and_local_time() {
+        let deps = ProtocolDeps::for_test();
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+        adapter.device_tag = Some("34020000001320000001".to_string());
+        adapter.device_id = Some(7);
+
+        let body = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Notify>
+  <CmdType>Alarm</CmdType>
+  <SN>2001</SN>
+  <DeviceID>34020000001320000001</DeviceID>
+  <AlarmPriority>2</AlarmPriority>
+  <AlarmMethod>5</AlarmMethod>
+  <AlarmTime>2026-11-15T10:00:00</AlarmTime>
+  <AlarmDescription>移动侦测报警开始</AlarmDescription>
+  <AlarmInfo>
+    <AlarmType>MotionDetect</AlarmType>
+    <AlarmID>alarm-20261115-0001</AlarmID>
+    <AlarmStatus>Start</AlarmStatus>
+    <AlarmStartTime>2026-11-15T10:00:00</AlarmStartTime>
+  </AlarmInfo>
+</Notify>"#;
+
+        let event = adapter.parse_alarm_event(body).expect("alarm event");
+        let expected = chrono::Local
+            .with_ymd_and_hms(2026, 11, 15, 10, 0, 0)
+            .unwrap()
+            .with_timezone(&Utc);
+        match event {
+            SignalEvent::Alarm {
+                alarm_id,
+                channel_tag,
+                alarm_type,
+                timestamp,
+                ..
+            } => {
+                assert_eq!(alarm_id.as_deref(), Some("alarm-20261115-0001"));
+                assert_eq!(channel_tag, None);
+                assert_eq!(alarm_type, "MotionDetect");
+                assert_eq!(timestamp, expected);
+            }
+            other => panic!("unexpected event: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_alarm_continue_is_still_a_raised_alarm() {
+        let deps = ProtocolDeps::for_test();
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+        adapter.device_tag = Some("34020000001320000001".to_string());
+        adapter.device_id = Some(7);
+
+        let body = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Notify>
+  <CmdType>Alarm</CmdType>
+  <SN>2002</SN>
+  <DeviceID>34020000001320000001</DeviceID>
+  <AlarmPriority>2</AlarmPriority>
+  <AlarmMethod>5</AlarmMethod>
+  <AlarmTime>2026-11-15T10:00:30</AlarmTime>
+  <AlarmDescription>移动侦测报警持续</AlarmDescription>
+  <AlarmInfo>
+    <AlarmType>MotionDetect</AlarmType>
+    <AlarmID>alarm-20261115-0001</AlarmID>
+    <AlarmStatus>Continue</AlarmStatus>
+  </AlarmInfo>
+</Notify>"#;
+
+        let event = adapter.parse_alarm_event(body).expect("alarm event");
+        let expected = chrono::Local
+            .with_ymd_and_hms(2026, 11, 15, 10, 0, 30)
+            .unwrap()
+            .with_timezone(&Utc);
+        match event {
+            SignalEvent::Alarm {
+                alarm_id,
+                timestamp,
+                ..
+            } => {
+                assert_eq!(alarm_id.as_deref(), Some("alarm-20261115-0001"));
+                assert_eq!(timestamp, expected);
+            }
+            other => panic!("unexpected event: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_alarm_end_returns_recovered_event() {
+        let deps = ProtocolDeps::for_test();
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+        adapter.device_tag = Some("34020000001320000001".to_string());
+        adapter.device_id = Some(7);
+
+        let body = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Notify>
+  <CmdType>Alarm</CmdType>
+  <SN>2004</SN>
+  <DeviceID>34020000001320000001</DeviceID>
+  <AlarmPriority>2</AlarmPriority>
+  <AlarmMethod>5</AlarmMethod>
+  <AlarmTime>2026-11-15T10:01:30</AlarmTime>
+  <AlarmDescription>移动侦测报警结束</AlarmDescription>
+  <AlarmInfo>
+    <AlarmType>MotionDetect</AlarmType>
+    <AlarmID>alarm-20261115-0001</AlarmID>
+    <AlarmStatus>End</AlarmStatus>
+    <AlarmStartTime>2026-11-15T10:00:00</AlarmStartTime>
+    <AlarmEndTime>2026-11-15T10:01:30</AlarmEndTime>
+  </AlarmInfo>
+</Notify>"#;
+
+        let event = adapter.parse_alarm_event(body).expect("alarm event");
+        let expected = chrono::Local
+            .with_ymd_and_hms(2026, 11, 15, 10, 1, 30)
+            .unwrap()
+            .with_timezone(&Utc);
+        match event {
+            SignalEvent::AlarmRecovered {
+                device_tag,
+                channel_tag,
+                alarm_type,
+                timestamp,
+                ..
+            } => {
+                assert_eq!(device_tag, "34020000001320000001");
+                assert_eq!(channel_tag, None);
+                assert_eq!(alarm_type, "MotionDetect");
+                assert_eq!(timestamp, expected);
+            }
+            other => panic!("unexpected event: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_alarm_channel_id_wins_over_device_id() {
+        let deps = ProtocolDeps::for_test();
+        let mut adapter = Gb28181Adapter::new(deps, Arc::new(|_, _| {}), Arc::new(|_| {}));
+        adapter.device_tag = Some("34020000001320000001".to_string());
+        adapter.device_id = Some(7);
+
+        let body = r#"<Notify>
+  <CmdType>Alarm</CmdType>
+  <DeviceID>34020000001320000001</DeviceID>
+  <ChannelID>34020000001370000001</ChannelID>
+  <AlarmTime>2026-11-15T10:00:00</AlarmTime>
+  <AlarmInfo><AlarmType>MotionDetect</AlarmType></AlarmInfo>
+</Notify>"#;
+
+        let event = adapter.parse_alarm_event(body).expect("alarm event");
+        match event {
+            SignalEvent::Alarm { channel_tag, .. } => {
+                assert_eq!(channel_tag.as_deref(), Some("34020000001370000001"));
+            }
+            other => panic!("unexpected event: {:?}", other),
+        }
     }
 
     #[test]

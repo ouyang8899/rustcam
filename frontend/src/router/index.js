@@ -93,6 +93,11 @@ const routes = [
         component: () => import('../views/UserManagement.vue'),
       },
       {
+        path: 'login-sessions',
+        name: 'LoginSessions',
+        component: () => import('../views/LoginSessions.vue'),
+      },
+      {
         path: 'roles',
         name: 'RoleManagement',
         component: () => import('../views/RoleManagement.vue'),

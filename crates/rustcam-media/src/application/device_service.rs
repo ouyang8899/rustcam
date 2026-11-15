@@ -431,8 +431,8 @@ impl DeviceService {
                 }
             }
 
-            SignalEvent::Alarm { device_id, device_tag: event_device_tag, channel_tag, alarm_type, message, timestamp } => {
-                tracing::warn!("[DeviceService] Alarm: device={} channel={:?} type={} msg={}", device_id, channel_tag, alarm_type, message);
+            SignalEvent::Alarm { device_id, device_tag: event_device_tag, channel_tag, alarm_type, message, alarm_id, timestamp } => {
+                tracing::warn!("[DeviceService] Alarm: device={} channel={:?} type={} alarm_id={:?} msg={}", device_id, channel_tag, alarm_type, alarm_id, message);
                 let device_id_num: i64 = device_id.parse().unwrap_or(0);
                 let device_tag = match infra.db.get_device_by_id(device_id_num).await {
                     Ok(Some(d)) => d.device_tag.unwrap_or_default(),
@@ -440,8 +440,9 @@ impl DeviceService {
                 };
                 let create_req = CreateAlarmRequest {
                     device_id: device_id_num,
-                    device_tag,
+                    device_tag: device_tag.clone(),
                     channel_tag: channel_tag.clone(),
+                    alarm_id: alarm_id.clone(),
                     alarm_type: alarm_type.clone(),
                     alarm_time: *timestamp,
                     alarm_method: Some(1),
@@ -454,7 +455,7 @@ impl DeviceService {
                         let _ = infra.event_bus.publish(SignalEvent::AlarmRaised {
                             alarm_id: alarm.id,
                             device_id: device_id.clone(),
-                            device_tag: event_device_tag.clone(),
+                            device_tag: Some(device_tag.clone()),
                             channel_tag: channel_tag.clone(),
                             alarm_type: alarm_type.clone(),
                             timestamp: *timestamp,

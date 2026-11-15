@@ -56,6 +56,7 @@ impl RecordingPolicyService {
             alarm_type: req.alarm_type,
             pre_record_secs: req.pre_record_secs.unwrap_or(0),
             post_record_secs: req.post_record_secs.unwrap_or(30),
+            alarm_recovery_secs: req.alarm_recovery_secs.unwrap_or(300),
             format,
             max_duration_secs: req.max_duration_secs.unwrap_or(3600),
             max_file_size_mb: req.max_file_size_mb.unwrap_or(512),
@@ -108,6 +109,9 @@ impl RecordingPolicyService {
         }
         if let Some(post_record_secs) = req.post_record_secs {
             policy.post_record_secs = post_record_secs;
+        }
+        if let Some(alarm_recovery_secs) = req.alarm_recovery_secs {
+            policy.alarm_recovery_secs = alarm_recovery_secs;
         }
         if let Some(format_str) = req.format {
             policy.format = match format_str.to_lowercase().as_str() {

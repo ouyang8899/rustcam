@@ -29,9 +29,18 @@
             <el-icon><VideoCamera /></el-icon>
             <span>设备管理</span>
           </template>
-          <el-menu-item index="/devices">设备列表</el-menu-item>
-          <el-menu-item index="/device-map">电子地图</el-menu-item>
-          <el-menu-item index="/channels">通道列表</el-menu-item>
+          <el-menu-item index="/devices">
+            <el-icon><VideoCamera /></el-icon>
+            <template #title><span>设备列表</span></template>
+          </el-menu-item>
+          <el-menu-item index="/device-map">
+            <el-icon><MapLocation /></el-icon>
+            <template #title><span>电子地图</span></template>
+          </el-menu-item>
+          <el-menu-item index="/channels">
+            <el-icon><Connection /></el-icon>
+            <template #title><span>通道列表</span></template>
+          </el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu index="/drone-group">
@@ -39,14 +48,38 @@
             <el-icon><Promotion /></el-icon>
             <span>移动眼</span>
           </template>
-          <el-menu-item index="/drone/drones">无人机</el-menu-item>
-          <el-menu-item index="/drone/adapters">接入适配器</el-menu-item>
-          <el-menu-item index="/drone/control">控制权管理</el-menu-item>
-          <el-menu-item index="/drone/live">实时飞行</el-menu-item>
-          <el-menu-item index="/drone/routes">航线规划</el-menu-item>
-          <el-menu-item index="/drone/fences">电子围栏</el-menu-item>
-          <el-menu-item index="/drone/alerts">告警与审计</el-menu-item>
-          <el-menu-item index="/drone/replay">轨迹回放</el-menu-item>
+          <el-menu-item index="/drone/drones">
+            <el-icon><Aim /></el-icon>
+            <template #title><span>无人机</span></template>
+          </el-menu-item>
+          <el-menu-item index="/drone/adapters">
+            <el-icon><Cpu /></el-icon>
+            <template #title><span>接入适配器</span></template>
+          </el-menu-item>
+          <el-menu-item index="/drone/control">
+            <el-icon><Unlock /></el-icon>
+            <template #title><span>控制权管理</span></template>
+          </el-menu-item>
+          <el-menu-item index="/drone/live">
+            <el-icon><VideoPlay /></el-icon>
+            <template #title><span>实时飞行</span></template>
+          </el-menu-item>
+          <el-menu-item index="/drone/routes">
+            <el-icon><Guide /></el-icon>
+            <template #title><span>航线规划</span></template>
+          </el-menu-item>
+          <el-menu-item index="/drone/fences">
+            <el-icon><Crop /></el-icon>
+            <template #title><span>电子围栏</span></template>
+          </el-menu-item>
+          <el-menu-item index="/drone/alerts">
+            <el-icon><Warning /></el-icon>
+            <template #title><span>告警与审计</span></template>
+          </el-menu-item>
+          <el-menu-item index="/drone/replay">
+            <el-icon><RefreshLeft /></el-icon>
+            <template #title><span>轨迹回放</span></template>
+          </el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu index="/stream-group">
@@ -54,8 +87,14 @@
             <el-icon><DataLine /></el-icon>
             <span>媒体流</span>
           </template>
-          <el-menu-item index="/streams">流列表</el-menu-item>
-          <el-menu-item index="/sessions">实时会话</el-menu-item>
+          <el-menu-item index="/streams">
+            <el-icon><Odometer /></el-icon>
+            <template #title><span>流列表</span></template>
+          </el-menu-item>
+          <el-menu-item index="/sessions">
+            <el-icon><Files /></el-icon>
+            <template #title><span>实时会话</span></template>
+          </el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu index="/recording-group">
@@ -63,10 +102,22 @@
             <el-icon><VideoPlay /></el-icon>
             <span>录像管理</span>
           </template>
-          <el-menu-item index="/recordings">录像管理</el-menu-item>
-          <el-menu-item index="/recordings/files">录像文件</el-menu-item>
-          <el-menu-item index="/recording-policies">录制策略</el-menu-item>
-          <el-menu-item index="/recording-playback">录像回放</el-menu-item>
+          <el-menu-item index="/recordings">
+            <el-icon><Film /></el-icon>
+            <template #title><span>录像管理</span></template>
+          </el-menu-item>
+          <el-menu-item index="/recordings/files">
+            <el-icon><Folder /></el-icon>
+            <template #title><span>录像文件</span></template>
+          </el-menu-item>
+          <el-menu-item index="/recording-policies">
+            <el-icon><Tickets /></el-icon>
+            <template #title><span>录制策略</span></template>
+          </el-menu-item>
+          <el-menu-item index="/recording-playback">
+            <el-icon><RefreshRight /></el-icon>
+            <template #title><span>录像回放</span></template>
+          </el-menu-item>
         </el-sub-menu>
 
         <el-menu-item index="/servers">
@@ -94,19 +145,41 @@
             <el-icon><Grid /></el-icon>
             <span>监控墙</span>
           </template>
-          <el-menu-item index="/video-wall">监控墙</el-menu-item>
-          <el-menu-item index="/video-wall/designer">布局设计</el-menu-item>
+          <el-menu-item index="/video-wall">
+            <el-icon><Monitor /></el-icon>
+            <template #title><span>监控墙</span></template>
+          </el-menu-item>
+          <el-menu-item index="/video-wall/designer">
+            <el-icon><MagicStick /></el-icon>
+            <template #title><span>布局设计</span></template>
+          </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="isAdmin" index="admin-group">
+        <el-sub-menu index="admin-group">
           <template #title>
             <el-icon><User /></el-icon>
             <span>管理</span>
           </template>
-          <el-menu-item index="/users">用户管理</el-menu-item>
-          <el-menu-item index="/roles">角色管理</el-menu-item>
-          <el-menu-item index="/permissions">权限管理</el-menu-item>
-          <el-menu-item index="/settings">系统设置</el-menu-item>
+          <el-menu-item v-if="canManage" index="/users">
+            <el-icon><Avatar /></el-icon>
+            <template #title><span>用户管理</span></template>
+          </el-menu-item>
+          <el-menu-item v-if="canManage" index="/roles">
+            <el-icon><UserFilled /></el-icon>
+            <template #title><span>角色管理</span></template>
+          </el-menu-item>
+          <el-menu-item v-if="canManage" index="/permissions">
+            <el-icon><Lock /></el-icon>
+            <template #title><span>权限管理</span></template>
+          </el-menu-item>
+          <el-menu-item index="/login-sessions">
+            <el-icon><Key /></el-icon>
+            <template #title><span>登录会话</span></template>
+          </el-menu-item>
+          <el-menu-item v-if="canManage" index="/settings">
+            <el-icon><Setting /></el-icon>
+            <template #title><span>系统设置</span></template>
+          </el-menu-item>
         </el-sub-menu>
       </el-menu>
     </div>
@@ -154,7 +227,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import { Monitor, VideoCamera, DataLine, VideoPlay, Cpu, Compass, Grid, User, Sunny, Moon, DArrowLeft, DArrowRight, SwitchButton, Bell, Promotion } from '@element-plus/icons-vue'
+import { Monitor, VideoCamera, DataLine, VideoPlay, Cpu, Compass, Grid, User, Sunny, Moon, DArrowLeft, DArrowRight, SwitchButton, Bell, Promotion, Key, MapLocation, Connection, Aim, Unlock, Guide, Crop, Warning, RefreshLeft, Odometer, Files, Film, Folder, Tickets, RefreshRight, Avatar, UserFilled, Lock, Setting, MagicStick } from '@element-plus/icons-vue'
 import { useThemeStore } from '../../stores/themeStore'
 import { useAuthStore } from '../../stores/authStore'
 import { useWsConnection } from '../../composables/useWsConnection'
@@ -168,6 +241,8 @@ const { wsConnected, connect, disconnect } = useWsConnection()
 
 const collapsed = ref(false)
 const isAdmin = computed(() => auth.isAdmin)
+/** 管理区对管理员和超级用户开放（超级用户自动拥有全部权限）。 */
+const canManage = computed(() => auth.isAdmin || !!auth.currentUser?.is_super)
 const currentRoute = computed(() => route.path)
 const unprocessedAlarms = ref(0)
 

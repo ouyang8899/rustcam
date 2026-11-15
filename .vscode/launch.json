@@ -5,7 +5,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "name": "Debug (MSVC)",
-            "program": "${workspaceFolder}/target/debug/rustcam-media.exe",
+            "program": "${workspaceFolder}/target/debug/rustcam-server.exe",
             "args": [],
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "rust: cargo build -p rustcam-server"

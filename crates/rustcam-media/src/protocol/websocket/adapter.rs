@@ -243,6 +243,7 @@ impl WebSocketAdapter {
                         channel_tag: json.get("channel_tag").and_then(|v| v.as_str()).map(|s| s.to_string()),
                         alarm_type: json.get("alarm_type").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
                         message: json.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        alarm_id: json.get("alarm_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
                         timestamp: chrono::Utc::now(),
                     });
                 }

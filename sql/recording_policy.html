@@ -6,13 +6,13 @@
 INSERT INTO recording_policies (
     device_tag, channel_tag, policy_type, enabled,
     schedule_type, cron_expr,
-    alarm_type, pre_record_secs, post_record_secs,
+    alarm_type, pre_record_secs, post_record_secs, alarm_recovery_secs,
     format, max_duration_secs, max_file_size_mb, output_path,
     created_at, updated_at
 ) VALUES (
     #{device_tag}, #{channel_tag}, #{policy_type}, #{enabled},
     #{schedule_type}, #{cron_expr},
-    #{alarm_type}, #{pre_record_secs}, #{post_record_secs},
+    #{alarm_type}, #{pre_record_secs}, #{post_record_secs}, #{alarm_recovery_secs},
     #{format}, #{max_duration_secs}, #{max_file_size_mb}, #{output_path},
     #{created_at}, #{updated_at}
 )
@@ -31,6 +31,7 @@ UPDATE recording_policies
 <if test="alarm_type != null">alarm_type = #{alarm_type},</if>
 <if test="pre_record_secs != null">pre_record_secs = #{pre_record_secs},</if>
 <if test="post_record_secs != null">post_record_secs = #{post_record_secs},</if>
+<if test="alarm_recovery_secs != null">alarm_recovery_secs = #{alarm_recovery_secs},</if>
 <if test="format != null">format = #{format},</if>
 <if test="max_duration_secs != null">max_duration_secs = #{max_duration_secs},</if>
 <if test="max_file_size_mb != null">max_file_size_mb = #{max_file_size_mb},</if>
@@ -47,7 +48,7 @@ DELETE FROM recording_policies WHERE id = #{id}
 <select id="policy_select_all">
 SELECT id, device_tag, channel_tag, policy_type, enabled,
        schedule_type, cron_expr,
-       alarm_type, pre_record_secs, post_record_secs,
+       alarm_type, pre_record_secs, post_record_secs, alarm_recovery_secs,
        format, max_duration_secs, max_file_size_mb, output_path,
        created_at, updated_at
 FROM recording_policies
@@ -57,7 +58,7 @@ ORDER BY created_at DESC
 <select id="policy_select_by_id">
 SELECT id, device_tag, channel_tag, policy_type, enabled,
        schedule_type, cron_expr,
-       alarm_type, pre_record_secs, post_record_secs,
+       alarm_type, pre_record_secs, post_record_secs, alarm_recovery_secs,
        format, max_duration_secs, max_file_size_mb, output_path,
        created_at, updated_at
 FROM recording_policies
@@ -67,7 +68,7 @@ WHERE id = #{id}
 <select id="policy_select_by_device_tag">
 SELECT id, device_tag, channel_tag, policy_type, enabled,
        schedule_type, cron_expr,
-       alarm_type, pre_record_secs, post_record_secs,
+       alarm_type, pre_record_secs, post_record_secs, alarm_recovery_secs,
        format, max_duration_secs, max_file_size_mb, output_path,
        created_at, updated_at
 FROM recording_policies
@@ -78,7 +79,7 @@ ORDER BY created_at DESC
 <select id="policy_select_by_device_and_channel">
 SELECT id, device_tag, channel_tag, policy_type, enabled,
        schedule_type, cron_expr,
-       alarm_type, pre_record_secs, post_record_secs,
+       alarm_type, pre_record_secs, post_record_secs, alarm_recovery_secs,
        format, max_duration_secs, max_file_size_mb, output_path,
        created_at, updated_at
 FROM recording_policies
@@ -90,7 +91,7 @@ ORDER BY created_at DESC
 <select id="policy_select_paginated">
 SELECT id, device_tag, channel_tag, policy_type, enabled,
        schedule_type, cron_expr,
-       alarm_type, pre_record_secs, post_record_secs,
+       alarm_type, pre_record_secs, post_record_secs, alarm_recovery_secs,
        format, max_duration_secs, max_file_size_mb, output_path,
        created_at, updated_at
 FROM recording_policies
@@ -122,11 +123,11 @@ and policy_type = #{policy_type}
 <select id="policy_select_by_alarm_triggered">
 SELECT id, device_tag, channel_tag, policy_type, enabled,
        schedule_type, cron_expr,
-       alarm_type, pre_record_secs, post_record_secs,
+       alarm_type, pre_record_secs, post_record_secs, alarm_recovery_secs,
        format, max_duration_secs, max_file_size_mb, output_path,
        created_at, updated_at
 FROM recording_policies
-WHERE policy_type = 'AlarmTriggered' AND enabled = true AND alarm_type = #{alarm_type}
+WHERE policy_type = 'AlarmTriggered' AND enabled = true AND (alarm_type = #{alarm_type} OR alarm_type = '*')
 ORDER BY created_at DESC
 </select>
 

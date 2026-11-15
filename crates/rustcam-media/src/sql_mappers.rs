@@ -1523,6 +1523,7 @@ pub struct AlarmRow {
     pub device_id: i64,
     pub device_tag: String,
     pub channel_tag: Option<String>,
+    pub alarm_id: Option<String>,
     pub alarm_type: String,
     pub alarm_time: RbatisDateTime,
     pub alarm_method: i32,
@@ -1543,6 +1544,7 @@ impl From<AlarmRow> for crate::domain::alarm::Alarm {
             device_id: row.device_id,
             device_tag: row.device_tag,
             channel_tag: row.channel_tag,
+            alarm_id: row.alarm_id,
             alarm_type: row.alarm_type,
             alarm_time,
             alarm_method: row.alarm_method,
@@ -1560,6 +1562,7 @@ pub async fn alarm_insert(
     device_id: i64,
     device_tag: &str,
     channel_tag: Option<&str>,
+    alarm_id: Option<&str>,
     alarm_type: &str,
     alarm_time: RbatisDateTime,
     alarm_method: i32,
@@ -1582,7 +1585,7 @@ pub async fn alarm_select_all(
     offset: i64,
 ) -> rbatis::Result<Vec<AlarmRow>> { impled!() }
 
-#[sql("SELECT id, device_id, device_tag, alarm_type, alarm_time, alarm_method, alarm_priority, description, processed, created_at FROM alarms WHERE id = $1")]
+#[sql("SELECT id, device_id, device_tag, channel_tag, alarm_id, alarm_type, alarm_time, alarm_method, alarm_priority, description, processed, created_at FROM alarms WHERE id = $1")]
 pub async fn alarm_select_by_id(
     rb: &dyn rbatis::Executor,
     id: i64,
@@ -1920,6 +1923,7 @@ pub struct RecordingPolicyRow {
     pub alarm_type: Option<String>,
     pub pre_record_secs: Option<i32>,
     pub post_record_secs: Option<i32>,
+    pub alarm_recovery_secs: Option<i32>,
     pub format: String,
     pub max_duration_secs: Option<i32>,
     pub max_file_size_mb: Option<i32>,
@@ -1983,6 +1987,7 @@ impl TryFrom<RecordingPolicyRow> for RecordingPolicy {
             alarm_type: row.alarm_type,
             pre_record_secs: row.pre_record_secs.unwrap_or(0) as u32,
             post_record_secs: row.post_record_secs.unwrap_or(30) as u32,
+            alarm_recovery_secs: row.alarm_recovery_secs.unwrap_or(300) as u32,
             format,
             max_duration_secs: row.max_duration_secs.unwrap_or(3600) as u32,
             max_file_size_mb: row.max_file_size_mb.unwrap_or(512) as u32,
@@ -2059,6 +2064,7 @@ pub async fn policy_insert(
     alarm_type: Option<&str>,
     pre_record_secs: i32,
     post_record_secs: i32,
+    alarm_recovery_secs: i32,
     format: &str,
     max_duration_secs: i32,
     max_file_size_mb: i32,
@@ -2080,6 +2086,7 @@ pub async fn policy_update(
     alarm_type: Option<&str>,
     pre_record_secs: Option<i32>,
     post_record_secs: Option<i32>,
+    alarm_recovery_secs: Option<i32>,
     format: Option<&str>,
     max_duration_secs: Option<i32>,
     max_file_size_mb: Option<i32>,

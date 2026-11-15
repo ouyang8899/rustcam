@@ -106,6 +106,7 @@ and start_time &lt;= #{end_time}
 </if>
 </where>
 ORDER BY start_time ASC
+LIMIT #{limit} OFFSET #{offset}
 </select>
 
 <select id="segment_count_filtered">

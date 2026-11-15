@@ -42,10 +42,10 @@
                 <span v-else>-</span>
               </template>
             </el-table-column>
-            <el-table-column label="预录/后录" width="110">
+            <el-table-column label="预录/后录/恢复" width="160">
               <template #default="{ row }">
                 <span v-if="row.policy_type === 'AlarmTriggered'">
-                  {{ row.pre_record_secs || 0 }}s / {{ row.post_record_secs || 0 }}s
+                  {{ row.pre_record_secs || 0 }}s / {{ row.post_record_secs || 0 }}s / {{ row.alarm_recovery_secs ?? 300 }}s
                 </span>
                 <span v-else>-</span>
               </template>
@@ -183,6 +183,13 @@
               </el-form-item>
             </el-col>
           </el-row>
+
+          <el-form-item label="报警恢复超时 (秒)">
+            <el-input-number v-model="form.alarm_recovery_secs" :min="0" :max="86400" style="width: 100%" />
+            <div style="color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.4; margin-top: 4px;">
+              连续该秒数没有新的报警上报即视为恢复并结束报警会话；0=关闭自动恢复。会话结束后仍会保留“后录秒数”的尾录。
+            </div>
+          </el-form-item>
         </template>
 
         <el-form-item label="录像格式">
@@ -265,6 +272,7 @@ const defaultForm = () => ({
   custom_alarm_type: '',
   pre_record_secs: 0,
   post_record_secs: 30,
+  alarm_recovery_secs: 300,
   format: 'Mp4',
   max_duration_secs: 3600,
   max_file_size_mb: 512,
@@ -421,6 +429,7 @@ function openEditDialog(row) {
     custom_alarm_type: '',
     pre_record_secs: row.pre_record_secs || 0,
     post_record_secs: row.post_record_secs || 30,
+    alarm_recovery_secs: row.alarm_recovery_secs ?? 300,
     format: row.format || 'Mp4',
     max_duration_secs: row.max_duration_secs || 3600,
     max_file_size_mb: row.max_file_size_mb || 512,
@@ -473,6 +482,7 @@ async function submitForm() {
         : null,
       pre_record_secs: form.value.pre_record_secs,
       post_record_secs: form.value.post_record_secs,
+      alarm_recovery_secs: form.value.alarm_recovery_secs,
       format: form.value.format,
       max_duration_secs: form.value.max_duration_secs,
       max_file_size_mb: form.value.max_file_size_mb,

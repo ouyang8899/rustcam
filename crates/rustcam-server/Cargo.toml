@@ -6,7 +6,7 @@ authors = ["RustCam Team"]
 description = "RustCam binary entrypoint"
 
 [[bin]]
-name = "rustcam-media"
+name = "rustcam-server"
 path = "src/main.rs"
 
 [dependencies]

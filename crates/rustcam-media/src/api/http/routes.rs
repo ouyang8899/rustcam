@@ -405,6 +405,9 @@ async fn alarm_hook_handler(
         channel_tag: payload.get("channel_tag")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
+        alarm_id: payload.get("alarm_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
         alarm_type: alarm_type.clone(),
         alarm_time: chrono::Utc::now(),
         alarm_method: Some(2),

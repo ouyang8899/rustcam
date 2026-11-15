@@ -150,7 +150,7 @@ const routeMap = {
   '/streams': '视频流', '/sessions': '直播会话',   '/recordings': '录像管理', '/recordings/files': '录像文件', '/servers': '服务器',
   '/recording-policies': '录制策略', '/recording-playback': '录像回放',
   '/public': '公开', '/video-wall': '视频墙', '/video-wall/designer': '布局设计',
-  '/users': '用户管理', '/settings': '设置',
+  '/users': '用户管理', '/settings': '设置', '/login-sessions': '登录会话',
 }
 
 function getTitle(path) {

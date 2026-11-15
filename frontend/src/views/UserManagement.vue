@@ -18,6 +18,15 @@
                   <span v-if="!row.roles?.length">-</span>
                 </template>
               </el-table-column>
+              <el-table-column label="超级用户" width="120" align="center">
+                <template #default="{ row }">
+                  <el-switch
+                    :model-value="!!row.is_super"
+                    :disabled="!canManageSuper || row.id === currentUserId"
+                    @change="(value) => toggleSuper(row, value)"
+                  />
+                </template>
+              </el-table-column>
               <el-table-column label="创建时间" width="180">
                 <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
               </el-table-column>
@@ -94,7 +103,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/authStore'
@@ -119,6 +128,8 @@ const showRolesModal = ref(false)
 const editUser = ref(null)
 const rolesUser = ref(null)
 const currentUserId = auth.currentUser?.id
+/** 只有超级用户能改超级用户标志（服务端同样会实时复核）。 */
+const canManageSuper = computed(() => !!auth.currentUser?.is_super)
 
 const createForm = ref({ username: '', password: '' })
 const editForm = ref({ password: '' })
@@ -164,6 +175,30 @@ function toggleRole(id) { const idx = rolesForm.value.roleIds.indexOf(id); if (i
 async function submitRoles() { submitting.value = true; try { await userApi.assignUserRoles(rolesUser.value.id, rolesForm.value.roleIds); toast.success('角色分配成功'); showRolesModal.value = false; await fetchUsers() } catch {} finally { submitting.value = false } }
 
 async function confirmDelete(user) { try { await ElMessageBox.confirm(`确定删除用户 "${user.username}" 吗？`, '确认删除', { type: 'warning' }); await userApi.deleteUser(user.id); toast.success('用户已删除'); await fetchUsers() } catch {} }
+
+/**
+ * 设置/取消超级用户标志。
+ *
+ * 变更后该用户的会话会被服务端吊销，需要重新登录才会生效。
+ */
+async function toggleSuper(user, value) {
+  const tip = value
+    ? `确定把 "${user.username}" 设为超级用户吗？超级用户自动拥有全部权限。`
+    : `确定取消 "${user.username}" 的超级用户标志吗？该用户会被强制重新登录。`
+  try {
+    await ElMessageBox.confirm(tip, '确认修改', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await userApi.setUserSuper(user.id, value)
+    toast.success(value ? '已设为超级用户' : '已取消超级用户标志')
+    await fetchUsers()
+  } catch (e) {
+    toast.error('修改失败: ' + (e.message || e))
+    await fetchUsers()
+  }
+}
 
 function formatDate(dateStr) { if (!dateStr) return '-'; return new Date(dateStr).toLocaleString('zh-CN', { hour12: false }) }
 </script>

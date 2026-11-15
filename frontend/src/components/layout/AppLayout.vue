@@ -42,6 +42,7 @@ const routeNames = {
   '/video-wall': '监控墙',
   '/video-wall/designer': '布局设计',
   '/users': '用户管理',
+  '/login-sessions': '登录会话',
   '/settings': '系统设置',
   '/drone/drones': '无人机',
   '/drone/adapters': '接入适配器',
