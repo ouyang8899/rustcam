@@ -30,6 +30,14 @@
             }
         },
         {
+            "name": "vs2019-qt5152-pro",
+            "displayName": "Visual Studio 2019 with Qt 5.15.2 (pro features)",
+            "inherits": "vs2019-qt5152",
+            "cacheVariables": {
+                "BUILD_PRO": "ON"
+            }
+        },
+        {
             "name": "ninja-qt5152",
             "displayName": "Ninja with Qt 5.15.2",
             "description": "Use Ninja generator with Qt 5.15.2",

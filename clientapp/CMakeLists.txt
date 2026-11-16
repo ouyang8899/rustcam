@@ -49,6 +49,11 @@ endif()
 
 option(ENABLE_COVERAGE "Enable code coverage" OFF)
 
+# --- pro (commercial) features ----------------------------------------------
+# Pro 版功能（无人机/移动眼等）全部位于 clientapp/pro/，默认不参与构建。
+# 打开方式：cmake -DBUILD_PRO=ON 或使用 vs2019-qt5152-pro preset。
+option(BUILD_PRO "Build pro (commercial) features" OFF)
+
 if(ENABLE_COVERAGE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --coverage")
     set(CMAKE_EXE_LINKER_FLAGS "--coverage")
@@ -97,6 +102,10 @@ add_subdirectory(core)
 add_subdirectory(interfaces)
 add_subdirectory(resources)
 add_subdirectory(rustcam_plugins)
+
+if(BUILD_PRO)
+    add_subdirectory(pro)
+endif()
 
 set(CONFIG_TEMPLATE "resources/config/default.json.in")
 configure_file(${CONFIG_TEMPLATE} ${CMAKE_BINARY_DIR}/bin/config/default.json @ESCAPE)
@@ -154,12 +163,10 @@ set(CEF_RUNTIME_RES_FILES
 )
 
 set(THIRD_PARTY_RUNTIME_FILES
-    ${CMAKE_SOURCE_DIR}/3rd_party/CURL/bin/libcurl.dll
-    ${CMAKE_SOURCE_DIR}/3rd_party/CURL/bin/libcurl_dp.dll
-    ${CMAKE_SOURCE_DIR}/3rd_party/CURL/bin/libcrypto-4-x64.dll
-    ${CMAKE_SOURCE_DIR}/3rd_party/CURL/bin/libssl-4-x64.dll
-    ${CMAKE_SOURCE_DIR}/3rd_party/CURL/bin/libzstd.dll
-    ${CMAKE_SOURCE_DIR}/3rd_party/SQLITE3/bin/sqlite3.dll
+    ${THIRD_PARTY_DIR}/bin/libcurl.dll
+    ${THIRD_PARTY_DIR}/bin/libcrypto-3-x64.dll
+    ${THIRD_PARTY_DIR}/bin/libssl-3-x64.dll
+    ${THIRD_PARTY_DIR}/bin/zlib.dll
 )
 
 # Qt shared libraries. Both the release and the debug flavours are deployed

@@ -4,9 +4,11 @@
 #include <QString>
 #include <QJsonObject>
 
+#include "CoreExport.h"
+
 namespace rustcam {
 
-class ServerConfig : public QObject {
+class RUSTCAM_CORE_API ServerConfig : public QObject {
     Q_OBJECT
 public:
     static ServerConfig* instance();

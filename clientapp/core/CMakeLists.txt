@@ -162,16 +162,18 @@ set(Boost_USE_STATIC_LIBS OFF)
 set(Boost_USE_MULTITHREADED ON)
 add_definitions(-DBOOST_ALL_NO_LIB)
 
-set(CURL_ROOT "${CMAKE_SOURCE_DIR}/3rd_party/CURL")
+# Shared third-party stack: everything installed under 3rd_party root
+# (curl/openssl/sqlite are built from 3rd_party/source, see 3rd_party/scripts).
+set(CURL_ROOT "${CMAKE_SOURCE_DIR}/3rd_party")
 set(CURL_INCLUDE_DIR "${CURL_ROOT}/include")
 set(CURL_LIBRARY "${CURL_ROOT}/lib/libcurl_imp.lib")
 
-set(OPENSSL_ROOT "${CMAKE_SOURCE_DIR}/3rd_party/openssl")
+set(OPENSSL_ROOT "${CMAKE_SOURCE_DIR}/3rd_party")
 set(OPENSSL_INCLUDE_DIR "${OPENSSL_ROOT}/include")
 set(OPENSSL_CRYPTO_LIBRARY "${OPENSSL_ROOT}/lib/libcrypto.lib")
 set(OPENSSL_SSL_LIBRARY "${OPENSSL_ROOT}/lib/libssl.lib")
 
-set(SQLITE3_ROOT "${CMAKE_SOURCE_DIR}/3rd_party/SQLITE3")
+set(SQLITE3_ROOT "${CMAKE_SOURCE_DIR}/3rd_party")
 set(SQLITE3_INCLUDE_DIR "${SQLITE3_ROOT}/include")
 set(SQLITE3_LIBRARY "${SQLITE3_ROOT}/lib/sqlite3.lib")
 

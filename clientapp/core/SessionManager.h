@@ -4,9 +4,11 @@
 #include <QString>
 #include <QJsonObject>
 
+#include "CoreExport.h"
+
 namespace rustcam {
 
-class SessionManager : public QObject {
+class RUSTCAM_CORE_API SessionManager : public QObject {
     Q_OBJECT
 public:
     static SessionManager* instance();
