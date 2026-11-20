@@ -1,6 +1,6 @@
 use crate::media::errors::{MediaError, Result};
-use crate::media::node::{ DataType, MediaNode };
-use crate::media::rtp_server::{TcpRtpServer, UDPRtpServer, RtpServerActive};
+use crate::media::node::{DataType, MediaNode};
+use crate::media::rtp_server::{RtpServerActive, TcpRtpServer, UDPRtpServer};
 use async_trait::async_trait;
 use bytes::BytesMut;
 use std::collections::HashMap;
@@ -483,15 +483,13 @@ impl crate::media::node::MediaTransport for GB28181BroadcastVoiceTransport {
     }
 
     async fn close(&self) -> Result<()> {
-
         {
             let mut guard = self.audio_tx.lock().unwrap();
             guard.take();
         }
 
         match &self.mode {
-            BroadcastMode::TcpPassive { stream, .. }
-            | BroadcastMode::TcpActive { stream, .. } => {
+            BroadcastMode::TcpPassive { stream, .. } | BroadcastMode::TcpActive { stream, .. } => {
                 let mut guard = stream.lock().await;
                 if let Some(mut s) = guard.take() {
                     let _ = s.shutdown().await;

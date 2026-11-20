@@ -1,16 +1,16 @@
-use std::sync::Arc;
-use axum::{
-    extract::{Path, State, Query},
-    Json,
-};
-use serde::Deserialize;
-use chrono::{DateTime, Utc};
 use crate::api::response::ApiResponse;
 use crate::api::state::FullState;
-use crate::error::AppError;
 use crate::domain::recording_policy::{
-    RecordingSegmentQuery, SegmentType, PaginatedRecordingFiles, PlayUrlResponse,
+    PaginatedRecordingFiles, PlayUrlResponse, RecordingSegmentQuery, SegmentType,
 };
+use crate::error::AppError;
+use axum::{
+    extract::{Path, Query, State},
+    Json,
+};
+use chrono::{DateTime, Utc};
+use serde::Deserialize;
+use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
 pub struct RecordingFilesQuery {
@@ -28,7 +28,6 @@ pub struct RecordingFilesQuery {
 }
 
 impl RecordingFilesQuery {
-
     pub fn channel_tag(&self) -> Option<&str> {
         self.channel_tag.as_deref().filter(|s| !s.is_empty())
     }
@@ -38,15 +37,17 @@ impl RecordingFilesQuery {
     }
 
     pub fn segment_type(&self) -> Option<SegmentType> {
-        self.segment_type.as_ref().and_then(|s| {
-            SegmentType::from_str(s)
-        })
+        self.segment_type
+            .as_ref()
+            .and_then(|s| SegmentType::from_str(s))
     }
 
     pub fn validate(&self) -> Result<(), AppError> {
         if let (Some(start), Some(end)) = (self.start_time, self.end_time) {
             if start >= end {
-                return Err(AppError::BadRequest("start_time must be before end_time".to_string()));
+                return Err(AppError::BadRequest(
+                    "start_time must be before end_time".to_string(),
+                ));
             }
         }
         if let Some(p) = self.page {
@@ -84,7 +85,10 @@ pub async fn list_recording_files_handler(
         page: q.page,
     };
 
-    let result = registry.recording_policy_service.list_recording_segments(query).await?;
+    let result = registry
+        .recording_policy_service
+        .list_recording_segments(query)
+        .await?;
 
     Ok(Json(ApiResponse::success(result)))
 }

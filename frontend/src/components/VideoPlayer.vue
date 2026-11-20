@@ -227,12 +227,6 @@ async function initPlayer() {
   }
 }
 
-  /**
-   * 原生播放（MP4 / HTTP 直链）
-   *
-   * 录像回放的文件地址是媒体服务器上的 mp4 直链，浏览器 <video> 可直接播放，
-   * 不走 hls.js / flv.js。
-   */
   async function initNativeVideo(url) {
     const video = videoRef.value
     if (!video) return

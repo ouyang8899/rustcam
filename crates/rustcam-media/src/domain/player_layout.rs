@@ -13,7 +13,9 @@ pub struct LayoutItem {
     pub label: Option<String>,
 }
 
-fn default_one() -> usize { 1 }
+fn default_one() -> usize {
+    1
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerLayout {

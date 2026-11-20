@@ -4,7 +4,6 @@
 // ============================================================
 
 :root {
-  // ── Accent (电光青) ──────────────────────────────────────
   --color-accent:        #00D4FF;
   --color-accent-dim:    rgba(0, 212, 255, 0.12);
   --color-accent-glow:   rgba(0, 212, 255, 0.35);
@@ -138,12 +137,11 @@
   --weight-semibold: 600;
   --weight-bold:     700;
 
-  // ── Border radius (2px industrial) ───────────────────────
-  --radius-sm:  0.125rem;  //  2px
-  --radius-base: 0.125rem;  //  2px
-  --radius-md:  0.125rem;  //  2px
-  --radius-lg:  0.125rem;  //  2px
-  --radius-xl:  0.25rem;   //  4px (largest — modals, dropdowns)
+  --radius-sm:  0;
+  --radius-base: 0;
+  --radius-md:  0;
+  --radius-lg:  0;
+  --radius-xl:  0;
 
   // ── Spacing ──────────────────────────────────────────────
   --space-1:  0.25rem;  //  4px

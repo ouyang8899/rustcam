@@ -1,6 +1,6 @@
+use crate::context::ServiceRegistry;
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
-use crate::context::ServiceRegistry;
 
 static GLOBAL_REGISTRY: OnceCell<Arc<ServiceRegistry>> = OnceCell::new();
 

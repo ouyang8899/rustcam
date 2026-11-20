@@ -1,9 +1,9 @@
+use crate::domain::SessionType;
+use crate::error::Result;
+use crate::protocol::adapter::SignalAdapter;
+use crate::protocol::event::{ProtocolType, SignalEvent};
 use async_trait::async_trait;
 use std::net::SocketAddr;
-use crate::domain::SessionType;
-use crate::protocol::event::{ SignalEvent, ProtocolType };
-use crate::protocol::adapter::SignalAdapter;
-use crate::error::Result;
 
 pub struct RtspAdapter {
     remote_addr: Option<SocketAddr>,
@@ -49,7 +49,9 @@ impl RtspAdapter {
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(0);
         let total_len = body_start + content_length;
-        if buffer.len() < total_len { return None; }
+        if buffer.len() < total_len {
+            return None;
+        }
         Some((&buffer[..total_len], &buffer[total_len..]))
     }
 
@@ -60,12 +62,18 @@ impl RtspAdapter {
 
         for line in &lines {
             let line = line.trim();
-            if line.starts_with("OPTIONS ") || line.starts_with("DESCRIBE ") ||
-                line.starts_with("SETUP ") || line.starts_with("PLAY ") ||
-                line.starts_with("TEARDOWN ") {
+            if line.starts_with("OPTIONS ")
+                || line.starts_with("DESCRIBE ")
+                || line.starts_with("SETUP ")
+                || line.starts_with("PLAY ")
+                || line.starts_with("TEARDOWN ")
+            {
                 events.push(SignalEvent::StartPlay {
                     device_tag: self.device_id.clone(),
-                    session_id: self.session.clone().unwrap_or_else(|| format!("rtsp_{}", chrono::Utc::now().timestamp())),
+                    session_id: self
+                        .session
+                        .clone()
+                        .unwrap_or_else(|| format!("rtsp_{}", chrono::Utc::now().timestamp())),
                     channel_id: Some("0".to_string()),
                     transport: crate::protocol::event::TransportType::Tcp,
                     media_server_name: None,
@@ -84,7 +92,10 @@ impl RtspAdapter {
 
     pub fn build_options_response(&mut self) -> String {
         let cseq = self.next_cseq();
-        format!("RTSP/1.0 200 OK\r\nCSeq: {}\r\nPublic: DESCRIBE, SETUP, TEARDOWN, PLAY, PAUSE\r\n\r\n", cseq)
+        format!(
+            "RTSP/1.0 200 OK\r\nCSeq: {}\r\nPublic: DESCRIBE, SETUP, TEARDOWN, PLAY, PAUSE\r\n\r\n",
+            cseq
+        )
     }
 
     pub fn build_describe_response(&mut self, sdp: &str) -> String {
@@ -94,7 +105,9 @@ impl RtspAdapter {
 }
 
 impl Default for RtspAdapter {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[async_trait]
@@ -126,11 +139,30 @@ impl SignalAdapter for RtspAdapter {
         Ok(())
     }
 
-    async fn send(&mut self, _data: &[u8]) -> Result<()> { Ok(()) }
-    fn protocol_type(&self) -> ProtocolType { ProtocolType::Rtsp }
-    fn name(&self) -> &'static str { "RTSP" }
-    fn keepalive(&self) -> bool { true }
-    fn idle_timeout(&self) -> Option<u64> { Some(60) }
-    async fn start(&mut self, _device_tag: &str, _channel_tag: &str) -> Result<()> { Ok(()) }
-    async fn ptz_control(&mut self, _channel_id: &str, _command: &crate::protocol::event::PtzCommand, _speed: Option<u8>) -> Result<()> { Ok(()) }
+    async fn send(&mut self, _data: &[u8]) -> Result<()> {
+        Ok(())
+    }
+    fn protocol_type(&self) -> ProtocolType {
+        ProtocolType::Rtsp
+    }
+    fn name(&self) -> &'static str {
+        "RTSP"
+    }
+    fn keepalive(&self) -> bool {
+        true
+    }
+    fn idle_timeout(&self) -> Option<u64> {
+        Some(60)
+    }
+    async fn start(&mut self, _device_tag: &str, _channel_tag: &str) -> Result<()> {
+        Ok(())
+    }
+    async fn ptz_control(
+        &mut self,
+        _channel_id: &str,
+        _command: &crate::protocol::event::PtzCommand,
+        _speed: Option<u8>,
+    ) -> Result<()> {
+        Ok(())
+    }
 }

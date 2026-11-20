@@ -24,8 +24,6 @@
 
 #define CFG_SCREENSHOT_PATH      CONFIG_KEY_PREFIX "screenshot/savePath"
 
-#define CFG_MAP_TMS_URL          CONFIG_KEY_PREFIX "map/tmsUrl"
-#define CFG_MAP_WFS_URL          CONFIG_KEY_PREFIX "map/wfsUrl"
-#define CFG_MAP_MIN_ZOOM         CONFIG_KEY_PREFIX "map/minZoom"
-#define CFG_MAP_MAX_ZOOM         CONFIG_KEY_PREFIX "map/maxZoom"
+#define CFG_MAP_LAYERS_JSON      CONFIG_KEY_PREFIX "map/layersJson"
+#define CFG_MAP_WFS_JSON         CONFIG_KEY_PREFIX "map/wfsJson"
 

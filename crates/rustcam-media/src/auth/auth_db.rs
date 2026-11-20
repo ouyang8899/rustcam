@@ -1,35 +1,40 @@
-use rbatis::rbatis::RBatis;
-use rbs::Value;
-use rbdc_pg::PgDriver;
 use async_trait::async_trait;
+use rbatis::rbatis::RBatis;
+use rbdc_pg::PgDriver;
+use rbs::Value;
 
+use super::models::{Permission, Role, User};
+use super::repository::{PermissionRepository, RoleRepository, UserRepository};
+use crate::error::Result;
 use argon2::PasswordHasher;
 use uuid::Uuid;
-use crate::error::Result;
-use super::models::{Permission, Role, User};
-use super::repository::{UserRepository, RoleRepository, PermissionRepository};
 
 pub struct PostgresAuthRepository {
     pub(crate) rb: RBatis,
 }
 
 impl PostgresAuthRepository {
-
     pub fn with_rb(rb: RBatis) -> Self {
         Self { rb }
     }
 
     pub async fn init(&self, default_username: &str, default_password: &str) {
         self.init_tables().await;
-        self.seed_default_data(default_username, default_password).await;
+        self.seed_default_data(default_username, default_password)
+            .await;
     }
 
-    pub async fn new(database_url: &str, default_username: &str, default_password: &str) -> anyhow::Result<Self> {
+    pub async fn new(
+        database_url: &str,
+        default_username: &str,
+        default_password: &str,
+    ) -> anyhow::Result<Self> {
         let rb = RBatis::new();
         let _init_res = rb.init(PgDriver {}, database_url);
         let repo = Self { rb };
         repo.init_tables().await;
-        repo.seed_default_data(default_username, default_password).await;
+        repo.seed_default_data(default_username, default_password)
+            .await;
         Ok(repo)
     }
 
@@ -73,14 +78,23 @@ impl PostgresAuthRepository {
     }
 
     async fn seed_default_data(&self, default_username: &str, default_password: &str) {
-        let count: Vec<Value> = match self.rb.exec_decode("SELECT COUNT(*) as c FROM users", vec![]).await {
+        let count: Vec<Value> = match self
+            .rb
+            .exec_decode("SELECT COUNT(*) as c FROM users", vec![])
+            .await
+        {
             Ok(c) => c,
             Err(e) => {
-                tracing::warn!("[AuthDB] seed_default_data skipped (table not ready): {}", e);
+                tracing::warn!(
+                    "[AuthDB] seed_default_data skipped (table not ready): {}",
+                    e
+                );
                 return;
             }
         };
-        if !count.is_empty() && count[0]["c"].as_i64().unwrap_or(0) > 0 { return; }
+        if !count.is_empty() && count[0]["c"].as_i64().unwrap_or(0) > 0 {
+            return;
+        }
 
         let now = chrono::Utc::now().to_rfc3339();
         let admin_role_id = Uuid::new_v4();
@@ -106,16 +120,28 @@ impl PostgresAuthRepository {
             tracing::warn!("[AuthDB] seed_default_data (user may exist): {}", e);
         }
 
-        if let Err(e) = self.rb.exec("INSERT INTO user_roles (user_id, role_id) VALUES ($1::uuid, $2::uuid)",
-                     vec![rbs::value![admin_user_id.to_string()], rbs::value![admin_role_id.to_string()]]).await {
+        if let Err(e) = self
+            .rb
+            .exec(
+                "INSERT INTO user_roles (user_id, role_id) VALUES ($1::uuid, $2::uuid)",
+                vec![
+                    rbs::value![admin_user_id.to_string()],
+                    rbs::value![admin_role_id.to_string()],
+                ],
+            )
+            .await
+        {
             tracing::warn!("[AuthDB] seed_default_data (user_roles may exist): {}", e);
         }
-
     }
 }
 
 impl Clone for PostgresAuthRepository {
-    fn clone(&self) -> Self { Self { rb: self.rb.clone() } }
+    fn clone(&self) -> Self {
+        Self {
+            rb: self.rb.clone(),
+        }
+    }
 }
 
 #[async_trait]
@@ -163,7 +189,12 @@ impl UserRepository for PostgresAuthRepository {
     }
 
     async fn delete(&self, id: Uuid) -> Result<()> {
-        self.rb.exec("DELETE FROM users WHERE id = $1::uuid", vec![rbs::value![id.to_string()]]).await?;
+        self.rb
+            .exec(
+                "DELETE FROM users WHERE id = $1::uuid",
+                vec![rbs::value![id.to_string()]],
+            )
+            .await?;
         Ok(())
     }
 
@@ -179,35 +210,53 @@ impl UserRepository for PostgresAuthRepository {
     }
 
     async fn list(&self) -> Result<Vec<User>> {
-        let rows: Vec<Value> = self.rb.exec_decode("SELECT id, username, password_hash, is_super, created_at, updated_at FROM users", vec![]).await?;
-        Ok(rows.into_iter().map(|r| User {
-            id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
-            username: r["username"].as_str().unwrap_or("").to_string(),
-            password_hash: r["password_hash"].as_str().unwrap_or("").to_string(),
-            is_super: r["is_super"].as_bool().unwrap_or(false),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        }).collect())
+        let rows: Vec<Value> = self
+            .rb
+            .exec_decode(
+                "SELECT id, username, password_hash, is_super, created_at, updated_at FROM users",
+                vec![],
+            )
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| User {
+                id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
+                username: r["username"].as_str().unwrap_or("").to_string(),
+                password_hash: r["password_hash"].as_str().unwrap_or("").to_string(),
+                is_super: r["is_super"].as_bool().unwrap_or(false),
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            })
+            .collect())
     }
 
     async fn list_paginated(&self, offset: usize, limit: usize) -> Result<Vec<User>> {
-        let rows: Vec<Value> = self.rb.exec_decode(
-            "SELECT id, username, password_hash, is_super, created_at, updated_at FROM users \
+        let rows: Vec<Value> = self
+            .rb
+            .exec_decode(
+                "SELECT id, username, password_hash, is_super, created_at, updated_at FROM users \
              ORDER BY created_at, id LIMIT $1 OFFSET $2",
-            vec![rbs::value![limit as i64], rbs::value![offset as i64]],
-        ).await?;
-        Ok(rows.into_iter().map(|r| User {
-            id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
-            username: r["username"].as_str().unwrap_or("").to_string(),
-            password_hash: r["password_hash"].as_str().unwrap_or("").to_string(),
-            is_super: r["is_super"].as_bool().unwrap_or(false),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        }).collect())
+                vec![rbs::value![limit as i64], rbs::value![offset as i64]],
+            )
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| User {
+                id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
+                username: r["username"].as_str().unwrap_or("").to_string(),
+                password_hash: r["password_hash"].as_str().unwrap_or("").to_string(),
+                is_super: r["is_super"].as_bool().unwrap_or(false),
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            })
+            .collect())
     }
 
     async fn count(&self) -> Result<usize> {
-        let rows: Vec<Value> = self.rb.exec_decode("SELECT count(*) AS total FROM users", vec![]).await?;
+        let rows: Vec<Value> = self
+            .rb
+            .exec_decode("SELECT count(*) AS total FROM users", vec![])
+            .await?;
         Ok(rows
             .first()
             .and_then(|r| r["total"].as_i64())
@@ -220,26 +269,45 @@ impl UserRepository for PostgresAuthRepository {
             "SELECT r.name FROM roles r INNER JOIN user_roles ur ON r.id::uuid = ur.role_id::uuid WHERE ur.user_id = $1::uuid",
             vec![rbs::value![user_id.to_string()]],
         ).await?;
-        Ok(rows.into_iter().filter_map(|r| r["name"].as_str().map(String::from)).collect())
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| r["name"].as_str().map(String::from))
+            .collect())
     }
 
     async fn set_user_roles(&self, user_id: Uuid, role_ids: &[Uuid]) -> Result<()> {
-        self.rb.exec("DELETE FROM user_roles WHERE user_id = $1::uuid", vec![rbs::value![user_id.to_string()]]).await?;
+        self.rb
+            .exec(
+                "DELETE FROM user_roles WHERE user_id = $1::uuid",
+                vec![rbs::value![user_id.to_string()]],
+            )
+            .await?;
         for role_id in role_ids {
-            self.rb.exec("INSERT INTO user_roles (user_id, role_id) VALUES ($1::uuid, $2::uuid)",
-                         vec![rbs::value![user_id.to_string()], rbs::value![role_id.to_string()]]).await?;
+            self.rb
+                .exec(
+                    "INSERT INTO user_roles (user_id, role_id) VALUES ($1::uuid, $2::uuid)",
+                    vec![
+                        rbs::value![user_id.to_string()],
+                        rbs::value![role_id.to_string()],
+                    ],
+                )
+                .await?;
         }
         Ok(())
     }
 
     async fn get_user_role_ids(&self, user_id: Uuid) -> Result<Vec<Uuid>> {
-        let rows: Vec<Value> = self.rb.exec_decode(
-            "SELECT role_id FROM user_roles WHERE user_id = $1::uuid",
-            vec![rbs::value![user_id.to_string()]],
-        ).await?;
-        Ok(rows.into_iter().filter_map(|r| {
-            Uuid::parse_str(r["role_id"].as_str().unwrap_or("")).ok()
-        }).collect())
+        let rows: Vec<Value> = self
+            .rb
+            .exec_decode(
+                "SELECT role_id FROM user_roles WHERE user_id = $1::uuid",
+                vec![rbs::value![user_id.to_string()]],
+            )
+            .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| Uuid::parse_str(r["role_id"].as_str().unwrap_or("")).ok())
+            .collect())
     }
 }
 
@@ -252,18 +320,25 @@ impl RoleRepository for PostgresAuthRepository {
             id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
             name: r["name"].as_str().unwrap_or("").to_string(),
             description: r["description"].as_str().map(String::from),
-            created_at: chrono::Utc::now(), updated_at: chrono::Utc::now(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
         }))
     }
 
     async fn find_by_name(&self, name: &str) -> Result<Option<Role>> {
-        let rows: Vec<Value> = self.rb.exec_decode("SELECT id, name, description, created_at, updated_at FROM roles WHERE name = $1",
-                                                   vec![rbs::value![name]]).await?;
+        let rows: Vec<Value> = self
+            .rb
+            .exec_decode(
+                "SELECT id, name, description, created_at, updated_at FROM roles WHERE name = $1",
+                vec![rbs::value![name]],
+            )
+            .await?;
         Ok(rows.into_iter().next().map(|r| Role {
             id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
             name: r["name"].as_str().unwrap_or("").to_string(),
             description: r["description"].as_str().map(String::from),
-            created_at: chrono::Utc::now(), updated_at: chrono::Utc::now(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
         }))
     }
 
@@ -280,29 +355,52 @@ impl RoleRepository for PostgresAuthRepository {
     }
 
     async fn delete(&self, id: Uuid) -> Result<()> {
-        self.rb.exec("DELETE FROM roles WHERE id = $1::uuid", vec![rbs::value![id.to_string()]]).await?;
+        self.rb
+            .exec(
+                "DELETE FROM roles WHERE id = $1::uuid",
+                vec![rbs::value![id.to_string()]],
+            )
+            .await?;
         Ok(())
     }
 
     async fn list(&self) -> Result<Vec<Role>> {
-        let rows: Vec<Value> = self.rb.exec_decode("SELECT id, name, description, created_at, updated_at FROM roles", vec![]).await?;
-        Ok(rows.into_iter().map(|r| Role {
-            id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
-            name: r["name"].as_str().unwrap_or("").to_string(),
-            description: r["description"].as_str().map(String::from),
-            created_at: chrono::Utc::now(), updated_at: chrono::Utc::now(),
-        }).collect())
+        let rows: Vec<Value> = self
+            .rb
+            .exec_decode(
+                "SELECT id, name, description, created_at, updated_at FROM roles",
+                vec![],
+            )
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| Role {
+                id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
+                name: r["name"].as_str().unwrap_or("").to_string(),
+                description: r["description"].as_str().map(String::from),
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            })
+            .collect())
     }
 
     async fn get_role_permissions(&self, role_id: Uuid) -> Result<Vec<String>> {
         let rows: Vec<Value> = self.rb.exec_decode(
             "SELECT p.name FROM permissions p INNER JOIN role_permissions rp ON p.id::uuid = rp.permission_id::uuid WHERE rp.role_id = $1::uuid",
             vec![rbs::value![role_id.to_string()]]).await?;
-        Ok(rows.into_iter().filter_map(|r| r["name"].as_str().map(String::from)).collect())
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| r["name"].as_str().map(String::from))
+            .collect())
     }
 
     async fn set_role_permissions(&self, role_id: Uuid, permission_ids: &[Uuid]) -> Result<()> {
-        self.rb.exec("DELETE FROM role_permissions WHERE role_id = $1::uuid", vec![rbs::value![role_id.to_string()]]).await?;
+        self.rb
+            .exec(
+                "DELETE FROM role_permissions WHERE role_id = $1::uuid",
+                vec![rbs::value![role_id.to_string()]],
+            )
+            .await?;
         for perm_id in permission_ids {
             self.rb.exec("INSERT INTO role_permissions (role_id, permission_id) VALUES ($1::uuid, $2::uuid)",
                          vec![rbs::value![role_id.to_string()], rbs::value![perm_id.to_string()]]).await?;
@@ -311,26 +409,38 @@ impl RoleRepository for PostgresAuthRepository {
     }
 
     async fn list_role_permissions(&self) -> Result<Vec<(String, String)>> {
-        let rows: Vec<Value> = self.rb.exec_decode(
-            "SELECT r.name AS role_name, p.name AS permission_name \
+        let rows: Vec<Value> = self
+            .rb
+            .exec_decode(
+                "SELECT r.name AS role_name, p.name AS permission_name \
              FROM roles r \
              INNER JOIN role_permissions rp ON rp.role_id = r.id \
              INNER JOIN permissions p ON p.id = rp.permission_id",
-            vec![]).await?;
-        Ok(rows.into_iter().filter_map(|r| {
-            let role = r["role_name"].as_str()?.to_string();
-            let permission = r["permission_name"].as_str()?.to_string();
-            Some((role, permission))
-        }).collect())
+                vec![],
+            )
+            .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| {
+                let role = r["role_name"].as_str()?.to_string();
+                let permission = r["permission_name"].as_str()?.to_string();
+                Some((role, permission))
+            })
+            .collect())
     }
 
     async fn list_role_inheritance(&self) -> Result<Vec<(String, String)>> {
-        let rows: Vec<Value> = match self.rb.exec_decode(
-            "SELECT child.name AS child_name, parent.name AS parent_name \
+        let rows: Vec<Value> = match self
+            .rb
+            .exec_decode(
+                "SELECT child.name AS child_name, parent.name AS parent_name \
              FROM role_inheritance ri \
              INNER JOIN roles child ON child.id = ri.child_role_id \
              INNER JOIN roles parent ON parent.id = ri.parent_role_id",
-            vec![]).await {
+                vec![],
+            )
+            .await
+        {
             Ok(rows) => rows,
             Err(e) => {
                 tracing::warn!(
@@ -340,11 +450,14 @@ impl RoleRepository for PostgresAuthRepository {
                 return Ok(Vec::new());
             }
         };
-        Ok(rows.into_iter().filter_map(|r| {
-            let child = r["child_name"].as_str()?.to_string();
-            let parent = r["parent_name"].as_str()?.to_string();
-            Some((child, parent))
-        }).collect())
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| {
+                let child = r["child_name"].as_str()?.to_string();
+                let parent = r["parent_name"].as_str()?.to_string();
+                Some((child, parent))
+            })
+            .collect())
     }
 
     async fn get_role_parents(&self, role_id: Uuid) -> Result<Vec<Role>> {
@@ -354,16 +467,25 @@ impl RoleRepository for PostgresAuthRepository {
              INNER JOIN roles parent ON parent.id = ri.parent_role_id \
              WHERE ri.child_role_id = $1::uuid",
             vec![rbs::value![role_id.to_string()]]).await?;
-        Ok(rows.into_iter().map(|r| Role {
-            id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
-            name: r["name"].as_str().unwrap_or("").to_string(),
-            description: r["description"].as_str().map(String::from),
-            created_at: chrono::Utc::now(), updated_at: chrono::Utc::now(),
-        }).collect())
+        Ok(rows
+            .into_iter()
+            .map(|r| Role {
+                id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
+                name: r["name"].as_str().unwrap_or("").to_string(),
+                description: r["description"].as_str().map(String::from),
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            })
+            .collect())
     }
 
     async fn set_role_parents(&self, role_id: Uuid, parent_ids: &[Uuid]) -> Result<()> {
-        self.rb.exec("DELETE FROM role_inheritance WHERE child_role_id = $1::uuid", vec![rbs::value![role_id.to_string()]]).await?;
+        self.rb
+            .exec(
+                "DELETE FROM role_inheritance WHERE child_role_id = $1::uuid",
+                vec![rbs::value![role_id.to_string()]],
+            )
+            .await?;
         for parent_id in parent_ids {
             self.rb.exec("INSERT INTO role_inheritance (parent_role_id, child_role_id) VALUES ($1::uuid, $2::uuid)",
                          vec![rbs::value![parent_id.to_string()], rbs::value![role_id.to_string()]]).await?;
@@ -375,8 +497,13 @@ impl RoleRepository for PostgresAuthRepository {
 #[async_trait]
 impl PermissionRepository for PostgresAuthRepository {
     async fn find_by_id(&self, id: Uuid) -> Result<Option<Permission>> {
-        let rows: Vec<Value> = self.rb.exec_decode("SELECT id, name, description, created_at FROM permissions WHERE id = $1::uuid",
-                                                   vec![rbs::value![id.to_string()]]).await?;
+        let rows: Vec<Value> = self
+            .rb
+            .exec_decode(
+                "SELECT id, name, description, created_at FROM permissions WHERE id = $1::uuid",
+                vec![rbs::value![id.to_string()]],
+            )
+            .await?;
         Ok(rows.into_iter().next().map(|r| Permission {
             id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
             name: r["name"].as_str().unwrap_or("").to_string(),
@@ -386,8 +513,13 @@ impl PermissionRepository for PostgresAuthRepository {
     }
 
     async fn find_by_name(&self, name: &str) -> Result<Option<Permission>> {
-        let rows: Vec<Value> = self.rb.exec_decode("SELECT id, name, description, created_at FROM permissions WHERE name = $1",
-                                                   vec![rbs::value![name]]).await?;
+        let rows: Vec<Value> = self
+            .rb
+            .exec_decode(
+                "SELECT id, name, description, created_at FROM permissions WHERE name = $1",
+                vec![rbs::value![name]],
+            )
+            .await?;
         Ok(rows.into_iter().next().map(|r| Permission {
             id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
             name: r["name"].as_str().unwrap_or("").to_string(),
@@ -403,42 +535,73 @@ impl PermissionRepository for PostgresAuthRepository {
     }
 
     async fn update(&self, permission: &Permission) -> Result<()> {
-        self.rb.exec("UPDATE permissions SET name = $1, description = $2 WHERE id = $3::uuid",
-                     vec![rbs::value![permission.name.clone()], rbs::value![permission.description.clone().unwrap_or_default()], rbs::value![permission.id.to_string()]]).await?;
+        self.rb
+            .exec(
+                "UPDATE permissions SET name = $1, description = $2 WHERE id = $3::uuid",
+                vec![
+                    rbs::value![permission.name.clone()],
+                    rbs::value![permission.description.clone().unwrap_or_default()],
+                    rbs::value![permission.id.to_string()],
+                ],
+            )
+            .await?;
         Ok(())
     }
 
     async fn delete(&self, id: Uuid) -> Result<()> {
-        self.rb.exec("DELETE FROM permissions WHERE id = $1::uuid", vec![rbs::value![id.to_string()]]).await?;
+        self.rb
+            .exec(
+                "DELETE FROM permissions WHERE id = $1::uuid",
+                vec![rbs::value![id.to_string()]],
+            )
+            .await?;
         Ok(())
     }
 
     async fn list(&self) -> Result<Vec<Permission>> {
-        let rows: Vec<Value> = self.rb.exec_decode("SELECT id, name, description, created_at FROM permissions", vec![]).await?;
-        Ok(rows.into_iter().map(|r| Permission {
-            id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
-            name: r["name"].as_str().unwrap_or("").to_string(),
-            description: r["description"].as_str().map(String::from),
-            created_at: chrono::Utc::now(),
-        }).collect())
+        let rows: Vec<Value> = self
+            .rb
+            .exec_decode(
+                "SELECT id, name, description, created_at FROM permissions",
+                vec![],
+            )
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| Permission {
+                id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
+                name: r["name"].as_str().unwrap_or("").to_string(),
+                description: r["description"].as_str().map(String::from),
+                created_at: chrono::Utc::now(),
+            })
+            .collect())
     }
 
     async fn list_paginated(&self, offset: usize, limit: usize) -> Result<Vec<Permission>> {
-        let rows: Vec<Value> = self.rb.exec_decode(
-            "SELECT id, name, description, created_at FROM permissions \
+        let rows: Vec<Value> = self
+            .rb
+            .exec_decode(
+                "SELECT id, name, description, created_at FROM permissions \
              ORDER BY name, id LIMIT $1 OFFSET $2",
-            vec![rbs::value![limit as i64], rbs::value![offset as i64]],
-        ).await?;
-        Ok(rows.into_iter().map(|r| Permission {
-            id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
-            name: r["name"].as_str().unwrap_or("").to_string(),
-            description: r["description"].as_str().map(String::from),
-            created_at: chrono::Utc::now(),
-        }).collect())
+                vec![rbs::value![limit as i64], rbs::value![offset as i64]],
+            )
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| Permission {
+                id: Uuid::parse_str(r["id"].as_str().unwrap_or("")).unwrap_or(Uuid::nil()),
+                name: r["name"].as_str().unwrap_or("").to_string(),
+                description: r["description"].as_str().map(String::from),
+                created_at: chrono::Utc::now(),
+            })
+            .collect())
     }
 
     async fn count(&self) -> Result<usize> {
-        let rows: Vec<Value> = self.rb.exec_decode("SELECT count(*) AS total FROM permissions", vec![]).await?;
+        let rows: Vec<Value> = self
+            .rb
+            .exec_decode("SELECT count(*) AS total FROM permissions", vec![])
+            .await?;
         Ok(rows
             .first()
             .and_then(|r| r["total"].as_i64())

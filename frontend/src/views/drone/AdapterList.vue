@@ -1,118 +1,123 @@
 <!-- @ts-check -->
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <div class="header-left">
-        <h1 class="page-title">接入适配器</h1>
-        <span class="header-sub">机载链路实体 · 决定谁来接管飞控、监听哪个端口段</span>
-      </div>
-      <div class="page-toolbar">
-        <el-switch
-          v-model="store.includeDisabled"
-          active-text="显示已停用"
-          @change="onToggleDisabled"
-        />
-        <el-button :icon="Refresh" @click="refresh">刷新</el-button>
-        <el-button type="primary" :icon="Plus" @click="openEditor()">新增 Adapter</el-button>
-      </div>
-    </div>
-
-    <div class="page-body adapter-page">
-      <div class="stat-grid">
-        <div class="stat-card">
-          <div class="stat-label">Adapter 总数</div>
-          <div class="stat-value">{{ store.totalCount }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">在线</div>
-          <div class="stat-value online">{{ store.onlineCount }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">启用 / 停用</div>
-          <div class="stat-value">{{ store.enabledAdapters.length }} / {{ store.disabledCount }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">承载无人机</div>
-          <div class="stat-value">{{ store.boundTotal }}</div>
-        </div>
-      </div>
-
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        class="hint"
-        title="标识要与适配器进程配置一致"
-        description="adapter_id 是适配器接入平台时使用的标识，创建后不可修改；端口段内的端口按飞控系统号区分，一台 adapter 可服务多架无人机。"
+  <PageView title="接入适配器" subtitle="机载链路实体 · 决定谁来接管飞控、监听哪个端口段">
+    <template #toolbar>
+      <el-switch
+        v-model="store.includeDisabled"
+        active-text="显示已停用"
+        @change="onToggleDisabled"
       />
+      <el-button :icon="Refresh" @click="refresh">刷新</el-button>
+      <el-button type="primary" :icon="Plus" @click="openEditor()">新增 Adapter</el-button>
+    </template>
 
-      <el-empty v-if="!store.loading && store.adapters.length === 0" description="还没有 adapter 配置">
-        <el-button type="primary" @click="openEditor()">创建第一个 Adapter</el-button>
-      </el-empty>
-
-      <el-table v-else v-loading="store.loading" :data="store.adapters" class="adapter-table" stripe>
-        <el-table-column label="Adapter" min-width="220">
-          <template #default="{ row }">
-            <div class="adapter-name-cell">
-              <span class="status-dot" :class="row.online ? 'online' : 'offline'"></span>
-              <div class="adapter-name-main">
-                <div class="adapter-name">{{ row.name || '未命名 Adapter' }}</div>
-                <div class="adapter-id">{{ row.adapter_id }}</div>
-              </div>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column prop="protocol" label="协议" min-width="100">
-          <template #default="{ row }">
-            <el-tag size="small" effect="plain">{{ row.protocol || '—' }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="监听 / 端口段" min-width="200">
-          <template #default="{ row }">
-            <div class="bind-cell mono">{{ row.bind_addr || '0.0.0.0' }}</div>
-            <div class="muted mono">{{ row.port_start }}-{{ row.port_end }}</div>
-          </template>
-        </el-table-column>
-        <el-table-column label="飞控 / 签名" min-width="140">
-          <template #default="{ row }">
-            <div class="fc-cell">
-              <el-tag size="small" effect="plain">{{ (row.autopilot || 'auto').toUpperCase() }}</el-tag>
-              <span class="muted">{{ row.has_signing_secret ? '签名已配置' : '未配置签名' }}</span>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="在线" width="100">
-          <template #default="{ row }">
-            <el-tag v-if="row.online" type="success" size="small">已接入</el-tag>
-            <el-tag v-else type="info" size="small">未接入</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="90">
-          <template #default="{ row }">
-            <el-tag v-if="row.enabled" type="success" size="small">启用</el-tag>
-            <el-tag v-else type="warning" size="small">已停用</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="承载无人机" min-width="120">
-          <template #default="{ row }">
-            <span class="muted">{{ row.bound_drones || 0 }} 架</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="190" fixed="right">
-          <template #default="{ row }">
-            <el-button text type="primary" @click="openEditor(row)">编辑</el-button>
-            <el-button v-if="row.enabled" text type="warning" @click="disable(row)">停用</el-button>
-            <el-button v-else text type="success" @click="restore(row)">恢复</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">Adapter 总数</div>
+        <div class="stat-value">{{ store.totalCount }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">在线</div>
+        <div class="stat-value online">{{ store.onlineCount }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">启用 / 停用</div>
+        <div class="stat-value">{{ store.enabledAdapters.length }} / {{ store.disabledCount }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">承载无人机</div>
+        <div class="stat-value">{{ store.boundTotal }}</div>
+      </div>
     </div>
 
-    <el-dialog
+    <el-alert
+      type="info"
+      :closable="false"
+      show-icon
+      class="hint"
+      title="标识要与适配器进程配置一致"
+      description="adapter_id 是适配器接入平台时使用的标识，创建后不可修改；端口段内的端口按飞控系统号区分，一台 adapter 可服务多架无人机。"
+    />
+
+    <DataCard>
+      <EmptyState v-if="!store.loading && store.adapters.length === 0" title="还没有 adapter 配置">
+        <template #action>
+          <el-button type="primary" @click="openEditor()">创建第一个 Adapter</el-button>
+        </template>
+      </EmptyState>
+
+      <el-table v-else v-loading="store.loading" :data="pagedAdapters" class="adapter-table" border stripe size="small">
+      <el-table-column label="Adapter" min-width="220">
+        <template #default="{ row }">
+          <div class="adapter-name-cell">
+            <span class="status-dot" :class="row.online ? 'online' : 'offline'"></span>
+            <div class="adapter-name-main">
+              <div class="adapter-name">{{ row.name || '未命名 Adapter' }}</div>
+              <div class="adapter-id">{{ row.adapter_id }}</div>
+            </div>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column prop="protocol" label="协议" min-width="100">
+        <template #default="{ row }">
+          <el-tag size="small" effect="plain">{{ row.protocol || '—' }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="监听 / 端口段" min-width="200">
+        <template #default="{ row }">
+          <div class="bind-cell mono">{{ row.bind_addr || '0.0.0.0' }}</div>
+          <div class="muted mono">{{ row.port_start }}-{{ row.port_end }}</div>
+        </template>
+      </el-table-column>
+      <el-table-column label="飞控 / 签名" min-width="140">
+        <template #default="{ row }">
+          <div class="fc-cell">
+            <el-tag size="small" effect="plain">{{ (row.autopilot || 'auto').toUpperCase() }}</el-tag>
+            <span class="muted">{{ row.has_signing_secret ? '签名已配置' : '未配置签名' }}</span>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="在线" width="100">
+        <template #default="{ row }">
+          <el-tag v-if="row.online" type="success" size="small">已接入</el-tag>
+          <el-tag v-else type="info" size="small">未接入</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="状态" width="90">
+        <template #default="{ row }">
+          <el-tag v-if="row.enabled" type="success" size="small">启用</el-tag>
+          <el-tag v-else type="warning" size="small">已停用</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="承载无人机" min-width="120">
+        <template #default="{ row }">
+          <span class="muted">{{ row.bound_drones || 0 }} 架</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="190" fixed="right">
+        <template #default="{ row }">
+          <el-button text type="primary" @click="openEditor(row)">编辑</el-button>
+          <el-button v-if="row.enabled" text type="warning" @click="disable(row)">停用</el-button>
+          <el-button v-else text type="success" @click="restore(row)">恢复</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+    </DataCard>
+
+    <template #footer>
+      <PaginationBar
+        v-model:page-size="pageSize"
+        :total="store.adapters.length"
+        :page="currentPage"
+        show-sizes
+        @update:page="currentPage = $event"
+      />
+    </template>
+
+    <AppDialog
       v-model="editorVisible"
       :title="editing ? '编辑 Adapter' : '新增 Adapter'"
-      width="560px"
-      destroy-on-close
+      size="md"
     >
       <el-form :model="form" label-width="96px">
         <el-form-item label="标识">
@@ -178,19 +183,33 @@
         <el-button @click="editorVisible = false">取消</el-button>
         <el-button type="primary" @click="save">保存</el-button>
       </template>
-    </el-dialog>
-  </div>
+    </AppDialog>
+  </PageView>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessageBox, ElMessage } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { useAdapterStore } from '../../stores/adapterStore'
+import { useToast } from '../../composables/useToast'
+import PageView from '../../components/common/PageView.vue'
+import DataCard from '../../components/common/DataCard.vue'
+import PaginationBar from '../../components/common/PaginationBar.vue'
+import EmptyState from '../../components/common/EmptyState.vue'
+import AppDialog from '../../components/common/AppDialog.vue'
 
 const ADAPTER_ID_RE = /^[A-Za-z0-9._-]{1,64}$/
 
 const store = useAdapterStore()
+
+const currentPage = ref(1)
+const pageSize = ref(20)
+const pagedAdapters = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return store.adapters.slice(start, start + pageSize.value)
+})
+const toast = useToast()
 const editorVisible = ref(false)
 const editing = ref(false)
 const editingHasSecret = ref(false)
@@ -220,7 +239,6 @@ async function refresh() {
   await store.fetchAdapters(store.includeDisabled)
 }
 
-/** 切换「显示已停用」：按开关当前值重新拉列表。 */
 async function onToggleDisabled(value) {
   await store.fetchAdapters(value)
 }
@@ -250,30 +268,30 @@ function findPortConflict(payload) {
 async function save() {
   const id = form.adapter_id.trim()
   if (!id) {
-    ElMessage.warning('Adapter 标识不能为空')
+    toast.warning('Adapter 标识不能为空')
     return
   }
   if (!ADAPTER_ID_RE.test(id)) {
-    ElMessage.warning('标识只允许字母、数字、点、下划线、连字符，且不超过 64 个字符')
+    toast.warning('标识只允许字母、数字、点、下划线、连字符，且不超过 64 个字符')
     return
   }
   if (form.port_start > form.port_end) {
-    ElMessage.warning('端口段的起始端口不能大于结束端口')
+    toast.warning('端口段的起始端口不能大于结束端口')
     return
   }
   if (form.reconnect_min_secs > form.reconnect_max_secs) {
-    ElMessage.warning('重连退避的下限不能大于上限')
+    toast.warning('重连退避的下限不能大于上限')
     return
   }
   const secret = form.signing_secret.trim()
   if (secret && (!/^[0-9a-fA-F]+$/.test(secret) || secret.length % 2 !== 0)) {
-    ElMessage.warning('签名密钥必须是偶数长度的十六进制字符串')
+    toast.warning('签名密钥必须是偶数长度的十六进制字符串')
     return
   }
   const payload = { ...form, adapter_id: id }
   const conflict = findPortConflict(payload)
   if (conflict) {
-    ElMessage.warning(
+    toast.warning(
       `端口段与「${conflict.name || conflict.adapter_id}」(${conflict.port_start}-${conflict.port_end}) 重叠`
     )
     return
@@ -282,7 +300,6 @@ async function save() {
     await store.saveAdapter(payload, editing.value)
     editorVisible.value = false
   } catch (e) {
-    // 新增撞上已停用的同名 adapter：create 返回 409，引导恢复并覆盖配置。
     if (!editing.value && e?.response?.status === 409) {
       await offerRestore(payload)
     }
@@ -304,7 +321,6 @@ async function offerRestore(payload) {
     await store.saveAdapter(payload, true)
     editorVisible.value = false
   } catch (e) {
-    // request 拦截器已提示
   }
 }
 
@@ -329,18 +345,6 @@ onMounted(refresh)
 </script>
 
 <style scoped>
-.header-left {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-.header-sub {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-.adapter-page {
-  gap: 16px;
-}
 .hint {
   margin-bottom: 4px;
 }
@@ -352,7 +356,7 @@ onMounted(refresh)
 .stat-card {
   padding: 14px 16px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--bg-surface);
 }
 .stat-label {
@@ -366,12 +370,9 @@ onMounted(refresh)
   font-family: var(--font-mono);
 }
 .stat-value.online { color: #22c55e; }
-.adapter-table {
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
-}
+  .adapter-table {
+    width: 100%;
+  }
 .adapter-name-cell {
   display: flex;
   align-items: center;

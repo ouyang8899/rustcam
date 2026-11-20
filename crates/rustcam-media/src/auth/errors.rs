@@ -37,14 +37,32 @@ impl IntoResponse for AuthError {
             AuthError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, 401, msg.clone()),
             AuthError::InvalidToken(msg) => (StatusCode::UNAUTHORIZED, 401, msg.clone()),
             AuthError::TokenExpired => (StatusCode::UNAUTHORIZED, 401, "Token expired".to_string()),
-            AuthError::PermissionDenied => (StatusCode::FORBIDDEN, 403, "Permission denied".to_string()),
-            AuthError::InvalidCredentials => (StatusCode::UNAUTHORIZED, 401, "Invalid credentials".to_string()),
+            AuthError::PermissionDenied => {
+                (StatusCode::FORBIDDEN, 403, "Permission denied".to_string())
+            }
+            AuthError::InvalidCredentials => (
+                StatusCode::UNAUTHORIZED,
+                401,
+                "Invalid credentials".to_string(),
+            ),
             AuthError::UserNotFound => (StatusCode::NOT_FOUND, 404, "User not found".to_string()),
-            AuthError::UsernameExists => (StatusCode::BAD_REQUEST, 400, "Username already exists".to_string()),
-            AuthError::RoleNotFound(msg) => (StatusCode::NOT_FOUND, 404, format!("Role not found: {}", msg)),
+            AuthError::UsernameExists => (
+                StatusCode::BAD_REQUEST,
+                400,
+                "Username already exists".to_string(),
+            ),
+            AuthError::RoleNotFound(msg) => (
+                StatusCode::NOT_FOUND,
+                404,
+                format!("Role not found: {}", msg),
+            ),
             AuthError::BadRequest(msg) => (StatusCode::BAD_REQUEST, 400, msg.clone()),
             AuthError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, 500, msg.clone()),
-            AuthError::Database(msg) => (StatusCode::INTERNAL_SERVER_ERROR, 500, format!("Database error: {}", msg)),
+            AuthError::Database(msg) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                500,
+                format!("Database error: {}", msg),
+            ),
         };
 
         let body = Json(serde_json::json!({ "code": code, "message": message, "data": null }));
@@ -53,7 +71,9 @@ impl IntoResponse for AuthError {
 }
 
 impl From<crate::error::AppError> for AuthError {
-    fn from(e: crate::error::AppError) -> Self { AuthError::Internal(e.to_string()) }
+    fn from(e: crate::error::AppError) -> Self {
+        AuthError::Internal(e.to_string())
+    }
 }
 
 pub type Result<T> = std::result::Result<T, AuthError>;

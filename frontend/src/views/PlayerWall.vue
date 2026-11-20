@@ -1,312 +1,295 @@
 <template>
-  <div class="page-container">
-    <div class="page-body">
-      <el-row :gutter="12" align="middle" class="page-toolbar">
-        <el-col :span="12">
-          <el-select v-model="selectedLayoutId" placeholder="选择布局" style="width: 240px" @change="onLayoutChange">
-            <el-option value="" label="-- 选择布局 --" />
-            <el-option v-for="l in layoutStore.sortedLayouts" :key="l.id" :label="`${l.name} (${l.rows}×${l.cols})${l.is_default ? ' ★' : ''}`" :value="l.id" />
-          </el-select>
-        </el-col>
-        <el-col :span="12" style="text-align: right">
-          <el-button :icon="Edit" @click="$router.push('/video-wall/designer')">设计布局</el-button>
-          <el-button v-if="selectedLayoutId" type="danger" plain :icon="Delete" @click="deleteLayout">删除布局</el-button>
-          <el-button :icon="VideoPlay" @click="stopAll">全部停止</el-button>
-        </el-col>
-      </el-row>
+  <PageView title="监控墙" layout="workspace">
+    <template #toolbar>
+      <el-select v-model="selectedLayoutId" placeholder="选择布局" style="width: 240px" @change="onLayoutChange">
+        <el-option value="" label="-- 选择布局 --" />
+        <el-option v-for="l in layoutStore.sortedLayouts" :key="l.id" :label="`${l.name} (${l.rows}×${l.cols})${l.is_default ? ' ★' : ''}`" :value="l.id" />
+      </el-select>
+      <el-button :icon="Edit" @click="$router.push('/video-wall/designer')">设计布局</el-button>
+      <el-button v-if="selectedLayoutId" type="danger" plain :icon="Delete" @click="deleteLayout">删除布局</el-button>
+      <el-button :icon="VideoPlay" @click="stopAll">全部停止</el-button>
+    </template>
 
-      <div class="wall-layout">
-        <div class="wall-sidebar">
-          <el-card shadow="never">
-            <template #header>
-              <span>设备</span>
-              <el-radio-group v-model="groupMode" size="small" style="margin-left: 8px">
+    <WorkspaceLayout>
+      <template #aside>
+        <div class="tree-panel">
+          <DataCard title="设备">
+            <template #toolbar>
+              <el-radio-group v-model="groupMode" size="small">
                 <el-radio-button value="region">地区</el-radio-button>
                 <el-radio-button value="group">分组</el-radio-button>
               </el-radio-group>
             </template>
-            <el-scrollbar height="480px">
-              <el-empty v-if="deviceStore.loading && deviceStore.devices.length === 0" description="加载中..." :image-size="40" />
-              <el-empty v-else-if="deviceStore.devices.length === 0" description="暂无设备" :image-size="40" />
-              <el-tree
-                v-else
-                :data="deviceTree"
-                :props="{ label: 'name', children: 'children' }"
-                :expand-on-click-node="false"
-                node-key="key"
-                default-expand-all
-              >
-                <template #default="{ data }">
-                  <div
-                    v-if="data.isDevice"
-                    class="device-item"
-                    draggable="true"
-                    @dragstart="onDragStart($event, data.device)"
-                    @dragend="onDragEnd"
-                  >
-                    <span class="status-dot" :class="data.device.status?.toLowerCase() === 'online' ? 'online' : 'offline'" />
-                    <el-text truncated style="flex: 1">{{ data.name }}</el-text>
-                    <el-tag size="small">{{ data.device.protocol }}</el-tag>
-                  </div>
-                  <div
-                    v-else-if="data.isChannel"
-                    class="channel-item"
-                    draggable="true"
-                    @dragstart="onChannelDragStart($event, data.device, data.channel)"
-                    @dragend="onDragEnd"
-                  >
-                    <VideoPlay style="width: 12px; height: 12px; margin-right: 4px" />
-                    <el-text truncated style="flex: 1">{{ data.name }}</el-text>
-                  </div>
-                  <span v-else>{{ data.name }} ({{ data.deviceCount || 0 }})</span>
-                </template>
-              </el-tree>
-            </el-scrollbar>
-          </el-card>
-
-          <el-card shadow="never" style="margin-top: 8px">
-            <template #header><span>绑定信息</span></template>
-            <el-empty v-if="Object.keys(bindings).length === 0" description="暂无绑定" :image-size="40" />
-            <div v-for="(binding, slotId) in bindings" :key="slotId" class="binding-item">
-              <el-text truncated style="flex: 1">{{ binding.name || binding.deviceTag }}</el-text>
-              <el-button size="small" type="danger" plain circle :icon="Close" @click="stopSlot(slotId)" />
-            </div>
-          </el-card>
+            <GroupTree
+              v-if="groupMode === 'group'"
+              searchable
+              refreshable
+              fill
+              @drag-start="onTreeDragStart"
+              @drag-end="onDragEnd"
+            />
+            <GroupTree
+              v-else
+              mode="region"
+              searchable
+              refreshable
+              fill
+              @drag-start="onTreeDragStart"
+              @drag-end="onDragEnd"
+            >
+              <template #node="{ node }">
+                <div v-if="node.type === 'device'" class="device-item">
+                  <span class="status-dot" :class="node.status?.toLowerCase() === 'online' ? 'online' : 'offline'" />
+                  <el-text truncated style="flex: 1">{{ node.name }}</el-text>
+                  <el-tag size="small">{{ node.protocol }}</el-tag>
+                </div>
+                <span v-else>{{ node.name }} ({{ node.count || 0 }})</span>
+              </template>
+            </GroupTree>
+          </DataCard>
         </div>
 
-        <div class="wall-main-area">
-          <div
-            ref="playerGrid"
-            class="wall-player-area"
-            @dragover.prevent
-            @drop="onDrop"
-          >
-            <el-empty v-if="!selectedLayoutId" description="请先选择布局" />
-            <el-empty v-else-if="!layout" description="加载中..." />
-            <div v-else class="player-grid" :style="gridStyle">
-              <div
-                v-for="(item, index) in layoutItems"
-                :key="item.id"
-                class="grid-cell"
-                :class="{ selected: selectedSlot === item.id }"
-                :style="itemStyle(item)"
-                @click="selectedSlot = item.id"
-                @dragover.prevent="onCellDragOver($event, item.id)"
-                @drop.prevent="onCellDrop($event, item.id)"
-              >
-                <div v-if="!bindings[item.id]" class="cell-empty">{{ index + 1 }}</div>
-                <template v-else>
-                  <VideoPlayer
-                    :liveSrc="bindings[item.id]?.flvUrl"
-                    :isLive="true"
-                    :autoplay="true"
-                    :deviceTag="bindings[item.id]?.deviceTag"
-                    :channelTag="bindings[item.id]?.channelTag"
-                    :enableBroadcast="true"
-                    :type="playerTypeFor(bindings[item.id]?.flvUrl)"
-                  />
-                  <div class="cell-label">{{ bindings[item.id]?.name }}</div>
-                </template>
-              </div>
+        <DataCard title="绑定信息" class="binding-card">
+          <EmptyState v-if="Object.keys(bindings).length === 0" title="暂无绑定" />
+          <div v-for="(binding, slotId) in bindings" :key="slotId" class="binding-item">
+            <el-text truncated style="flex: 1">{{ binding.name || binding.deviceTag }}</el-text>
+            <el-button size="small" type="danger" plain circle :icon="Close" @click="stopSlot(slotId)" />
+          </div>
+        </DataCard>
+      </template>
+
+      <div class="wall-main-area workspace-layout__fill">
+        <div
+          ref="playerGrid"
+          class="wall-player-area"
+          @dragover.prevent
+          @drop="onDrop"
+        >
+          <EmptyState v-if="!selectedLayoutId" title="请先选择布局" />
+          <EmptyState v-else-if="!layout" title="加载中..." />
+          <div v-else class="player-grid" :style="gridStyle">
+            <div
+              v-for="(item, index) in layoutItems"
+              :key="item.id"
+              class="grid-cell"
+              :class="{ selected: selectedSlot === item.id }"
+              :style="itemStyle(item)"
+              @click="selectedSlot = item.id"
+              @dragover.prevent="onCellDragOver($event, item.id)"
+              @drop.prevent="onCellDrop($event, item.id)"
+            >
+              <div v-if="!bindings[item.id]" class="cell-empty">{{ index + 1 }}</div>
+              <template v-else>
+                <VideoPlayer
+                  :liveSrc="bindings[item.id]?.flvUrl"
+                  :isLive="true"
+                  :autoplay="true"
+                  :deviceTag="bindings[item.id]?.deviceTag"
+                  :channelTag="bindings[item.id]?.channelTag"
+                  :enableBroadcast="true"
+                  :type="playerTypeFor(bindings[item.id]?.flvUrl)"
+                />
+                <div class="cell-label">{{ bindings[item.id]?.name }}</div>
+              </template>
             </div>
           </div>
+        </div>
 
-          <div class="wall-ptz-wrapper">
-            <div class="wall-ptz-toggle" @click="ptzPanelVisible = !ptzPanelVisible">
-              <el-icon :size="16"><DArrowLeft v-if="ptzPanelVisible" /><DArrowRight v-else /></el-icon>
+        <div class="wall-ptz-wrapper">
+          <div class="wall-ptz-toggle" @click="ptzPanelVisible = !ptzPanelVisible">
+            <el-icon :size="16"><DArrowLeft v-if="ptzPanelVisible" /><DArrowRight v-else /></el-icon>
+          </div>
+          <div class="wall-ptz-panel" :class="{ collapsed: !ptzPanelVisible }">
+
+            <div class="ptz-hd">
+              <div class="ptz-hd-l">
+                <div class="ptz-hd-title">PTZ</div>
+                <div class="ptz-hd-sub">云台控制</div>
+              </div>
+              <div class="ptz-hd-r">
+                <div class="ptz-hd-signal">
+                  <div class="ptz-hd-dot" :class="selectedBinding ? (ptzSupported ? 'sig-ok' : 'sig-no') : 'sig-off'" />
+                  <span>{{ selectedBinding ? (ptzSupported ? '在线' : '无云台') : '空闲' }}</span>
+                </div>
+              </div>
             </div>
-            <div class="wall-ptz-panel" :class="{ collapsed: !ptzPanelVisible }">
 
-              <div class="ptz-hd">
-                <div class="ptz-hd-l">
-                  <div class="ptz-hd-title">PTZ</div>
-                  <div class="ptz-hd-sub">云台控制</div>
-                </div>
-                <div class="ptz-hd-r">
-                  <div class="ptz-hd-signal">
-                    <div class="ptz-hd-dot" :class="selectedBinding ? (ptzSupported ? 'sig-ok' : 'sig-no') : 'sig-off'" />
-                    <span>{{ selectedBinding ? (ptzSupported ? '在线' : '无云台') : '空闲' }}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="ptz-ch">
-                <div class="ptz-ch-name">{{ selectedBinding?.name || '— 未选择设备 —' }}</div>
-                <div class="ptz-ch-info">
-                  <span class="ptz-ch-tag" :class="ptzSupported ? 'ptz-tag-ok' : 'ptz-tag-off'">
-                    {{ selectedBinding?.protocol || '---' }}
-                  </span>
-                  <span class="ptz-ch-spd">
-                    <span class="ptz-ch-spd-lbl">速度</span>
-                    <span class="ptz-ch-spd-val">{{ ptzSpeed }}</span>
-                  </span>
-                </div>
-              </div>
-
-              <div class="ptz-scan" />
-
-              <div class="ptz-body">
-
-                <div class="ptz-zone ptz-zone-dir">
-                  <div class="ptz-crosshair">
-                    <div class="ptz-ch-v" />
-                    <div class="ptz-ch-h" />
-                    <button class="ptz-dir-btn ptz-dir-up"
-                      :class="{ on: ptzActiveDir === 'up' }"
-                      :disabled="!ptzSupported"
-                      @mousedown.prevent="ptzActiveDir = 'up'; ptzCmd('up')"
-                      @mouseup="ptzActiveDir = null; ptzStop()"
-                      @mouseleave="ptzActiveDir === 'up' && ptzStop()"
-                    ><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
-                    <button class="ptz-dir-btn ptz-dir-lf"
-                      :class="{ on: ptzActiveDir === 'left' }"
-                      :disabled="!ptzSupported"
-                      @mousedown.prevent="ptzActiveDir = 'left'; ptzCmd('left')"
-                      @mouseup="ptzActiveDir = null; ptzStop()"
-                      @mouseleave="ptzActiveDir === 'left' && ptzStop()"
-                    ><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button>
-                    <button class="ptz-stop-btn"
-                      :disabled="!ptzSupported"
-                      @click="ptzStop()"
-                    ><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
-                    <button class="ptz-dir-btn ptz-dir-rt"
-                      :class="{ on: ptzActiveDir === 'right' }"
-                      :disabled="!ptzSupported"
-                      @mousedown.prevent="ptzActiveDir = 'right'; ptzCmd('right')"
-                      @mouseup="ptzActiveDir = null; ptzStop()"
-                      @mouseleave="ptzActiveDir === 'right' && ptzStop()"
-                    ><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg></button>
-                    <button class="ptz-dir-btn ptz-dir-dn"
-                      :class="{ on: ptzActiveDir === 'down' }"
-                      :disabled="!ptzSupported"
-                      @mousedown.prevent="ptzActiveDir = 'down'; ptzCmd('down')"
-                      @mouseup="ptzActiveDir = null; ptzStop()"
-                      @mouseleave="ptzActiveDir === 'down' && ptzStop()"
-                    ><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12l7 7 7-7"/></svg></button>
-                  </div>
-                  <div class="ptz-spd-track">
-                    <div class="ptz-spd-fill" :style="{ width: ptzSpeed + '%' }" />
-                    <input type="range" min="1" max="100" v-model="ptzSpeed" class="ptz-spd-range" :disabled="!ptzSupported" />
-                  </div>
-                </div>
-
-                <div class="ptz-sep">
-                  <span class="ptz-sep-ln" /><span class="ptz-sep-txt">光学</span><span class="ptz-sep-ln" />
-                </div>
-
-                <div class="ptz-zone ptz-zone-opt">
-                  <div class="ptz-opt-group">
-                    <div class="ptz-opt-label">ZOOM</div>
-                    <div class="ptz-opt-row">
-                      <button class="ptz-opt-btn"
-                        :class="{ on: ptzActiveDir === 'zoom_in' }"
-                        :disabled="!ptzSupported"
-                        @mousedown.prevent="ptzActiveDir = 'zoom_in'; ptzCmd('zoom_in')"
-                        @mouseup="ptzActiveDir = null; ptzStop()"
-                        @mouseleave="ptzActiveDir === 'zoom_in' && ptzStop()"
-                      >+</button>
-                      <button class="ptz-opt-btn"
-                        :class="{ on: ptzActiveDir === 'zoom_out' }"
-                        :disabled="!ptzSupported"
-                        @mousedown.prevent="ptzActiveDir = 'zoom_out'; ptzCmd('zoom_out')"
-                        @mouseup="ptzActiveDir = null; ptzStop()"
-                        @mouseleave="ptzActiveDir === 'zoom_out' && ptzStop()"
-                      >−</button>
-                    </div>
-                  </div>
-                  <div class="ptz-opt-group">
-                    <div class="ptz-opt-label">FOCUS</div>
-                    <div class="ptz-opt-row">
-                      <button class="ptz-opt-btn"
-                        :class="{ on: ptzActiveDir === 'focus_in' }"
-                        :disabled="!ptzSupported"
-                        @mousedown.prevent="ptzActiveDir = 'focus_in'; ptzCmd('focus_in')"
-                        @mouseup="ptzActiveDir = null; ptzStop()"
-                        @mouseleave="ptzActiveDir === 'focus_in' && ptzStop()"
-                      >+</button>
-                      <button class="ptz-opt-btn"
-                        :class="{ on: ptzActiveDir === 'focus_out' }"
-                        :disabled="!ptzSupported"
-                        @mousedown.prevent="ptzActiveDir = 'focus_out'; ptzCmd('focus_out')"
-                        @mouseup="ptzActiveDir = null; ptzStop()"
-                        @mouseleave="ptzActiveDir === 'focus_out' && ptzStop()"
-                      >−</button>
-                    </div>
-                  </div>
-                  <div class="ptz-opt-group">
-                    <div class="ptz-opt-label">IRIS</div>
-                    <div class="ptz-opt-row">
-                      <button class="ptz-opt-btn"
-                        :class="{ on: ptzActiveDir === 'iris_in' }"
-                        :disabled="!ptzSupported"
-                        @mousedown.prevent="ptzActiveDir = 'iris_in'; ptzCmd('iris_in')"
-                        @mouseup="ptzActiveDir = null; ptzStop()"
-                        @mouseleave="ptzActiveDir === 'iris_in' && ptzStop()"
-                      >+</button>
-                      <button class="ptz-opt-btn"
-                        :class="{ on: ptzActiveDir === 'iris_out' }"
-                        :disabled="!ptzSupported"
-                        @mousedown.prevent="ptzActiveDir = 'iris_out'; ptzCmd('iris_out')"
-                        @mouseup="ptzActiveDir = null; ptzStop()"
-                        @mouseleave="ptzActiveDir === 'iris_out' && ptzStop()"
-                      >−</button>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="ptz-joystick-area" ref="joystickRef" @mousedown="startJoystick" @touchstart.prevent="startJoystick">
-                  <div class="joystick-base">
-                    <div class="joystick-stick" :style="joystickStyle"></div>
-                  </div>
-                </div>
-
-                <div class="ptz-position" v-if="ptzStatus?.position">
-                  <span class="pos-label">位置</span>
-                  <span class="pos-value">P:{{ ptzStatus.position.pan?.toFixed(2) }} T:{{ ptzStatus.position.tilt?.toFixed(2) }} Z:{{ ptzStatus.position.zoom?.toFixed(2) }}</span>
-                </div>
-
-                <div class="ptz-sep">
-                  <span class="ptz-sep-ln" /><span class="ptz-sep-txt">预制位</span><span class="ptz-sep-ln" />
-                </div>
-
-                <div class="ptz-zone ptz-zone-ps">
-                  <button class="ptz-ps-save"
-                    :disabled="!ptzSupported"
-                    @click="savePreset()"
-                  >+ 保存位置</button>
-                  <div class="ptz-ps-list">
-                    <div v-if="presets.length === 0" class="ptz-ps-empty">暂无预制位</div>
-                    <div
-                      v-for="(p, i) in presets" :key="p.token"
-                      class="ptz-ps-row"
-                      :class="{ disabled: !ptzSupported }"
-                      @click="ptzSupported && gotoPreset(p)"
-                    >
-                      <span class="ptz-ps-idx">{{ String(i + 1).padStart(2, '0') }}</span>
-                      <span class="ptz-ps-nm">{{ p.name }}</span>
-                      <button class="ptz-ps-del"
-                        :disabled="!ptzSupported"
-                        @click.stop="removePreset(p)"
-                      ><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-
-              <div class="ptz-ft">
-                <span class="ptz-ft-sys">SYS</span>
-                <span class="ptz-ft-st" :class="ptzActiveDir ? 'st-run' : 'st-idle'">
-                  {{ ptzActiveDir ? { up:'上移中', down:'下移中', left:'左移中', right:'右移中', zoom_in:'放大中', zoom_out:'缩小中', focus_in:'近焦中', focus_out:'远焦中' }[ptzActiveDir] : '— 就绪 —' }}
+            <div class="ptz-ch">
+              <div class="ptz-ch-name">{{ selectedBinding?.name || '— 未选择设备 —' }}</div>
+              <div class="ptz-ch-info">
+                <span class="ptz-ch-tag" :class="ptzSupported ? 'ptz-tag-ok' : 'ptz-tag-off'">
+                  {{ selectedBinding?.protocol || '---' }}
+                </span>
+                <span class="ptz-ch-spd">
+                  <span class="ptz-ch-spd-lbl">速度</span>
+                  <span class="ptz-ch-spd-val">{{ ptzSpeed }}</span>
                 </span>
               </div>
+            </div>
+
+            <div class="ptz-scan" />
+
+            <div class="ptz-body">
+
+              <div class="ptz-zone ptz-zone-dir">
+                <div class="ptz-crosshair">
+                  <div class="ptz-ch-v" />
+                  <div class="ptz-ch-h" />
+                  <button class="ptz-dir-btn ptz-dir-up"
+                    :class="{ on: ptzActiveDir === 'up' }"
+                    :disabled="!ptzSupported"
+                    @mousedown.prevent="ptzActiveDir = 'up'; ptzCmd('up')"
+                    @mouseup="ptzActiveDir = null; ptzStop()"
+                    @mouseleave="ptzActiveDir === 'up' && ptzStop()"
+                  ><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+                  <button class="ptz-dir-btn ptz-dir-lf"
+                    :class="{ on: ptzActiveDir === 'left' }"
+                    :disabled="!ptzSupported"
+                    @mousedown.prevent="ptzActiveDir = 'left'; ptzCmd('left')"
+                    @mouseup="ptzActiveDir = null; ptzStop()"
+                    @mouseleave="ptzActiveDir === 'left' && ptzStop()"
+                  ><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 5l-7 7 7 7"/></svg></button>
+                  <button class="ptz-stop-btn"
+                    :disabled="!ptzSupported"
+                    @click="ptzStop()"
+                  ><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
+                  <button class="ptz-dir-btn ptz-dir-rt"
+                    :class="{ on: ptzActiveDir === 'right' }"
+                    :disabled="!ptzSupported"
+                    @mousedown.prevent="ptzActiveDir = 'right'; ptzCmd('right')"
+                    @mouseup="ptzActiveDir = null; ptzStop()"
+                    @mouseleave="ptzActiveDir === 'right' && ptzStop()"
+                  ><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg></button>
+                  <button class="ptz-dir-btn ptz-dir-dn"
+                    :class="{ on: ptzActiveDir === 'down' }"
+                    :disabled="!ptzSupported"
+                    @mousedown.prevent="ptzActiveDir = 'down'; ptzCmd('down')"
+                    @mouseup="ptzActiveDir = null; ptzStop()"
+                    @mouseleave="ptzActiveDir === 'down' && ptzStop()"
+                  ><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12l7 7 7-7"/></svg></button>
+                </div>
+                <div class="ptz-spd-track">
+                  <div class="ptz-spd-fill" :style="{ width: ptzSpeed + '%' }" />
+                  <input type="range" min="1" max="100" v-model="ptzSpeed" class="ptz-spd-range" :disabled="!ptzSupported" />
+                </div>
+              </div>
+
+              <div class="ptz-sep">
+                <span class="ptz-sep-ln" /><span class="ptz-sep-txt">光学</span><span class="ptz-sep-ln" />
+              </div>
+
+              <div class="ptz-zone ptz-zone-opt">
+                <div class="ptz-opt-group">
+                  <div class="ptz-opt-label">ZOOM</div>
+                  <div class="ptz-opt-row">
+                    <button class="ptz-opt-btn"
+                      :class="{ on: ptzActiveDir === 'zoom_in' }"
+                      :disabled="!ptzSupported"
+                      @mousedown.prevent="ptzActiveDir = 'zoom_in'; ptzCmd('zoom_in')"
+                      @mouseup="ptzActiveDir = null; ptzStop()"
+                      @mouseleave="ptzActiveDir === 'zoom_in' && ptzStop()"
+                    >+</button>
+                    <button class="ptz-opt-btn"
+                      :class="{ on: ptzActiveDir === 'zoom_out' }"
+                      :disabled="!ptzSupported"
+                      @mousedown.prevent="ptzActiveDir = 'zoom_out'; ptzCmd('zoom_out')"
+                      @mouseup="ptzActiveDir = null; ptzStop()"
+                      @mouseleave="ptzActiveDir === 'zoom_out' && ptzStop()"
+                    >−</button>
+                  </div>
+                </div>
+                <div class="ptz-opt-group">
+                  <div class="ptz-opt-label">FOCUS</div>
+                  <div class="ptz-opt-row">
+                    <button class="ptz-opt-btn"
+                      :class="{ on: ptzActiveDir === 'focus_in' }"
+                      :disabled="!ptzSupported"
+                      @mousedown.prevent="ptzActiveDir = 'focus_in'; ptzCmd('focus_in')"
+                      @mouseup="ptzActiveDir = null; ptzStop()"
+                      @mouseleave="ptzActiveDir === 'focus_in' && ptzStop()"
+                    >+</button>
+                    <button class="ptz-opt-btn"
+                      :class="{ on: ptzActiveDir === 'focus_out' }"
+                      :disabled="!ptzSupported"
+                      @mousedown.prevent="ptzActiveDir = 'focus_out'; ptzCmd('focus_out')"
+                      @mouseup="ptzActiveDir = null; ptzStop()"
+                      @mouseleave="ptzActiveDir === 'focus_out' && ptzStop()"
+                    >−</button>
+                  </div>
+                </div>
+                <div class="ptz-opt-group">
+                  <div class="ptz-opt-label">IRIS</div>
+                  <div class="ptz-opt-row">
+                    <button class="ptz-opt-btn"
+                      :class="{ on: ptzActiveDir === 'iris_in' }"
+                      :disabled="!ptzSupported"
+                      @mousedown.prevent="ptzActiveDir = 'iris_in'; ptzCmd('iris_in')"
+                      @mouseup="ptzActiveDir = null; ptzStop()"
+                      @mouseleave="ptzActiveDir === 'iris_in' && ptzStop()"
+                    >+</button>
+                    <button class="ptz-opt-btn"
+                      :class="{ on: ptzActiveDir === 'iris_out' }"
+                      :disabled="!ptzSupported"
+                      @mousedown.prevent="ptzActiveDir = 'iris_out'; ptzCmd('iris_out')"
+                      @mouseup="ptzActiveDir = null; ptzStop()"
+                      @mouseleave="ptzActiveDir === 'iris_out' && ptzStop()"
+                    >−</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="ptz-joystick-area" ref="joystickRef" @mousedown="startJoystick" @touchstart.prevent="startJoystick">
+                <div class="joystick-base">
+                  <div class="joystick-stick" :style="joystickStyle"></div>
+                </div>
+              </div>
+
+              <div class="ptz-position" v-if="ptzStatus?.position">
+                <span class="pos-label">位置</span>
+                <span class="pos-value">P:{{ ptzStatus.position.pan?.toFixed(2) }} T:{{ ptzStatus.position.tilt?.toFixed(2) }} Z:{{ ptzStatus.position.zoom?.toFixed(2) }}</span>
+              </div>
+
+              <div class="ptz-sep">
+                <span class="ptz-sep-ln" /><span class="ptz-sep-txt">预制位</span><span class="ptz-sep-ln" />
+              </div>
+
+              <div class="ptz-zone ptz-zone-ps">
+                <button class="ptz-ps-save"
+                  :disabled="!ptzSupported"
+                  @click="savePreset()"
+                >+ 保存位置</button>
+                <div class="ptz-ps-list">
+                  <div v-if="presets.length === 0" class="ptz-ps-empty">暂无预制位</div>
+                  <div
+                    v-for="(p, i) in presets" :key="p.token"
+                    class="ptz-ps-row"
+                    :class="{ disabled: !ptzSupported }"
+                    @click="ptzSupported && gotoPreset(p)"
+                  >
+                    <span class="ptz-ps-idx">{{ String(i + 1).padStart(2, '0') }}</span>
+                    <span class="ptz-ps-nm">{{ p.name }}</span>
+                    <button class="ptz-ps-del"
+                      :disabled="!ptzSupported"
+                      @click.stop="removePreset(p)"
+                    ><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+                  </div>
+                </div>
+              </div>
 
             </div>
+
+            <div class="ptz-ft">
+              <span class="ptz-ft-sys">SYS</span>
+              <span class="ptz-ft-st" :class="ptzActiveDir ? 'st-run' : 'st-idle'">
+                {{ ptzActiveDir ? { up:'上移中', down:'下移中', left:'左移中', right:'右移中', zoom_in:'放大中', zoom_out:'缩小中', focus_in:'近焦中', focus_out:'远焦中' }[ptzActiveDir] : '— 就绪 —' }}
+              </span>
+            </div>
+
           </div>
         </div>
       </div>
-    </div>
-  </div>
+    </WorkspaceLayout>
+  </PageView>
 </template>
 
 <script setup>
@@ -314,95 +297,23 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Edit, Delete, VideoPlay, Close, ArrowUp, ArrowDown, ArrowLeft as ArrowLeftIcon, ArrowRight, DArrowLeft, DArrowRight } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import VideoPlayer from '../components/VideoPlayer.vue'
+import GroupTree from '../components/common/GroupTree.vue'
+import PageView from '../components/common/PageView.vue'
+import WorkspaceLayout from '../components/common/WorkspaceLayout.vue'
+import DataCard from '../components/common/DataCard.vue'
+import EmptyState from '../components/common/EmptyState.vue'
 import { usePlayerLayoutStore } from '../stores/playerLayoutStore'
 import { useDeviceStore } from '../stores/deviceStore'
-import { useRegionStore } from '../stores/regionStore'
-import { useGroupStore } from '../stores/groupStore'
-import { useChannelStore } from '../stores/channelStore'
 import { useToast } from '../composables/useToast'
 import { request } from '../utils/request'
+import { readDragPayload } from '../utils/dragPayload'
+import { resolvePlayUrl } from '../utils/playLinks'
 
 const layoutStore = usePlayerLayoutStore()
 const deviceStore = useDeviceStore()
-const regionStore = useRegionStore()
-const groupStore = useGroupStore()
-const channelStore = useChannelStore()
 const toast = useToast()
 
 const groupMode = ref('region')
-
-const deviceTree = computed(() => {
-  if (groupMode.value === 'region') {
-    return buildRegionTree()
-  } else {
-    return buildGroupTree()
-  }
-})
-
-function buildRegionTree() {
-  const roots = JSON.parse(JSON.stringify(regionStore.regionTree))
-  const map = new Map()
-  function collect(nodes) {
-    for (const node of nodes) {
-      map.set(node.code, node)
-      node.children = node.children || []
-      collect(node.children)
-    }
-  }
-  collect(roots)
-  for (const device of deviceStore.devices) {
-    const region = map.get(device.region_code)
-    if (region) {
-      region.children.push(buildDeviceNode(device))
-    }
-  }
-  calcDeviceCount(roots)
-  const allDevices = deviceStore.devices.map(d => buildDeviceNode(d))
-  return [{ name: '全部', key: 'all', children: allDevices }, ...roots]
-}
-
-function buildGroupTree() {
-  const roots = JSON.parse(JSON.stringify(groupStore.groupTree))
-  const map = new Map()
-  function collect(nodes) {
-    for (const node of nodes) {
-      map.set(node.id, node)
-      node.children = node.children || []
-      collect(node.children)
-    }
-  }
-  collect(roots)
-  for (const device of deviceStore.devices) {
-    const group = map.get(device.group_id)
-    if (group) {
-      group.children.push(buildDeviceNode(device))
-    }
-  }
-  calcDeviceCount(roots)
-  const allDevices = deviceStore.devices.map(d => buildDeviceNode(d))
-  return [{ name: '全部', key: 'all', children: allDevices }, ...roots]
-}
-
-function buildDeviceNode(device) {
-  const channels = deviceChannelsMap.value[device.device_tag] || []
-  const children = channels.map(ch => ({
-    name: ch.name || ch.channel_tag,
-    key: `channel_${device.device_tag}_${ch.channel_tag}`,
-    isChannel: true,
-    device,
-    channel: ch,
-    children: []
-  }))
-  return { name: device.name, key: `device_${device.device_tag}`, isDevice: true, device, children }
-}
-
-function calcDeviceCount(nodes) {
-  for (const node of nodes) {
-    calcDeviceCount(node.children || [])
-    const count = (node.children || []).reduce((sum, c) => sum + (c.deviceCount || (c.isDevice ? 1 : 0)), 0)
-    node.deviceCount = count
-  }
-}
 
 const selectedLayoutId = ref('')
 const selectedSlot = ref(null)
@@ -472,7 +383,6 @@ const gridStyle = computed(() => {
   return { gridTemplateColumns: `repeat(${layout.value.cols}, 1fr)`, gridTemplateRows: `repeat(${layout.value.rows}, 1fr)` }
 })
 
-// ws-flv 走 WebSocket，http-flv 走 HTTP，两者都由 flv.js 播放
 function playerTypeFor(url) {
   if (!url) return 'wsflv'
   return /^wss?:\/\//i.test(url) ? 'wsflv' : 'flv'
@@ -486,92 +396,17 @@ function itemStyle(item) {
 }
 
 async function getFlvUrl(deviceTag, channelTag = null) {
-  try {
-    // 1. 如果指定了 channelTag，直接使用
-    if (channelTag) {
-      const linksRes = await request.get(`/channels/${deviceTag}/${channelTag}/play-links`).catch(() => null)
-      if (linksRes?.data?.data) {
-        const links = linksRes.data.data || {}
-        if (links.web_flv) return links.web_flv
-        if (links.flv) return links.flv
-      }
-      // 如果有 channelTag 但没找到 FLV，回退到 deviceTag 作为 channelTag（IPC 场景）
-      if (channelTag !== deviceTag) {
-        const linksRes2 = await request.get(`/channels/${deviceTag}/${deviceTag}/play-links`).catch(() => null)
-        if (linksRes2?.data?.data) {
-          const links = linksRes2.data.data || {}
-          if (links.web_flv) return links.web_flv
-          if (links.flv) return links.flv
-        }
-      }
-    } else {
-      // 2. 没有指定 channelTag，尝试用 deviceTag 作为 channelTag
-      const linksRes = await request.get(`/channels/${deviceTag}/${deviceTag}/play-links`).catch(() => null)
-      if (linksRes?.data?.data) {
-        const links = linksRes.data.data || {}
-        if (links.web_flv) return links.web_flv
-        if (links.flv) return links.flv
-      }
-      // 3. 对于 NVR，尝试获取通道列表，使用第一个通道
-      const channelsRes = await request.get(`/devices/${deviceTag}/channels`).catch(() => null)
-      if (channelsRes?.data?.data?.length > 0) {
-        const firstChannel = channelsRes.data.data[0]
-        const chTag = firstChannel.channel_tag
-        const linksRes2 = await request.get(`/channels/${deviceTag}/${chTag}/play-links`).catch(() => null)
-        if (linksRes2?.data?.data) {
-          const links = linksRes2.data.data || {}
-          if (links.web_flv) return links.web_flv
-          if (links.flv) return links.flv
-        }
-      }
-    }
-    // 4. 回退：查找 active stream
-    const streamsRes = await request.get(`/streams/by-device/${deviceTag}`)
-    const streams = streamsRes.data.data || []
-    let stream = streams.find(s => s.device_tag === deviceTag && s.state === 'Active')
-    // 5. 如果没有 active stream，尝试启动 RTSP 设备的流
-    if (!stream) {
-      try {
-        await request.post(`/devices/${deviceTag}/play`)
-        // 等待一下让流启动
-        await new Promise(r => setTimeout(r, 1000))
-        const streamsRes2 = await request.get(`/streams/by-device/${deviceTag}`)
-        const streams2 = streamsRes2.data.data || []
-        stream = streams2.find(s => s.device_tag === deviceTag && s.state === 'Active')
-      } catch {}
-    }
-    if (!stream) return null
-    const flvRes = await request.get(`/streams/${stream.id}/play`, { params: { protocol: 'wsflv' } })
-    return flvRes.data.data
-  } catch { return null }
+  const payload = { type: channelTag ? 'channel' : 'device', deviceTag, channelTag: channelTag || null, name: deviceTag }
+  return resolvePlayUrl(payload)
 }
-
-const deviceChannelsMap = ref({})
 
 onMounted(async () => {
   await deviceStore.fetchDevices(500, 0)
-  await regionStore.fetchRegionTree()
-  await groupStore.fetchGroupTree()
   await layoutStore.fetchLayouts()
-  await fetchDeviceChannels()
   if (layoutStore.defaultLayout) { selectedLayoutId.value = layoutStore.defaultLayout.id; layout.value = layoutStore.defaultLayout }
   document.addEventListener('mousemove', updateJoystick)
   document.addEventListener('mouseup', stopJoystick)
 })
-
-async function fetchDeviceChannels() {
-  const channelsMap = {}
-  for (const device of deviceStore.devices) {
-    try {
-      const res = await request.get(`/devices/${device.device_tag}/channels`)
-      const channels = res.data.data || []
-      if (channels.length > 0) {
-        channelsMap[device.device_tag] = channels
-      }
-    } catch {}
-  }
-  deviceChannelsMap.value = channelsMap
-}
 
 onUnmounted(() => {
   stopAll()
@@ -586,36 +421,14 @@ async function onLayoutChange() {
   layout.value = await layoutStore.fetchLayout(Number(selectedLayoutId.value))
 }
 
-async function onDragStart(event, device) {
-  const deviceTag = device.device_tag
-  draggingDeviceId = deviceTag; draggingDevice = device; draggingFlvUrl = null
-  event.dataTransfer.setData('application/json', JSON.stringify({ deviceTag, name: device.name, flvUrl: null }))
-  event.dataTransfer.effectAllowed = 'copy'
+async function onTreeDragStart(payload) {
+  if (!payload) return
+  draggingDeviceId = payload.deviceTag
+  draggingDevice = payload
+  draggingFlvUrl = null
   try {
-    const flvUrl = await getFlvUrl(deviceTag)
-    if (flvUrl) {
-      draggingFlvUrl = flvUrl
-      event.dataTransfer.setData('application/json', JSON.stringify({ deviceTag, name: device.name, flvUrl }))
-    }
+    draggingFlvUrl = await resolvePlayUrl(payload)
   } catch (err) { console.warn('[PlayerWallFlv] pre-fetch flv url failed:', err) }
-}
-
-async function onChannelDragStart(event, device, channel) {
-  const deviceTag = device.device_tag
-  const channelTag = channel.channel_tag
-  draggingDeviceId = deviceTag; draggingDevice = device; draggingFlvUrl = null
-  const name = channel.name || channelTag
-  event.dataTransfer.setData('application/json', JSON.stringify({ deviceTag, channelTag, name, flvUrl: null }))
-  event.dataTransfer.effectAllowed = 'copy'
-  try {
-    const linksRes = await request.get(`/channels/${deviceTag}/${channelTag}/play-links`)
-    const links = linksRes.data.data || {}
-    const flvUrl = links.web_flv || links.flv || null
-    if (flvUrl) {
-      draggingFlvUrl = flvUrl
-      event.dataTransfer.setData('application/json', JSON.stringify({ deviceTag, channelTag, name, flvUrl }))
-    }
-  } catch (err) { console.warn('[PlayerWallFlv] pre-fetch channel flv url failed:', err) }
 }
 
 function onDragEnd() { draggingDeviceId = null; draggingDevice = null; draggingFlvUrl = null }
@@ -628,34 +441,38 @@ function onCellDragOver(event, slotId) {
 async function onCellDrop(event, slotId) {
   event.preventDefault()
   event.stopPropagation()
-  const rawData = event.dataTransfer.getData('application/json')
-  if (!rawData) return
-  let deviceTag, channelTag, deviceName, flvUrl
-  try {
-    const data = JSON.parse(rawData)
-    deviceTag = data.deviceTag; channelTag = data.channelTag; deviceName = data.name; flvUrl = data.flvUrl
-  } catch { toast.error('数据格式错误'); return }
-  if (!flvUrl) flvUrl = await getFlvUrl(deviceTag, channelTag)
+  const payload = readDragPayload(event)
+  if (!payload) return
+  let flvUrl = draggingFlvUrl
+  if (!flvUrl) flvUrl = await resolvePlayUrl(payload)
   if (!flvUrl) { toast.error('该设备无可用 FLV 播放地址'); return }
   if (bindings.value[slotId]) toast.info('该格子已有播放，替换中...')
-  bindings.value[slotId] = { deviceTag, channelTag, name: deviceName, flvUrl, slotId }
+  bindings.value[slotId] = {
+    deviceTag: payload.deviceTag,
+    channelTag: payload.channelTag,
+    name: payload.name,
+    flvUrl,
+    slotId,
+  }
 }
 
 async function onDrop(event) {
   event.preventDefault()
   if (!layout.value || layoutItems.value.length === 0) return
-  const rawData = event.dataTransfer.getData('application/json')
-  if (!rawData) return
-  let deviceTag, channelTag, deviceName, flvUrl
-  try {
-    const data = JSON.parse(rawData)
-    deviceTag = data.deviceTag; channelTag = data.channelTag; deviceName = data.name; flvUrl = data.flvUrl
-  } catch { return }
-  if (!flvUrl) flvUrl = await getFlvUrl(deviceTag, channelTag)
+  const payload = readDragPayload(event)
+  if (!payload) return
+  let flvUrl = draggingFlvUrl
+  if (!flvUrl) flvUrl = await resolvePlayUrl(payload)
   if (!flvUrl) { toast.error('该设备无可用 FLV 播放地址'); return }
   const emptySlot = layoutItems.value.find(item => !bindings.value[item.id])
   const targetSlot = emptySlot || layoutItems.value[0]
-  bindings.value[targetSlot.id] = { deviceTag, channelTag, name: deviceName, flvUrl, slotId: targetSlot.id }
+  bindings.value[targetSlot.id] = {
+    deviceTag: payload.deviceTag,
+    channelTag: payload.channelTag,
+    name: payload.name,
+    flvUrl,
+    slotId: targetSlot.id,
+  }
 }
 
 function stopSlot(slotId) { delete bindings.value[slotId] }
@@ -829,11 +646,12 @@ async function deleteLayout() {
 </script>
 
 <style scoped>
-.wall-layout { display: flex; gap: 12px; height: calc(100vh - 120px); margin-top: 12px; }
-.wall-sidebar { width: 280px; flex-shrink: 0; display: flex; flex-direction: column; gap: 0; }
-.wall-main-area { flex: 1; display: flex; gap: 8px; min-width: 0; padding-left: 20px; }
+.wall-main-area { flex: 1 1 auto; min-height: 0; display: flex; gap: 8px; min-width: 0; padding-left: 20px; }
 .wall-player-area { flex: 1; border: 1px dashed var(--border); border-radius: 8px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--bg-surface); padding: 8px; }
 .wall-ptz-wrapper { position: relative; flex-shrink: 0; display: flex; align-items: stretch; }
+
+.binding-card { flex-shrink: 0; max-height: 240px; display: flex; flex-direction: column; }
+.binding-card :deep(.data-card__body) { overflow-y: auto; min-height: 0; }
 .wall-ptz-panel {
   width: 200px; flex-shrink: 0;
   background: var(--bg-card);
@@ -1121,7 +939,6 @@ async function deleteLayout() {
 
 .player-grid { display: grid; gap: 4px; width: 100%; height: 100%; }
 .grid-cell { border: 1px dashed var(--border); border-radius: 4px; overflow: hidden; position: relative; background: var(--video-bg); display: flex; align-items: center; justify-content: center; cursor: pointer; }
-/* 平铺时格子可能很小，去掉 VideoPlayer 的最小高度，避免溢出格子 */
 .grid-cell :deep(.video-player) { min-height: 0; }
 .grid-cell.selected { border-color: var(--color-accent); border-style: solid; box-shadow: 0 0 10px var(--color-accent-glow); }
 .cell-empty { font-size: 24px; color: var(--text-muted); font-weight: 700; }

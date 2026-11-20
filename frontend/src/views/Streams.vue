@@ -1,19 +1,25 @@
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <h1 class="page-title">流管理</h1>
-      <div class="page-toolbar">
+  <PageView title="流管理">
+    <template #toolbar>
+      <el-button :icon="Refresh" :loading="streamStore.loading" @click="fetchStreams">刷新</el-button>
+      <el-button type="primary" :icon="Plus" @click="showAddModal = true">添加流</el-button>
+    </template>
+
+    <FilterBar>
+      <template #left>
         <el-input
           v-model="searchQuery"
           placeholder="搜索流..."
           clearable
           style="max-width: 200px"
+          @change="onFilterChange"
+          @clear="onFilterChange"
         >
           <template #prefix>
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
-        <el-select v-model="stateFilter" clearable placeholder="全部状态" style="width: 120px">
+        <el-select v-model="stateFilter" clearable placeholder="全部状态" style="width: 120px" @change="onFilterChange">
           <el-option value="Active" label="活跃" />
           <el-option value="Idle" label="空闲" />
           <el-option value="Starting" label="启动中" />
@@ -22,12 +28,10 @@
           <el-option value="Error" label="错误" />
           <el-option value="Stopped" label="已停止" />
         </el-select>
-        <el-button :icon="Refresh" :loading="streamStore.loading" @click="fetchStreams">刷新</el-button>
-        <el-button type="primary" :icon="Plus" @click="showAddModal = true">添加流</el-button>
-      </div>
-    </div>
-    <div class="page-body">
-      <DataCard>
+      </template>
+    </FilterBar>
+
+    <DataCard>
         <el-table
           v-loading="streamStore.loading && streams.length === 0"
           :data="filteredStreams"
@@ -97,17 +101,7 @@
         </el-table>
       </DataCard>
 
-      <div class="pagination-wrapper" v-if="streamStore.total > streamStore.pageSize">
-        <el-pagination
-          v-model:current-page="currentPage"
-          :page-size="streamStore.pageSize"
-          :total="streamStore.total"
-          layout="prev, pager, next"
-          @current-change="onPageChange"
-        />
-      </div>
-
-      <el-dialog v-model="showAddModal" title="创建流" width="480px" destroy-on-close>
+      <AppDialog v-model="showAddModal" title="创建流" size="sm">
         <el-form label-position="top" @submit.prevent="addStream">
           <el-form-item label="设备 ID" required>
             <el-input v-model="addForm.deviceId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
@@ -122,9 +116,19 @@
             {{ addLoading ? '创建中...' : '创建' }}
           </el-button>
         </template>
-      </el-dialog>
-    </div>
-  </div>
+      </AppDialog>
+
+    <template #footer>
+      <PaginationBar
+        v-model:page-size="streamStore.pageSize"
+        :total="streamStore.total"
+        :page="currentPage"
+        show-sizes
+        :page-sizes="[12, 20, 50, 100, 200]"
+        @update:page="onPageChange"
+      />
+    </template>
+  </PageView>
 </template>
 
 <script setup>
@@ -135,6 +139,10 @@ import { Search, Refresh, Plus, User } from '@element-plus/icons-vue'
 import { useStreamStore } from '../stores/streamStore'
 import { useDeviceStore } from '../stores/deviceStore'
 import DataCard from '../components/common/DataCard.vue'
+import PageView from '../components/common/PageView.vue'
+import FilterBar from '../components/common/FilterBar.vue'
+import PaginationBar from '../components/common/PaginationBar.vue'
+import AppDialog from '../components/common/AppDialog.vue'
 
 const route = useRoute()
 const streamStore = useStreamStore()
@@ -153,12 +161,7 @@ async function onPageChange(page) {
 }
 
 const filteredStreams = computed(() => {
-  return streams.value.filter(s => {
-    const q = searchQuery.value.toLowerCase()
-    const matchSearch = !q || (s.stream_key || '').toLowerCase().includes(q) || (s.id || '').toLowerCase().includes(q) || (s.media_server_id || '').toLowerCase().includes(q)
-    const matchState = !stateFilter.value || s.state === stateFilter.value
-    return matchSearch && matchState
-  })
+  return streams.value
 })
 
 let refreshTimer = null
@@ -185,8 +188,13 @@ onUnmounted(() => {
 })
 
 async function fetchStreams(offset = 0) {
-  await streamStore.fetchStreams(offset)
+  await streamStore.fetchStreams(offset, { search: searchQuery.value, state: stateFilter.value })
   streams.value = streamStore.streams
+}
+
+function onFilterChange() {
+  currentPage.value = 1
+  fetchStreams(0)
 }
 
 async function playStream(stream, protocol) {
@@ -254,5 +262,4 @@ function formatTime(ts) {
   font-size: var(--text-xs);
   color: var(--text-secondary);
 }
-.pagination-wrapper { display: flex; justify-content: center; margin-top: 16px; }
 </style>

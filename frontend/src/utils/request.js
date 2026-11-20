@@ -46,7 +46,6 @@ request.interceptors.response.use(
   (response) => {
     const res = response.data
     if (res.code !== undefined && res.code !== 200) {
-      // silent：调用方自行处理错误（例如概览页的可选数据源），不弹提示。
       if (!response.config?.silent) {
         ElMessage.error(res.message || res.msg || '请求失败')
       }
@@ -89,7 +88,6 @@ request.interceptors.response.use(
       return Promise.reject(error)
     }
 
-    // silent：调用方自行处理错误，不弹提示。
     if (originalRequest?.silent) {
       return Promise.reject(error)
     }

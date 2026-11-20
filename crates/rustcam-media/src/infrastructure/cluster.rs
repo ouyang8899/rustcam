@@ -1,7 +1,7 @@
+use crate::adapter::media_server::{MediaServerAdapter, ServerStatus};
+use crate::config::{MediaServerConfig, MediaServersConfig};
 use dashmap::DashMap;
 use std::sync::Arc;
-use crate::adapter::media_server::{MediaServerAdapter, ServerStatus};
-use crate::config::{MediaServersConfig, MediaServerConfig};
 
 pub struct ClusterManager {
     servers: Arc<DashMap<String, Arc<dyn MediaServerAdapter>>>,
@@ -18,7 +18,9 @@ pub enum ClusterStrategy {
 }
 
 impl Default for ClusterStrategy {
-    fn default() -> Self { ClusterStrategy::RoundRobin }
+    fn default() -> Self {
+        ClusterStrategy::RoundRobin
+    }
 }
 
 impl ClusterManager {
@@ -32,14 +34,25 @@ impl ClusterManager {
         let strategy = ClusterStrategy::RoundRobin;
         let round_robin = Arc::new(std::sync::atomic::AtomicU32::new(0));
 
-        Self { servers, enabled, strategy, round_robin }
+        Self {
+            servers,
+            enabled,
+            strategy,
+            round_robin,
+        }
     }
 
     fn create_adapter(config: &MediaServerConfig) -> Option<Arc<dyn MediaServerAdapter>> {
         match config.server_type.as_str() {
-            "zlmediakit" => Some(Arc::new(crate::adapter::media_server::zlmediakit::ZlMediaKitAdapter::new(config.clone()))),
-            "srs" => Some(Arc::new(crate::adapter::media_server::srs::SrsAdapter::new(config.clone()))),
-            "xiu" => Some(Arc::new(crate::adapter::media_server::xiu::XiuAdapter::new(config.clone()))),
+            "zlmediakit" => Some(Arc::new(
+                crate::adapter::media_server::zlmediakit::ZlMediaKitAdapter::new(config.clone()),
+            )),
+            "srs" => Some(Arc::new(
+                crate::adapter::media_server::srs::SrsAdapter::new(config.clone()),
+            )),
+            "xiu" => Some(Arc::new(
+                crate::adapter::media_server::xiu::XiuAdapter::new(config.clone()),
+            )),
             _ => None,
         }
     }
@@ -47,7 +60,8 @@ impl ClusterManager {
     pub fn register_server(&self, config: MediaServerConfig) {
         if let Some(adapter) = Self::create_adapter(&config) {
             self.servers.insert(config.server_tag.clone(), adapter);
-            self.enabled.insert(config.server_tag.clone(), config.enabled);
+            self.enabled
+                .insert(config.server_tag.clone(), config.enabled);
         }
     }
 
@@ -60,93 +74,134 @@ impl ClusterManager {
         let adapter = match self.servers.get(tag) {
             Some(a) => a.value().clone(),
             None => {
-                tracing::warn!("[ClusterManager] get_server_status: tag '{}' not found in cluster", tag);
+                tracing::warn!(
+                    "[ClusterManager] get_server_status: tag '{}' not found in cluster",
+                    tag
+                );
                 return None;
             }
         };
 
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(3),
-            adapter.get_status(),
-        )
-        .await
-        {
+        match tokio::time::timeout(std::time::Duration::from_secs(3), adapter.get_status()).await {
             Ok(Ok(status)) => Some(status),
             Ok(Err(e)) => {
-                tracing::warn!("[ClusterManager] get_server_status: tag '{}' get_status failed: {}", tag, e);
+                tracing::warn!(
+                    "[ClusterManager] get_server_status: tag '{}' get_status failed: {}",
+                    tag,
+                    e
+                );
                 None
             }
             Err(_) => {
-                tracing::warn!("[ClusterManager] get_server_status: tag '{}' timed out", tag);
+                tracing::warn!(
+                    "[ClusterManager] get_server_status: tag '{}' timed out",
+                    tag
+                );
                 None
             }
         }
     }
 
     pub async fn is_stream_online(&self, app: &str, stream_key: &str, server_tag: &str) -> bool {
-
         let adapter = { self.servers.get(server_tag).map(|a| a.value().clone()) };
         if let Some(adapter) = adapter {
             match adapter.is_stream_online(app, stream_key).await {
                 Ok(online) => return online,
-                Err(e) => tracing::warn!("[ClusterManager] is_stream_online failed for {}: {}", stream_key, e),
+                Err(e) => tracing::warn!(
+                    "[ClusterManager] is_stream_online failed for {}: {}",
+                    stream_key,
+                    e
+                ),
             }
         }
         false
     }
 
     pub async fn select_any_server(&self) -> Option<Arc<dyn MediaServerAdapter>> {
-        let candidates: Vec<_> = self.servers.iter()
-            .filter(|entry| self.enabled.get(entry.key()).map(|e| *e.value()).unwrap_or(false))
+        let candidates: Vec<_> = self
+            .servers
+            .iter()
+            .filter(|entry| {
+                self.enabled
+                    .get(entry.key())
+                    .map(|e| *e.value())
+                    .unwrap_or(false)
+            })
             .map(|e| e.value().clone())
             .collect();
 
-        if candidates.is_empty() { return None; }
+        if candidates.is_empty() {
+            return None;
+        }
 
         match self.strategy {
             ClusterStrategy::RoundRobin => {
-                let idx = self.round_robin.fetch_add(1, std::sync::atomic::Ordering::Relaxed) as usize % candidates.len();
+                let idx = self
+                    .round_robin
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    as usize
+                    % candidates.len();
                 Some(candidates[idx].clone())
             }
             ClusterStrategy::LeastConnections => {
-                let mut counts: Vec<_> = futures::future::join_all(
-                    candidates.iter().map(|s| async {
+                let mut counts: Vec<_> =
+                    futures::future::join_all(candidates.iter().map(|s| async {
                         let count = s.get_session_count().await.unwrap_or(u32::MAX);
                         (Arc::clone(s), count)
-                    })
-                ).await;
+                    }))
+                    .await;
                 counts.sort_by(|a, b| a.1.cmp(&b.1));
                 counts.into_iter().next().map(|(s, _)| s)
             }
             ClusterStrategy::Random => {
                 use std::time::{SystemTime, UNIX_EPOCH};
-                let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as usize;
+                let seed = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos() as usize;
                 Some(candidates[seed % candidates.len()].clone())
             }
         }
     }
 
     pub async fn select_server(&self) -> Option<Arc<dyn MediaServerAdapter>> {
-
         let servers: Vec<Arc<dyn MediaServerAdapter>> = {
             self.servers
                 .iter()
-                .filter(|entry| self.enabled.get(entry.key()).map(|e| *e.value()).unwrap_or(false))
+                .filter(|entry| {
+                    self.enabled
+                        .get(entry.key())
+                        .map(|e| *e.value())
+                        .unwrap_or(false)
+                })
                 .map(|e| e.value().clone())
                 .collect()
         };
 
-        let candidates: Vec<Arc<dyn MediaServerAdapter>> = futures::future::join_all(
-            servers.into_iter().map(|s| async move {
-                if s.is_online().await { Some(s) } else { None }
-            })
-        ).await.into_iter().flatten().collect();
+        let candidates: Vec<Arc<dyn MediaServerAdapter>> =
+            futures::future::join_all(servers.into_iter().map(|s| async move {
+                if s.is_online().await {
+                    Some(s)
+                } else {
+                    None
+                }
+            }))
+            .await
+            .into_iter()
+            .flatten()
+            .collect();
 
-        if candidates.is_empty() { return None; }
+        if candidates.is_empty() {
+            return None;
+        }
 
         match self.strategy {
             ClusterStrategy::RoundRobin => {
-                let idx = self.round_robin.fetch_add(1, std::sync::atomic::Ordering::Relaxed) as usize % candidates.len();
+                let idx = self
+                    .round_robin
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    as usize
+                    % candidates.len();
                 Some(candidates[idx].clone())
             }
             _ => Some(candidates[0].clone()),
@@ -157,7 +212,9 @@ impl ClusterManager {
         self.servers.iter().map(|s| s.value().clone()).collect()
     }
 
-    pub fn server_count(&self) -> usize { self.servers.len() }
+    pub fn server_count(&self) -> usize {
+        self.servers.len()
+    }
 
     pub fn get_server(&self, tag: &str) -> Option<Arc<dyn MediaServerAdapter>> {
         self.servers.get(tag).map(|s| s.value().clone())

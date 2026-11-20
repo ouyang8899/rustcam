@@ -1,11 +1,11 @@
 use crate::domain::device::Protocol;
 use crate::protocol::adapter::SignalAdapter;
 use crate::protocol::traits::ProtocolDeps;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use dashmap::DashMap;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::RwLock;
+use tokio::sync::Mutex;
 
 pub type AdapterEntry = Arc<Mutex<Box<dyn SignalAdapter + Send + Sync>>>;
 pub type AdapterFactory = Arc<dyn Fn(ProtocolDeps, &str) -> Box<dyn SignalAdapter> + Send + Sync>;
@@ -48,7 +48,6 @@ pub fn set_default_deps(deps: ProtocolDeps) {
 }
 
 pub fn get_or_create_adapter(protocol: &Protocol, key: &str) -> Option<AdapterEntry> {
-
     if let Some(existing) = ADAPTER_MAP.get(key) {
         return Some(existing.value().clone());
     }

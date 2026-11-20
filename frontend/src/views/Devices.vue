@@ -1,8 +1,11 @@
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <h1 class="page-title">设备管理</h1>
-      <div class="page-toolbar">
+  <PageView title="设备管理" layout="workspace">
+    <template #toolbar>
+      <el-button type="primary" :icon="Plus" @click="openAddModal()">添加设备</el-button>
+    </template>
+
+    <FilterBar>
+      <template #left>
         <el-input v-model="searchQuery" placeholder="搜索设备..." clearable style="max-width: 200px" @change="onFilterChange">
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
@@ -29,103 +32,63 @@
           <el-option value="Platform" label="Platform" />
           <el-option value="Other" label="Other" />
         </el-select>
-        <el-button type="primary" :icon="Plus" @click="openAddModal()">添加设备</el-button>
-      </div>
-    </div>
-    <div class="page-body">
-      <el-row :gutter="12" class="devices-layout">
-        <el-col :span="6">
-          <div class="data-card">
-            <div class="data-card__header">
-              <div class="group-header">
-                <span>分组</span>
-                <el-radio-group v-model="groupMode" size="small">
-                  <el-radio-button value="region">地区</el-radio-button>
-                  <el-radio-button value="custom">自定义</el-radio-button>
-                </el-radio-group>
+      </template>
+    </FilterBar>
+
+    <WorkspaceLayout>
+        <template #aside>
+          <div class="tree-panel">
+            <div class="data-card">
+              <div class="data-card__header">
+                <div class="group-header">
+                  <span>分组</span>
+                  <el-radio-group v-model="groupMode" size="small" style="float:right;">
+                    <el-radio-button value="region">地区</el-radio-button>
+                    <el-radio-button value="custom">自定义</el-radio-button>
+                  </el-radio-group>
+                </div>
               </div>
-            </div>
-            <div class="data-card__body" v-if="groupMode === 'region'">
-              <el-skeleton animated :rows="3" :loading="regionLoading">
-                <div class="region-all-item" :class="{ active: selectedRegion === null }" @click="onRegionAllClick">
-                  全部 <span class="count">{{ deviceStore.total }}</span>
-                </div>
-                <el-tree
-                  ref="regionTreeRef"
-                  :data="regionStore.regionTree"
-                  :props="{ label: 'name', children: 'children' }"
-                  node-key="gb28181_code"
-                  :default-expand-all="false"
-                  :expand-on-click-node="false"
+              <div class="data-card__body" v-if="groupMode === 'region'">
+                <GroupTree
+                  mode="region"
+                  :show-devices="false"
+                  searchable
+                  refreshable
+                  fill
                   @node-click="onRegionNodeClick"
-                >
-                  <template #default="{ data }">
-                    <span>{{ data.name }} ({{ data.device_count || 0 }})</span>
-                  </template>
-                </el-tree>
-                <el-empty v-if="!regionLoading && regionStore.regionTree.length === 0" description="暂无地区数据" :image-size="60" />
-              </el-skeleton>
-            </div>
-            <div class="data-card__body" v-else>
-              <el-button size="small" :icon="Plus" style="margin-bottom: 8px" @click="addRootGroup">新建分组</el-button>
-              <el-skeleton animated :rows="3" :loading="groupLoading">
-                <div class="region-all-item" :class="{ active: selectedGroup === null }" @click="onGroupAllClick">
-                  全部 <span class="count">{{ deviceStore.total }}</span>
-                </div>
-                <el-tree
-                  ref="groupTreeRef"
-                  :data="groupStore.groupTree"
-                  :props="{ label: 'name', children: 'children' }"
-                  node-key="id"
-                  :current-node-key="selectedGroup > 0 ? selectedGroup : undefined"
-                  :default-expand-all="false"
-                  :expand-on-click-node="false"
-                  highlight-current
-                  :default-expanded-keys="Array.from(expandedGroupIds)"
+                />
+              </div>
+              <div class="data-card__body" v-else>
+                <el-button size="small" :icon="Plus" style="margin-bottom: 8px" @click="addRootGroup">新建分组</el-button>
+                <GroupTree
+                  :show-devices="false"
+                  searchable
+                  refreshable
+                  fill
                   @node-click="onGroupNodeClick"
                   @node-contextmenu="onGroupContextmenu"
-                >
-                  <template #default="{ data }">
-                    <span class="group-node-row">
-                      <span class="group-node-label">{{ data.name }} ({{ data.device_count || 0 }})</span>
-                      <span class="group-node-actions" @click.stop>
-                        <el-tooltip content="添加子分组" :show-after="400">
-                          <el-button :icon="FolderAdd" size="small" circle text @click="addChildGroup(data)" />
-                        </el-tooltip>
-                        <el-tooltip content="重命名" :show-after="400">
-                          <el-button :icon="Edit" size="small" circle text @click="editGroup(data)" />
-                        </el-tooltip>
-                        <el-tooltip content="删除" :show-after="400">
-                          <el-button :icon="Delete" size="small" circle text type="danger" @click="deleteGroup(data)" />
-                        </el-tooltip>
-                      </span>
-                    </span>
-                  </template>
-                </el-tree>
-                <el-empty v-if="!groupLoading && groupStore.groupTree.length === 0" description="暂无自定义分组" :image-size="60" />
-              </el-skeleton>
+                />
 
-              <teleport to="body">
-                <div
-                  v-if="contextmenuVisible"
-                  class="group-contextmenu"
-                  :style="{ left: contextmenuX + 'px', top: contextmenuY + 'px' }"
-                  @click.stop
-                >
-                  <div class="ctx-item" @click="handleCtxAddChild"><el-icon><FolderAdd /></el-icon> 新建子分组</div>
-                  <div class="ctx-item" @click="handleCtxRename"><el-icon><Edit /></el-icon> 重命名</div>
-                  <div class="ctx-item ctx-danger" @click="handleCtxDelete"><el-icon><Delete /></el-icon> 删除</div>
-                </div>
-              </teleport>
+                <teleport to="body">
+                  <div
+                    v-if="contextmenuVisible"
+                    class="group-contextmenu"
+                    :style="{ left: contextmenuX + 'px', top: contextmenuY + 'px' }"
+                    @click.stop
+                  >
+                    <div class="ctx-item" @click="handleCtxAddChild"><el-icon><FolderAdd /></el-icon> 新建子分组</div>
+                    <div class="ctx-item" @click="handleCtxRename"><el-icon><Edit /></el-icon> 重命名</div>
+                    <div class="ctx-item ctx-danger" @click="handleCtxDelete"><el-icon><Delete /></el-icon> 删除</div>
+                  </div>
+                </teleport>
+              </div>
             </div>
           </div>
-        </el-col>
+        </template>
 
-        <el-col :span="18">
-          <el-text type="info" style="margin-bottom: 12px; display: block">共 {{ deviceStore.total }} 台设备</el-text>
-          <div class="data-card">
-            <el-skeleton animated :rows="5" :loading="tableLoading">
-              <el-table :data="filteredDevices" row-key="id" empty-text="暂无设备">
+        <DataCard>
+          <el-skeleton animated :rows="5" :loading="tableLoading">
+              <el-table :data="filteredDevices" row-key="id" border stripe empty-text="暂无设备">
                   <el-table-column label="状态" width="70" align="center">
                     <template #default="{ row }">
                       <StatusDot :status="getDeviceStatusClass(row.status)" />
@@ -186,65 +149,61 @@
                       <el-button size="small" type="danger" plain @click="deleteDevice(row)">删除</el-button>
                     </template>
                   </el-table-column>
-                </el-table>
-            </el-skeleton>
+              </el-table>
+          </el-skeleton>
+        </DataCard>
 
-            <el-pagination
-              v-if="!tableLoading"
-              v-model:current-page="currentPage"
-              :page-size="deviceStore.limit"
+
+        <template #footer>
+          <div v-if="!tableLoading" class="workspace-footer">
+            <PaginationBar
+              v-model:page-size="deviceStore.limit"
               :total="deviceStore.total"
-              layout="prev, pager, next"
-              style="margin-top: 12px; justify-content: flex-end"
-              @current-change="fetchDevices"
+              :page="currentPage"
+              show-sizes
+              @update:page="onPageChange"
             />
           </div>
-        </el-col>
-      </el-row>
-    </div>
+        </template>
+    </WorkspaceLayout>
 
-    <el-dialog v-model="showModal" :title="isEdit ? '编辑设备' : '添加设备'" width="800px" draggable destroy-on-close>
-      <!-- 添加模式显示 tabs，编辑模式直接显示对应表单 -->
+    <AppDialog v-model="showModal" :title="isEdit ? '编辑设备' : '添加设备'" size="lg" draggable>
       <template v-if="!isEdit">
         <el-tabs v-model="activeDeviceTab" tab-position="top">
           <el-tab-pane label="GB28181" name="gb28181">
-            <Gb28181DeviceForm 
+            <Gb28181DeviceForm
               ref="gbFormRef"
               :media-server-options="mediaServerStore.servers"
               :region-tree="regionStore.regionTree"
-              :group-tree="groupStore.groupTree"
               :industry-options="gbIndustryCodeOptions"
               :device-type-options="gbDeviceTypeOptions"
               :network-options="gbNetworkCodeOptions"
               />
             </el-tab-pane>
             <el-tab-pane label="RTSP" name="rtsp">
-            <RtspDeviceForm 
+            <RtspDeviceForm
               ref="rtspFormRef"
               v-model="form"
               :media-server-options="mediaServerStore.servers"
               :region-tree="regionStore.regionTree"
-              :group-tree="groupStore.groupTree"
               :push-address="rtspPushAddress"
               :push-port="rtspPushPort"
             />
           </el-tab-pane>
           <el-tab-pane label="ONVIF" name="onvif">
-            <OnvifDeviceForm 
+            <OnvifDeviceForm
               ref="onvifFormRef"
               v-model="form"
               :media-server-options="mediaServerStore.servers"
               :region-tree="regionStore.regionTree"
-              :group-tree="groupStore.groupTree"
             />
           </el-tab-pane>
           <el-tab-pane label="RTMP" name="rtmp">
-            <RtmpDeviceForm 
+            <RtmpDeviceForm
               ref="rtmpFormRef"
               v-model="form"
               :media-server-options="mediaServerStore.servers"
               :region-tree="regionStore.regionTree"
-              :group-tree="groupStore.groupTree"
               :push-address="rtmpPushAddress"
               :push-port="rtmpPushPortActual"
             />
@@ -255,7 +214,6 @@
         <Gb28181DeviceForm v-if="form.protocol === 'Gb28181'" :key="editingId" ref="gbFormRef"
           :media-server-options="mediaServerStore.servers"
           :region-tree="regionStore.regionTree"
-          :group-tree="groupStore.groupTree"
           :industry-options="gbIndustryCodeOptions"
           :device-type-options="gbDeviceTypeOptions"
           :network-options="gbNetworkCodeOptions"
@@ -264,7 +222,6 @@
         <RtspDeviceForm v-else-if="form.protocol === 'Rtsp'" :key="editingId" ref="rtspFormRef"
           :media-server-options="mediaServerStore.servers"
           :region-tree="regionStore.regionTree"
-          :group-tree="groupStore.groupTree"
           :push-address="rtspPushAddress"
           :push-port="rtspPushPort"
           :device-tag="form.device_tag"
@@ -272,13 +229,11 @@
         <OnvifDeviceForm v-else-if="form.protocol === 'Onvif'" :key="editingId" ref="onvifFormRef"
           :media-server-options="mediaServerStore.servers"
           :region-tree="regionStore.regionTree"
-          :group-tree="groupStore.groupTree"
           :device-tag="form.device_tag"
         />
         <RtmpDeviceForm v-else-if="form.protocol === 'Rtmp'" :key="editingId" ref="rtmpFormRef"
           :media-server-options="mediaServerStore.servers"
           :region-tree="regionStore.regionTree"
-          :group-tree="groupStore.groupTree"
           :push-address="rtmpPushAddress"
           :push-port="rtmpPushPortActual"
           :device-tag="form.device_tag"
@@ -288,9 +243,9 @@
         <el-button @click="closeModal">取消</el-button>
         <el-button type="primary" @click="submitDevice">{{ isEdit ? '保存修改' : '确认添加' }}</el-button>
       </template>
-    </el-dialog>
+    </AppDialog>
 
-    <el-dialog v-model="showPlayLinksModal" :title="`播放链接: ${selectedDevice?.name}`" width="560px" draggable destroy-on-close>
+    <AppDialog v-model="showPlayLinksModal" :title="`播放链接: ${selectedDevice?.name}`" size="md" draggable>
       <el-descriptions :column="1" border v-if="availablePlayLinks.length > 0">
         <el-descriptions-item v-for="link in availablePlayLinks" :key="link.key" :label="link.label">
           <div style="display: flex; gap: 8px; align-items: center">
@@ -299,19 +254,15 @@
           </div>
         </el-descriptions-item>
       </el-descriptions>
-      <el-empty v-else description="暂无播放链接" />
-    </el-dialog>
-
-    <div v-if="copied" class="fixed-toast toast-success">
-      已复制到剪贴板
-    </div>
-  </div>
+      <EmptyState v-else title="暂无播放链接" />
+    </AppDialog>
+  </PageView>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { ElMessageBox, ElMessage } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { Search, Refresh, Plus, Delete, Edit, FolderAdd } from '@element-plus/icons-vue'
 import { useDeviceStore } from '../stores/deviceStore'
 import { useMediaServerStore } from '../stores/mediaServerStore'
@@ -323,6 +274,13 @@ import { request } from '../utils/request'
 import { useToast } from '../composables/useToast'
 import StatusDot from '../components/common/StatusDot.vue'
 import DataCard from '../components/common/DataCard.vue'
+import GroupTree from '../components/common/GroupTree.vue'
+import PageView from '../components/common/PageView.vue'
+import WorkspaceLayout from '../components/common/WorkspaceLayout.vue'
+import FilterBar from '../components/common/FilterBar.vue'
+import PaginationBar from '../components/common/PaginationBar.vue'
+import EmptyState from '../components/common/EmptyState.vue'
+import AppDialog from '../components/common/AppDialog.vue'
 import RtspDeviceForm from './device-forms/RtspDeviceForm.vue'
 import Gb28181DeviceForm from './device-forms/Gb28181DeviceForm.vue'
 import OnvifDeviceForm from './device-forms/OnvifDeviceForm.vue'
@@ -360,8 +318,6 @@ function getDeviceStatusClass(status) {
 }
 
 const tableLoading = computed(() => deviceStore.loading)
-const regionLoading = computed(() => regionStore.loading)
-const groupLoading = computed(() => groupStore.loading)
 
 const showModal = ref(false)
 const searchQuery = ref('')
@@ -373,10 +329,9 @@ const editingId = ref(null)
 const showPlayLinksModal = ref(false)
 const selectedDevice = ref(null)
 const playLinks = ref(null)
-const copied = ref(false)
 const gbRegionCascader = ref([])
-const sipGbCode = ref('00')  // 基层编码，默认00
-const sipIdSuffix = ref('')  // 后缀，最多6位数字
+const sipGbCode = ref('00')
+const sipIdSuffix = ref('')
 const gbFormRef = ref(null)
 const rtspFormRef = ref(null)
 const onvifFormRef = ref(null)
@@ -394,29 +349,22 @@ watch(sipGbCode, (val) => {
 })
 
 const selectedRegion = ref(null)
+const selectedUnassignedRegion = ref(false)
 const groupMode = ref('region')
 const selectedGroup = ref(null)
-const regionTreeRef = ref(null)
-const groupTreeRef = ref(null)
 const contextmenuVisible = ref(false)
 const contextmenuX = ref(0)
 const contextmenuY = ref(0)
 const contextmenuNode = ref(null)
-const expandedGroupIds = ref(new Set())
 
 const currentPage = ref(Math.floor(deviceStore.offset / deviceStore.limit) + 1)
 
 let copiedTimer = null
 
-const hasGroupData = computed(() => {
-  if (groupMode.value === 'region') return regionStore.regionTree.length > 0
-  return groupStore.groupTree.length > 0
-})
-
 const sipIdPrefix = computed(() => {
   if (!gbRegionCascader.value || gbRegionCascader.value.length === 0) return ''
   const code = gbRegionCascader.value[gbRegionCascader.value.length - 1] || ''
-  return code  // 6位行政区划
+  return code
 })
 
 function findRegionPath(code, tree, path = []) {
@@ -441,42 +389,10 @@ const sipIdPreview = computed(() => {
   const suffix = sipIdSuffix.value || ''
   const paddedSuffix = suffix.padEnd(6, '_')
   const gbCode = sipGbCode.value || '00'
-  // 6位行政区划 + 2位基层编码 + 2位行业 + 3位设备 + 1位网络 + 6位后缀 = 20位
   return sipIdPrefix.value + gbCode + sipIdIndustryCode.value + (form.value.gb_device_type || '') + sipIdNetworkCode.value + paddedSuffix
 })
 
-const groupTreeWithAll = computed(() => {
-  return [{ id: '', name: '全部', children: [] }, ...groupStore.groupTree]
-})
-
-function flattenGroups(groups, result = []) {
-  for (const group of groups) {
-    if (group.id != null) {
-      result.push({ id: String(group.id), name: group.name })
-    }
-    if (group.children && group.children.length > 0) {
-      flattenGroups(group.children, result)
-    }
-  }
-  return result
-}
-
-const flatGroupList = computed(() => flattenGroups(groupStore.groupTree))
-
 function onGbRegionChange(val) {
-}
-
-
-
-function onRegionAllClick() {
-  selectedRegion.value = null
-  currentPage.value = 1
-  deviceStore.offset = 0
-  fetchDevices()
-}
-
-function onGroupAllClick() {
-  selectedGroup.value = null
 }
 
 const rtspPushServer = computed(() => {
@@ -649,10 +565,6 @@ onMounted(async () => {
     fetchGroupTree(),
     gb28181RefStore.fetchRefData(),
   ])
-  groupStore.groupTree.forEach(g => g.expanded = false)
-  if (groupStore.groupTree.length > 0) {
-    expandedGroupIds.value = new Set(groupStore.groupTree.map(n => n.id))
-  }
   document.addEventListener('click', closeContextmenu)
 
   const editId = route.query.edit
@@ -665,12 +577,12 @@ onMounted(async () => {
 async function fetchDevices() {
   const regionCode = groupMode.value === 'region' ? selectedRegion.value : null
   const groupId = groupMode.value === 'custom' ? selectedGroup.value : null
+  const unassignedRegion = groupMode.value === 'region' ? selectedUnassignedRegion.value : null
   const search = searchQuery.value || null
   const protocol = protocolFilter.value || null
   const status = statusFilter.value || null
   const deviceType = deviceTypeFilter.value || null
-  console.log('[fetchDevices] regionCode:', regionCode, 'groupId:', groupId, 'search:', search, 'protocol:', protocol, 'status:', status, 'deviceType:', deviceType)
-  await deviceStore.fetchDevices(deviceStore.limit, deviceStore.offset, regionCode, search, protocol, status, deviceType, groupId)
+  await deviceStore.fetchDevices(deviceStore.limit, deviceStore.offset, regionCode, search, protocol, status, deviceType, groupId, unassignedRegion)
 }
 
 async function fetchRegionTree() {
@@ -683,6 +595,7 @@ async function fetchGroupTree() {
 
 watch(groupMode, () => {
   selectedRegion.value = null
+  selectedUnassignedRegion.value = false
   selectedGroup.value = null
   currentPage.value = 1
   deviceStore.offset = 0
@@ -690,8 +603,19 @@ watch(groupMode, () => {
 })
 
 function onRegionNodeClick(data) {
-  console.log('[onRegionNodeClick] data:', data)
-  selectedRegion.value = data.code
+  if (data.type === 'region') {
+    selectedRegion.value = data.region_code ?? null
+    selectedUnassignedRegion.value = false
+  } else if (data.type === 'ungrouped') {
+    selectedRegion.value = null
+    selectedUnassignedRegion.value = true
+  } else if (data.type === 'all') {
+    selectedRegion.value = null
+    selectedUnassignedRegion.value = false
+    selectedGroup.value = null
+  } else {
+    return
+  }
   currentPage.value = 1
   deviceStore.offset = 0
   fetchDevices()
@@ -701,43 +625,42 @@ function onFilterChange() {
   deviceStore.offset = 0
   fetchDevices()
 }
+
+function onPageChange(page) {
+  currentPage.value = page
+  deviceStore.offset = (page - 1) * deviceStore.limit
+  fetchDevices()
+}
 function onGroupNodeClick(data) {
-  selectedGroup.value = data.id
+  let groupId = null
+  if (data.type === 'group') {
+    groupId = data.id
+  } else if (data.type === 'ungrouped') {
+    groupId = 0
+  } else if (data.type === 'all') {
+    groupId = null
+  } else {
+    return
+  }
+  selectedGroup.value = groupId
+  selectedRegion.value = null
+  selectedUnassignedRegion.value = false
   currentPage.value = 1
   deviceStore.offset = 0
   fetchDevices()
 }
 
-function onGroupContextmenu(e, data) {
-  selectedGroup.value = data.id
+function onGroupContextmenu(data, node, component, event) {
+  if (data.type !== 'group') return
   contextmenuNode.value = data
-  contextmenuX.value = e.clientX
-  contextmenuY.value = e.clientY
+  contextmenuX.value = event.clientX
+  contextmenuY.value = event.clientY
   contextmenuVisible.value = true
 }
 
 function closeContextmenu() {
   contextmenuVisible.value = false
   contextmenuNode.value = null
-}
-
-function findParentChain(nodeId, tree, chain = []) {
-  for (const node of tree) {
-    if (node.id === nodeId) return chain
-    if (node.children) {
-      const found = findParentChain(nodeId, node.children, [...chain, node.id])
-      if (found) return found
-    }
-  }
-  return null
-}
-
-function restoreGroupExpanded(preserveIds = []) {
-  if (!groupTreeRef.value) return
-  for (const id of preserveIds) {
-    expandedGroupIds.value.add(id)
-    try { groupTreeRef.value.expandNode(groupTreeRef.value.getNode(id)) } catch {}
-  }
 }
 
 function handleCtxAddChild() {
@@ -761,10 +684,10 @@ async function addRootGroup() {
     const name = typeof raw === 'object' ? raw.value : raw
     if (!name || !String(name).trim()) return
     await groupStore.createGroup({ name: String(name).trim() })
-    ElMessage.success('分组已创建')
+    toast.success('分组已创建')
     await fetchGroupTree()
   } catch (e) {
-    if (e !== 'cancel') ElMessage.error('创建分组失败: ' + (e?.message || e))
+    if (e !== 'cancel') toast.error('创建分组失败: ' + (e?.message || e))
   }
 }
 
@@ -774,11 +697,10 @@ async function addChildGroup(parentNode) {
     const name = typeof raw === 'object' ? raw.value : raw
     if (!name || !String(name).trim()) return
     await groupStore.createGroup({ name: String(name).trim(), parent_id: parentNode.id })
-    ElMessage.success('子分组已创建')
+    toast.success('子分组已创建')
     await fetchGroupTree()
-    expandedGroupIds.value.add(parentNode.id)
   } catch (e) {
-    if (e !== 'cancel') ElMessage.error('创建子分组失败: ' + (e?.message || e))
+    if (e !== 'cancel') toast.error('创建子分组失败: ' + (e?.message || e))
   }
 }
 
@@ -790,12 +712,10 @@ async function editGroup(node) {
     const name = typeof raw === 'object' ? raw.value : raw
     if (!name || !String(name).trim()) return
     await groupStore.updateGroup(node.id, { name: String(name).trim() })
-    ElMessage.success('分组已重命名')
+    toast.success('分组已重命名')
     await fetchGroupTree()
-    const chain = findParentChain(node.id, groupStore.groupTree, [])
-    restoreGroupExpanded([...chain, node.id])
   } catch (e) {
-    if (e !== 'cancel') ElMessage.error('重命名失败: ' + (e?.message || e))
+    if (e !== 'cancel') toast.error('重命名失败: ' + (e?.message || e))
   }
 }
 
@@ -806,14 +726,12 @@ async function deleteGroup(node) {
       ? `确定删除分组"${node.name}"吗？删除后以下子分组也会被删除：${childNames}`
       : `确定删除分组"${node.name}"吗？`
     await ElMessageBox.confirm(msg, '确认删除', { type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消' })
-    const chain = findParentChain(node.id, groupStore.groupTree, [])
     await groupStore.deleteGroup(node.id)
     if (selectedGroup.value === node.id) selectedGroup.value = null
-    ElMessage.success('分组已删除')
+    toast.success('分组已删除')
     await fetchGroupTree()
-    restoreGroupExpanded(chain)
   } catch (e) {
-    if (e !== 'cancel') ElMessage.error('删除失败: ' + (e?.message || e))
+    if (e !== 'cancel') toast.error('删除失败: ' + (e?.message || e))
   }
 }
 
@@ -840,7 +758,7 @@ async function openEditModal(device) {
     }
     showModal.value = true
   } catch (e) {
-    ElMessage.error('获取设备详情失败: ' + (e?.message || e))
+    toast.error('获取设备详情失败: ' + (e?.message || e))
   }
 }
 
@@ -872,11 +790,11 @@ const currentFormRef = computed(() => {
 
 async function submitDevice() {
   const formRef = currentFormRef.value
-  if (!formRef) { ElMessage.error('无法获取表单'); return }
+  if (!formRef) { toast.error('无法获取表单'); return }
   
   const validation = formRef.validate()
   if (!validation.valid) {
-    ElMessage.error(validation.message)
+    toast.error(validation.message)
     return
   }
   
@@ -902,7 +820,6 @@ async function submitDevice() {
     },
   }
 
-  // GB28181: 完整流配置
   if (data.protocol === 'Gb28181' && data.enable_stream_config) {
     payload.extended.stream_config = {
       video_codec: data.stream_config.video_codec || null,
@@ -917,7 +834,6 @@ async function submitDevice() {
     }
   }
 
-  // 录像配置 (所有协议通用)
   if (data.enable_recording) {
     payload.extended.recording = {
       enabled: true,
@@ -953,7 +869,7 @@ async function submitDevice() {
       scopes: [],
       streams,
     })
-    ElMessage.success(`成功创建 ${streams.length} 个 ONVIF 通道`)
+    toast.success(`成功创建 ${streams.length} 个 ONVIF 通道`)
     await fetchDevices(); closeModal()
     return
   }
@@ -982,39 +898,12 @@ async function copyLink(text) {
     const el = document.createElement('textarea')
     el.value = text; document.body.appendChild(el); el.select(); document.execCommand('copy'); document.body.removeChild(el)
   }
-  copied.value = true; clearTimeout(copiedTimer); copiedTimer = setTimeout(() => { copied.value = false }, 2000)
+  toast.success('已复制到剪贴板')
 }
 </script>
 
 <style scoped>
-.stream-key {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-}
-.mono { font-family: var(--font-mono); }
-
-.fixed-toast {
-  position: fixed;
-  left: 50%;
-  bottom: 20px;
-  transform: translateX(-50%);
-  z-index: 3000;
-  padding: 10px 20px;
-  border-radius: 4px;
-  color: #fff;
-  font-size: 14px;
-  line-height: 20px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  pointer-events: none;
-  max-width: 80vw;
-}
-
-.toast-success { background-color: #67c23a; }
-.toast-error { background-color: #f56c6c; }
-
-.group-header { display: flex; align-items: center; justify-content: space-between; }
-.devices-layout { margin-top: 0; }
+.group-header { display: flex; align-items: center; justify-content: space-between;width: 100%;}
 
 .group-node-row {
   display: flex;
@@ -1075,33 +964,6 @@ async function copyLink(text) {
   background: rgba(239, 68, 68, 0.1);
   color: var(--color-danger);
 }
-.region-all-item {
-  padding: var(--space-2) var(--space-3);
-  cursor: pointer;
-  border-radius: var(--radius-base);
-  font-size: var(--text-sm);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  color: var(--text-primary);
-  margin-bottom: var(--space-1);
-  transition: background 0.15s, color 0.15s;
-  font-family: var(--font-sans);
-}
-.region-all-item:hover {
-  background: var(--color-accent-dim);
-  color: var(--color-accent);
-}
-.region-all-item.active {
-  background: var(--color-accent-dim);
-  color: var(--color-accent);
-  font-weight: var(--weight-semibold);
-}
-.region-all-item .count {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-}
-
 .protocol-tag {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -1149,7 +1011,7 @@ async function copyLink(text) {
   font-size: 12px;
   color: var(--text-secondary);
   padding: 4px 8px;
-  background: var(--bg-color);
+  background: var(--bg-surface);
   border-radius: 4px;
   margin-top: 8px;
 }
@@ -1160,7 +1022,7 @@ async function copyLink(text) {
   color: var(--text-secondary);
   margin: 8px 0 4px 0;
   padding-left: 4px;
-  border-left: 3px solid var(--color-primary);
+  border-left: 3px solid var(--color-accent);
 }
 .tag-category-header:first-child {
   margin-top: 0;
@@ -1171,7 +1033,7 @@ async function copyLink(text) {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background: var(--bg-color);
+  background: var(--bg-surface);
   border-radius: 6px;
   margin-bottom: 12px;
   font-size: 13px;
@@ -1184,7 +1046,7 @@ async function copyLink(text) {
   font-weight: 600;
 }
 .gb28181-selected-summary .summary-divider {
-  color: var(--border-color);
+  color: var(--border);
 }
 
 .sip-id-row {

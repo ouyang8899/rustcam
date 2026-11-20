@@ -95,7 +95,6 @@ impl AuthHandler {
                 Ok(format!("Basic {}", encoded))
             }
             Some(AuthMethod::Digest { realm, nonce }) => {
-
                 let response = Self::calc_digest_response(
                     &self.credentials.username,
                     realm,
@@ -110,9 +109,7 @@ impl AuthHandler {
                 );
                 Ok(auth_header)
             }
-            None => Err(RtspError::AuthFailed(
-                "No auth method selected".into(),
-            )),
+            None => Err(RtspError::AuthFailed("No auth method selected".into())),
         }
     }
 

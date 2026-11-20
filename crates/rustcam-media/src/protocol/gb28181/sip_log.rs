@@ -47,7 +47,11 @@ pub fn format_received(
 
 /// Formats a sent SIP message for the log.
 pub fn format_sent(destination: Option<SocketAddr>, raw: &str) -> String {
-    format!("sip: send to {}: full send message\n{}", addr_str(destination), raw)
+    format!(
+        "sip: send to {}: full send message\n{}",
+        addr_str(destination),
+        raw
+    )
 }
 
 /// Logs a received SIP message with its full content.
@@ -173,7 +177,8 @@ mod tests {
     fn test_format_received_contains_both_addresses_and_the_message() {
         let source: SocketAddr = "192.168.1.211:5060".parse().unwrap();
         let destination: SocketAddr = "192.168.1.7:5061".parse().unwrap();
-        let raw = "REGISTER sip:31011500001000000001@3101150000 SIP/2.0\r\nCSeq: 1 REGISTER\r\n\r\n";
+        let raw =
+            "REGISTER sip:31011500001000000001@3101150000 SIP/2.0\r\nCSeq: 1 REGISTER\r\n\r\n";
 
         let formatted = format_received(Some(source), Some(destination), raw);
 
@@ -214,7 +219,8 @@ mod tests {
     fn test_unknown_addresses_are_reported() {
         let formatted = format_received(None, None, "OPTIONS sip:x SIP/2.0\r\n\r\n");
         assert!(
-            formatted.starts_with("sip: receive from unknown -> to unknown: full receive message\n"),
+            formatted
+                .starts_with("sip: receive from unknown -> to unknown: full receive message\n"),
             "unexpected header: {}",
             formatted
         );

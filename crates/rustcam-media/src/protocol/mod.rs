@@ -1,15 +1,18 @@
-pub mod event;
 pub mod adapter;
+pub mod adapter_event_handler;
 pub mod adapter_manager;
-pub mod matcher;
-pub mod traits;
+pub mod event;
 pub mod gb28181;
+pub mod matcher;
 pub mod onvif;
 pub mod rtsp;
+pub mod traits;
 pub mod websocket;
-pub mod adapter_event_handler;
 
-pub use event::ProtocolType;
 pub use adapter::{AdapterRegistry, SignalAdapter};
-pub use adapter_manager::{get_adapter, set_adapter, remove_adapter, clear_adapters, cleanup_expired_subscriptions_all, refresh_expiring_subscriptions_all, AdapterEntry};
+pub use adapter_manager::{
+    cleanup_expired_subscriptions_all, clear_adapters, get_adapter,
+    refresh_expiring_subscriptions_all, remove_adapter, set_adapter, AdapterEntry,
+};
+pub use event::ProtocolType;
 pub use matcher::ProtocolMatcher;

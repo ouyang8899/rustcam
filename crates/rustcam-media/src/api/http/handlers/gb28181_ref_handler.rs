@@ -6,7 +6,9 @@ use crate::api::response::ApiResponse;
 use crate::api::state::FullState;
 use crate::domain::gb28181_ref::{GbDeviceType, GbIndustryCode, GbNetworkCode, GbReferenceData};
 use crate::error::Result;
-use crate::sql_mappers::{gb_device_type_select_all, gb_industry_code_select_all, gb_network_code_select_all};
+use crate::sql_mappers::{
+    gb_device_type_select_all, gb_industry_code_select_all, gb_network_code_select_all,
+};
 
 pub async fn get_gb28181_ref_data_handler(
     State(state): State<Arc<FullState>>,

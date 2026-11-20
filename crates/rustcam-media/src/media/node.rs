@@ -14,7 +14,7 @@ use tokio::sync::RwLock;
 
 use crate::media::codec::AudioCodec;
 use crate::media::codec::G711;
-use crate::media::errors::{ Result };
+use crate::media::errors::Result;
 use crate::media::rtp::RtpHeader;
 
 static NODE_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -734,8 +734,7 @@ impl MediaNode for BasicMediaNode {
         BasicMediaNode::add_send_chain(self, target_type, mw);
     }
 
-    async fn run(self: Arc<Self>) {
-    }
+    async fn run(self: Arc<Self>) {}
 
     async fn stop(&self) -> Result<()> {
         BasicMediaNode::stop(self).await
@@ -881,7 +880,10 @@ impl MediaSession {
             }
             true
         } else {
-            tracing::warn!("[MediaSession] remove_and_stop_node: node {} not found", node_id.id);
+            tracing::warn!(
+                "[MediaSession] remove_and_stop_node: node {} not found",
+                node_id.id
+            );
             false
         }
     }

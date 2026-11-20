@@ -43,8 +43,12 @@ impl User {
         self
     }
 
-    pub fn is_admin(&self) -> bool { matches!(self.role, UserRole::Admin) }
-    pub fn is_operator(&self) -> bool { matches!(self.role, UserRole::Operator | UserRole::Admin) }
+    pub fn is_admin(&self) -> bool {
+        matches!(self.role, UserRole::Admin)
+    }
+    pub fn is_operator(&self) -> bool {
+        matches!(self.role, UserRole::Operator | UserRole::Admin)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

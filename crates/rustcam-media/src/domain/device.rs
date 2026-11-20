@@ -7,7 +7,6 @@ use crate::domain::server::ServerProtocolPorts;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamConfig {
-
     #[serde(
         default = "default_video_codec",
         skip_serializing_if = "Option::is_none"
@@ -130,6 +129,20 @@ impl fmt::Display for DeviceStatus {
 impl Default for DeviceStatus {
     fn default() -> Self {
         DeviceStatus::Offline
+    }
+}
+
+impl DeviceStatus {
+    /// API 对外暴露的形式（与 serde 的 PascalCase 表示一致）。
+    ///
+    /// 与 `Display` 的小写形式不同：`Display` 面向数据库列，`api_name` 面向 JSON 响应。
+    pub fn api_name(&self) -> &'static str {
+        match self {
+            DeviceStatus::Offline => "Offline",
+            DeviceStatus::Online => "Online",
+            DeviceStatus::Error => "Error",
+            DeviceStatus::Maintaining => "Maintaining",
+        }
     }
 }
 

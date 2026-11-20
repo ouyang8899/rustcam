@@ -53,7 +53,9 @@ pub fn encode_token(
     expires_in: Duration,
     secret: &str,
 ) -> Result<String, AuthError> {
-    let claims = Claims::new(user_id, username, roles, token_type, sid, is_super, expires_in);
+    let claims = Claims::new(
+        user_id, username, roles, token_type, sid, is_super, expires_in,
+    );
     let header = Header::new(Algorithm::HS256);
 
     encode(

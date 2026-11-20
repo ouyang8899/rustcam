@@ -262,23 +262,17 @@ void CefBrowserWidget::handleBridgeMessage(const QString& payload)
     }
 }
 
-void CefBrowserWidget::initialize(double lon, double lat, int zoom, const QString& tmsUrl,
-                                  int minZoom, int maxZoom)
+void CefBrowserWidget::initialize(double lon, double lat, int zoom, const QString& layersJson)
 {
-    const QString script = QStringLiteral("initMap(%1, %2, %3, '%4', %5, %6)")
-        .arg(lon).arg(lat).arg(zoom).arg(jsonEscape(tmsUrl))
-        .arg(minZoom).arg(maxZoom);
+    // jsonEscape 已转义 \ " ' 与换行，所以 JSON 串放进单引号里是安全的 JS 字符串字面量。
+    const QString script = QStringLiteral("initMap(%1, %2, %3, '%4')")
+        .arg(lon).arg(lat).arg(zoom).arg(jsonEscape(layersJson));
     executeJavaScript(script);
 }
 
-void CefBrowserWidget::setTilesUrl(const QString& tmsUrl)
+void CefBrowserWidget::setTilesUrl(const QString& layersJson)
 {
-    executeJavaScript(QStringLiteral("setTilesUrl('%1')").arg(jsonEscape(tmsUrl)));
-}
-
-void CefBrowserWidget::setZoomLimits(int minZoom, int maxZoom)
-{
-    executeJavaScript(QStringLiteral("setZoomLimits(%1, %2)").arg(minZoom).arg(maxZoom));
+    executeJavaScript(QStringLiteral("setTilesUrl('%1')").arg(jsonEscape(layersJson)));
 }
 
 void CefBrowserWidget::locateMarker(const QString& id)

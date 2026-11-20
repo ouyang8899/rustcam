@@ -1,13 +1,16 @@
-use std::sync::Arc;
+use crate::api::response::ApiResponse;
+use crate::api::state::FullState;
+use crate::common::{normalize_device_type, normalize_protocol, normalize_status};
+use crate::domain::{
+    Channel, CreateDeviceRequest, Device, Protocol, Session, Stream, UpdateDeviceRequest,
+};
+use crate::error::AppError;
 use axum::{
-    extract::{Path, State, Query},
+    extract::{Path, Query, State},
     Json,
 };
 use serde::{Deserialize, Serialize};
-use crate::api::state::FullState;
-use crate::api::response::ApiResponse;
-use crate::error::AppError;
-use crate::domain::{ Device, CreateDeviceRequest, UpdateDeviceRequest, Protocol, Stream, Session, Channel };
+use std::sync::Arc;
 
 use crate::protocol::onvif::OnvifDeviceClient;
 
@@ -23,7 +26,10 @@ fn inject_rtsp_auth(url: &str, username: &str, password: &str) -> String {
         if let Some(first_slash) = without_scheme.find('/') {
             let host_part = &without_scheme[..first_slash];
             let path_part = &without_scheme[first_slash..];
-            return format!("rtsp://{}:{}@{}{}", username, password, host_part, path_part);
+            return format!(
+                "rtsp://{}:{}@{}{}",
+                username, password, host_part, path_part
+            );
         } else {
             return format!("rtsp://{}:{}@{}", username, password, without_scheme);
         }
@@ -41,11 +47,17 @@ pub struct PaginationQuery {
     pub status: Option<String>,
     pub device_type: Option<String>,
     pub group_id: Option<i64>,
+    /// 只要没有归属地区的设备（地区树上的「未分组」）。
+    pub unassigned_region: Option<bool>,
 }
 
 impl PaginationQuery {
-    pub fn limit(&self) -> usize { self.limit.unwrap_or(50).min(500) }
-    pub fn offset(&self) -> usize { self.offset.unwrap_or(0) }
+    pub fn limit(&self) -> usize {
+        self.limit.unwrap_or(50).min(500)
+    }
+    pub fn offset(&self) -> usize {
+        self.offset.unwrap_or(0)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -63,27 +75,44 @@ pub async fn list_devices_handler(
     Query(q): Query<PaginationQuery>,
 ) -> Result<Json<ApiResponse<PaginatedResponse<DeviceWithMediaServer>>>, AppError> {
     let registry = &state.app.registry;
-    let devices = registry.device_service.list_devices_paginated(
-        q.limit(),
-        q.offset(),
-        q.search.as_deref(),
-        q.region_code.as_deref(),
-        q.protocol.as_deref(),
-        q.status.as_deref(),
-        q.device_type.as_deref(),
-        q.group_id,
-    ).await?;
-    let total = registry.device_service.count_devices_filtered(
-        q.search.as_deref(),
-        q.region_code.as_deref(),
-        q.protocol.as_deref(),
-        q.status.as_deref(),
-        q.device_type.as_deref(),
-        q.group_id,
-    ).await?;
+    // 过滤值归一化：前端按 API 的 PascalCase 发送，数据库列存的是小写/大写形式，
+    // 不归一化的话 `status = 'Online'` 会匹配不到任何行。
+    let protocol = normalize_protocol(q.protocol.as_deref());
+    let status = normalize_status(q.status.as_deref());
+    let device_type = normalize_device_type(q.device_type.as_deref());
+
+    let devices = registry
+        .device_service
+        .list_devices_paginated(
+            q.limit(),
+            q.offset(),
+            q.search.as_deref(),
+            q.region_code.as_deref(),
+            protocol.as_deref(),
+            status.as_deref(),
+            device_type.as_deref(),
+            q.group_id,
+            q.unassigned_region,
+        )
+        .await?;
+    let total = registry
+        .device_service
+        .count_devices_filtered(
+            q.search.as_deref(),
+            q.region_code.as_deref(),
+            protocol.as_deref(),
+            status.as_deref(),
+            device_type.as_deref(),
+            q.group_id,
+            q.unassigned_region,
+        )
+        .await?;
 
     Ok(Json(ApiResponse::success(PaginatedResponse {
-        items: devices.into_iter().map(|d| DeviceWithMediaServer::from_device(d, registry)).collect(),
+        items: devices
+            .into_iter()
+            .map(|d| DeviceWithMediaServer::from_device(d, registry))
+            .collect(),
         total,
         limit: q.limit(),
         offset: q.offset(),
@@ -95,7 +124,11 @@ pub async fn list_online_devices_handler(
     Query(q): Query<PaginationQuery>,
 ) -> Result<Json<ApiResponse<PaginatedResponse<Device>>>, AppError> {
     let registry = &state.app.registry;
-    let devices = registry.infra.db.list_online_devices_paginated(q.limit(), q.offset()).await;
+    let devices = registry
+        .infra
+        .db
+        .list_online_devices_paginated(q.limit(), q.offset())
+        .await;
     let total = registry.infra.db.count_online_devices().await;
 
     Ok(Json(ApiResponse::success(PaginatedResponse {
@@ -119,7 +152,11 @@ pub async fn get_device_handler(
     State(state): State<Arc<FullState>>,
     Path(device_tag): Path<String>,
 ) -> Result<Json<ApiResponse<Device>>, AppError> {
-    let device = state.app.registry.device_service.get_device_by_device_tag(&device_tag)?
+    let device = state
+        .app
+        .registry
+        .device_service
+        .get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
     Ok(Json(ApiResponse::success(device)))
 }
@@ -129,7 +166,12 @@ pub async fn update_device_handler(
     Path(id): Path<i64>,
     Json(req): Json<UpdateDeviceRequest>,
 ) -> Result<Json<ApiResponse<Device>>, AppError> {
-    let updated = state.app.registry.device_service.update_device(id, req).await?;
+    let updated = state
+        .app
+        .registry
+        .device_service
+        .update_device(id, req)
+        .await?;
     Ok(Json(ApiResponse::success(updated)))
 }
 
@@ -138,7 +180,12 @@ pub async fn update_device_by_tag_handler(
     Path(device_tag): Path<String>,
     Json(req): Json<UpdateDeviceRequest>,
 ) -> Result<Json<ApiResponse<Device>>, AppError> {
-    let updated = state.app.registry.device_service.update_device_by_tag(&device_tag, req).await?;
+    let updated = state
+        .app
+        .registry
+        .device_service
+        .update_device_by_tag(&device_tag, req)
+        .await?;
     Ok(Json(ApiResponse::success(updated)))
 }
 
@@ -148,25 +195,48 @@ pub async fn delete_device_handler(
 ) -> Result<Json<ApiResponse<()>>, AppError> {
     let registry = &state.app.registry;
 
-    let _device = registry.device_service.get_device_by_device_tag(&device_tag)?
+    let _device = registry
+        .device_service
+        .get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
 
-    let streams = registry.stream_service.list_all_streams().await
+    let streams = registry
+        .stream_service
+        .list_all_streams()
+        .await
         .into_iter()
-        .filter(|s| s.device_tag.as_ref() == Some(&device_tag) && s.state == crate::domain::StreamState::Active)
+        .filter(|s| {
+            s.device_tag.as_ref() == Some(&device_tag)
+                && s.state == crate::domain::StreamState::Active
+        })
         .collect::<Vec<_>>();
 
     for stream in streams {
-        let stream_key = crate::common::device_utils::format_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
-        let _ = registry.stream_service.stop_stream(&stream.app, &stream_key).await;
+        let stream_key = crate::common::device_utils::format_stream_key(
+            stream.device_tag.as_deref().unwrap_or(""),
+            stream.channel_tag.as_deref().unwrap_or(""),
+        );
+        let _ = registry
+            .stream_service
+            .stop_stream(&stream.app, &stream_key)
+            .await;
     }
 
-    let recordings = registry.recording_service.list_device_recordings_by_device_tag(&device_tag).await?;
+    let recordings = registry
+        .recording_service
+        .list_device_recordings_by_device_tag(&device_tag)
+        .await?;
     for recording in recordings {
         if recording.state == crate::domain::RecordingState::Recording {
-            let _ = registry.recording_service.stop_recording(recording.id).await;
+            let _ = registry
+                .recording_service
+                .stop_recording(recording.id)
+                .await;
         }
-        let _ = registry.recording_service.delete_recording(recording.id).await;
+        let _ = registry
+            .recording_service
+            .delete_recording(recording.id)
+            .await;
     }
 
     registry.device_service.delete_device(&device_tag).await?;
@@ -180,17 +250,24 @@ pub async fn play_device_handler(
 ) -> Result<Json<ApiResponse<crate::adapter::media_server::StreamInfo>>, AppError> {
     let registry = &state.app.registry;
 
-    let device = registry.device_service.get_device_by_device_tag(&device_tag)?
+    let device = registry
+        .device_service
+        .get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
 
-    let (_, pull_url) = device.select_source()
-        .ok_or_else(|| AppError::BadRequest("Device has no stream source configured".to_string()))?;
+    let (_, pull_url) = device.select_source().ok_or_else(|| {
+        AppError::BadRequest("Device has no stream source configured".to_string())
+    })?;
 
-    let session = registry.session_service.create_session(
-        crate::domain::SessionType::Play, device.id,
-    ).await?;
+    let session = registry
+        .session_service
+        .create_session(crate::domain::SessionType::Play, device.id)
+        .await?;
 
-    let stream_info = registry.session_service.activate_session(session.id, &pull_url).await?;
+    let stream_info = registry
+        .session_service
+        .activate_session(session.id, &pull_url)
+        .await?;
 
     Ok(Json(ApiResponse::success(stream_info)))
 }
@@ -207,7 +284,9 @@ pub async fn playback_device_handler(
     Json(req): Json<PlaybackRequest>,
 ) -> Result<Json<ApiResponse<StartDeviceResult>>, AppError> {
     let registry = &state.app.registry;
-    let device = registry.device_service.get_device_by_device_tag(&device_tag)?
+    let device = registry
+        .device_service
+        .get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
 
     let start_dt = chrono::DateTime::parse_from_rfc3339(&req.start_time)
@@ -219,14 +298,20 @@ pub async fn playback_device_handler(
 
     match device.protocol {
         Protocol::Gb28181 => {
-            let device_tag = device.device_tag.clone()
-                .ok_or_else(|| AppError::BadRequest(format!("Device {} has no device_tag", device_tag)))?;
-            let adapter_key = device.parent_device_tag.clone().unwrap_or(device_tag.clone());
+            let device_tag = device.device_tag.clone().ok_or_else(|| {
+                AppError::BadRequest(format!("Device {} has no device_tag", device_tag))
+            })?;
+            let adapter_key = device
+                .parent_device_tag
+                .clone()
+                .unwrap_or(device_tag.clone());
             let adapter_arc = crate::protocol::adapter_manager::get_adapter(&adapter_key)
                 .ok_or_else(|| AppError::NotFound(format!("Device {} is offline", device_tag)))?;
 
             let mut inner = adapter_arc.lock().await;
-            (&mut *inner).start_playback(&device_tag, start_dt, end_dt).await
+            (&mut *inner)
+                .start_playback(&device_tag, start_dt, end_dt)
+                .await
                 .map_err(|e| AppError::Internal(format!("Playback INVITE failed: {}", e)))?;
 
             Ok(Json(ApiResponse::success(StartDeviceResult {
@@ -234,7 +319,9 @@ pub async fn playback_device_handler(
                 message: "Playback INVITE sent".to_string(),
             })))
         }
-        _ => Err(AppError::BadRequest("Playback only supported for GB28181 devices".to_string()))
+        _ => Err(AppError::BadRequest(
+            "Playback only supported for GB28181 devices".to_string(),
+        )),
     }
 }
 
@@ -244,20 +331,29 @@ pub async fn get_play_links_handler(
 ) -> Result<Json<ApiResponse<crate::domain::device::PlayLinks>>, AppError> {
     let registry = &state.app.registry;
 
-    let device = registry.device_service.get_device_by_device_tag(&device_tag)?
+    let device = registry
+        .device_service
+        .get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
 
-    device.select_source()
-        .ok_or_else(|| AppError::BadRequest("Device has no stream source configured".to_string()))?;
+    device.select_source().ok_or_else(|| {
+        AppError::BadRequest("Device has no stream source configured".to_string())
+    })?;
 
     let stream_id = if device.parent_device_tag.is_some() {
         crate::common::device_utils::format_stream_key(&device_tag, &device_tag)
     } else {
-         crate::common::device_utils::format_stream_key(&device_tag, "main")
+        crate::common::device_utils::format_stream_key(&device_tag, "main")
     };
 
-    let token = registry.play_service.generate_token(&device.id.to_string()).await?;
-    let play_links = registry.play_service.build_play_links(&device, &token, &stream_id).await;
+    let token = registry
+        .play_service
+        .generate_token(&device.id.to_string())
+        .await?;
+    let play_links = registry
+        .play_service
+        .build_play_links(&device, &token, &stream_id)
+        .await;
 
     Ok(Json(ApiResponse::success(play_links)))
 }
@@ -274,24 +370,34 @@ pub async fn get_device_config_handler(
 ) -> Result<Json<ApiResponse<String>>, AppError> {
     let registry = &state.app.registry;
 
-    let device = registry.device_service.get_device_by_device_tag(&device_tag)?
+    let device = registry
+        .device_service
+        .get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
 
     let config_type = query.r#type.as_deref().unwrap_or("BasicParam");
 
     let config_xml = match device.protocol {
         Protocol::Gb28181 => {
-            let device_tag = device.device_tag.as_ref().ok_or_else(|| AppError::BadRequest("Device has no device tag".to_string()))?;
+            let device_tag = device
+                .device_tag
+                .as_ref()
+                .ok_or_else(|| AppError::BadRequest("Device has no device tag".to_string()))?;
             if let Some(adapter) = crate::protocol::adapter_manager::get_adapter(device_tag) {
                 let guard = adapter.lock().await;
-                let resp = guard.send_device_config_query(config_type).await
+                let resp = guard
+                    .send_device_config_query(config_type)
+                    .await
                     .map_err(|e| AppError::BadRequest(format!("Config query failed: {}", e)))?;
                 resp
             } else {
                 format!(r#"<Error>Device {} not connected</Error>"#, device_tag)
             }
         }
-        _ => format!(r#"<Error>Protocol {} does not support config query</Error>"#, device.protocol),
+        _ => format!(
+            r#"<Error>Protocol {} does not support config query</Error>"#,
+            device.protocol
+        ),
     };
 
     Ok(Json(ApiResponse::success(config_xml)))
@@ -303,7 +409,11 @@ pub async fn stop_device_handler(
 ) -> Result<Json<ApiResponse<()>>, AppError> {
     let registry = &state.app.registry;
 
-    let sessions: Vec<_> = registry.infra.db.sessions_cache().iter()
+    let sessions: Vec<_> = registry
+        .infra
+        .db
+        .sessions_cache()
+        .iter()
         .filter(|s| {
             if s.state != crate::domain::SessionState::Active {
                 return false;
@@ -317,7 +427,10 @@ pub async fn stop_device_handler(
         .collect();
 
     for session in sessions {
-        let _ = registry.session_service.deactivate_session(session.id).await;
+        let _ = registry
+            .session_service
+            .deactivate_session(session.id)
+            .await;
     }
 
     Ok(Json(ApiResponse::success(())))
@@ -330,21 +443,29 @@ pub async fn start_device_handler(
 ) -> Result<Json<ApiResponse<StartDeviceResult>>, AppError> {
     let registry = &state.app.registry;
 
-    let device = registry.device_service.get_device_by_device_tag(&device_tag)?
+    let device = registry
+        .device_service
+        .get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
 
     let channel_tag = params.channel_tag.as_deref().unwrap_or("");
 
     match device.protocol {
         Protocol::Gb28181 => {
-            let device_tag = device.device_tag.clone()
-                .ok_or_else(|| AppError::BadRequest(format!("Device {} has no device_tag", device_tag)))?;
-            let adapter_key = device.parent_device_tag.clone().unwrap_or(device_tag.clone());
+            let device_tag = device.device_tag.clone().ok_or_else(|| {
+                AppError::BadRequest(format!("Device {} has no device_tag", device_tag))
+            })?;
+            let adapter_key = device
+                .parent_device_tag
+                .clone()
+                .unwrap_or(device_tag.clone());
             let adapter_arc = crate::protocol::adapter_manager::get_adapter(&adapter_key)
                 .ok_or_else(|| AppError::NotFound(format!("Device {} is offline", device_tag)))?;
 
             let mut inner = adapter_arc.lock().await;
-            (&mut *inner).start(&device_tag, channel_tag).await
+            (&mut *inner)
+                .start(&device_tag, channel_tag)
+                .await
                 .map_err(|e| AppError::Internal(format!("INVITE failed: {}", e)))?;
 
             Ok(Json(ApiResponse::success(StartDeviceResult {
@@ -353,7 +474,9 @@ pub async fn start_device_handler(
             })))
         }
         Protocol::Onvif => {
-            let x_addr = device.extended.as_ref()
+            let x_addr = device
+                .extended
+                .as_ref()
                 .and_then(|e| e.get("x_addr"))
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| AppError::BadRequest("Device has no ONVIF x_addr".to_string()))?;
@@ -363,22 +486,35 @@ pub async fn start_device_handler(
                 client = client.with_credentials(u, p);
             }
 
-            let streams = client.get_all_stream_uris().await
-                .map_err(|e| AppError::Internal(format!("Failed to get ONVIF stream URIs: {}", e)))?;
+            let streams = client.get_all_stream_uris().await.map_err(|e| {
+                AppError::Internal(format!("Failed to get ONVIF stream URIs: {}", e))
+            })?;
 
             if streams.is_empty() {
-                return Err(AppError::NotFound("No stream URIs found on ONVIF device".to_string()));
+                return Err(AppError::NotFound(
+                    "No stream URIs found on ONVIF device".to_string(),
+                ));
             }
 
-            let device_tag = device.device_tag.clone()
+            let device_tag = device
+                .device_tag
+                .clone()
                 .ok_or_else(|| AppError::BadRequest(format!("Device has no device_tag")))?;
             let mut started = Vec::new();
             for (profile, uri) in streams {
                 let uname = device.device_username.as_deref().unwrap_or("");
                 let pwd = device.device_password.as_deref().unwrap_or("");
                 let full_url = inject_rtsp_auth(&uri.uri, uname, pwd);
-                let stream_info = registry.stream_service.start_pull_stream(&device_tag, &device_tag, &full_url).await
-                    .map_err(|e| AppError::Internal(format!("Failed to start stream for profile {}: {}", profile.token, e)))?;
+                let stream_info = registry
+                    .stream_service
+                    .start_pull_stream(&device_tag, &device_tag, &full_url)
+                    .await
+                    .map_err(|e| {
+                        AppError::Internal(format!(
+                            "Failed to start stream for profile {}: {}",
+                            profile.token, e
+                        ))
+                    })?;
                 started.push(stream_info);
             }
 
@@ -394,7 +530,9 @@ pub async fn start_device_handler(
             })))
         }
         Protocol::Rtsp => {
-            let device_tag = device.device_tag.clone()
+            let device_tag = device
+                .device_tag
+                .clone()
                 .ok_or_else(|| AppError::BadRequest(format!("Device has no device_tag")))?;
             let raw_url = match device.select_source() {
                 Some((_, url)) => url.clone(),
@@ -407,7 +545,10 @@ pub async fn start_device_handler(
             let pwd = device.device_password.as_deref().unwrap_or("");
             let full_url = inject_rtsp_auth(&raw_url, uname, pwd);
 
-            let stream_info = registry.stream_service.start_pull_stream(&device_tag, &device_tag, &full_url).await
+            let stream_info = registry
+                .stream_service
+                .start_pull_stream(&device_tag, &device_tag, &full_url)
+                .await
                 .map_err(|e| AppError::Internal(format!("Failed to start stream: {}", e)))?;
             Ok(Json(ApiResponse::success(StartDeviceResult {
                 success: true,
@@ -415,14 +556,22 @@ pub async fn start_device_handler(
             })))
         }
         Protocol::Rtmp => {
-            return Err(AppError::BadRequest("RTMP 设备需要主动推流到媒体服务器，请确认设备已配置推流".to_string()));
+            return Err(AppError::BadRequest(
+                "RTMP 设备需要主动推流到媒体服务器，请确认设备已配置推流".to_string(),
+            ));
         }
         Protocol::Hls | Protocol::WebRTC => {
-            let device_tag = device.device_tag.clone()
+            let device_tag = device
+                .device_tag
+                .clone()
                 .ok_or_else(|| AppError::BadRequest(format!("Device has no device_tag")))?;
-            let url = device.select_source().map(|(_, url)| url)
-                .ok_or_else(|| AppError::BadRequest(format!("{} device has no stream source", device.protocol)))?;
-            let stream_info = registry.stream_service.start_pull_stream(&device_tag, &device_tag, &url).await
+            let url = device.select_source().map(|(_, url)| url).ok_or_else(|| {
+                AppError::BadRequest(format!("{} device has no stream source", device.protocol))
+            })?;
+            let stream_info = registry
+                .stream_service
+                .start_pull_stream(&device_tag, &device_tag, &url)
+                .await
                 .map_err(|e| AppError::Internal(format!("Failed to start stream: {}", e)))?;
             Ok(Json(ApiResponse::success(StartDeviceResult {
                 success: true,
@@ -430,15 +579,47 @@ pub async fn start_device_handler(
             })))
         }
         Protocol::Custom(ref name) => {
-            return Err(AppError::BadRequest(format!("Custom protocol '{}' not supported for stream start", name)));
+            return Err(AppError::BadRequest(format!(
+                "Custom protocol '{}' not supported for stream start",
+                name
+            )));
         }
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PublicStreamsQuery {
+    /// 按设备名称 / tag 搜索公开设备
+    pub search: Option<String>,
+    /// 按协议过滤
+    pub protocol: Option<String>,
+}
+
 pub async fn list_public_streams_handler(
     State(state): State<Arc<FullState>>,
+    Query(q): Query<PublicStreamsQuery>,
 ) -> Result<Json<ApiResponse<Vec<Device>>>, AppError> {
-    let devices = state.app.registry.device_service.list_public_devices().await;
+    let mut devices = state
+        .app
+        .registry
+        .device_service
+        .list_public_devices()
+        .await;
+    let needle = q
+        .search
+        .as_deref()
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty());
+    if let Some(n) = needle {
+        devices.retain(|d| {
+            let name = d.name.to_lowercase();
+            let tag = d.device_tag.as_deref().unwrap_or("").to_lowercase();
+            name.contains(&n) || tag.contains(&n)
+        });
+    }
+    if let Some(protocol) = normalize_protocol(q.protocol.as_deref()) {
+        devices.retain(|d| d.protocol.api_name().eq_ignore_ascii_case(&protocol));
+    }
     Ok(Json(ApiResponse::success(devices)))
 }
 
@@ -491,14 +672,15 @@ pub struct ChannelWithMediaServer {
 
 impl DeviceWithMediaServer {
     pub fn from_device(device: Device, registry: &crate::context::ServiceRegistry) -> Self {
-        let (media_server_name, media_server_online) = if let Some(ref tag) = device.media_server_tag {
-            let server = registry.media_server_service.get(tag);
-            let name = server.map(|s| s.name);
-            let online = registry.media.cluster.get_server(tag).is_some();
-            (name, online)
-        } else {
-            (None, false)
-        };
+        let (media_server_name, media_server_online) =
+            if let Some(ref tag) = device.media_server_tag {
+                let server = registry.media_server_service.get(tag);
+                let name = server.map(|s| s.name);
+                let online = registry.media.cluster.get_server(tag).is_some();
+                (name, online)
+            } else {
+                (None, false)
+            };
         DeviceWithMediaServer {
             device,
             media_server_name,
@@ -523,14 +705,15 @@ impl StreamWithMediaServer {
 
 impl SessionWithMediaServer {
     pub fn from_session(session: Session, registry: &crate::context::ServiceRegistry) -> Self {
-        let (media_server_name, media_server_online) = if let Some(ref tag) = session.media_server_tag {
-            let server = registry.media_server_service.get(tag);
-            let name = server.map(|s| s.name);
-            let online = registry.media.cluster.get_server(tag).is_some();
-            (name, online)
-        } else {
-            (None, false)
-        };
+        let (media_server_name, media_server_online) =
+            if let Some(ref tag) = session.media_server_tag {
+                let server = registry.media_server_service.get(tag);
+                let name = server.map(|s| s.name);
+                let online = registry.media.cluster.get_server(tag).is_some();
+                (name, online)
+            } else {
+                (None, false)
+            };
         SessionWithMediaServer {
             session,
             media_server_name,
@@ -542,7 +725,11 @@ impl SessionWithMediaServer {
 impl ChannelWithMediaServer {
     pub fn from_channel(channel: Channel, registry: &crate::context::ServiceRegistry) -> Self {
         let (media_server_name, media_server_tag, media_server_online) = {
-            if let Some(device) = registry.infra.db.get_device_by_device_tag(&channel.device_tag) {
+            if let Some(device) = registry
+                .infra
+                .db
+                .get_device_by_device_tag(&channel.device_tag)
+            {
                 if let Some(ref tag) = device.media_server_tag {
                     let server = registry.media_server_service.get(tag);
                     let name = server.map(|s| s.name);

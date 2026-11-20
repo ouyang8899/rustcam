@@ -34,7 +34,7 @@ const displayValue = computed(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+  transition: border-color 0.15s, transform 0.15s;
 }
 
 .metric-card.is-clickable {
@@ -43,7 +43,6 @@ const displayValue = computed(() => {
 
 .metric-card:hover {
   border-color: var(--border-accent);
-  box-shadow: var(--shadow-accent);
   transform: translateY(-1px);
 }
 

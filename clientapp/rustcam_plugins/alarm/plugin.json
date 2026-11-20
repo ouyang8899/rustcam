@@ -9,5 +9,5 @@
   "workspace": true,
   "sidePanel": true,
   "shortcut": "Ctrl+3",
-  "icon": ":/icons/alarm.svg"
+  "icon": "icons/icon.svg"
 }

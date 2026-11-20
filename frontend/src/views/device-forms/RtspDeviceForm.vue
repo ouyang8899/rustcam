@@ -31,15 +31,12 @@
       <el-col :span="12">
         <el-form-item label="自定义分组">
           <el-select v-model="localForm.group_id" placeholder="选择分组（可选）" clearable style="width: 100%">
-            <template v-for="group in groupTree" :key="group.id">
-              <el-option :label="group.name" :value="group.id" />
-              <template v-for="child in (group.children || [])" :key="child.id">
-                <el-option :label="'  ├─ ' + child.name" :value="child.id" />
-                <template v-for="grandchild in (child.children || [])" :key="grandchild.id">
-                  <el-option :label="'    └─ ' + grandchild.name" :value="grandchild.id" />
-                </template>
-              </template>
-            </template>
+            <el-option
+              v-for="group in flatGroups"
+              :key="group.id"
+              :label="group.label"
+              :value="group.id"
+            />
           </el-select>
         </el-form-item>
       </el-col>
@@ -100,7 +97,7 @@
       <el-switch v-model="localForm.enable_stream_config" size="small" />
     </el-form-item>
     
-    <div v-if="localForm.enable_stream_config" style="background: #f5f7fa; padding: 16px; border-radius: 4px; margin-bottom: 16px">
+    <div v-if="localForm.enable_stream_config" style="background: #f5f7fa; padding: 16px; border-radius: 0; margin-bottom: 16px">
       <p style="margin: 0 0 12px 0; color: #909399; font-size: 12px;">RTSP 设备会自动获取媒体参数，如有兼容性问题可手动覆盖：</p>
       <el-row :gutter="12">
         <el-col :span="8">
@@ -140,7 +137,7 @@
       <el-switch v-model="localForm.enable_recording" size="small" />
     </el-form-item>
     
-    <div v-if="localForm.enable_recording" style="background: #f5f7fa; padding: 16px; border-radius: 4px; margin-bottom: 16px">
+    <div v-if="localForm.enable_recording" style="background: #f5f7fa; padding: 16px; border-radius: 0; margin-bottom: 16px">
       <el-row :gutter="12">
         <el-col :span="8">
           <el-form-item label="录像格式">
@@ -187,18 +184,23 @@
 
 <script setup>
 import { reactive, computed, watch, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { useToast } from '../../composables/useToast'
+
+const toast = useToast()
 import { request } from '../../utils/request'
+import { useDeviceTreeStore } from '../../stores/deviceTreeStore'
 
 const props = defineProps({
   modelValue: Object,
   mediaServerOptions: Array,
   regionTree: Array,
-  groupTree: Array,
   pushAddress: String,
   pushPort: Number,
   deviceTag: String,
 })
+
+const treeStore = useDeviceTreeStore()
+const flatGroups = computed(() => treeStore.flatGroups)
 
 const localForm = reactive({
   name: '',
@@ -285,7 +287,7 @@ async function loadData(deviceTag) {
       max_file_size_mb: devRecording.max_file_size_mb || 0,
     }
   } catch (e) {
-    ElMessage.error('加载设备数据失败: ' + (e?.message || e))
+    toast.error('加载设备数据失败: ' + (e?.message || e))
   }
 }
 

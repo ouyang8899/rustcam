@@ -145,7 +145,9 @@ async fn connect_succeeds_even_when_drone_service_is_not_running() {
 #[tokio::test]
 async fn requests_report_unavailable_while_drone_service_is_down() {
     let port = free_port().await;
-    let client = DroneClient::connect(&config_for(port)).await.expect("connect");
+    let client = DroneClient::connect(&config_for(port))
+        .await
+        .expect("connect");
     let err = client.list_drones().await.expect_err("应当失败");
     assert_eq!(err.status, 503, "错误码应为 503，实际 {:?}", err);
 }
@@ -154,7 +156,9 @@ async fn requests_report_unavailable_while_drone_service_is_down() {
 #[tokio::test]
 async fn requests_succeed_once_drone_service_is_running() {
     let port = free_port().await;
-    let client = DroneClient::connect(&config_for(port)).await.expect("connect");
+    let client = DroneClient::connect(&config_for(port))
+        .await
+        .expect("connect");
 
     let listener = TcpListener::bind(("127.0.0.1", port)).await.expect("bind");
     let _server = spawn_query_service(listener).await;
@@ -166,7 +170,9 @@ async fn requests_succeed_once_drone_service_is_running() {
 #[tokio::test]
 async fn client_recovers_after_drone_service_restarts() {
     let port = free_port().await;
-    let client = DroneClient::connect(&config_for(port)).await.expect("connect");
+    let client = DroneClient::connect(&config_for(port))
+        .await
+        .expect("connect");
 
     let listener = TcpListener::bind(("127.0.0.1", port)).await.expect("bind");
     let server = spawn_query_service(listener).await;
@@ -175,7 +181,9 @@ async fn client_recovers_after_drone_service_restarts() {
     server.abort();
     let _ = server.await;
 
-    let listener = TcpListener::bind(("127.0.0.1", port)).await.expect("rebind");
+    let listener = TcpListener::bind(("127.0.0.1", port))
+        .await
+        .expect("rebind");
     let _server = spawn_query_service(listener).await;
 
     // 重启窗口内的第一次调用可能失败（连接被重置），随后必须自愈。
@@ -194,7 +202,9 @@ async fn client_recovers_after_drone_service_restarts() {
 #[tokio::test]
 async fn event_stream_resubscribes_after_drone_service_restarts() {
     let port = free_port().await;
-    let client = DroneClient::connect(&config_for(port)).await.expect("connect");
+    let client = DroneClient::connect(&config_for(port))
+        .await
+        .expect("connect");
 
     let listener = TcpListener::bind(("127.0.0.1", port)).await.expect("bind");
     let server = spawn_event_service(listener).await;
@@ -210,7 +220,9 @@ async fn event_stream_resubscribes_after_drone_service_restarts() {
     server.abort();
     let _ = server.await;
 
-    let listener = TcpListener::bind(("127.0.0.1", port)).await.expect("rebind");
+    let listener = TcpListener::bind(("127.0.0.1", port))
+        .await
+        .expect("rebind");
     let _server = spawn_event_service(listener).await;
 
     // 重订阅后应继续收到事件，而不是就此结束。

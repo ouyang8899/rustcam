@@ -1,14 +1,14 @@
-use std::sync::Arc;
-use std::net::SocketAddr;
 use async_trait::async_trait;
-use tokio::net::tcp::OwnedWriteHalf;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
+use tokio::net::tcp::OwnedWriteHalf;
 
 use crate::domain::SessionType;
+use crate::error::{AppError, Result};
 use crate::protocol::adapter::SignalAdapter;
-use crate::protocol::event::{SignalEvent, ProtocolType, TransportType, PtzCommand};
+use crate::protocol::event::{ProtocolType, PtzCommand, SignalEvent, TransportType};
 use crate::protocol::traits::ProtocolDeps;
-use crate::error::{Result, AppError};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum WsOpcode {
@@ -38,7 +38,9 @@ struct WsFrame;
 
 impl WsFrame {
     fn parse(buffer: &[u8]) -> Option<(WsFrameData, usize)> {
-        if buffer.len() < 2 { return None; }
+        if buffer.len() < 2 {
+            return None;
+        }
 
         let byte0 = buffer[0];
         let byte1 = buffer[1];
@@ -49,29 +51,46 @@ impl WsFrame {
         let mut header_len = 2;
 
         if payload_len == 126 {
-            if buffer.len() < 4 { return None; }
+            if buffer.len() < 4 {
+                return None;
+            }
             payload_len = ((buffer[2] as usize) << 8) | (buffer[3] as usize);
             header_len = 4;
         } else if payload_len == 127 {
-            if buffer.len() < 10 { return None; }
+            if buffer.len() < 10 {
+                return None;
+            }
             payload_len = 0;
-            for i in 0..8 { payload_len = (payload_len << 8) | (buffer[2 + i] as usize); }
+            for i in 0..8 {
+                payload_len = (payload_len << 8) | (buffer[2 + i] as usize);
+            }
             header_len = 10;
         }
 
         let mask_len = if masked { 4 } else { 0 };
         let total_len = header_len + mask_len + payload_len;
-        if buffer.len() < total_len { return None; }
+        if buffer.len() < total_len {
+            return None;
+        }
 
         let payload_start = header_len + mask_len;
         let mut payload = buffer[payload_start..payload_start + payload_len].to_vec();
 
         if masked {
             let mask = &buffer[header_len..header_len + 4];
-            for (i, byte) in payload.iter_mut().enumerate() { *byte ^= mask[i % 4]; }
+            for (i, byte) in payload.iter_mut().enumerate() {
+                *byte ^= mask[i % 4];
+            }
         }
 
-        Some((WsFrameData { opcode, fin, payload }, total_len))
+        Some((
+            WsFrameData {
+                opcode,
+                fin,
+                payload,
+            },
+            total_len,
+        ))
     }
 
     fn build_text_frame(data: &str) -> Vec<u8> {
@@ -92,7 +111,9 @@ impl WsFrame {
         frame
     }
 
-    fn build_close_frame() -> Vec<u8> { vec![0x88, 0x00] }
+    fn build_close_frame() -> Vec<u8> {
+        vec![0x88, 0x00]
+    }
 
     fn build_pong_frame(data: &[u8]) -> Vec<u8> {
         let payload_len = data.len();
@@ -156,12 +177,17 @@ impl WebSocketAdapter {
 
         match msg_type {
             "login" | "auth" => {
-                let device_id = json.get("device_id").and_then(|v| v.as_str()).unwrap_or("ws_device");
+                let device_id = json
+                    .get("device_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("ws_device");
                 let token = json.get("token").and_then(|v| v.as_str());
 
                 let authenticated = if let Some(t) = token {
                     let handle = tokio::runtime::Handle::current();
-                    handle.block_on(self.deps.stream_manager.validate_token(t)).is_some()
+                    handle
+                        .block_on(self.deps.stream_manager.validate_token(t))
+                        .is_some()
                 } else {
                     true
                 };
@@ -172,9 +198,16 @@ impl WebSocketAdapter {
                     events.push(SignalEvent::DeviceRegister {
                         device_id: 0,
                         device_tag: None,
-                        name: json.get("name").and_then(|v| v.as_str()).unwrap_or("WebSocket Device").to_string(),
+                        name: json
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("WebSocket Device")
+                            .to_string(),
                         stream_key: None,
-                        manufacturer: json.get("manufacturer").and_then(|v| v.as_str()).map(String::from),
+                        manufacturer: json
+                            .get("manufacturer")
+                            .and_then(|v| v.as_str())
+                            .map(String::from),
                         model: json.get("model").and_then(|v| v.as_str()).map(String::from),
                         protocol: ProtocolType::WebRTC,
                     });
@@ -187,9 +220,8 @@ impl WebSocketAdapter {
                     if let Some(ref write_arc) = self.write {
                         let frame = WsFrame::build_text_frame(&response.to_string());
                         let handle = tokio::runtime::Handle::current();
-                        let _ = handle.block_on(async {
-                            write_arc.write().await.write_all(&frame).await
-                        });
+                        let _ = handle
+                            .block_on(async { write_arc.write().await.write_all(&frame).await });
                     }
                 }
             }
@@ -198,8 +230,15 @@ impl WebSocketAdapter {
                 if let Some(device_id_str) = json.get("device_id").and_then(|v| v.as_str()) {
                     events.push(SignalEvent::StartPlay {
                         device_tag: Some(device_id_str.to_string()),
-                        session_id: json.get("session_id").and_then(|v| v.as_str()).unwrap_or("ws_session").to_string(),
-                        channel_id: json.get("channel").and_then(|v| v.as_str()).map(String::from),
+                        session_id: json
+                            .get("session_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("ws_session")
+                            .to_string(),
+                        channel_id: json
+                            .get("channel")
+                            .and_then(|v| v.as_str())
+                            .map(String::from),
                         transport: TransportType::WebSocket,
                         media_server_name: None,
                         session_type: SessionType::Play,
@@ -211,7 +250,11 @@ impl WebSocketAdapter {
                 if let Some(device_id_str) = json.get("device_id").and_then(|v| v.as_str()) {
                     events.push(SignalEvent::StopPlay {
                         device_tag: Some(device_id_str.to_string()),
-                        session_id: json.get("session_id").and_then(|v| v.as_str()).unwrap_or("ws_session").to_string(),
+                        session_id: json
+                            .get("session_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("ws_session")
+                            .to_string(),
                         session_type: SessionType::Play,
                     });
                 }
@@ -219,7 +262,10 @@ impl WebSocketAdapter {
 
             "ptz" => {
                 if let Some(device_id) = json.get("device_id").and_then(|v| v.as_str()) {
-                    let cmd_str = json.get("command").and_then(|v| v.as_str()).unwrap_or("stop");
+                    let cmd_str = json
+                        .get("command")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("stop");
                     let command = match cmd_str {
                         "up" => PtzCommand::Up,
                         "down" => PtzCommand::Down,
@@ -231,7 +277,11 @@ impl WebSocketAdapter {
                         _ => PtzCommand::Stop,
                     };
                     let speed = json.get("speed").and_then(|v| v.as_u64()).map(|v| v as u8);
-                    events.push(SignalEvent::PtzControl { device_id: device_id.to_string(), command, speed });
+                    events.push(SignalEvent::PtzControl {
+                        device_id: device_id.to_string(),
+                        command,
+                        speed,
+                    });
                 }
             }
 
@@ -240,10 +290,24 @@ impl WebSocketAdapter {
                     events.push(SignalEvent::Alarm {
                         device_id: device_id.to_string(),
                         device_tag: self.device_id.clone(),
-                        channel_tag: json.get("channel_tag").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                        alarm_type: json.get("alarm_type").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
-                        message: json.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                        alarm_id: json.get("alarm_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                        channel_tag: json
+                            .get("channel_tag")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string()),
+                        alarm_type: json
+                            .get("alarm_type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                            .to_string(),
+                        message: json
+                            .get("message")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        alarm_id: json
+                            .get("alarm_id")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string()),
                         timestamp: chrono::Utc::now(),
                     });
                 }
@@ -329,7 +393,11 @@ impl SignalAdapter for WebSocketAdapter {
 
     async fn on_disconnected(&mut self) -> Result<()> {
         if let Some(ref device_id) = self.device_id {
-            let _ = self.deps.device_lookup.set_offline(device_id, Some("Connection closed")).await;
+            let _ = self
+                .deps
+                .device_lookup
+                .set_offline(device_id, Some("Connection closed"))
+                .await;
         }
         Ok(())
     }
@@ -337,21 +405,40 @@ impl SignalAdapter for WebSocketAdapter {
     async fn send(&mut self, data: &[u8]) -> Result<()> {
         if let Some(ref write_arc) = self.write {
             let mut write = write_arc.write().await;
-            write.write_all(data).await
+            write
+                .write_all(data)
+                .await
                 .map_err(|e| AppError::Internal(e.to_string()))?;
         }
         Ok(())
     }
 
-    fn protocol_type(&self) -> ProtocolType { ProtocolType::WebRTC }
-    fn name(&self) -> &'static str { "WebSocket" }
-    fn keepalive(&self) -> bool { true }
-    fn idle_timeout(&self) -> Option<u64> { Some(300) }
+    fn protocol_type(&self) -> ProtocolType {
+        ProtocolType::WebRTC
+    }
+    fn name(&self) -> &'static str {
+        "WebSocket"
+    }
+    fn keepalive(&self) -> bool {
+        true
+    }
+    fn idle_timeout(&self) -> Option<u64> {
+        Some(300)
+    }
 
     fn set_tcp_write(&mut self, write: OwnedWriteHalf) {
         self.write = Some(Arc::new(tokio::sync::RwLock::new(write)));
     }
 
-    async fn start(&mut self, _device_tag: &str, _channel_tag: &str) -> Result<()> { Ok(()) }
-    async fn ptz_control(&mut self, _channel_id: &str, _command: &crate::protocol::event::PtzCommand, _speed: Option<u8>) -> Result<()> { Ok(()) }
+    async fn start(&mut self, _device_tag: &str, _channel_tag: &str) -> Result<()> {
+        Ok(())
+    }
+    async fn ptz_control(
+        &mut self,
+        _channel_id: &str,
+        _command: &crate::protocol::event::PtzCommand,
+        _speed: Option<u8>,
+    ) -> Result<()> {
+        Ok(())
+    }
 }

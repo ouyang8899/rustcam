@@ -72,11 +72,8 @@ private:
     QMap<QString, MapMarkerData> m_markers;
     /// True once the map page reported that its MapLibre instance is ready.
     bool m_mapReady = false;
-    /// Tile url of the desktop client map, provided by the backend.
-    QString m_tmsUrl;
-    /// Zoom range of the desktop client map, provided by the backend.
-    int m_minZoom = 0;
-    int m_maxZoom = 19;
+    /// Tile layers (JSON array) of the desktop client map, provided by the backend.
+    QString m_layersJson = QStringLiteral("[]");
     /// Event bus subscription token for TOPIC_MAP_TILES_URL.
     QString m_tilesToken;
     /// Live video dialog opened from a map marker.

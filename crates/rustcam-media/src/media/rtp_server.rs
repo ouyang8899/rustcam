@@ -1,4 +1,3 @@
-
 use crate::media::errors::{MediaError, Result};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -48,18 +47,26 @@ impl UDPRtpServer {
         if port + 1 > port_range.end {
             return Err(MediaError::Transport(format!(
                 "RTP port {} + 1 超出范围 {}",
-                port,
-                port_range.end
+                port, port_range.end
             )));
         }
 
         let rtp_socket = tokio::net::UdpSocket::bind(format!("{}:{}", bind_addr, port))
             .await
-            .map_err(|e| MediaError::Transport(format!("RTP bind {}:{} failed: {}", bind_addr, port, e)))?;
+            .map_err(|e| {
+                MediaError::Transport(format!("RTP bind {}:{} failed: {}", bind_addr, port, e))
+            })?;
 
         let rtcp_socket = tokio::net::UdpSocket::bind(format!("{}:{}", bind_addr, port + 1))
             .await
-            .map_err(|e| MediaError::Transport(format!("RTCP bind {}:{} failed: {}", bind_addr, port + 1, e)))?;
+            .map_err(|e| {
+                MediaError::Transport(format!(
+                    "RTCP bind {}:{} failed: {}",
+                    bind_addr,
+                    port + 1,
+                    e
+                ))
+            })?;
 
         Ok(Self {
             rtp_socket: Arc::new(rtp_socket),
@@ -192,7 +199,9 @@ impl TcpRtpServer {
     pub async fn new_passive(bind_addr: &str, port: u16) -> Result<Self> {
         let listener = tokio::net::TcpListener::bind(format!("{}:{}", bind_addr, port))
             .await
-            .map_err(|e| MediaError::Transport(format!("TCP RTP bind {}:{} failed: {}", bind_addr, port, e)))?;
+            .map_err(|e| {
+                MediaError::Transport(format!("TCP RTP bind {}:{} failed: {}", bind_addr, port, e))
+            })?;
 
         Ok(Self {
             port,
@@ -212,9 +221,10 @@ impl TcpRtpServer {
         let socket = tokio::net::TcpSocket::new_v4()
             .map_err(|e| MediaError::Transport(format!("TCP socket create failed: {}", e)))?;
 
-        let addr: std::net::SocketAddr = format!("{}:{}", bind_addr, port)
-            .parse()
-            .map_err(|e| MediaError::Transport(format!("Invalid address {}:{}: {}", bind_addr, port, e)))?;
+        let addr: std::net::SocketAddr =
+            format!("{}:{}", bind_addr, port).parse().map_err(|e| {
+                MediaError::Transport(format!("Invalid address {}:{}: {}", bind_addr, port, e))
+            })?;
 
         socket
             .bind(addr)
@@ -280,8 +290,7 @@ impl TcpRtpServer {
         self.allocated_at.write().await.take();
         self.active_at.write().await.take();
 
-        if let Some(ssrc) = ssrc {
-        }
+        if let Some(ssrc) = ssrc {}
     }
 
     pub async fn get_session(&self) -> Option<RtpSession> {

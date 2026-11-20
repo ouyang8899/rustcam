@@ -176,7 +176,12 @@ mod tests {
             ("stop", 0x00, "A50F0100000000B5"),
         ];
         for (direction, speed, expected) in cases {
-            assert_eq!(encode_direction(direction, speed), expected, "{}", direction);
+            assert_eq!(
+                encode_direction(direction, speed),
+                expected,
+                "{}",
+                direction
+            );
         }
     }
 

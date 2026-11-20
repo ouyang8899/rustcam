@@ -44,3 +44,21 @@ impl std::fmt::Display for Protocol {
         }
     }
 }
+
+impl Protocol {
+    /// API 对外暴露的形式（与 serde 的 PascalCase 表示一致）。
+    ///
+    /// 与 `Display` 不同：`Display` 面向数据库列（`GB28181`），
+    /// `api_name` 面向 JSON 响应（`Gb28181`），与 `GET /devices` 保持一致。
+    pub fn api_name(&self) -> String {
+        match self {
+            Protocol::Gb28181 => "Gb28181".to_string(),
+            Protocol::Onvif => "Onvif".to_string(),
+            Protocol::Rtsp => "Rtsp".to_string(),
+            Protocol::Rtmp => "Rtmp".to_string(),
+            Protocol::Hls => "Hls".to_string(),
+            Protocol::WebRTC => "WebRTC".to_string(),
+            Protocol::Custom(name) => name.clone(),
+        }
+    }
+}

@@ -1,4 +1,3 @@
-
 use tokio::net::UdpSocket;
 use tokio::sync::broadcast;
 
@@ -13,11 +12,23 @@ pub struct OnvifDiscoveryServer {
 }
 
 impl OnvifDiscoveryServer {
-    pub fn new(local_ip: String, x_port: u16, scopes: Vec<String>) -> (Self, broadcast::Sender<()>) {
+    pub fn new(
+        local_ip: String,
+        x_port: u16,
+        scopes: Vec<String>,
+    ) -> (Self, broadcast::Sender<()>) {
         let x_addr = format!("http://{}:{}/onvif/device_service", local_ip, x_port);
         let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
         let device_id = format!("urn:uuid:{}", uuid::Uuid::new_v4());
-        (Self { x_addr, scopes, shutdown_rx, device_id }, shutdown_tx)
+        (
+            Self {
+                x_addr,
+                scopes,
+                shutdown_rx,
+                device_id,
+            },
+            shutdown_tx,
+        )
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {
@@ -26,7 +37,12 @@ impl OnvifDiscoveryServer {
         sock.join_multicast_v4(MULTICAST_ADDR.parse().unwrap(), "0.0.0.0".parse().unwrap())?;
 
         let hello = self.build_hello();
-        let _ = sock.send_to(hello.as_bytes(), format!("{}:{}", MULTICAST_ADDR, DISCOVERY_PORT)).await;
+        let _ = sock
+            .send_to(
+                hello.as_bytes(),
+                format!("{}:{}", MULTICAST_ADDR, DISCOVERY_PORT),
+            )
+            .await;
 
         let mut buf = vec![0u8; 65536];
         loop {

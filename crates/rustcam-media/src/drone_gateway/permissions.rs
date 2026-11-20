@@ -74,10 +74,9 @@ pub fn required_permissions(path: &str, method: &str) -> Option<&'static [&'stat
         ("/api/v1/drone/drones/{drone_tag}", "DELETE") => Some(MANAGE_ONLY),
         ("/api/v1/drone/drones/{drone_tag}/cameras", "GET") => Some(VIEW_ONLY),
         ("/api/v1/drone/drones/{drone_tag}/cameras", "POST") => Some(MANAGE_ONLY),
-        (
-            "/api/v1/drone/drones/{drone_tag}/cameras/{camera_device_tag}",
-            "DELETE",
-        ) => Some(MANAGE_ONLY),
+        ("/api/v1/drone/drones/{drone_tag}/cameras/{camera_device_tag}", "DELETE") => {
+            Some(MANAGE_ONLY)
+        }
         ("/api/v1/drone/devices", "GET") => Some(VIEW_ONLY),
         ("/api/v1/drone/devices/{drone_tag}", "GET") => Some(VIEW_ONLY),
         ("/api/v1/drone/{drone_tag}/command", "POST") => Some(&[COMMAND_SEND]),

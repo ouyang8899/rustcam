@@ -234,13 +234,9 @@ CREATE INDEX IF NOT EXISTS idx_gb_network_codes_sort ON gb_network_codes USING b
 -- ============================================
 CREATE TABLE IF NOT EXISTS map_settings (
     id integer PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-    browser_tms_url text NOT NULL DEFAULT '',
-    client_tms_url text NOT NULL DEFAULT '',
-    wfs_url text NOT NULL DEFAULT '',
-    browser_min_zoom integer NOT NULL DEFAULT 0,
-    browser_max_zoom integer NOT NULL DEFAULT 19,
-    client_min_zoom integer NOT NULL DEFAULT 0,
-    client_max_zoom integer NOT NULL DEFAULT 19,
+    browser_layers jsonb NOT NULL DEFAULT '[]'::jsonb,
+    client_layers jsonb NOT NULL DEFAULT '[]'::jsonb,
+    wfs jsonb NOT NULL DEFAULT '{}'::jsonb,
     updated_at timestamptz DEFAULT now() NOT NULL
 );
 

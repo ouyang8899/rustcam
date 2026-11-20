@@ -67,7 +67,10 @@ impl AuthState {
         Ok(active)
     }
 
-    pub async fn load_active_session(&self, sid: Uuid) -> crate::error::Result<Option<UserSession>> {
+    pub async fn load_active_session(
+        &self,
+        sid: Uuid,
+    ) -> crate::error::Result<Option<UserSession>> {
         let session = SessionRepository::find_active(&*self.repo, sid).await?;
         if session.is_some() {
             self.session_cache.mark(sid);
@@ -90,7 +93,10 @@ pub async fn jwt_auth_layer(
     mut req: Request,
     next: Next,
 ) -> Response {
-    let auth_header = req.headers().get("Authorization").and_then(|v| v.to_str().ok());
+    let auth_header = req
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok());
 
     let auth_header = match auth_header {
         Some(h) if h.starts_with("Bearer ") => h,
@@ -135,6 +141,9 @@ pub async fn jwt_auth_layer(
         roles: claims.roles,
         is_super: claims.is_super,
     };
-    req.extensions_mut().insert(CurrentUser { user: user_info, sid });
+    req.extensions_mut().insert(CurrentUser {
+        user: user_info,
+        sid,
+    });
     next.run(req).await
 }

@@ -1,22 +1,12 @@
 <!-- @ts-check -->
 <template>
-  <div class="page-container replay-page">
-    <div class="page-header replay-header">
-      <div class="header-left">
-        <h1 class="page-title">轨迹回放</h1>
-        <span class="header-sub">
-          {{ selected ? selected.name || selected.drone_tag : '未选择无人机' }}
-          <el-tag
-            v-if="selected"
-            size="small"
-            :type="selected.online ? 'success' : 'info'"
-            style="margin-left: 8px"
-          >
-            {{ selected.online ? '在线' : '离线' }}
-          </el-tag>
-        </span>
-      </div>
-      <div class="page-toolbar replay-toolbar">
+  <PageView title="轨迹回放" :subtitle="subtitleText">
+    <template #toolbar>
+      <el-button type="primary" :icon="Search" :loading="loading" @click="load">查询</el-button>
+    </template>
+
+    <FilterBar>
+      <template #left>
         <el-select
           v-model="deviceId"
           placeholder="选择无人机"
@@ -41,9 +31,8 @@
           style="width: 350px"
           @change="onRangeChange"
         />
-        <el-button type="primary" :icon="Search" :loading="loading" @click="load">查询</el-button>
-      </div>
-    </div>
+      </template>
+    </FilterBar>
 
     <div class="replay-body">
       <section class="stage">
@@ -202,24 +191,23 @@
               />
             </div>
           </template>
-          <el-empty v-else description="暂无遥测" :image-size="52" />
+          <EmptyState v-else title="暂无遥测" />
         </div>
 
         <div class="panel">
           <div class="panel-head"><span>高度 / 速度</span></div>
           <v-chart v-if="chartSamples.length" class="profile-chart" :option="profileOption" autoresize />
-          <el-empty v-else description="暂无曲线" :image-size="52" />
+          <EmptyState v-else title="暂无曲线" />
         </div>
       </aside>
     </div>
-  </div>
+  </PageView>
 </template>
 
 <script setup>
 // @ts-check
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import {
   DArrowLeft,
   DArrowRight,
@@ -233,6 +221,12 @@ import {
 import { useDroneStore } from '../../stores/droneStore'
 import Map2D from '../../components/drone/Map2D.vue'
 import CesiumGlobe from '../../components/drone/CesiumGlobe.vue'
+import PageView from '../../components/common/PageView.vue'
+import FilterBar from '../../components/common/FilterBar.vue'
+import EmptyState from '../../components/common/EmptyState.vue'
+import { useToast } from '../../composables/useToast'
+
+const toast = useToast()
 
 const store = useDroneStore()
 const route = useRoute()
@@ -247,7 +241,6 @@ const range = ref([])
 const loading = ref(false)
 const playing = ref(false)
 const speed = ref(1)
-/** 当前回放时间戳（ms），在样本之间按进度线性插值。 */
 const currentTs = ref(0)
 /** @type {import('vue').Ref<any[]>} */
 const samples = ref([])
@@ -271,6 +264,10 @@ const shortcuts = [
 ]
 
 const selected = computed(() => store.drones.find((d) => d.drone_tag === deviceId.value) || null)
+const subtitleText = computed(() => {
+  if (!selected.value) return '未选择无人机'
+  return `${selected.value.name || selected.value.drone_tag} · ${selected.value.online ? '在线' : '离线'}`
+})
 const t0 = computed(() => (samples.value.length ? samples.value[0].ts_ms : 0))
 const t1 = computed(() =>
   samples.value.length ? samples.value[samples.value.length - 1].ts_ms : 0
@@ -283,12 +280,10 @@ const progress = computed(() => {
   return Math.min(1, Math.max(0, (currentTs.value - t0.value) / durationMs.value))
 })
 
-/** 回放用的轨迹点，供 2D/3D 地图绘制。 */
 const track = computed(() =>
   samples.value.map((t) => ({ lat: t.lat, lon: t.lon, alt: t.alt_amsl }))
 )
 
-/** 把当前插值样本伪装成一台“无人机”，复用地图上的机标与姿态渲染。 */
 const replayDrones = computed(() => {
   const t = current.value
   if (!t) return []
@@ -328,7 +323,6 @@ const maxRelAlt = computed(() =>
 )
 const maxSpeed = computed(() => samples.value.reduce((max, t) => Math.max(max, speedOf(t)), 0))
 
-/** 时间轴滑块的秒数视图，拖动时暂停并跳转。 */
 const sliderSec = computed({
   get: () => Math.max(0, (currentTs.value - t0.value) / 1000),
   set: (value) => {
@@ -338,7 +332,6 @@ const sliderSec = computed({
   },
 })
 
-/** 3D 视角中心：轨迹包围盒中心，高度随轨迹跨度变化。 */
 const globeCenter = computed(() => {
   const m = trackMetrics()
   return { lon: m.lon, lat: m.lat, alt: Math.max(1200, m.span * 2) }
@@ -353,7 +346,6 @@ const chartSamples = computed(() => {
   return out
 })
 
-/** 图表游标按整秒更新，避免逐帧重绘 ECharts。 */
 const cursorSec = computed(() => Math.max(0, Math.round((currentTs.value - t0.value) / 1000)))
 
 const profileOption = computed(() => {
@@ -444,11 +436,6 @@ watch(
   }
 )
 
-/**
- * 二分 + 线性插值：让机标在样本之间平滑移动，而不是逐帧跳变。
- * 姿态角按最短弧插值，避免 359°→1° 时反转一圈。
- * @param {number} ts
- */
 function sampleAt(ts) {
   const list = samples.value
   if (!list.length) return null
@@ -513,7 +500,6 @@ function haversine(a, b) {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)))
 }
 
-/** 轨迹包围盒中心与跨度（米），用于 3D 视角。 */
 function trackMetrics() {
   const list = track.value
   if (!list.length) return { lon: 121.4737, lat: 31.2304, span: 5000 }
@@ -568,7 +554,6 @@ function togglePlay() {
 /** @param {number} now */
 function step(now) {
   if (!playing.value) return
-  // 切后台再回来时 performance.now 会大幅跳变，限制单帧推进量。
   const delta = Math.min(Math.max(0, now - lastFrame), 120)
   lastFrame = now
   currentTs.value = Math.min(t1.value, currentTs.value + delta * speed.value)
@@ -580,7 +565,6 @@ function step(now) {
   raf = requestAnimationFrame(step)
 }
 
-/** @param {number} direction -1 上一帧 / 1 下一帧 */
 function jump(direction) {
   const list = samples.value
   if (!list.length) return
@@ -615,7 +599,7 @@ function restart() {
 
 async function load() {
   if (!deviceId.value) {
-    ElMessage.warning('请选择无人机')
+    toast.warning('请选择无人机')
     return
   }
   if (
@@ -624,13 +608,13 @@ async function load() {
     !range.value[0] ||
     !range.value[1]
   ) {
-    ElMessage.warning('请选择查询时间段')
+    toast.warning('请选择查询时间段')
     return
   }
   const start = range.value[0].getTime()
   const end = range.value[1].getTime()
   if (end <= start) {
-    ElMessage.warning('结束时间必须晚于开始时间')
+    toast.warning('结束时间必须晚于开始时间')
     return
   }
   const seq = ++loadSeq
@@ -639,18 +623,17 @@ async function load() {
   try {
     const list = await store.fetchReplay(deviceId.value, start, end)
     if (seq !== loadSeq) return
-    // GPS 未定位时服务端仍会上报 (0,0)，直接入图会拉出一条跨洲折线。
     samples.value = list.filter((t) => !(t.lat === 0 && t.lon === 0))
     currentTs.value = samples.value[0]?.ts_ms || 0
     if (samples.value.length) {
       nextTick(() => focus3d())
     } else {
-      ElMessage.info('该时间窗内没有遥测历史')
+      toast.info('该时间窗内没有遥测历史')
     }
   } catch (e) {
     if (seq !== loadSeq) return
     samples.value = []
-    ElMessage.error(e?.response?.data?.message || e?.message || '轨迹查询失败')
+    toast.error(e?.response?.data?.message || e?.message || '轨迹查询失败')
   } finally {
     if (seq === loadSeq) loading.value = false
   }
@@ -753,24 +736,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.replay-header {
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.header-left {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  min-width: 0;
-}
-.header-sub {
-  font-size: 12px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.replay-toolbar {
-  flex-wrap: wrap;
-}
 .replay-body {
   flex: 1;
   min-height: 0;
@@ -790,7 +755,7 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 0;
   overflow: hidden;
   background: #0f172a;
 }
@@ -804,7 +769,7 @@ onUnmounted(() => {
   right: 10px;
   z-index: 5;
   padding: 2px;
-  border-radius: 8px;
+  border-radius: 0;
   background: rgba(15, 23, 42, 0.6);
   backdrop-filter: blur(4px);
 }
@@ -843,7 +808,7 @@ onUnmounted(() => {
 .timeline-card {
   flex-shrink: 0;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--bg-surface);
   padding: 10px 14px 6px;
 }
@@ -911,12 +876,12 @@ onUnmounted(() => {
   gap: 12px;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--bg-surface);
 }
 .panel {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   padding: 10px;
   background: var(--bg-base);
 }

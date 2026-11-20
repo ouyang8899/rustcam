@@ -41,7 +41,7 @@ pub struct Channel {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
 
-#[serde(default)]
+    #[serde(default)]
     pub parental: i32,
 
     // 不加 skip_serializing_if：坐标为 None 时也要显式输出 null，
@@ -282,7 +282,8 @@ mod tests {
         channel.longitude = Some(2.0);
 
         let req: UpdateChannelRequest =
-            serde_json::from_str(r#"{"name": "new", "address": "somewhere", "port": 8554}"#).unwrap();
+            serde_json::from_str(r#"{"name": "new", "address": "somewhere", "port": 8554}"#)
+                .unwrap();
         req.apply_to(&mut channel);
 
         assert_eq!(channel.name, "new");

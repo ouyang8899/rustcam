@@ -42,7 +42,10 @@ impl OnvifDiscoveryClient {
                 Ok(Ok((len, _addr))) => {
                     let xml = String::from_utf8_lossy(&buf[..len]);
                     if let Some(device) = Self::parse_probe_match(&xml) {
-                        if !devices.iter().any(|d: &OnvifDiscoveredDevice| d.x_addr == device.x_addr) {
+                        if !devices
+                            .iter()
+                            .any(|d: &OnvifDiscoveredDevice| d.x_addr == device.x_addr)
+                        {
                             devices.push(device);
                         }
                     }
@@ -54,7 +57,8 @@ impl OnvifDiscoveryClient {
 
         for device in &mut devices {
             if let Ok(info) = crate::protocol::onvif::OnvifDeviceClient::new(&device.x_addr)
-                .get_device_info().await
+                .get_device_info()
+                .await
             {
                 device.manufacturer = info.manufacturer.clone();
                 device.model = info.model.clone();
@@ -64,7 +68,10 @@ impl OnvifDiscoveryClient {
                     device.name = Some(format!("{} {}", mfr, mdl));
                 }
             } else {
-                tracing::warn!("[ONVIF Discovery] Failed to get device info from: {}", device.x_addr);
+                tracing::warn!(
+                    "[ONVIF Discovery] Failed to get device info from: {}",
+                    device.x_addr
+                );
             }
         }
 
@@ -92,7 +99,11 @@ impl OnvifDiscoveryClient {
     fn parse_probe_match(xml: &str) -> Option<OnvifDiscoveredDevice> {
         use crate::protocol::onvif::soap::extract_element_text;
         let x_addrs_full = extract_element_text(xml.as_bytes(), "XAddrs")?;
-        let x_addr = x_addrs_full.split_whitespace().next().unwrap_or(&x_addrs_full).to_string();
+        let x_addr = x_addrs_full
+            .split_whitespace()
+            .next()
+            .unwrap_or(&x_addrs_full)
+            .to_string();
         let address = extract_element_text(xml.as_bytes(), "Address").unwrap_or_default();
         let types = extract_element_text(xml.as_bytes(), "Types")
             .map(|t| t.split_whitespace().map(|s| s.to_string()).collect())
@@ -104,14 +115,23 @@ impl OnvifDiscoveryClient {
             .and_then(|v| v.parse().ok())
             .unwrap_or(1);
         Some(OnvifDiscoveredDevice {
-            x_addr, types, scopes,
-            address, metadata_version,
-            manufacturer: None, model: None, firmware_version: None,
-            serial_number: None, name: None,
+            x_addr,
+            types,
+            scopes,
+            address,
+            metadata_version,
+            manufacturer: None,
+            model: None,
+            firmware_version: None,
+            serial_number: None,
+            name: None,
         })
     }
 
-    pub async fn probe_unicast(ip: &str, port: u16) -> anyhow::Result<Option<OnvifDiscoveredDevice>> {
+    pub async fn probe_unicast(
+        ip: &str,
+        port: u16,
+    ) -> anyhow::Result<Option<OnvifDiscoveredDevice>> {
         let bind_addr = SocketAddr::from((Ipv4Addr::new(0, 0, 0, 0), 0));
         let sock = UdpSocket::bind(bind_addr).await?;
 
@@ -122,12 +142,13 @@ impl OnvifDiscoveryClient {
         let mut buf = vec![0u8; 65536];
         let deadline = Duration::from_secs(5);
         match tokio::time::timeout(deadline, sock.recv_from(&mut buf)).await {
-                Ok(Ok((len, _addr))) => {
-                    let xml = String::from_utf8_lossy(&buf[..len]);
-                    let mut device = Self::parse_probe_match(&xml)
+            Ok(Ok((len, _addr))) => {
+                let xml = String::from_utf8_lossy(&buf[..len]);
+                let mut device = Self::parse_probe_match(&xml)
                     .ok_or_else(|| anyhow::anyhow!("Invalid ProbeMatch response"))?;
                 if let Ok(info) = crate::protocol::onvif::OnvifDeviceClient::new(&device.x_addr)
-                    .get_device_info().await
+                    .get_device_info()
+                    .await
                 {
                     device.manufacturer = info.manufacturer.clone();
                     device.model = info.model.clone();
@@ -143,9 +164,7 @@ impl OnvifDiscoveryClient {
                 tracing::error!("[ONVIF Discovery] UDP recv error: {}", e);
                 Err(anyhow::anyhow!("UDP recv error: {}", e))
             }
-            Err(_) => {
-                Ok(None)
-            }
+            Err(_) => Ok(None),
         }
     }
 }

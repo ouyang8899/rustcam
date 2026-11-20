@@ -1,27 +1,25 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
+use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use axum::{
     extract::{ConnectInfo, Extension, Path, Query, State},
     http::HeaderMap,
     Json,
 };
-use argon2::{
-    Argon2, PasswordHash, PasswordVerifier,
-};
 use password_hash::phc::SaltString;
 use password_hash::PasswordHasher;
 use serde::Deserialize;
-use uuid::Uuid;
 use serde::Serialize;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use uuid::Uuid;
 
-use crate::api::FullState;
 use crate::api::http::handlers::device_handler::PaginatedResponse;
-use crate::error::{AppError, Result as AppResult};
-use crate::auth::models::*;
+use crate::api::FullState;
 use crate::auth::middleware::CurrentUser;
-use crate::auth::repository::{UserRepository, RoleRepository, PermissionRepository};
+use crate::auth::models::*;
+use crate::auth::repository::{PermissionRepository, RoleRepository, UserRepository};
 use crate::auth::session::SessionRepository;
 use crate::auth::session_policy::{decide_limit, LimitDecision};
+use crate::error::{AppError, Result as AppResult};
 
 /// 列表分页参数。
 ///
@@ -85,20 +83,13 @@ pub async fn login(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(req): Json<LoginRequest>,
 ) -> AppResult<Json<ApiResponse<LoginResponse>>> {
-
     let user = UserRepository::find_by_username(&*state.auth.repo, &req.username)
         .await
-        .map_err(|e| {
-            AppError::Auth(e.to_string())
-        })?
-        .ok_or_else(|| {
-            AppError::Auth("Invalid credentials".to_string())
-        })?;
+        .map_err(|e| AppError::Auth(e.to_string()))?
+        .ok_or_else(|| AppError::Auth("Invalid credentials".to_string()))?;
 
     let parsed_hash = PasswordHash::new(&user.password_hash)
-        .map_err(|e| {
-            AppError::Auth(format!("Password hash error: {}", e))
-        })?;
+        .map_err(|e| AppError::Auth(format!("Password hash error: {}", e)))?;
 
     let password_bytes = req.password.as_bytes().to_vec();
     let password_valid = tokio::task::spawn_blocking(move || {
@@ -115,9 +106,7 @@ pub async fn login(
 
     let roles = UserRepository::get_user_roles(&*state.auth.repo, user.id)
         .await
-        .map_err(|e| {
-            AppError::Auth(e.to_string())
-        })?;
+        .map_err(|e| AppError::Auth(e.to_string()))?;
 
     let user_info = UserInfo {
         id: user.id,
@@ -210,8 +199,8 @@ pub async fn refresh(
         return Err(AppError::Auth("Invalid token type".to_string()));
     }
 
-    let user_id = Uuid::parse_str(&claims.sub)
-        .map_err(|_| AppError::Auth("Invalid user ID".to_string()))?;
+    let user_id =
+        Uuid::parse_str(&claims.sub).map_err(|_| AppError::Auth("Invalid user ID".to_string()))?;
 
     let sid = Uuid::parse_str(&claims.sid)
         .map_err(|_| AppError::Auth("Missing session id".to_string()))?;
@@ -238,21 +227,26 @@ pub async fn refresh(
         .await
         .map_err(|e| AppError::Auth(e.to_string()))?;
 
-    let user_info = UserInfo { id: user.id, username: user.username.clone(), roles, is_super: user.is_super };
+    let user_info = UserInfo {
+        id: user.id,
+        username: user.username.clone(),
+        roles,
+        is_super: user.is_super,
+    };
     let (access_token, refresh_token) =
         crate::auth::jwt::generate_tokens(&user_info, &claims.sid, &state.auth.jwt_config)
             .map_err(|e| AppError::Auth(e.to_string()))?;
 
     Ok(Json(ApiResponse::success(LoginResponse {
-        access_token, refresh_token,
+        access_token,
+        refresh_token,
         expires_in: state.auth.jwt_config.access_token_expire_minutes * 60,
-        token_type: "Bearer".to_string(), user: user_info,
+        token_type: "Bearer".to_string(),
+        user: user_info,
     })))
 }
 
-pub async fn me(
-    Extension(current_user): Extension<CurrentUser>,
-) -> Json<ApiResponse<UserInfo>> {
+pub async fn me(Extension(current_user): Extension<CurrentUser>) -> Json<ApiResponse<UserInfo>> {
     Json(ApiResponse::success(current_user.user))
 }
 
@@ -261,7 +255,6 @@ pub async fn list_users(
     Extension(current_user): Extension<CurrentUser>,
     Query(q): Query<PageQuery>,
 ) -> AppResult<Json<ApiResponse<PaginatedResponse<UserWithRoles>>>> {
-
     require_permission(&state, &current_user, "user", "read").await?;
 
     let total = UserRepository::count(&*state.auth.repo)
@@ -304,7 +297,6 @@ pub async fn create_user(
     Extension(current_user): Extension<CurrentUser>,
     Json(req): Json<CreateUserRequest>,
 ) -> AppResult<Json<ApiResponse<User>>> {
-
     require_permission(&state, &current_user, "user", "write").await?;
 
     if UserRepository::find_by_username(&*state.auth.repo, &req.username)
@@ -346,7 +338,6 @@ pub async fn get_user(
     Path(user_id): Path<Uuid>,
     Extension(current_user): Extension<CurrentUser>,
 ) -> AppResult<Json<ApiResponse<UserWithRoles>>> {
-
     require_permission(&state, &current_user, "user", "read").await?;
 
     let user = UserRepository::find_by_id(&*state.auth.repo, user_id)
@@ -377,7 +368,6 @@ pub async fn update_user(
     Extension(current_user): Extension<CurrentUser>,
     Json(req): Json<UpdateUserRequest>,
 ) -> AppResult<Json<ApiResponse<User>>> {
-
     require_permission(&state, &current_user, "user", "write").await?;
 
     let mut user = UserRepository::find_by_id(&*state.auth.repo, user_id)
@@ -425,7 +415,6 @@ pub async fn delete_user(
     Path(user_id): Path<Uuid>,
     Extension(current_user): Extension<CurrentUser>,
 ) -> AppResult<Json<ApiResponse<()>>> {
-
     require_permission(&state, &current_user, "user", "write").await?;
 
     UserRepository::delete(&*state.auth.repo, user_id)
@@ -449,10 +438,7 @@ pub async fn assign_user_roles(
             .map_err(|e| AppError::Auth(e.to_string()))?
             .is_none()
         {
-            return Err(AppError::BadRequest(format!(
-                "Role not found: {}",
-                role_id
-            )));
+            return Err(AppError::BadRequest(format!("Role not found: {}", role_id)));
         }
     }
 
@@ -471,7 +457,6 @@ pub async fn list_roles(
     State(state): State<Arc<FullState>>,
     Extension(current_user): Extension<CurrentUser>,
 ) -> AppResult<Json<ApiResponse<Vec<Role>>>> {
-
     require_permission(&state, &current_user, "role", "manage").await?;
 
     let roles = RoleRepository::list(&*state.auth.repo)
@@ -486,7 +471,6 @@ pub async fn get_role(
     Path(role_id): Path<Uuid>,
     Extension(current_user): Extension<CurrentUser>,
 ) -> AppResult<Json<ApiResponse<RoleDetail>>> {
-
     require_permission(&state, &current_user, "role", "manage").await?;
 
     let role = RoleRepository::find_by_id(&*state.auth.repo, role_id)
@@ -514,7 +498,6 @@ pub async fn create_role(
     Extension(current_user): Extension<CurrentUser>,
     Json(req): Json<CreateRoleRequest>,
 ) -> AppResult<Json<ApiResponse<Role>>> {
-
     require_permission(&state, &current_user, "role", "manage").await?;
 
     let name = req.name.trim().to_string();
@@ -527,9 +510,7 @@ pub async fn create_role(
         .map_err(|e| AppError::Auth(e.to_string()))?
         .is_some()
     {
-        return Err(AppError::BadRequest(
-            "Role name already exists".to_string(),
-        ));
+        return Err(AppError::BadRequest("Role name already exists".to_string()));
     }
 
     let role = Role::new(name, req.description);
@@ -555,7 +536,6 @@ pub async fn update_role(
     Extension(current_user): Extension<CurrentUser>,
     Json(req): Json<UpdateRoleRequest>,
 ) -> AppResult<Json<ApiResponse<Role>>> {
-
     require_permission(&state, &current_user, "role", "manage").await?;
 
     let mut role = RoleRepository::find_by_id(&*state.auth.repo, role_id)
@@ -573,9 +553,7 @@ pub async fn update_role(
             .map_err(|e| AppError::Auth(e.to_string()))?
         {
             if existing.id != role_id {
-                return Err(AppError::BadRequest(
-                    "Role name already exists".to_string(),
-                ));
+                return Err(AppError::BadRequest("Role name already exists".to_string()));
             }
         }
         role.name = name;
@@ -601,7 +579,6 @@ pub async fn delete_role(
     Path(role_id): Path<Uuid>,
     Extension(current_user): Extension<CurrentUser>,
 ) -> AppResult<Json<ApiResponse<()>>> {
-
     require_permission(&state, &current_user, "role", "manage").await?;
 
     let role = RoleRepository::find_by_id(&*state.auth.repo, role_id)
@@ -630,7 +607,6 @@ pub async fn set_role_permissions(
     Extension(current_user): Extension<CurrentUser>,
     Json(req): Json<SetPermissionsRequest>,
 ) -> AppResult<Json<ApiResponse<()>>> {
-
     require_permission(&state, &current_user, "role", "manage").await?;
 
     if RoleRepository::find_by_id(&*state.auth.repo, role_id)
@@ -670,7 +646,6 @@ pub async fn set_role_parents(
     Extension(current_user): Extension<CurrentUser>,
     Json(req): Json<SetRoleParentsRequest>,
 ) -> AppResult<Json<ApiResponse<Vec<Role>>>> {
-
     require_permission(&state, &current_user, "role", "manage").await?;
 
     let role = RoleRepository::find_by_id(&*state.auth.repo, role_id)
@@ -689,9 +664,7 @@ pub async fn set_role_parents(
         let parent = RoleRepository::find_by_id(&*state.auth.repo, *parent_id)
             .await
             .map_err(|e| AppError::Auth(e.to_string()))?
-            .ok_or_else(|| {
-                AppError::BadRequest(format!("Parent role not found: {}", parent_id))
-            })?;
+            .ok_or_else(|| AppError::BadRequest(format!("Parent role not found: {}", parent_id)))?;
         parent_names.push(parent.name);
     }
 
@@ -728,16 +701,16 @@ pub async fn list_permissions(
     Extension(current_user): Extension<CurrentUser>,
     Query(q): Query<PageQuery>,
 ) -> AppResult<Json<ApiResponse<PaginatedResponse<Permission>>>> {
-
     require_permission(&state, &current_user, "role", "manage").await?;
 
     let total = PermissionRepository::count(&*state.auth.repo)
         .await
         .map_err(|e| AppError::Auth(e.to_string()))?;
 
-    let permissions = PermissionRepository::list_paginated(&*state.auth.repo, q.offset(), q.limit())
-        .await
-        .map_err(|e| AppError::Auth(e.to_string()))?;
+    let permissions =
+        PermissionRepository::list_paginated(&*state.auth.repo, q.offset(), q.limit())
+            .await
+            .map_err(|e| AppError::Auth(e.to_string()))?;
 
     Ok(Json(ApiResponse::success(PaginatedResponse {
         items: permissions,
@@ -752,7 +725,6 @@ pub async fn create_permission(
     Extension(current_user): Extension<CurrentUser>,
     Json(req): Json<CreatePermissionRequest>,
 ) -> AppResult<Json<ApiResponse<Permission>>> {
-
     require_permission(&state, &current_user, "role", "manage").await?;
 
     let name = req.name.trim().to_string();
@@ -786,7 +758,6 @@ pub async fn update_permission(
     Extension(current_user): Extension<CurrentUser>,
     Json(req): Json<UpdatePermissionRequest>,
 ) -> AppResult<Json<ApiResponse<Permission>>> {
-
     require_permission(&state, &current_user, "role", "manage").await?;
 
     let mut permission = PermissionRepository::find_by_id(&*state.auth.repo, permission_id)
@@ -829,7 +800,6 @@ pub async fn delete_permission(
     Path(permission_id): Path<Uuid>,
     Extension(current_user): Extension<CurrentUser>,
 ) -> AppResult<Json<ApiResponse<()>>> {
-
     require_permission(&state, &current_user, "role", "manage").await?;
 
     PermissionRepository::delete(&*state.auth.repo, permission_id)
@@ -907,12 +877,17 @@ pub async fn list_all_sessions(
     Query(q): Query<PageQuery>,
 ) -> AppResult<Json<ApiResponse<SessionPage>>> {
     if !is_super_admin(&current_user.user) {
-        return Err(AppError::Forbidden("仅超级管理员可查看全部会话".to_string()));
+        return Err(AppError::Forbidden(
+            "仅超级管理员可查看全部会话".to_string(),
+        ));
     }
-    let (sessions, total) =
-        SessionRepository::list_all_active_paged(&*state.auth.repo, q.offset() as i64, q.limit() as i64)
-            .await
-            .map_err(|e| AppError::Internal(e.to_string()))?;
+    let (sessions, total) = SessionRepository::list_all_active_paged(
+        &*state.auth.repo,
+        q.offset() as i64,
+        q.limit() as i64,
+    )
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))?;
     let items = sessions
         .into_iter()
         .map(|entry| SessionDto {
@@ -944,7 +919,9 @@ pub async fn set_user_super(
         .map_err(|e| AppError::Internal(e.to_string()))?
         .ok_or_else(|| AppError::Auth("当前用户不存在".to_string()))?;
     if !caller.is_super {
-        return Err(AppError::Forbidden("仅超级用户可修改超级用户标志".to_string()));
+        return Err(AppError::Forbidden(
+            "仅超级用户可修改超级用户标志".to_string(),
+        ));
     }
     require_permission(&state, &current_user, "user", "write").await?;
 

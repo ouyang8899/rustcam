@@ -1,9 +1,9 @@
-pub mod routes;
 pub mod handlers;
+pub mod routes;
 
-use axum::Router;
 use crate::api::state::{AppState, FullState};
 use crate::auth::AuthState;
+use axum::Router;
 
 pub fn create_router(state: AppState, auth_state: AuthState) -> Router {
     let full_state = FullState {

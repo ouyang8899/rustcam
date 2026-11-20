@@ -18,9 +18,49 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
 #include <QMap>
+#include <QStringList>
 
 namespace rustcam {
+
+namespace {
+
+/// 把客户端图层 JSON 摘成一屏可读文本（维度 + SRS + 瓦片地址）。
+QString describeClientLayers()
+{
+    const QString json =
+        SystemConfig::instance()->getValue(CFG_MAP_LAYERS_JSON, "[]").toString();
+    QJsonParseError err{};
+    const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8(), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isArray()) {
+        return QObject::tr("（尚未配置图层）");
+    }
+
+    QStringList parts;
+    const QJsonArray array = doc.array();
+    for (const QJsonValue& value : array) {
+        const QJsonObject obj = value.toObject();
+        const QString dim = obj.value(QStringLiteral("dim")).toString();
+        const QString srs = obj.value(QStringLiteral("srs")).toString();
+        const QString url = obj.value(QStringLiteral("url")).toString();
+        const int minZoom = obj.value(QStringLiteral("min_zoom")).toInt(0);
+        const int maxZoom = obj.value(QStringLiteral("max_zoom")).toInt(19);
+        parts.append(QStringLiteral("%1D %2 z%3-%4 %5")
+                         .arg(dim == QStringLiteral("3d") ? QStringLiteral("3")
+                                                          : QStringLiteral("2"))
+                         .arg(srs.isEmpty() ? QStringLiteral("(无 SRS)") : srs)
+                         .arg(minZoom)
+                         .arg(maxZoom)
+                         .arg(url.left(60)));
+    }
+    return parts.isEmpty() ? QObject::tr("（尚未配置图层）") : parts.join(QStringLiteral("\n"));
+}
+
+} // namespace
 
 SettingsWidget::SettingsWidget(QWidget* parent)
     : QWidget(parent)
@@ -40,9 +80,8 @@ SettingsWidget::SettingsWidget(QWidget* parent)
     , m_osdBgAlphaSpin(nullptr)
     , m_pluginOrderList(nullptr)
     , m_screenshotPathEdit(nullptr)
-    , m_clientTmsUrlEdit(nullptr)
+    , m_mapLayersView(nullptr)
     , m_wfsUrlEdit(nullptr)
-    , m_zoomRangeEdit(nullptr)
 {
     setWindowTitle(tr("Settings"));
     setMinimumWidth(550);
@@ -98,11 +137,8 @@ void SettingsWidget::loadSettings() {
 
     m_screenshotPathEdit->setText(QDir::toNativeSeparators(SystemConfig::screenshotDirectory()));
 
-    m_clientTmsUrlEdit->setText(cfg->getValue(CFG_MAP_TMS_URL, "").toString());
-    m_wfsUrlEdit->setText(cfg->getValue(CFG_MAP_WFS_URL, "").toString());
-    m_zoomRangeEdit->setText(QString("%1 - %2")
-        .arg(cfg->getValue(CFG_MAP_MIN_ZOOM, 0))
-        .arg(cfg->getValue(CFG_MAP_MAX_ZOOM, 19)));
+    m_mapLayersView->setPlainText(describeClientLayers());
+    m_wfsUrlEdit->setText(cfg->getValue(CFG_MAP_WFS_JSON, "{}").toString());
 
     refreshPluginList();
 }
@@ -311,20 +347,16 @@ void SettingsWidget::setupMapTab() {
     QGroupBox* mapGroup = new QGroupBox(tr("Electronic Map"), tab);
     QFormLayout* mapLayout = new QFormLayout(mapGroup);
 
-    m_clientTmsUrlEdit = new QLineEdit(tab);
-    m_clientTmsUrlEdit->setReadOnly(true);
-    m_clientTmsUrlEdit->setPlaceholderText(tr("https://tile.openstreetmap.org/{z}/{x}/{y}.png"));
-    mapLayout->addRow(tr("Client TMS URL:"), m_clientTmsUrlEdit);
+    m_mapLayersView = new QPlainTextEdit(tab);
+    m_mapLayersView->setReadOnly(true);
+    m_mapLayersView->setMinimumHeight(140);
+    m_mapLayersView->setPlaceholderText(tr("在 Web 端「电子地图」设置里配置客户端图层"));
+    mapLayout->addRow(tr("Client Layers:"), m_mapLayersView);
 
     m_wfsUrlEdit = new QLineEdit(tab);
     m_wfsUrlEdit->setReadOnly(true);
     m_wfsUrlEdit->setPlaceholderText(tr("http://localhost:8080/geoserver/ows?service=WFS&version=2.0.0&request=GetFeature"));
-    mapLayout->addRow(tr("WFS URL:"), m_wfsUrlEdit);
-
-    m_zoomRangeEdit = new QLineEdit(tab);
-    m_zoomRangeEdit->setReadOnly(true);
-    m_zoomRangeEdit->setPlaceholderText(tr("0 - 19"));
-    mapLayout->addRow(tr("Zoom Levels:"), m_zoomRangeEdit);
+    mapLayout->addRow(tr("WFS (url + srsName):"), m_wfsUrlEdit);
 
     layout->addWidget(mapGroup);
 

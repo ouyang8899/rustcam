@@ -1,6 +1,6 @@
-use std::sync::Arc;
-use crate::domain::{ Channel, CreateChannelRequest, UpdateChannelRequest };
+use crate::domain::{Channel, CreateChannelRequest, UpdateChannelRequest};
 use crate::error::Result;
+use std::sync::Arc;
 
 pub struct ChannelService {
     repo: Arc<crate::infrastructure::DbRepository>,
@@ -11,7 +11,11 @@ impl ChannelService {
         Self { repo }
     }
 
-    pub async fn get_channel(&self, device_tag: &str, channel_tag: &str) -> Result<Option<Channel>> {
+    pub async fn get_channel(
+        &self,
+        device_tag: &str,
+        channel_tag: &str,
+    ) -> Result<Option<Channel>> {
         self.repo.get_channel(device_tag, channel_tag).await
     }
 
@@ -33,10 +37,24 @@ impl ChannelService {
         device_tag: Option<&str>,
         search: Option<&str>,
         status: Option<&str>,
+        group_id: Option<i64>,
+        region_code: Option<&str>,
+        unassigned_region: Option<bool>,
         limit: usize,
         offset: usize,
     ) -> Result<Vec<Channel>> {
-        self.repo.list_channels_paginated(device_tag, search, status, limit, offset).await
+        self.repo
+            .list_channels_paginated(
+                device_tag,
+                search,
+                status,
+                group_id,
+                region_code,
+                unassigned_region,
+                limit,
+                offset,
+            )
+            .await
     }
 
     pub fn count_channels(&self) -> usize {
@@ -48,8 +66,20 @@ impl ChannelService {
         device_tag: Option<&str>,
         search: Option<&str>,
         status: Option<&str>,
+        group_id: Option<i64>,
+        region_code: Option<&str>,
+        unassigned_region: Option<bool>,
     ) -> Result<usize> {
-        self.repo.count_channels(device_tag, search, status).await
+        self.repo
+            .count_channels(
+                device_tag,
+                search,
+                status,
+                group_id,
+                region_code,
+                unassigned_region,
+            )
+            .await
     }
 
     pub fn get_channels_by_device(&self, device_tag: &str) -> Vec<Channel> {
@@ -81,7 +111,7 @@ impl ChannelService {
             name.to_string(),
         );
         let id = self.repo.create_channel(&channel).await?;
-        
+
         let mut created = channel;
         created.id = id;
         Ok(created)

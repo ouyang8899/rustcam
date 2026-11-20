@@ -1,7 +1,7 @@
-use std::sync::Arc;
-use crate::context::ServiceRegistry;
 use crate::auth::AuthState;
+use crate::context::ServiceRegistry;
 use crate::drone_gateway::client::{DroneApi, DroneClient};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct FullState {

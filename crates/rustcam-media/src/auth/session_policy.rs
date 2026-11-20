@@ -64,7 +64,9 @@ mod tests {
     use chrono::{DateTime, Utc};
 
     fn session(seconds: i64, client_type: &str) -> UserSession {
-        let ts = DateTime::from_timestamp(seconds, 0).unwrap().with_timezone(&Utc);
+        let ts = DateTime::from_timestamp(seconds, 0)
+            .unwrap()
+            .with_timezone(&Utc);
         UserSession {
             id: Uuid::new_v4(),
             user_id: Uuid::nil(),

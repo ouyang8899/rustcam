@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::error::Result;
 use super::models::{NewSession, UserSession, UserSessionWithUser};
+use crate::error::Result;
 
 #[async_trait]
 pub trait SessionRepository: Send + Sync {

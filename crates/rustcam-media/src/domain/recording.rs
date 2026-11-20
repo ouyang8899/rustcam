@@ -392,10 +392,25 @@ mod tests {
     #[test]
     fn test_retry_backoff_grows_and_is_capped() {
         assert_eq!(retry_backoff_secs(StartFailureKind::StreamNotReady, 9), 15);
-        assert_eq!(retry_backoff_secs(StartFailureKind::MediaServerUnavailable, 1), 30);
-        assert_eq!(retry_backoff_secs(StartFailureKind::MediaServerUnavailable, 2), 60);
-        assert_eq!(retry_backoff_secs(StartFailureKind::MediaServerUnavailable, 3), 120);
-        assert_eq!(retry_backoff_secs(StartFailureKind::MediaServerUnavailable, 4), 300);
-        assert_eq!(retry_backoff_secs(StartFailureKind::MediaServerUnavailable, 50), 900);
+        assert_eq!(
+            retry_backoff_secs(StartFailureKind::MediaServerUnavailable, 1),
+            30
+        );
+        assert_eq!(
+            retry_backoff_secs(StartFailureKind::MediaServerUnavailable, 2),
+            60
+        );
+        assert_eq!(
+            retry_backoff_secs(StartFailureKind::MediaServerUnavailable, 3),
+            120
+        );
+        assert_eq!(
+            retry_backoff_secs(StartFailureKind::MediaServerUnavailable, 4),
+            300
+        );
+        assert_eq!(
+            retry_backoff_secs(StartFailureKind::MediaServerUnavailable, 50),
+            900
+        );
     }
 }

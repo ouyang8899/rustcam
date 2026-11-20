@@ -5,6 +5,13 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+:root {
+  --el-border-radius-base: 0;
+  --el-border-radius-small: 0;
+  --el-border-radius-round: 0;
+  --el-border-radius-circle: 0;
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -29,7 +36,8 @@ html, body {
 .status-dot.offline { background-color: var(--status-offline); }
 .status-dot.warning { background-color: var(--status-warning); }
 .status-dot.error   { background-color: var(--status-error); }
-.status-dot.recording { background-color: var(--status-error); }
+.status-dot.maintaining { background-color: var(--status-warning); animation: pulse-online 1.5s ease-in-out infinite; }
+.status-dot.recording { background-color: var(--status-error); animation: pulse-online 1.5s ease-in-out infinite; }
 
 // ── ElButton ─────────────────────────────────────────────────
 .el-button {
@@ -141,7 +149,6 @@ html, body {
   color: var(--text-primary);
 }
 
-// Input group (stream key + 生成 button)
 .el-input-group__append {
   background-color: var(--bg-base);
   border-color: var(--border);
@@ -310,7 +317,6 @@ html, body {
   }
 }
 
-// 列表底部的分页栏
 .pagination-bar {
   margin-top: var(--space-4);
   display: flex;
@@ -475,8 +481,8 @@ html, body {
   }
 }
 
-.el-switch__core {
-  border-radius: 10px !important;
+    .el-switch__core {
+    border-radius: 0 !important;
 
   .el-switch__action {
     border-radius: 50%;
@@ -562,7 +568,6 @@ html, body {
   --el-menu-selected-bg-color: var(--color-accent-dim);
   --el-menu-selected-text-color: var(--color-accent);
   --el-menu-item-height: 40px;
-  // 层级缩进：子菜单项每深入一级再缩进一个 --space-4
   --el-menu-base-level-padding: var(--space-4);
   --el-menu-level-padding: var(--space-4);
   border-right: none !important;
@@ -579,7 +584,6 @@ html, body {
     }
   }
 
-  // 只统一顶级项的左边距；子项沿用 Element Plus 的层级缩进，避免父子同级
   &:not(.el-menu--inline):not(.el-menu--popup) {
     > .el-menu-item,
     > .el-sub-menu > .el-sub-menu__title {
@@ -649,8 +653,8 @@ html, body {
 }
 
 // ── ElBadge ────────────────────────────────────────────────
-.el-badge__content {
-  border-radius: 10px !important;
+    .el-badge__content {
+    border-radius: 0 !important;
   font-family: var(--font-mono);
   font-size: 10px;
 }
@@ -961,9 +965,9 @@ html, body {
 // ── Scrollbar ───────────────────────────────────────────────
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb {
-  background: var(--border-bright);
-  border-radius: 3px;
+    ::-webkit-scrollbar-thumb {
+    background: var(--border-bright);
+    border-radius: 0;
   &:hover { background: var(--text-muted); }
 }
 
@@ -1108,4 +1112,44 @@ html.dark .el-skeleton__item {
     color: #001f2a;
     font-weight: var(--weight-semibold);
   }
+}
+
+.data-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-base);
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+
+.data-card:hover {
+  border-color: var(--border-accent);
+}
+
+
+.data-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background-color: var(--bg-elevated);
+}
+
+.data-card__title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-secondary);
+}
+
+.data-card__toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.data-card__body {
+  padding: var(--space-4);
 }

@@ -44,9 +44,9 @@ impl RedisBus {
             Duration::from_secs(5),
             client.get_multiplexed_async_connection(),
         )
-            .await
-            .map_err(|_| anyhow::anyhow!("Redis connection timeout"))?
-            .map_err(|e| anyhow::anyhow!("Redis connection error: {}", e))?;
+        .await
+        .map_err(|_| anyhow::anyhow!("Redis connection timeout"))?
+        .map_err(|e| anyhow::anyhow!("Redis connection error: {}", e))?;
         Ok(conn)
     }
 
@@ -60,7 +60,10 @@ impl RedisBus {
     async fn execute_with_retry<T, E>(
         &self,
         operation_name: &str,
-        mut f: impl FnMut(&mut MultiplexedConnection) -> Pin<Box<dyn Future<Output = std::result::Result<T, E>> + Send + '_>>,
+        mut f: impl FnMut(
+            &mut MultiplexedConnection,
+        )
+            -> Pin<Box<dyn Future<Output = std::result::Result<T, E>> + Send + '_>>,
     ) -> anyhow::Result<T>
     where
         E: std::error::Error + Send + Sync + 'static,
@@ -72,13 +75,7 @@ impl RedisBus {
             let mut conn_guard = self.conn.write().await;
 
             if let Some(ref mut conn) = *conn_guard {
-
-                let result = match tokio::time::timeout(
-                    REDIS_COMMAND_TIMEOUT,
-                    f(conn),
-                )
-                .await
-                {
+                let result = match tokio::time::timeout(REDIS_COMMAND_TIMEOUT, f(conn)).await {
                     Ok(r) => r,
                     Err(_) => {
                         tracing::warn!(
@@ -157,11 +154,9 @@ impl RedisBus {
         self.execute_with_retry("publish", move |conn| {
             let channel = channel.clone();
             let msg = msg.clone();
-            Box::pin(async move {
-                conn.publish::<_, _, ()>(&channel, msg).await
-            })
+            Box::pin(async move { conn.publish::<_, _, ()>(&channel, msg).await })
         })
-            .await
+        .await
     }
 
     pub async fn subscribe(&self, _channel: &str) -> anyhow::Result<()> {
@@ -169,14 +164,20 @@ impl RedisBus {
     }
 
     pub async fn set<T: Serialize>(
-        &self, key: &str, value: &T, ttl_secs: Option<u64>,
+        &self,
+        key: &str,
+        value: &T,
+        ttl_secs: Option<u64>,
     ) -> anyhow::Result<()> {
         let val = serde_json::to_string(value)?;
         self.set_json_str(key, &val, ttl_secs).await
     }
 
     pub async fn set_json_str(
-        &self, key: &str, val: &str, ttl_secs: Option<u64>,
+        &self,
+        key: &str,
+        val: &str,
+        ttl_secs: Option<u64>,
     ) -> anyhow::Result<()> {
         let key = key.to_string();
         let val = val.to_string();
@@ -191,7 +192,7 @@ impl RedisBus {
                 }
             })
         })
-            .await
+        .await
     }
 
     pub async fn get<T: DeserializeOwned>(&self, key: &str) -> anyhow::Result<Option<T>> {
@@ -226,7 +227,7 @@ impl RedisBus {
             let key = key.clone();
             Box::pin(async move { conn.del::<_, ()>(&key).await })
         })
-            .await
+        .await
     }
 
     pub async fn exists(&self, key: &str) -> anyhow::Result<bool> {
@@ -235,7 +236,7 @@ impl RedisBus {
             let key = key.clone();
             Box::pin(async move { conn.exists::<_, bool>(&key).await })
         })
-            .await
+        .await
     }
 
     pub async fn incr(&self, key: &str) -> anyhow::Result<i64> {
@@ -244,7 +245,7 @@ impl RedisBus {
             let key = key.clone();
             Box::pin(async move { conn.incr::<_, i64, i64>(&key, 1i64).await })
         })
-            .await
+        .await
     }
 
     pub async fn hset(&self, key: &str, field: &str, value: &str) -> anyhow::Result<()> {
@@ -258,7 +259,7 @@ impl RedisBus {
             let value = value.clone();
             Box::pin(async move { conn.hset::<_, _, _, ()>(&key, &field, value).await })
         })
-            .await
+        .await
     }
 
     pub async fn hmset(&self, key: &str, fields: &[(&str, &str)]) -> anyhow::Result<()> {
@@ -279,7 +280,7 @@ impl RedisBus {
                 conn.hset_multiple(&key, &refs).await
             })
         })
-            .await
+        .await
     }
 
     pub async fn hget(&self, key: &str, field: &str) -> anyhow::Result<Option<String>> {
@@ -291,20 +292,22 @@ impl RedisBus {
             let field = field.clone();
             Box::pin(async move { conn.hget::<_, _, Option<String>>(&key, &field).await })
         })
-            .await
+        .await
     }
 
     pub async fn hgetall(
-        &self, key: &str,
+        &self,
+        key: &str,
     ) -> anyhow::Result<std::collections::HashMap<String, String>> {
         let key = key.to_string();
         self.execute_with_retry("hgetall", move |conn| {
             let key = key.clone();
             Box::pin(async move {
-                conn.hgetall::<_, std::collections::HashMap<String, String>>(&key).await
+                conn.hgetall::<_, std::collections::HashMap<String, String>>(&key)
+                    .await
             })
         })
-            .await
+        .await
     }
 
     pub async fn expire(&self, key: &str, seconds: u64) -> anyhow::Result<()> {
@@ -313,7 +316,7 @@ impl RedisBus {
             let key = key.clone();
             Box::pin(async move { conn.expire::<_, ()>(&key, seconds as i64).await })
         })
-            .await
+        .await
     }
 
     pub async fn expire_key(&self, key: &str, seconds: u64) -> anyhow::Result<()> {
@@ -329,7 +332,7 @@ impl RedisBus {
             let member = member.clone();
             Box::pin(async move { conn.sadd::<_, _, ()>(&key, member).await })
         })
-            .await
+        .await
     }
 
     pub async fn srem(&self, key: &str, member: &str) -> anyhow::Result<()> {
@@ -341,7 +344,7 @@ impl RedisBus {
             let member = member.clone();
             Box::pin(async move { conn.srem::<_, _, ()>(&key, member).await })
         })
-            .await
+        .await
     }
 
     pub async fn smembers(&self, key: &str) -> anyhow::Result<Vec<String>> {
@@ -350,6 +353,6 @@ impl RedisBus {
             let key = key.clone();
             Box::pin(async move { conn.smembers::<_, Vec<String>>(&key).await })
         })
-            .await
+        .await
     }
 }

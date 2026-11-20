@@ -1,44 +1,38 @@
 <!-- @ts-check -->
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <div class="header-left">
-        <h1 class="page-title">航线规划</h1>
-        <span class="header-sub">在地球上点击添加航点，保存后可一键执行</span>
-      </div>
-      <div class="page-toolbar">
-        <el-button :icon="Plus" @click="newRoute">新建航线</el-button>
-        <el-button type="primary" :disabled="!canSave" @click="save">保存</el-button>
-        <el-select
-          v-model="executeTarget"
-          size="small"
-          placeholder="执行无人机（单架）"
-          style="width: 170px"
-        >
-          <el-option
-            v-for="d in executeCandidates"
-            :key="d.drone_tag"
-            :label="d.name || d.drone_tag"
-            :value="d.drone_tag"
-          />
-        </el-select>
-        <el-input-number
-          v-model="executeOffset"
-          :min="-200"
-          :max="200"
-          :step="10"
-          size="small"
-          controls-position="right"
-          style="width: 120px"
+  <PageView title="航线规划" subtitle="在地球上点击添加航点，保存后可一键执行">
+    <template #toolbar>
+      <el-button :icon="Plus" @click="newRoute">新建航线</el-button>
+      <el-button type="primary" :disabled="!canSave" @click="save">保存</el-button>
+      <el-select
+        v-model="executeTarget"
+        size="small"
+        placeholder="执行无人机（单架）"
+        style="width: 170px"
+      >
+        <el-option
+          v-for="d in executeCandidates"
+          :key="d.drone_tag"
+          :label="d.name || d.drone_tag"
+          :value="d.drone_tag"
         />
-        <span class="offset-unit">m 横向</span>
-        <el-button
-          type="success"
-          :disabled="!form.id || waypoints.length === 0 || !executeTarget"
-          @click="execute"
-        >执行</el-button>
-      </div>
-    </div>
+      </el-select>
+      <el-input-number
+        v-model="executeOffset"
+        :min="-200"
+        :max="200"
+        :step="10"
+        size="small"
+        controls-position="right"
+        style="width: 120px"
+      />
+      <span class="offset-unit">m 横向</span>
+      <el-button
+        type="success"
+        :disabled="!form.id || waypoints.length === 0 || !executeTarget"
+        @click="execute"
+      >执行</el-button>
+    </template>
 
     <div class="planner-body">
       <aside class="route-rail">
@@ -53,7 +47,7 @@
           <div class="route-name">{{ r.name }}</div>
           <div class="route-meta">{{ routeScope(r) }} · {{ r.waypoints.length }} 航点</div>
         </div>
-        <el-empty v-if="store.routes.length === 0" description="暂无航线" :image-size="60" />
+        <EmptyState v-if="store.routes.length === 0" title="暂无航线" />
 
         <div class="rail-title" style="margin-top: 14px">航线属性</div>
         <el-form label-position="top" size="small">
@@ -110,7 +104,7 @@
             <span class="wp-unit">秒悬停</span>
           </div>
         </div>
-        <el-empty v-if="waypoints.length === 0" description="点击地图添加航点" :image-size="48" />
+        <EmptyState v-if="waypoints.length === 0" title="点击地图添加航点" />
       </aside>
 
       <div class="planner-map">
@@ -130,15 +124,20 @@
         </CesiumGlobe>
       </div>
     </div>
-  </div>
+  </PageView>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { useDroneStore } from '../../stores/droneStore'
 import CesiumGlobe from '../../components/drone/CesiumGlobe.vue'
+import PageView from '../../components/common/PageView.vue'
+import EmptyState from '../../components/common/EmptyState.vue'
+import { useToast } from '../../composables/useToast'
+
+const toast = useToast()
 
 const store = useDroneStore()
 const globeRef = ref(null)
@@ -147,16 +146,12 @@ const waypoints = ref([])
 const form = reactive({
   id: '',
   name: '',
-  /** 适用无人机列表；空 = 全部（航线模板）。 */
   drone_tags: [],
   enabled: true,
-  /** 任务结束动作：hold / rtl / land。 */
   end_action: 'hold',
 })
 
-/** 执行目标无人机：航线可复用，执行时必须明确一架。 */
 const executeTarget = ref('')
-/** 本次执行的横向偏移（米，正=右，负=左），用于同航线多机分道。 */
 const executeOffset = ref(0)
 const executeCandidates = computed(() => {
   if (form.drone_tags.length === 0) return store.drones
@@ -240,7 +235,7 @@ function move(index, delta) {
 
 async function save() {
   if (!canSave.value) {
-    ElMessage.warning('请填写名称并至少添加一个航点')
+    toast.warning('请填写名称并至少添加一个航点')
     return
   }
   const payload = {
@@ -264,7 +259,7 @@ async function save() {
 
 async function execute() {
   if (!executeTarget.value) {
-    ElMessage.warning('请选择执行航线的无人机')
+    toast.warning('请选择执行航线的无人机')
     return
   }
   try {
@@ -282,7 +277,7 @@ async function execute() {
   try {
     await store.executeRoute(form.id, executeTarget.value, executeOffset.value)
   } catch (e) {
-    ElMessage.error(e?.response?.data?.message || e?.message || '航线执行失败')
+    toast.error(e?.response?.data?.message || e?.message || '航线执行失败')
   }
 }
 
@@ -297,15 +292,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.header-left {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-.header-sub {
-  font-size: 12px;
-  color: var(--text-muted);
-}
 .offset-unit {
   font-size: 11px;
   color: var(--text-muted);
@@ -323,7 +309,7 @@ onMounted(async () => {
   min-height: 0;
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--bg-surface);
   padding: 12px;
 }
@@ -334,7 +320,7 @@ onMounted(async () => {
 }
 .route-item {
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: 0;
   border: 1px solid transparent;
   cursor: pointer;
   margin-bottom: 6px;
@@ -358,7 +344,7 @@ onMounted(async () => {
 }
 .wp-item {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   padding: 8px;
   margin-bottom: 8px;
   background: var(--bg-base);
@@ -395,7 +381,7 @@ onMounted(async () => {
 .planner-map {
   min-height: 0;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 0;
   overflow: hidden;
 }
 .planner-map :deep(.cesium-globe) {

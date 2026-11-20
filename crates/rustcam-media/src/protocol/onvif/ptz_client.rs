@@ -1,9 +1,8 @@
+use crate::protocol::onvif::auth::UsernameToken;
 use quick_xml::events::Event;
 use quick_xml::Reader;
-use crate::protocol::onvif::auth::UsernameToken;
 
 pub struct OnvifPtzClient {
-
     ptz_url: String,
 
     username: Option<String>,
@@ -16,12 +15,7 @@ pub struct OnvifPtzClient {
 }
 
 impl OnvifPtzClient {
-
-    pub fn new(
-        ptz_url: String,
-        username: Option<String>,
-        password: Option<String>,
-    ) -> Self {
+    pub fn new(ptz_url: String, username: Option<String>, password: Option<String>) -> Self {
         Self {
             ptz_url,
             username,
@@ -306,9 +300,7 @@ impl OnvifPtzClient {
                 }
                 Ok(Event::End(ref e)) => {
                     let name = e.name().local_name();
-                    if name.into_inner() == "PresetToken" {
-
-                    }
+                    if name.into_inner() == "PresetToken" {}
                 }
                 Ok(Event::Eof) => break,
                 Err(_) => break,
@@ -339,7 +331,6 @@ impl OnvifPtzClient {
                             }
                         }
                     } else if name.into_inner() == "Name" {
-
                     }
                 }
                 Ok(Event::Text(ref e)) => {
@@ -352,7 +343,9 @@ impl OnvifPtzClient {
                 }
                 Ok(Event::End(ref e)) => {
                     let name = e.name().local_name();
-                    if (name.into_inner() == "Preset" || name.into_inner() == "PTZPreset") && current_token.is_some() {
+                    if (name.into_inner() == "Preset" || name.into_inner() == "PTZPreset")
+                        && current_token.is_some()
+                    {
                         if let Some(token) = current_token.take() {
                             results.push((token, current_name.take()));
                         }

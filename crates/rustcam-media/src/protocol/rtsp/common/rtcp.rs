@@ -1,10 +1,17 @@
-
-
 #[derive(Debug, Clone)]
 pub enum ReceivedData {
     RtspResponse(String),
-    RtpData { track_id: String, data: Vec<u8>, ssrc: u32 },
-    RtcpData { track_id: String, data: Vec<u8>, ssrc: u32, report_type: RtcpReportType },
+    RtpData {
+        track_id: String,
+        data: Vec<u8>,
+        ssrc: u32,
+    },
+    RtcpData {
+        track_id: String,
+        data: Vec<u8>,
+        ssrc: u32,
+        report_type: RtcpReportType,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -46,7 +53,12 @@ impl RtcpStats {
         Self::default()
     }
 
-    pub fn update_from_rtp(&mut self, seq: u16, timestamp: u32, arrival: std::time::Instant) -> Option<RtpUpdateResult> {
+    pub fn update_from_rtp(
+        &mut self,
+        seq: u16,
+        timestamp: u32,
+        arrival: std::time::Instant,
+    ) -> Option<RtpUpdateResult> {
         let mut result = None;
 
         if self.last_seq != 0 {
@@ -55,7 +67,11 @@ impl RtcpStats {
             if diff == 0 {
                 tracing::warn!("Duplicate RTP packet detected, seq={}", seq);
             } else if diff > 0x8000 {
-                tracing::warn!("RTP sequence number wrap or severe reordering detected, prev={} curr={}", self.last_seq, seq);
+                tracing::warn!(
+                    "RTP sequence number wrap or severe reordering detected, prev={} curr={}",
+                    self.last_seq,
+                    seq
+                );
                 result = Some(RtpUpdateResult::SequenceWraparound);
             } else if diff > 1000 {
                 self.lost_count = self.lost_count.wrapping_add(diff as u32);
@@ -79,13 +95,18 @@ impl RtcpStats {
         result
     }
 
-    pub fn update_from_sr(&mut self, ntp_timestamp: u64, rtp_timestamp: u32, packet_count: u32, octet_count: u32) {
+    pub fn update_from_sr(
+        &mut self,
+        ntp_timestamp: u64,
+        rtp_timestamp: u32,
+        packet_count: u32,
+        octet_count: u32,
+    ) {
         self.last_sr_ntp = ntp_timestamp;
         self.last_sr_time = Some(std::time::Instant::now());
         self.last_rtp_time = rtp_timestamp;
 
-        if self.packet_count > 0 && packet_count < self.packet_count {
-        }
+        if self.packet_count > 0 && packet_count < self.packet_count {}
         self.packet_count = packet_count;
         self.octet_count = octet_count;
     }
@@ -135,10 +156,14 @@ impl RtcpPacket {
                 if data.len() < 28 {
                     return Some((ssrc, RtcpReportType::Unknown));
                 }
-                let ntp_timestamp = u64::from_be_bytes([data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15]]);
+                let ntp_timestamp = u64::from_be_bytes([
+                    data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
+                ]);
                 let rtp_timestamp = u32::from_be_bytes([data[16], data[17], data[18], data[19]]);
-                let sender_packet_count = u32::from_be_bytes([data[20], data[21], data[22], data[23]]);
-                let sender_octet_count = u32::from_be_bytes([data[24], data[25], data[26], data[27]]);
+                let sender_packet_count =
+                    u32::from_be_bytes([data[20], data[21], data[22], data[23]]);
+                let sender_octet_count =
+                    u32::from_be_bytes([data[24], data[25], data[26], data[27]]);
 
                 RtcpReportType::SenderReport {
                     ntp_timestamp,

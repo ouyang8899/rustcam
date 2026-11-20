@@ -20,6 +20,11 @@ export const useChannelStore = defineStore('channels', {
           limit: params.limit || this.limit,
           offset: params.offset || this.offset,
           device_tag: params.device_tag || undefined,
+          search: params.search || undefined,
+          status: params.status || undefined,
+          group_id: params.group_id ?? undefined,
+          region_code: params.region_code ?? undefined,
+          unassigned_region: params.unassigned_region ?? undefined,
         })
         this.channels = data.items
         this.total = data.total

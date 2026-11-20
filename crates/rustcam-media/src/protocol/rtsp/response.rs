@@ -42,10 +42,15 @@ impl RtspResponse {
 
     pub fn play(cseq: u32, session: &str, range: Option<&str>, rtp_info: Option<&str>) -> String {
         let range_line = range.unwrap_or("npt=0.000-");
-        let rtp_info_line = rtp_info.map(|r| format!("RTP-Info: {}\r\n", r)).unwrap_or_default();
+        let rtp_info_line = rtp_info
+            .map(|r| format!("RTP-Info: {}\r\n", r))
+            .unwrap_or_default();
         format!(
             "RTSP/1.0 200 OK\r\nCSeq: {}\r\nSession: {}\r\nRange: {}\r\n{}r\n",
-            cseq, session_header(session), range_line, rtp_info_line
+            cseq,
+            session_header(session),
+            range_line,
+            rtp_info_line
         )
     }
 
@@ -54,7 +59,11 @@ impl RtspResponse {
     }
 
     pub fn get_parameter(cseq: u32, session: &str) -> String {
-        format!("RTSP/1.0 200 OK\r\nCSeq: {}\r\nSession: {}\r\nContent-Length: 0\r\n\r\n", cseq, session_header(session))
+        format!(
+            "RTSP/1.0 200 OK\r\nCSeq: {}\r\nSession: {}\r\nContent-Length: 0\r\n\r\n",
+            cseq,
+            session_header(session)
+        )
     }
 
     pub fn announce(cseq: u32) -> String {
@@ -62,11 +71,17 @@ impl RtspResponse {
     }
 
     pub fn announce_with_transport(cseq: u32, transport: &str) -> String {
-        format!("RTSP/1.0 200 OK\r\nCSeq: {}\r\nTransport: {}\r\n\r\n", cseq, transport)
+        format!(
+            "RTSP/1.0 200 OK\r\nCSeq: {}\r\nTransport: {}\r\n\r\n",
+            cseq, transport
+        )
     }
 
     pub fn unauthorized(cseq: u32, www_authenticate: &str) -> String {
-        format!("RTSP/1.0 401 Unauthorized\r\nCSeq: {}\r\nWWW-Authenticate: {}\r\n\r\n", cseq, www_authenticate)
+        format!(
+            "RTSP/1.0 401 Unauthorized\r\nCSeq: {}\r\nWWW-Authenticate: {}\r\n\r\n",
+            cseq, www_authenticate
+        )
     }
 
     pub fn forbidden(cseq: u32) -> String {

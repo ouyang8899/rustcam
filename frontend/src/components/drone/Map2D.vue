@@ -10,10 +10,11 @@ import { LngLatBounds, Map as MapLibreMap, Marker, NavigationControl, setWorkerU
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { FENCE_COLORS, fenceRule } from '../../utils/fenceStyle'
+import { buildRasterSource, selectLayers, viewZoomRange } from '../../utils/mapTiles'
+import { useToast } from '../../composables/useToast'
 
-// MapLibre 通过 import.meta.url 推导 Worker 地址；经 Vite 预打包/分包后该地址并不存在，
-// GeoJSON 图层（围栏、航线、回放轨迹）会因 Worker 加载失败而完全不渲染。
-// Worker 由 vite.config.js 的 viteStaticCopy 发布到 /maplibre/，这里显式指定。
+const toast = useToast()
+
 setWorkerUrl(`${import.meta.env.BASE_URL}maplibre/maplibre-gl-worker.mjs`)
 
 const DEFAULT_TMS_URL =
@@ -28,15 +29,10 @@ const props = defineProps({
   selectedId: { type: String, default: '' },
   /** @type {Array<any>} */
   fences: { type: Array, default: () => [] },
-  /** @type {Array<any>} 航线点 {lat, lon, alt?} */
   route: { type: Array, default: () => [] },
-  /** 航线变化时自动把视野适配到航线 + 当前无人机（实时飞行页使用） */
   autoFitRoute: { type: Boolean, default: false },
-  /** @type {Array<any>} 回放轨迹点 {lat, lon, alt?} */
   track: { type: Array, default: () => [] },
-  /** @type {number} 回放进度 0..1：已飞过 / 未飞过的轨迹分开着色 */
   trackProgress: { type: Number, default: 0 },
-  /** @type {Array<any>} 待提交/草稿点 {lat, lon} */
   draftPoints: { type: Array, default: () => [] },
   /** @type {'none'|'waypoint'} */
   drawMode: { type: String, default: 'none' },
@@ -50,10 +46,8 @@ const mapEl = ref(null)
 let map = null
 /** @type {Map<string, { marker: any, el: HTMLElement, key: string }>} */
 const droneMarkers = new Map()
-/** @type {any} 回放起点/终点标签 */
 let trackStartMarker = null
 let trackEndMarker = null
-/** @type {[number, number][]} 回放轨迹缓存（lon/lat） */
 let cachedTrack = []
 let lastTrackIndex = -1
 
@@ -76,13 +70,6 @@ function parseGeometry(value) {
   }
 }
 
-/**
- * 圆形围栏在后端只存圆心与半径，这里按大圆公式离散成多边形用于 2D 回显。
- * @param {number} lon
- * @param {number} lat
- * @param {number} radiusM
- * @param {number} steps
- */
 function circleRing(lon, lat, radiusM, steps = 64) {
   const R = 6378137
   const d = radiusM / R
@@ -175,17 +162,12 @@ function draftCollection() {
   return { type: 'FeatureCollection', features }
 }
 
-/**
- * 回放轨迹按进度切段：已飞过的部分高亮，未飞过的部分用虚线。
- * @param {number} progress
- */
 function trackSegments(progress) {
   const coords = cachedTrack
   const n = coords.length
   if (n === 0) return { done: [], todo: [] }
   const idx =
     n <= 1 ? 1 : Math.max(1, Math.min(n, Math.round(progress * (n - 1)) + 1))
-  // 未飞过的段从当前点开始，两段在节点处衔接，避免出现断口。
   return { done: coords.slice(0, idx), todo: coords.slice(Math.max(0, idx - 1)) }
 }
 
@@ -236,7 +218,7 @@ function endLabel(text, color) {
   el.textContent = text
   el.style.cssText = [
     'padding:1px 7px',
-    'border-radius:9px',
+    'border-radius: 0',
     'font-size:11px',
     'line-height:16px',
     'color:#fff',
@@ -279,10 +261,6 @@ function syncTrackMarkers() {
   }
 }
 
-/**
- * 同步回放轨迹。进度只在轨迹点索引变化时才重设 GeoJSON，避免逐帧写图层。
- * @param {boolean} [force] 轨迹本身变化时强制重建缓存
- */
 function syncTrack(force = false) {
   if (!map || !map.getSource('drone-track-done')) return
   if (force || cachedTrack.length === 0) {
@@ -303,7 +281,6 @@ function syncTrack(force = false) {
   if (todoSource) todoSource.setData(lineCollection(todo))
   const endsSource = map.getSource('drone-track-ends')
   if (endsSource) endsSource.setData(trackEndsCollection())
-  // 起点/终点标记只跟轨迹本身有关，进度推进时无需反复 setLngLat。
   if (force) syncTrackMarkers()
 }
 
@@ -322,7 +299,6 @@ function fitTrack() {
   })
 }
 
-/** 把视野适配到航线与当前无人机，保证“意图航线”一眼可见。 */
 function fitRoute() {
   if (!map || !map.getSource('drone-route') || props.route.length === 0) return
   const coords = toLngLat(props.route)
@@ -345,23 +321,40 @@ function fitRoute() {
 
 function addBasemap() {
   if (!map || map.getSource('basemap')) return
-  const configured = settingsStore.browserTmsUrl || ''
-  const configuredTiles = configured
-    .split('\n')
-    .map((u) => u.trim())
-    .filter((u) => u.includes('{x}') && u.includes('{z}'))
-  const tiles = configuredTiles.length > 0 ? configuredTiles : [DEFAULT_TMS_URL]
-  const hasNegY = tiles.some((u) => u.includes('{-y}'))
-  const normalized = tiles.map((u) => (hasNegY ? u.replace(/\{-y\}/g, '{y}') : u))
 
-  map.addSource('basemap', {
-    type: 'raster',
-    tiles: normalized,
-    tileSize: 256,
-    maxzoom: 19,
-    scheme: hasNegY ? 'tms' : 'xyz',
-  })
-  map.addLayer({ id: 'basemap-layer', type: 'raster', source: 'basemap' })
+  const layers = selectLayers(settingsStore.browserLayers, '2d')
+  let source = null
+  let chosen = null
+  for (const layer of layers) {
+    const candidate = buildRasterSource(layer)
+    if (candidate) {
+      source = candidate
+      chosen = layer
+      break
+    }
+    console.warn('[Map2D] 底图图层在该端不可用，已跳过:', layer.name || layer.url, layer.srs)
+    toast.warning(
+      `底图图层「${layer.name || layer.url}」的投影 ${layer.srs} 不被浏览器 2D 支持（仅 EPSG:3857），已跳过`,
+    )
+  }
+
+  const { minZoom, maxZoom } = viewZoomRange(chosen)
+
+  if (!source) {
+    source = {
+      type: 'raster',
+      tiles: [DEFAULT_TMS_URL],
+      tileSize: 256,
+      minzoom: minZoom,
+      maxzoom: maxZoom,
+      scheme: 'xyz',
+    }
+  }
+
+  map.addSource('basemap', source)
+  map.addLayer({ id: 'basemap-layer', type: 'raster', source: 'basemap', minzoom: minZoom, maxzoom: maxZoom })
+  map.setMinZoom(minZoom)
+  map.setMaxZoom(maxZoom)
 }
 
 function addOverlayLayers() {
@@ -434,7 +427,6 @@ function addOverlayLayers() {
     },
   })
 
-  // 回放轨迹：未飞过（灰虚线）在下，已飞过（高亮）在上。
   map.addSource('drone-track-todo', { type: 'geojson', data: lineCollection([]) })
   map.addLayer({
     id: 'drone-track-todo-line',

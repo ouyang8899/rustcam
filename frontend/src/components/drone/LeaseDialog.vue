@@ -1,11 +1,9 @@
 <!-- @ts-check -->
 <template>
-  <el-dialog
+  <AppDialog
     :model-value="modelValue"
     :title="title"
-    width="420px"
-    destroy-on-close
-    append-to-body
+    size="sm"
     @update:model-value="$emit('update:modelValue', $event)"
   >
     <div class="lease-target">
@@ -45,13 +43,14 @@
       <el-button @click="$emit('update:modelValue', false)">取消</el-button>
       <el-button type="primary" @click="confirm">{{ confirmText }}</el-button>
     </template>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <script setup>
 // @ts-check
 import { computed, ref, watch } from 'vue'
 import { LEASE_OPTIONS, DEFAULT_LEASE_SECONDS } from '../../utils/droneLease'
+import AppDialog from '../common/AppDialog.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -115,7 +114,7 @@ function confirm() {
   padding: 10px 12px;
   margin-bottom: 14px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   background: var(--bg-elevated);
 }
 .lease-drone {
@@ -141,7 +140,7 @@ function confirm() {
   line-height: 1.6;
   color: var(--text-muted);
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: 0;
   background: var(--bg-base);
 }
 </style>

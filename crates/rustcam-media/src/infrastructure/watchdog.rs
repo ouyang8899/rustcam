@@ -1,4 +1,3 @@
-
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -63,7 +62,9 @@ pub fn spawn_watchdog(log_dir: &str) {
                         "[STALL] heartbeat stopped for {}s (hb={}, threads={:?})",
                         stall_secs,
                         hb,
-                        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0)
+                        std::thread::available_parallelism()
+                            .map(|n| n.get())
+                            .unwrap_or(0)
                     ),
                 );
             }

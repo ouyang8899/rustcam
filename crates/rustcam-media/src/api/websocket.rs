@@ -4,23 +4,23 @@ use crate::domain::device::Protocol;
 
 use crate::auth::middleware::CurrentUser;
 use crate::media::{
-    AudioCodec, BasicMediaNode, LinearPcmToG711Middleware, MediaNode, MediaNodeId,
-    MediaNodeType, SendToReceiversMiddleware, WebSocketMediaNodeTransport,
+    AudioCodec, BasicMediaNode, LinearPcmToG711Middleware, MediaNode, MediaNodeId, MediaNodeType,
+    SendToReceiversMiddleware, WebSocketMediaNodeTransport,
 };
-use crate::protocol::adapter_manager::{ self };
+use crate::protocol::adapter_manager::{self};
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use axum::extract::{ConnectInfo, Extension, Path, State, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use bytes::{ BytesMut };
+use bytes::BytesMut;
 use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{ broadcast, mpsc };
+use tokio::sync::{broadcast, mpsc};
 use uuid::Uuid;
 
 pub struct WsTicketStore {
@@ -89,7 +89,9 @@ impl axum::extract::FromRequestParts<Arc<FullState>> for WsTicket {
             .extensions
             .get::<Arc<WsTicketStore>>()
             .cloned()
-            .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, "ws ticket store missing").into_response())?;
+            .ok_or_else(|| {
+                (StatusCode::INTERNAL_SERVER_ERROR, "ws ticket store missing").into_response()
+            })?;
 
         store
             .redeem(ticket)
@@ -272,7 +274,6 @@ async fn handle_socket(
             }
         }
     }
-
 }
 
 pub async fn audio_talk_handler(
@@ -339,9 +340,7 @@ async fn handle_audio_talk(
             .device_service
             .get_device_by_device_tag(&device_tag)
         {
-            Ok(Some(device)) => {
-                Some(device.protocol)
-            }
+            Ok(Some(device)) => Some(device.protocol),
             Ok(None) => {
                 tracing::warn!("[AudioTalk] Device {} not found", device_tag);
                 None
@@ -393,7 +392,6 @@ async fn handle_audio_talk(
             );
         }
         Protocol::Onvif => {
-
             if adapter_manager::get_or_create_adapter(&Protocol::Onvif, &device_tag).is_none() {
                 tracing::error!("[AudioTalk] ONVIF adapter factory not registered");
                 let resp = serde_json::json!({"status": "error", "message": "ONVIF 适配器未注册"});

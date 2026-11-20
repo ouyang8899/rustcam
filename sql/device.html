@@ -24,12 +24,21 @@ SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_devi
 FROM devices
 <where>
 1=1
-<if test="search != null">AND (name LIKE #{search} OR host LIKE #{search} OR device_tag LIKE #{search})</if>
-<if test="region_code != null">AND region_code = #{region_code}</if>
+<if test="search != null">AND (name ILIKE '%' || #{search} || '%' OR host ILIKE '%' || #{search} || '%' OR device_tag ILIKE '%' || #{search} || '%')</if>
+<if test="region_code != null">AND region_code LIKE #{region_code} || '%'</if>
+<if test="unassigned_region != null">
+AND (region_code IS NULL OR region_code = '' OR region_code NOT IN (SELECT code FROM gb28181_regions))
+</if>
 <if test="protocol != null">AND protocol = #{protocol}</if>
 <if test="status != null">AND status = #{status}</if>
 <if test="device_type != null">AND device_type = #{device_type}</if>
-<if test="group_id != null">AND group_id = #{group_id}</if>
+<if test="group_ids != null">
+AND group_id IN
+<foreach item="gid" collection="group_ids" open="(" separator="," close=")">#{gid}</foreach>
+</if>
+<if test="ungrouped != null">
+AND group_id IS NULL
+</if>
 </where>
 ORDER BY id DESC
 LIMIT #{limit} OFFSET #{offset}
@@ -39,12 +48,21 @@ LIMIT #{limit} OFFSET #{offset}
 SELECT COUNT(*) FROM devices
 <where>
 1=1
-<if test="search != null">AND (name LIKE #{search} OR host LIKE #{search} OR device_tag LIKE #{search})</if>
-<if test="region_code != null">AND region_code = #{region_code}</if>
+<if test="search != null">AND (name ILIKE '%' || #{search} || '%' OR host ILIKE '%' || #{search} || '%' OR device_tag ILIKE '%' || #{search} || '%')</if>
+<if test="region_code != null">AND region_code LIKE #{region_code} || '%'</if>
+<if test="unassigned_region != null">
+AND (region_code IS NULL OR region_code = '' OR region_code NOT IN (SELECT code FROM gb28181_regions))
+</if>
 <if test="protocol != null">AND protocol = #{protocol}</if>
 <if test="status != null">AND status = #{status}</if>
 <if test="device_type != null">AND device_type = #{device_type}</if>
-<if test="group_id != null">AND group_id = #{group_id}</if>
+<if test="group_ids != null">
+AND group_id IN
+<foreach item="gid" collection="group_ids" open="(" separator="," close=")">#{gid}</foreach>
+</if>
+<if test="ungrouped != null">
+AND group_id IS NULL
+</if>
 </where>
 </select>
 
@@ -54,13 +72,13 @@ SELECT COUNT(*) FROM devices
 
 <select id="device_select_online_paginated">
 SELECT id, name, protocol, status, host, port, rtsp_url, device_tag, parent_device_tag, is_public, created_at, device_username, device_password, playback_username, playback_password, media_server_tag, push_urls, pull_urls, region_code, updated_at, ssrc, gb_username, gb_password, extended, group_id, app, device_type, device_type_code, channel_count
-FROM devices WHERE status = 'online'
+FROM devices WHERE LOWER(status) = 'online'
 ORDER BY id DESC
 LIMIT #{limit} OFFSET #{offset}
 </select>
 
 <select id="device_count_online">
-SELECT COUNT(*) FROM devices WHERE status = 'online'
+SELECT COUNT(*) FROM devices WHERE LOWER(status) = 'online'
 </select>
 
 <select id="device_select_by_device_tag">

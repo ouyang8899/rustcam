@@ -1,9 +1,9 @@
-use std::sync::Arc;
-use axum::{extract::State, Json};
-use crate::api::state::FullState;
 use crate::api::response::ApiResponse;
-use crate::error::AppError;
+use crate::api::state::FullState;
 use crate::domain::map_settings::{MapSettings, UpdateMapSettingsRequest};
+use crate::error::AppError;
+use axum::{extract::State, Json};
+use std::sync::Arc;
 
 pub async fn get_map_settings_handler(
     State(state): State<Arc<FullState>>,

@@ -56,7 +56,6 @@ pub struct ServerProtocolPorts {
 }
 
 impl ServerProtocolPorts {
-
     pub fn is_empty(&self) -> bool {
         self.rtsp.is_none()
             && self.rtmp.is_none()

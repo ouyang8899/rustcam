@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum StreamState {
-
     Idle,
 
     Starting,
@@ -41,7 +40,6 @@ impl std::fmt::Display for StreamState {
 }
 
 impl StreamState {
-
     pub fn is_alive(&self) -> bool {
         matches!(
             self,
@@ -49,8 +47,6 @@ impl StreamState {
         )
     }
 }
-
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Stream {

@@ -135,7 +135,7 @@
             'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
         ];
 
-        // 底图与地图视图允许的缩放层级，由后端配置下发。
+        // 地图视图允许的缩放层级：跟随当前底图图层自身的瓦片层级范围。
         var zoomLimits = { min: 0, max: 19 };
 
         var STATUS_COLORS = {
@@ -240,39 +240,111 @@
             return Math.max(0, Math.min(24, Math.round(n)));
         }
 
-        function buildTileSource(tmsUrl) {
-            var lines = (tmsUrl || '').split('\n').map(function (u) { return u.trim(); })
-                .filter(function (u) { return u.length > 0; });
-            var valid = lines.filter(function (u) {
-                return u.indexOf('{x}') >= 0 && u.indexOf('{z}') >= 0;
-            });
+        // 瓦片取址协议：决定地址怎么拼、行号怎么算。
+        var TILE_PROTOCOLS = {
+            xyz: { flipsY: false },
+            tms: { flipsY: true },
+            wmts: { flipsY: false },
+            quadkey: { flipsY: false }
+        };
 
-            if (valid.length === 0) {
+        function protocolInfo(protocol) {
+            var key = String(protocol || '').trim().toLowerCase();
+            return TILE_PROTOCOLS[key] || TILE_PROTOCOLS.xyz;
+        }
+
+        function detectProtocol(url) {
+            var lower = String(url || '').toLowerCase();
+            if (lower.indexOf('{quadkey}') >= 0) return 'quadkey';
+            if (lower.indexOf('tilematrix') >= 0 && lower.indexOf('tilerow') >= 0 && lower.indexOf('tilecol') >= 0) {
+                return 'wmts';
+            }
+            if (lower.indexOf('{-y}') >= 0) return 'tms';
+            return 'xyz';
+        }
+
+        function protocolMatchesUrl(url, protocol) {
+            var lower = String(url || '').trim().toLowerCase();
+            if (!lower) return false;
+            var key = String(protocol || '').trim().toLowerCase() || 'xyz';
+            if (key === 'quadkey') return lower.indexOf('{quadkey}') >= 0;
+            if (key === 'wmts') {
+                return lower.indexOf('tilematrix') >= 0 && lower.indexOf('tilerow') >= 0 && lower.indexOf('tilecol') >= 0;
+            }
+            return lower.indexOf('{x}') >= 0 && lower.indexOf('{z}') >= 0 &&
+                (lower.indexOf('{y}') >= 0 || lower.indexOf('{-y}') >= 0);
+        }
+
+        function tileSizeOf(layer) {
+            return Number(layer && layer.tile_size) === 512 ? 512 : 256;
+        }
+
+        // 图层 → 视图缩放范围：跟着影像走，没有独立配置。
+        function viewZoomRange(layer) {
+            var min = normalizeZoom(layer.min_zoom, 0);
+            var max = normalizeZoom(layer.max_zoom, 19);
+            if (max < min) {
+                min = 0;
+                max = 19;
+            }
+            return { min: min, max: max };
+        }
+
+        function buildTileSource(layersJson) {
+            var layers = [];
+            try {
+                var parsed = JSON.parse(layersJson || '[]');
+                if (Object.prototype.toString.call(parsed) === '[object Array]') {
+                    layers = parsed;
+                }
+            } catch (e) {
+                console.warn('[map] 图层 JSON 解析失败', e);
+            }
+
+            for (var i = 0; i < layers.length; i++) {
+                var layer = layers[i] || {};
+                if (layer.enabled === false) continue;
+                // 这里只渲染 2D 底图，3D 图层交给三维地球。
+                if (layer.dim && String(layer.dim).toLowerCase() !== '2d') continue;
+                // MapLibre GL 只能消费 EPSG:3857
+                if (String(layer.srs || '').trim().toUpperCase() !== 'EPSG:3857') {
+                    console.warn('[map] 底图图层投影不被 2D 支持，已跳过:', layer.name || layer.url, layer.srs);
+                    continue;
+                }
+                var protocol = String(layer.protocol || '').trim().toLowerCase() || detectProtocol(layer.url);
+                var urls = String(layer.url || '').split('\n').map(function (u) { return u.trim(); })
+                    .filter(function (u) {
+                        return u.length > 0 && protocolMatchesUrl(u, protocol);
+                    });
+                if (urls.length === 0) {
+                    console.warn('[map] 底图图层地址与所选协议不匹配，已跳过:', layer.name || layer.url, protocol);
+                    continue;
+                }
+
+                var hasNegY = urls.some(function (u) { return u.indexOf('{-y}') >= 0; });
+                var tiles = hasNegY ? urls.map(function (u) { return u.replace(/\{-y\}/g, '{y}'); }) : urls;
+                var scheme = (hasNegY || protocolInfo(protocol).flipsY) ? 'tms' : 'xyz';
+                zoomLimits = viewZoomRange(layer);
                 return {
                     type: 'raster',
-                    tiles: DEFAULT_TILES.slice(),
-                    tileSize: 256,
+                    tiles: tiles,
+                    tileSize: tileSizeOf(layer),
                     minzoom: zoomLimits.min,
                     maxzoom: zoomLimits.max,
+                    scheme: scheme,
                     attribution: '&copy; Esri, Maxar, Earthstar Geographics'
                 };
             }
 
-            var hasNegY = valid.some(function (u) { return u.indexOf('{-y}') >= 0; });
-            var tiles = valid.map(function (u) {
-                return hasNegY ? u.replace(/\{-y\}/g, '{y}') : u;
-            });
-            var source = {
+            zoomLimits = { min: 0, max: 19 };
+            return {
                 type: 'raster',
-                tiles: tiles,
+                tiles: DEFAULT_TILES.slice(),
                 tileSize: 256,
                 minzoom: zoomLimits.min,
                 maxzoom: zoomLimits.max,
-                scheme: hasNegY ? 'tms' : 'xyz',
                 attribution: '&copy; Esri, Maxar, Earthstar Geographics'
             };
-
-            return source;
         }
 
         function applyZoomLimits() {
@@ -283,7 +355,7 @@
             if (map.getZoom() > zoomLimits.max) map.setZoom(zoomLimits.max);
         }
 
-        function applyTileSource(tmsUrl) {
+        function applyTileSource(layersJson) {
             if (!map) return;
 
             if (map.getLayer('raster-basemap-layer')) {
@@ -293,7 +365,7 @@
                 map.removeSource('raster-basemap');
             }
 
-            map.addSource('raster-basemap', buildTileSource(tmsUrl));
+            map.addSource('raster-basemap', buildTileSource(layersJson));
             map.addLayer({
                 id: 'raster-basemap-layer',
                 type: 'raster',
@@ -329,7 +401,7 @@
             map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
 
             map.on('load', function () {
-                applyTileSource(pendingInit ? pendingInit.tmsUrl : '');
+                applyTileSource(pendingInit ? pendingInit.layersJson : '[]');
                 flushPendingMarkers();
                 window.mapReady = true;
                 sendToNative({ type: 'mapReady' });
@@ -347,25 +419,18 @@
             });
         }
 
-        // Called by the native side with the tile url that the client
+        // Called by the native side with the tile layers that the client
         // received from the backend.
-        function initMap(centerLng, centerLat, zoom, tmsUrl, minZoom, maxZoom) {
+        function initMap(centerLng, centerLat, zoom, layersJson) {
             if (centerLng === undefined || centerLng === null) centerLng = SHANGHAI_LNG;
             if (centerLat === undefined || centerLat === null) centerLat = SHANGHAI_LAT;
             if (zoom === undefined || zoom === null) zoom = SHANGHAI_ZOOM;
-
-            zoomLimits.min = normalizeZoom(minZoom, 0);
-            zoomLimits.max = normalizeZoom(maxZoom, 19);
-            if (zoomLimits.min > zoomLimits.max) {
-                zoomLimits.min = 0;
-                zoomLimits.max = 19;
-            }
 
             pendingInit = {
                 lng: centerLng,
                 lat: centerLat,
                 zoom: zoom,
-                tmsUrl: tmsUrl || ''
+                layersJson: layersJson || '[]'
             };
 
             if (!map) {
@@ -374,7 +439,7 @@
                 return;
             }
 
-            applyTileSource(pendingInit.tmsUrl);
+            applyTileSource(pendingInit.layersJson);
             map.jumpTo({
                 center: [centerLng, centerLat],
                 zoom: zoom
@@ -382,25 +447,14 @@
         }
 
         // Changes the basemap without moving the view.
-        function setTilesUrl(tmsUrl) {
+        function setTilesUrl(layersJson) {
             if (!pendingInit) {
-                pendingInit = { lng: SHANGHAI_LNG, lat: SHANGHAI_LAT, zoom: SHANGHAI_ZOOM, tmsUrl: '' };
+                pendingInit = { lng: SHANGHAI_LNG, lat: SHANGHAI_LAT, zoom: SHANGHAI_ZOOM, layersJson: '[]' };
             }
-            pendingInit.tmsUrl = tmsUrl || '';
+            pendingInit.layersJson = layersJson || '[]';
             if (map) {
-                applyTileSource(pendingInit.tmsUrl);
+                applyTileSource(pendingInit.layersJson);
             }
-        }
-
-        function setZoomLimits(minZoom, maxZoom) {
-            zoomLimits.min = normalizeZoom(minZoom, 0);
-            zoomLimits.max = normalizeZoom(maxZoom, 19);
-            if (zoomLimits.min > zoomLimits.max) {
-                zoomLimits.min = 0;
-                zoomLimits.max = 19;
-            }
-            if (!map) return;
-            applyTileSource(pendingInit ? pendingInit.tmsUrl : '');
         }
 
         function setCenter(lng, lat, zoom) {

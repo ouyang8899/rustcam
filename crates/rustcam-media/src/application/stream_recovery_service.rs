@@ -1,14 +1,17 @@
+use crate::application::StreamService;
+use crate::common::device_utils::format_stream_key;
+use crate::context::{InfraContext, MediaContext};
+use crate::domain::{Device, DeviceStatus, Protocol, Stream, StreamState};
+use crate::protocol::event::SignalEvent;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use crate::context::{InfraContext, MediaContext};
-use crate::domain::{Stream, StreamState, Device, DeviceStatus, Protocol};
-use crate::common::device_utils::format_stream_key;
-use crate::protocol::event::SignalEvent;
-use crate::application::StreamService;
 
 fn compute_stream_key(stream: &Stream) -> String {
-    format_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""))
+    format_stream_key(
+        stream.device_tag.as_deref().unwrap_or(""),
+        stream.channel_tag.as_deref().unwrap_or(""),
+    )
 }
 
 fn embed_rtsp_auth(rtsp_url: &str, username: &str, password: &str) -> String {
@@ -31,7 +34,11 @@ pub struct StreamRecoveryService {
 }
 
 impl StreamRecoveryService {
-    pub fn new(infra: InfraContext, media: MediaContext, stream_service: Arc<StreamService>) -> Self {
+    pub fn new(
+        infra: InfraContext,
+        media: MediaContext,
+        stream_service: Arc<StreamService>,
+    ) -> Self {
         Self {
             infra,
             media,
@@ -54,21 +61,29 @@ impl StreamRecoveryService {
             self_clone.start_idle_streams().await;
             self_clone.event_loop(&mut rx).await;
         });
-
     }
 
     async fn start_idle_streams(&self) {
-        let streams: Vec<Stream> = self.infra.db.streams_cache()
+        let streams: Vec<Stream> = self
+            .infra
+            .db
+            .streams_cache()
             .iter()
             .map(|r| r.value().clone())
             .collect();
-        let devices: Vec<(String, Device)> = self.infra.db.devices_cache()
+        let devices: Vec<(String, Device)> = self
+            .infra
+            .db
+            .devices_cache()
             .iter()
             .map(|r| (r.key().clone(), r.value().clone()))
             .collect();
 
         for stream in streams {
-            if matches!(stream.state, StreamState::Active | StreamState::Starting | StreamState::Recovering) {
+            if matches!(
+                stream.state,
+                StreamState::Active | StreamState::Starting | StreamState::Recovering
+            ) {
                 continue;
             }
             let device_tag = match stream.device_tag.as_deref() {
@@ -91,23 +106,38 @@ impl StreamRecoveryService {
             }
             match device.protocol {
                 Protocol::Onvif | Protocol::Rtsp => {
-                    let raw_url = device.pull_urls.iter()
+                    let raw_url = device
+                        .pull_urls
+                        .iter()
                         .min_by_key(|p| p.priority)
                         .map(|p| p.url.clone());
                     if let Some(raw_url) = raw_url {
                         let uname = device.device_username.as_deref().unwrap_or("");
                         let pwd = device.device_password.as_deref().unwrap_or("");
                         let full_url = embed_rtsp_auth(&raw_url, uname, pwd);
-                        if let Err(e) = self.stream_service.start_pull_stream(device_tag, channel_tag, &full_url).await {
-                            tracing::error!("[StreamRecoveryService] auto-pull failed for {}/{}: {}", device_tag, channel_tag, e);
+                        if let Err(e) = self
+                            .stream_service
+                            .start_pull_stream(device_tag, channel_tag, &full_url)
+                            .await
+                        {
+                            tracing::error!(
+                                "[StreamRecoveryService] auto-pull failed for {}/{}: {}",
+                                device_tag,
+                                channel_tag,
+                                e
+                            );
                         }
                     }
                 }
                 Protocol::Gb28181 => {
-                    let adapter_key = device.parent_device_tag.clone().unwrap_or_else(|| device_tag.to_string());
-                    if let Some(adapter) = crate::protocol::adapter_manager::get_adapter(&adapter_key) {
-                        if let Ok(_) = adapter.lock().await.start(device_tag, channel_tag).await {
-                        }
+                    let adapter_key = device
+                        .parent_device_tag
+                        .clone()
+                        .unwrap_or_else(|| device_tag.to_string());
+                    if let Some(adapter) =
+                        crate::protocol::adapter_manager::get_adapter(&adapter_key)
+                    {
+                        if let Ok(_) = adapter.lock().await.start(device_tag, channel_tag).await {}
                     }
                 }
                 _ => {}
@@ -149,17 +179,28 @@ impl StreamRecoveryService {
 
     async fn handle_event(&self, event: &SignalEvent) {
         match event {
-            SignalEvent::DeviceOffline { device_id: _, device_tag, reason: _ } => {
+            SignalEvent::DeviceOffline {
+                device_id: _,
+                device_tag,
+                reason: _,
+            } => {
                 if let Some(tag) = device_tag {
                     self.mark_streams_recovering(&tag).await;
                 }
             }
-            SignalEvent::DeviceOnline { device_id: _, device_tag } => {
+            SignalEvent::DeviceOnline {
+                device_id: _,
+                device_tag,
+            } => {
                 if let Some(ref tag) = device_tag {
                     self.recover_streams_for_device(tag).await;
                 }
             }
-            SignalEvent::StreamCreated { device_id: _, device_tag: _, channel_tag: _ } => {
+            SignalEvent::StreamCreated {
+                device_id: _,
+                device_tag: _,
+                channel_tag: _,
+            } => {
                 self.trigger_start_idle().await;
             }
             _ => {}
@@ -167,11 +208,17 @@ impl StreamRecoveryService {
     }
 
     async fn trigger_start_idle(&self) {
-        let streams: Vec<Stream> = self.infra.db.streams_cache()
+        let streams: Vec<Stream> = self
+            .infra
+            .db
+            .streams_cache()
             .iter()
             .map(|r| r.value().clone())
             .collect();
-        let devices: Vec<(String, Device)> = self.infra.db.devices_cache()
+        let devices: Vec<(String, Device)> = self
+            .infra
+            .db
+            .devices_cache()
             .iter()
             .map(|r| (r.key().clone(), r.value().clone()))
             .collect();
@@ -200,23 +247,43 @@ impl StreamRecoveryService {
             }
             match device.protocol {
                 Protocol::Onvif | Protocol::Rtsp => {
-                    let raw_url = device.pull_urls.iter()
+                    let raw_url = device
+                        .pull_urls
+                        .iter()
                         .min_by_key(|p| p.priority)
                         .map(|p| p.url.clone());
                     if let Some(raw_url) = raw_url {
                         let uname = device.device_username.as_deref().unwrap_or("");
                         let pwd = device.device_password.as_deref().unwrap_or("");
                         let full_url = embed_rtsp_auth(&raw_url, uname, pwd);
-                        if let Err(e) = self.stream_service.start_pull_stream(device_tag, channel_tag, &full_url).await {
-                            tracing::error!("[StreamRecoveryService] auto-pull failed for {}/{}: {}", device_tag, channel_tag, e);
+                        if let Err(e) = self
+                            .stream_service
+                            .start_pull_stream(device_tag, channel_tag, &full_url)
+                            .await
+                        {
+                            tracing::error!(
+                                "[StreamRecoveryService] auto-pull failed for {}/{}: {}",
+                                device_tag,
+                                channel_tag,
+                                e
+                            );
                         }
                     }
                 }
                 Protocol::Gb28181 => {
-                    let adapter_key = device.parent_device_tag.clone().unwrap_or_else(|| device_tag.to_string());
-                    if let Some(adapter) = crate::protocol::adapter_manager::get_adapter(&adapter_key) {
+                    let adapter_key = device
+                        .parent_device_tag
+                        .clone()
+                        .unwrap_or_else(|| device_tag.to_string());
+                    if let Some(adapter) =
+                        crate::protocol::adapter_manager::get_adapter(&adapter_key)
+                    {
                         if let Err(e) = adapter.lock().await.start(device_tag, "").await {
-                            tracing::error!("[StreamRecoveryService] GB28181 auto-start failed for {}: {}", device_tag, e);
+                            tracing::error!(
+                                "[StreamRecoveryService] GB28181 auto-start failed for {}: {}",
+                                device_tag,
+                                e
+                            );
                         }
                     }
                 }
@@ -226,12 +293,21 @@ impl StreamRecoveryService {
     }
 
     async fn mark_streams_recovering(&self, device_tag: &str) {
-        let streams: Vec<Stream> = self.infra.db.list_streams()
+        let streams: Vec<Stream> = self
+            .infra
+            .db
+            .list_streams()
             .await
             .into_iter()
             .filter(|s| {
                 s.device_tag.as_deref() == Some(device_tag)
-                    && matches!(s.state, StreamState::Active | StreamState::Starting | StreamState::Recovering | StreamState::Idle)
+                    && matches!(
+                        s.state,
+                        StreamState::Active
+                            | StreamState::Starting
+                            | StreamState::Recovering
+                            | StreamState::Idle
+                    )
             })
             .collect();
 
@@ -253,7 +329,10 @@ impl StreamRecoveryService {
     }
 
     pub async fn mark_streams_recovering_for_media_server(&self, media_server_tag: &str) {
-        let streams: Vec<Stream> = self.infra.db.streams_cache()
+        let streams: Vec<Stream> = self
+            .infra
+            .db
+            .streams_cache()
             .iter()
             .filter(|s| {
                 s.media_server_tag == media_server_tag
@@ -306,11 +385,20 @@ impl StreamRecoveryService {
     }
 
     pub async fn restart_streams_for_media_server(&self, media_server_tag: &str) {
-        let streams: Vec<Stream> = self.infra.db.streams_cache()
+        let streams: Vec<Stream> = self
+            .infra
+            .db
+            .streams_cache()
             .iter()
             .filter(|s| {
                 s.media_server_tag == media_server_tag
-                    && matches!(s.state, StreamState::Active | StreamState::Starting | StreamState::Recovering | StreamState::Idle)
+                    && matches!(
+                        s.state,
+                        StreamState::Active
+                            | StreamState::Starting
+                            | StreamState::Recovering
+                            | StreamState::Idle
+                    )
             })
             .map(|r| r.clone())
             .collect();
@@ -353,9 +441,12 @@ impl StreamRecoveryService {
                     if device.status != crate::domain::DeviceStatus::Online {
                         continue;
                     }
-                    match self.stream_service.restart_gb28181_stream(&compute_stream_key(&stream)).await {
-                        Ok(_info) => {
-                        }
+                    match self
+                        .stream_service
+                        .restart_gb28181_stream(&compute_stream_key(&stream))
+                        .await
+                    {
+                        Ok(_info) => {}
                         Err(e) => {
                             tracing::error!(
                                 stream_key = %compute_stream_key(&stream),
@@ -380,7 +471,10 @@ impl StreamRecoveryService {
         let adapter = match self.media.cluster.get_server(media_server_tag) {
             Some(a) => a,
             None => {
-                tracing::warn!("[StreamRecoveryService] Media server {} not found for Idle stream", media_server_tag);
+                tracing::warn!(
+                    "[StreamRecoveryService] Media server {} not found for Idle stream",
+                    media_server_tag
+                );
                 return;
             }
         };
@@ -388,33 +482,49 @@ impl StreamRecoveryService {
         let stream_device_tag = match stream.device_tag.as_deref() {
             Some(tag) => tag,
             None => {
-                tracing::warn!("[StreamRecoveryService] Stream {} has no device_tag", compute_stream_key(&stream));
+                tracing::warn!(
+                    "[StreamRecoveryService] Stream {} has no device_tag",
+                    compute_stream_key(&stream)
+                );
                 return;
             }
         };
 
-        match adapter.is_stream_online(&stream.app, &compute_stream_key(&stream)).await {
+        match adapter
+            .is_stream_online(&stream.app, &compute_stream_key(&stream))
+            .await
+        {
             Ok(true) => {
                 let mut s = stream.clone();
                 s.start();
                 s.last_error = None;
                 if let Err(e) = self.infra.db.update_stream(&s).await {
-                    tracing::warn!("[StreamRecoveryService] Failed to sync Idle stream to Active: {}", e);
+                    tracing::warn!(
+                        "[StreamRecoveryService] Failed to sync Idle stream to Active: {}",
+                        e
+                    );
                 } else {
                 }
-                self.sync_device_status(stream_device_tag, StreamState::Active).await;
+                self.sync_device_status(stream_device_tag, StreamState::Active)
+                    .await;
             }
             Ok(false) => {
-
                 let cached_device = self.infra.db.device_cached(stream_device_tag);
                 if let Some(device) = cached_device {
                     self.direct_restart_stream(&device, stream).await;
                 } else {
-                    tracing::warn!("[StreamRecoveryService] Device {} not found for Idle stream restart", stream_device_tag);
+                    tracing::warn!(
+                        "[StreamRecoveryService] Device {} not found for Idle stream restart",
+                        stream_device_tag
+                    );
                 }
             }
             Err(e) => {
-                tracing::warn!("[StreamRecoveryService] is_stream_online failed for {}, assuming offline: {}", compute_stream_key(&stream), e);
+                tracing::warn!(
+                    "[StreamRecoveryService] is_stream_online failed for {}, assuming offline: {}",
+                    compute_stream_key(&stream),
+                    e
+                );
 
                 let cached_device = self.infra.db.device_cached(stream_device_tag);
                 if let Some(device) = cached_device {
@@ -450,18 +560,27 @@ impl StreamRecoveryService {
             }
         };
 
-        let rtsp_url = device.select_source()
-            .map(|(_, url)| Self::embed_auth(&url, &device.device_username, &device.device_password))
+        let rtsp_url = device
+            .select_source()
+            .map(|(_, url)| {
+                Self::embed_auth(&url, &device.device_username, &device.device_password)
+            })
             .unwrap_or_default();
 
-        match adapter.add_stream_proxy(&stream.app, stream_key, &rtsp_url).await {
+        match adapter
+            .add_stream_proxy(&stream.app, stream_key, &rtsp_url)
+            .await
+        {
             Ok(_info) => {
                 let mut s = stream.clone();
                 s.state = StreamState::Starting;
                 s.retry_count = 0;
                 s.last_error = None;
                 if let Err(e) = self.infra.db.update_stream(&s).await {
-                    tracing::warn!("[StreamRecoveryService] Failed to update stream state: {}", e);
+                    tracing::warn!(
+                        "[StreamRecoveryService] Failed to update stream state: {}",
+                        e
+                    );
                 }
             }
             Err(e) => {
@@ -488,21 +607,31 @@ impl StreamRecoveryService {
         }
 
         let new_status = match stream_state {
-            StreamState::Active | StreamState::Starting | StreamState::Recovering => DeviceStatus::Online,
+            StreamState::Active | StreamState::Starting | StreamState::Recovering => {
+                DeviceStatus::Online
+            }
             StreamState::Error => DeviceStatus::Error,
-            StreamState::Idle | StreamState::Stopping | StreamState::Stopped => DeviceStatus::Offline,
+            StreamState::Idle | StreamState::Stopping | StreamState::Stopped => {
+                DeviceStatus::Offline
+            }
         };
 
         if device.status != new_status {
             device.status = new_status;
             if let Err(e) = self.infra.db.update_device(&device).await {
-                tracing::warn!("[StreamRecoveryService] Failed to sync device status: {}", e);
+                tracing::warn!(
+                    "[StreamRecoveryService] Failed to sync device status: {}",
+                    e
+                );
             }
         }
     }
 
     pub async fn recover_streams_for_media_server(&self, media_server_tag: &str) {
-        let streams: Vec<Stream> = self.infra.db.streams_cache()
+        let streams: Vec<Stream> = self
+            .infra
+            .db
+            .streams_cache()
             .iter()
             .filter(|s| {
                 s.media_server_tag == media_server_tag
@@ -552,7 +681,10 @@ impl StreamRecoveryService {
             return;
         }
 
-        let streams: Vec<Stream> = self.infra.db.list_streams()
+        let streams: Vec<Stream> = self
+            .infra
+            .db
+            .list_streams()
             .await
             .into_iter()
             .filter(|s| {
@@ -568,12 +700,14 @@ impl StreamRecoveryService {
     }
 
     async fn check_recovering_streams(&self) {
-        let streams: Vec<Stream> = self.infra.db.list_streams()
+        let streams: Vec<Stream> = self
+            .infra
+            .db
+            .list_streams()
             .await
             .into_iter()
             .filter(|s| {
-                s.should_retry()
-                    && matches!(s.state, StreamState::Recovering | StreamState::Error)
+                s.should_retry() && matches!(s.state, StreamState::Recovering | StreamState::Error)
             })
             .collect();
 
@@ -608,7 +742,9 @@ impl StreamRecoveryService {
         self.metrics_inc("stream_recovery_attempts");
 
         let rtsp_url = match device.select_source() {
-            Some((_, url)) => Self::embed_auth(&url, &device.device_username, &device.device_password),
+            Some((_, url)) => {
+                Self::embed_auth(&url, &device.device_username, &device.device_password)
+            }
             None => {
                 tracing::warn!(
                     stream_key = %stream_key,
@@ -628,18 +764,24 @@ impl StreamRecoveryService {
                 self.stream_service.restart_gb28181_stream(stream_key).await
             }
             _ => {
-                self.stream_service.restart_stream(stream_key, &rtsp_url).await
+                self.stream_service
+                    .restart_stream(stream_key, &rtsp_url)
+                    .await
             }
         };
 
         match result {
             Ok(info) => {
                 self.metrics_inc("stream_recovery_success");
-                self.sync_device_status(device_tag, StreamState::Active).await;
-                let _ = self.infra.publish_event(SignalEvent::StreamRecover {
-                    device_id: device.id,
-                    stream_key: info.stream_key,
-                }).await;
+                self.sync_device_status(device_tag, StreamState::Active)
+                    .await;
+                let _ = self
+                    .infra
+                    .publish_event(SignalEvent::StreamRecover {
+                        device_id: device.id,
+                        stream_key: info.stream_key,
+                    })
+                    .await;
             }
             Err(e) => {
                 tracing::error!(
@@ -650,13 +792,18 @@ impl StreamRecoveryService {
                 );
                 self.metrics_inc("stream_recovery_failures");
                 self.record_failure(stream, &e.to_string()).await;
-                self.sync_device_status(device_tag, StreamState::Error).await;
+                self.sync_device_status(device_tag, StreamState::Error)
+                    .await;
             }
         }
     }
 
     async fn record_failure(&self, stream: &Stream, reason: &str) {
-        let cache_key = match self.infra.db.get_stream_cache_key_by_stream_key(&compute_stream_key(&stream)) {
+        let cache_key = match self
+            .infra
+            .db
+            .get_stream_cache_key_by_stream_key(&compute_stream_key(&stream))
+        {
             Some(key) => key,
             None => {
                 tracing::warn!(
@@ -703,12 +850,15 @@ impl StreamRecoveryService {
                 "[StreamRecoveryService] Stream retries exhausted — manual intervention required"
             );
             self.metrics_inc("stream_retries_exhausted");
-            let _ = self.infra.publish_event(SignalEvent::StreamRetriesExhausted {
-                device_id: 0,
-                stream_key: s_stream_key.clone(),
-                retry_count: s.retry_count,
-                last_error: s.last_error.clone(),
-            }).await;
+            let _ = self
+                .infra
+                .publish_event(SignalEvent::StreamRetriesExhausted {
+                    device_id: 0,
+                    stream_key: s_stream_key.clone(),
+                    retry_count: s.retry_count,
+                    last_error: s.last_error.clone(),
+                })
+                .await;
         }
     }
 
@@ -749,12 +899,17 @@ impl StreamRecoveryService {
             let device = match cached_device {
                 Some(d) => d,
                 None => {
-                    tracing::warn!("[StreamRecovery] Device {} not found for stream {}", device_tag, stream_key);
+                    tracing::warn!(
+                        "[StreamRecovery] Device {} not found for stream {}",
+                        device_tag,
+                        stream_key
+                    );
                     return false;
                 }
             };
 
-            let rtsp_url = device.extended
+            let rtsp_url = device
+                .extended
                 .as_ref()
                 .and_then(|e| e.get("rtsp_full_url"))
                 .and_then(|v| v.as_str())
@@ -765,12 +920,18 @@ impl StreamRecoveryService {
                 return false;
             }
 
-            match self.stream_service.start_pull_stream(device_tag, device_tag, rtsp_url).await {
-                Ok(_) => {
-                    true
-                }
+            match self
+                .stream_service
+                .start_pull_stream(device_tag, device_tag, rtsp_url)
+                .await
+            {
+                Ok(_) => true,
                 Err(e) => {
-                    tracing::error!("[StreamRecovery] Failed to pull stream {}: {}", stream_key, e);
+                    tracing::error!(
+                        "[StreamRecovery] Failed to pull stream {}: {}",
+                        stream_key,
+                        e
+                    );
                     false
                 }
             }

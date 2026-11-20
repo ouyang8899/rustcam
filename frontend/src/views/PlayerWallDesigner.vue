@@ -1,7 +1,6 @@
 <template>
-  <div class="page-container">
-    <div class="layout-designer">
-      <div class="toolbar">
+  <PageView title="监控墙设计">
+    <template #toolbar>
       <div style="display:flex;align-items:center;gap:8px">
         <el-button :icon="ArrowLeft" @click="$router.push('/video-wall')">返回</el-button>
         <el-select v-model="selectedLayoutId" placeholder="选择布局" style="width:200px" @change="onLayoutSelect">
@@ -18,7 +17,7 @@
         <el-button v-if="selectedLayoutId" :loading="settingDefault" @click="onSetDefault">{{ currentIsDefault ? '★ 默认' : '设为默认' }}</el-button>
         <el-button @click="clearAll">清空</el-button>
       </div>
-    </div>
+    </template>
 
     <div class="canvas-wrapper" ref="wrapperRef">
       <canvas
@@ -35,17 +34,18 @@
       <span>已创建 {{ layoutItems.length }} 个区域</span>
       <span v-if="drawing">拖拽中: ({{ Math.min(dragStartRow, dragEndRow) }},{{ Math.min(dragStartCol, dragEndCol) }}) → ({{ Math.max(dragStartRow, dragEndRow) }},{{ Math.max(dragStartCol, dragEndCol) }})</span>
     </div>
-  </div>
-  </div>
+  </PageView>
 </template>
 
 <script setup>
 import { ref, computed, watch, nextTick, onUnmounted, onMounted } from 'vue'
 import { ArrowLeft } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
 import { usePlayerLayoutStore } from '../stores/playerLayoutStore'
+import { useToast } from '../composables/useToast'
+import PageView from '../components/common/PageView.vue'
 
 const layoutStore = usePlayerLayoutStore()
+const toast = useToast()
 
 const COLORS = ['#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#909399', '#C71585', '#00CED1', '#9370DB']
 
@@ -234,7 +234,7 @@ function generateId() {
 
 async function onSave() {
   if (!layoutName.value.trim()) {
-    ElMessage.warning('请输入布局名称')
+    toast.warning('请输入布局名称')
     return
   }
   saving.value = true
@@ -247,15 +247,15 @@ async function onSave() {
     }
     if (selectedLayoutId.value) {
       await layoutStore.updateLayout(Number(selectedLayoutId.value), data)
-      ElMessage.success('布局已更新')
+      toast.success('布局已更新')
     } else {
       const created = await layoutStore.createLayout(data)
       if (created) selectedLayoutId.value = String(created.id)
-      ElMessage.success('布局已创建')
+      toast.success('布局已创建')
     }
     await layoutStore.fetchLayouts()
   } catch (e) {
-    ElMessage.error('保存失败: ' + (e.message || e))
+    toast.error('保存失败: ' + (e.message || e))
   } finally {
     saving.value = false
   }
@@ -267,9 +267,9 @@ async function onSetDefault() {
   try {
     await layoutStore.setDefault(Number(selectedLayoutId.value))
     await layoutStore.fetchLayouts()
-    ElMessage.success('已设为默认布局')
+    toast.success('已设为默认布局')
   } catch (e) {
-    ElMessage.error('设置失败')
+    toast.error('设置失败')
   } finally {
     settingDefault.value = false
   }
@@ -321,20 +321,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.layout-designer {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  padding: 12px;
-  gap: 12px;
-}
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-}
 .canvas-wrapper {
   flex: 1;
   border: 1px solid var(--border);

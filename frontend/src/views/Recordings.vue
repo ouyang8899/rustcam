@@ -1,37 +1,34 @@
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <h1 class="page-title">录像管理</h1>
-      <div class="page-toolbar">
-        <el-button :icon="Refresh" :loading="loading" @click="fetchAll">刷新</el-button>
-        <el-button type="primary" :icon="Plus" @click="openCreateModal">创建任务</el-button>
-      </div>
+  <PageView title="录像管理">
+    <template #toolbar>
+      <el-button :icon="Refresh" :loading="loading" @click="fetchAll">刷新</el-button>
+      <el-button type="primary" :icon="Plus" @click="openCreateModal">创建任务</el-button>
+    </template>
+
+    <div class="page-grid stats-grid">
+      <MetricCard v-for="stat in statCards" :key="stat.label" :label="stat.label" :value="stat.value" />
     </div>
-    <div class="page-body">
-      <div class="page-grid stats-grid">
-        <MetricCard v-for="stat in statCards" :key="stat.label" :label="stat.label" :value="stat.value" :extras="stat.label === '存储占用' ? [{ label: formatSize(stats?.total_size_bytes || 0) }] : []" />
-      </div>
 
-      <el-row :gutter="12" align="middle" class="filter-bar">
-        <el-col :span="12">
-          <el-input v-model="searchQuery" placeholder="搜索..." clearable style="max-width: 280px">
-            <template #prefix><el-icon><Search /></el-icon></template>
-          </el-input>
-          <el-select v-model="stateFilter" clearable placeholder="全部状态" style="width: 130px; margin-left: 8px">
-            <el-option value="Starting" label="启动中" />
-            <el-option value="Recording" label="录制中" />
-            <el-option value="Paused" label="已暂停" />
-            <el-option value="Stopping" label="停止中" />
-            <el-option value="Completed" label="已完成" />
-            <el-option value="Error" label="错误" />
-          </el-select>
-          <el-text type="info" style="margin-left: 12px">{{ recordings.length }} / {{ total }}</el-text>
-        </el-col>
-      </el-row>
+    <FilterBar>
+      <template #left>
+        <el-input v-model="searchQuery" placeholder="搜索..." clearable style="max-width: 280px">
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+        <el-select v-model="stateFilter" clearable placeholder="全部状态" style="width: 130px">
+          <el-option value="Starting" label="启动中" />
+          <el-option value="Recording" label="录制中" />
+          <el-option value="Paused" label="已暂停" />
+          <el-option value="Stopping" label="停止中" />
+          <el-option value="Completed" label="已完成" />
+          <el-option value="Error" label="错误" />
+        </el-select>
+        <el-text type="info">{{ recordings.length }} / {{ total }}</el-text>
+      </template>
+    </FilterBar>
 
-      <DataCard>
+    <DataCard>
         <el-skeleton animated :loading="loading" :rows="5">
-          <el-table :data="recordings" style="margin-top: 0">
+          <el-table :data="recordings" border stripe size="small" style="margin-top: 0">
               <el-table-column label="状态" prop="state" width="100">
                 <template #default="{ row }">
                   <el-tag :type="stateTagType(row.state)" size="small">{{ stateLabel(row.state) }}</el-tag>
@@ -71,21 +68,19 @@
               </el-table-column>
             </el-table>
         </el-skeleton>
-
-        <el-pagination
-          class="pagination-bar"
-          layout="total, sizes, prev, pager, next, jumper"
-          :total="total"
-          :current-page="page"
-          :page-size="pageSize"
-          :page-sizes="[20, 50, 100, 200]"
-          @current-change="onPageChange"
-          @size-change="onPageSizeChange"
-        />
       </DataCard>
-    </div>
 
-        <el-dialog v-model="showCreateModal" title="创建录像任务" width="500px" destroy-on-close>
+    <template #footer>
+      <PaginationBar
+        :total="total"
+        :page="page"
+        v-model:page-size="pageSize"
+        show-sizes
+        @update:page="onPageChange"
+      />
+    </template>
+
+    <AppDialog v-model="showCreateModal" title="创建录像任务" size="md">
       <el-form label-position="top">
         <el-form-item label="设备 *" :error="deviceSelectorError">
           <el-select
@@ -151,22 +146,22 @@
         <el-button @click="showCreateModal = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitCreate">创建任务</el-button>
       </template>
-    </el-dialog>
+    </AppDialog>
 
-    <el-dialog v-model="showPlaybackModal" :title="`录像回放: ${playbackRecording?.stream_key}`" width="900px">
+    <AppDialog v-model="showPlaybackModal" :title="`录像回放: ${playbackRecording?.stream_key}`" size="lg">
       <el-skeleton animated :loading="playbackLoading">
         <template #default>
           <VideoPlayer v-if="playbackUrl" :src="playbackUrl" :is-live="false" :autoplay="true" />
-          <el-empty v-else description="暂无播放地址" />
+          <EmptyState v-else title="暂无播放地址" />
         </template>
       </el-skeleton>
-    </el-dialog>
-  </div>
+    </AppDialog>
+  </PageView>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, shallowRef, watch } from 'vue'
-import { ElMessageBox, ElMessage } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { Search, Refresh, Plus } from '@element-plus/icons-vue'
 import VideoPlayer from '../components/VideoPlayer.vue'
 import { useRecordingStore } from '../stores/recordingStore'
@@ -175,6 +170,11 @@ import { useToast } from '../composables/useToast'
 import { request } from '../utils/request'
 import MetricCard from '../components/common/MetricCard.vue'
 import DataCard from '../components/common/DataCard.vue'
+import PageView from '../components/common/PageView.vue'
+import FilterBar from '../components/common/FilterBar.vue'
+import PaginationBar from '../components/common/PaginationBar.vue'
+import EmptyState from '../components/common/EmptyState.vue'
+import AppDialog from '../components/common/AppDialog.vue'
 
 const recStore = useRecordingStore()
 const deviceStore = useDeviceStore()
@@ -234,12 +234,6 @@ watch(stateFilter, () => {
 
 function onPageChange(p) {
   page.value = p
-  fetchAll()
-}
-
-function onPageSizeChange(size) {
-  pageSize.value = size
-  page.value = 1
   fetchAll()
 }
 
@@ -403,5 +397,4 @@ function deviceName(deviceTag) {
 .stats-grid {
   grid-template-columns: repeat(4, 1fr);
 }
-.filter-bar { margin-bottom: 8px; }
 </style>

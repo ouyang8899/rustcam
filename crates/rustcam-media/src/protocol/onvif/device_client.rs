@@ -138,7 +138,13 @@ impl OnvifDeviceClient {
         Some(rest[..end].to_string())
     }
 
-    fn build_http_digest_authorization(&self, method: &str, uri: &str, realm: &str, nonce: &str) -> String {
+    fn build_http_digest_authorization(
+        &self,
+        method: &str,
+        uri: &str,
+        realm: &str,
+        nonce: &str,
+    ) -> String {
         use base64::{engine::general_purpose::STANDARD, Engine};
 
         let username = self.username.as_deref().unwrap_or("");
@@ -202,7 +208,10 @@ impl OnvifDeviceClient {
             }
         }
 
-        tracing::warn!("[ONVIF Auth] Unknown auth method, status={}, trying WS-Security", status);
+        tracing::warn!(
+            "[ONVIF Auth] Unknown auth method, status={}, trying WS-Security",
+            status
+        );
         Ok(AuthMethod::WsSecurityDigest)
     }
 
@@ -211,7 +220,10 @@ impl OnvifDeviceClient {
             self.auth_method = Some(self.discover_auth().await?);
         }
 
-        let mut current_auth_method = self.auth_method.clone().unwrap_or(AuthMethod::WsSecurityDigest);
+        let mut current_auth_method = self
+            .auth_method
+            .clone()
+            .unwrap_or(AuthMethod::WsSecurityDigest);
         let _retry_with_text = false;
 
         loop {
@@ -254,11 +266,15 @@ impl OnvifDeviceClient {
                                     .unwrap_or_default();
 
                                 let uri = if let Some(path) = self.x_addr.split("://").nth(1) {
-                                    format!("/{}", path.split('/').skip(1).collect::<Vec<_>>().join("/"))
+                                    format!(
+                                        "/{}",
+                                        path.split('/').skip(1).collect::<Vec<_>>().join("/")
+                                    )
                                 } else {
                                     "/onvif/device_service".to_string()
                                 };
-                                let auth_header = self.build_http_digest_authorization("POST", &uri, &realm, &nonce);
+                                let auth_header = self
+                                    .build_http_digest_authorization("POST", &uri, &realm, &nonce);
 
                                 let client2 = reqwest::Client::builder()
                                     .timeout(Duration::from_secs(10))
@@ -296,7 +312,9 @@ impl OnvifDeviceClient {
                     let status = resp.status();
                     if status == reqwest::StatusCode::BAD_REQUEST {
                         let _error_body = resp.text().await?;
-                        tracing::warn!("[ONVIF Auth] WS-Security Digest failed (400), trying PasswordText");
+                        tracing::warn!(
+                            "[ONVIF Auth] WS-Security Digest failed (400), trying PasswordText"
+                        );
                         current_auth_method = AuthMethod::WsSecurityText;
                         continue;
                     }
@@ -350,7 +368,9 @@ impl OnvifDeviceClient {
         Ok(result)
     }
 
-    pub async fn get_audio_outputs(&mut self) -> anyhow::Result<Vec<crate::protocol::onvif::types::AudioOutput>> {
+    pub async fn get_audio_outputs(
+        &mut self,
+    ) -> anyhow::Result<Vec<crate::protocol::onvif::types::AudioOutput>> {
         let body = r#"<GetAudioOutputs xmlns="http://www.onvif.org/ver10/media/wsdl"/>"#;
         let xml = self.send_soap_internal(body).await?;
 
@@ -410,7 +430,11 @@ impl OnvifDeviceClient {
                 }
                 Ok(Event::Eof) => break,
                 Err(e) => {
-                    tracing::warn!("[ONVIF] XML parsing error at position {}: {:?}", reader.error_position(), e);
+                    tracing::warn!(
+                        "[ONVIF] XML parsing error at position {}: {:?}",
+                        reader.error_position(),
+                        e
+                    );
                     break;
                 }
                 _ => {}
@@ -468,9 +492,7 @@ impl OnvifDeviceClient {
                         in_resolution = true;
                     } else if name == "Name" {
                         if let Some(ref mut p) = current_profile {
-                            if p.name.is_empty() && !in_video_encoder && !in_audio_encoder {
-
-                            }
+                            if p.name.is_empty() && !in_video_encoder && !in_audio_encoder {}
                         }
                     }
                 }
@@ -480,7 +502,11 @@ impl OnvifDeviceClient {
                         let trimmed = text.trim();
                         if !trimmed.is_empty() {
                             match current_element.as_str() {
-                                "Name" if p.name.is_empty() && !in_video_encoder && !in_audio_encoder => {
+                                "Name"
+                                    if p.name.is_empty()
+                                        && !in_video_encoder
+                                        && !in_audio_encoder =>
+                                {
                                     p.name = trimmed.to_string();
                                 }
                                 "Encoding" if in_video_encoder && !in_resolution => {
@@ -526,8 +552,7 @@ impl OnvifDeviceClient {
             }
         }
 
-        for _p in &profiles {
-        }
+        for _p in &profiles {}
         Ok(profiles)
     }
 
@@ -546,8 +571,7 @@ impl OnvifDeviceClient {
         );
         let xml = self.send_soap_internal(&body).await?;
 
-        let uri = extract_element_text(xml.as_bytes(), "Uri")
-            .unwrap_or_default();
+        let uri = extract_element_text(xml.as_bytes(), "Uri").unwrap_or_default();
 
         Ok(OnvifStreamUri {
             uri,
@@ -604,7 +628,11 @@ impl OnvifDeviceClient {
                         caps.imaging = Some(url.clone());
                     }
                 }
-                if caps.media.is_some() || caps.ptz.is_some() || caps.events.is_some() || caps.imaging.is_some() {
+                if caps.media.is_some()
+                    || caps.ptz.is_some()
+                    || caps.events.is_some()
+                    || caps.imaging.is_some()
+                {
                     return Ok(caps);
                 }
             }
@@ -612,13 +640,19 @@ impl OnvifDeviceClient {
         self.get_capabilities().await
     }
 
-    pub async fn get_all_stream_uris(&mut self) -> anyhow::Result<Vec<(OnvifProfile, OnvifStreamUri)>> {
+    pub async fn get_all_stream_uris(
+        &mut self,
+    ) -> anyhow::Result<Vec<(OnvifProfile, OnvifStreamUri)>> {
         let profiles = self.get_profiles().await?;
         let mut results = Vec::new();
         for profile in profiles {
             match self.get_stream_uri(&profile.token).await {
                 Ok(uri) => results.push((profile, uri)),
-                Err(e) => tracing::warn!("[ONVIF] Failed to get stream URI for profile {}: {}", profile.token, e),
+                Err(e) => tracing::warn!(
+                    "[ONVIF] Failed to get stream URI for profile {}: {}",
+                    profile.token,
+                    e
+                ),
             }
         }
         Ok(results)
@@ -654,7 +688,9 @@ impl OnvifDeviceClient {
                                     Ok(Event::Text(ref e)) => text.push_str(&*e),
                                     Ok(Event::End(ref e)) => {
                                         let en = e.name().local_name().into_inner();
-                                        if en == "XAddr" { break; }
+                                        if en == "XAddr" {
+                                            break;
+                                        }
                                     }
                                     Ok(Event::Eof) | Err(_) => break,
                                     _ => {}
@@ -669,7 +705,9 @@ impl OnvifDeviceClient {
                 Ok(Event::End(_)) => {
                     if in_category {
                         depth -= 1;
-                        if depth == 0 { in_category = false; }
+                        if depth == 0 {
+                            in_category = false;
+                        }
                     }
                 }
                 Ok(Event::Eof) | Err(_) => break,
@@ -710,7 +748,9 @@ impl OnvifDeviceClient {
                             match reader.read_event() {
                                 Ok(Event::Text(ref e)) => text.push_str(&*e),
                                 Ok(Event::End(ref e)) => {
-                                    if e.name().local_name().into_inner() == "XAddr" { break; }
+                                    if e.name().local_name().into_inner() == "XAddr" {
+                                        break;
+                                    }
                                 }
                                 Ok(Event::Eof) | Err(_) => break,
                                 _ => {}

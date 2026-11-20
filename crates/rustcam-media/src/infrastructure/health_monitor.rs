@@ -1,11 +1,11 @@
-use std::sync::Arc;
-use std::time::Duration;
 use crate::adapter::media_server::MediaServerAdapter;
 use crate::application::media_server_service::MediaServerService;
 use crate::application::StreamRecoveryService;
 use crate::domain::traits::CacheStore;
-use crate::infrastructure::RedisStore;
 use crate::infrastructure::cluster::ClusterManager;
+use crate::infrastructure::RedisStore;
+use std::sync::Arc;
+use std::time::Duration;
 
 pub const SERVER_KEY_PREFIX: &str = "media_servers";
 pub const ONLINE_SET_KEY: &str = "media_servers:online";
@@ -97,9 +97,10 @@ impl HealthMonitor {
 
         tokio::spawn(async move {
             let cluster_tags = self.cluster.get_all_server_tags().clone();
-            for  config_tag in &cluster_tags {
+            for config_tag in &cluster_tags {
                 if let Some(ref svc) = self.stream_recovery_service {
-                    svc.mark_streams_recovering_for_media_server(&config_tag).await;
+                    svc.mark_streams_recovering_for_media_server(&config_tag)
+                        .await;
                     svc.restart_streams_for_media_server(&config_tag).await;
                 }
             }
@@ -156,7 +157,6 @@ impl HealthMonitor {
 
                     if enabled {
                         if !in_cluster {
-
                             self.cluster.register_server(config);
 
                             if let Some(ref svc) = self.stream_recovery_service {
@@ -165,10 +165,12 @@ impl HealthMonitor {
                         }
                         self.update_server_status(&tag, &status).await;
                     } else {
-
                         if in_cluster {
                             self.cluster.unregister_server(&tag);
-                            tracing::warn!("[HealthMonitor] Server {} is disabled, unregistered from cluster", tag);
+                            tracing::warn!(
+                                "[HealthMonitor] Server {} is disabled, unregistered from cluster",
+                                tag
+                            );
                         }
                         self.mark_server_offline(&tag).await;
                     }
@@ -191,7 +193,10 @@ impl HealthMonitor {
 
                     if cluster_tags_set.contains(&tag) {
                         self.cluster.unregister_server(&tag);
-                        tracing::warn!("[HealthMonitor] Server {} unregistered from cluster (offline)", tag);
+                        tracing::warn!(
+                            "[HealthMonitor] Server {} unregistered from cluster (offline)",
+                            tag
+                        );
                     }
                     self.mark_server_offline(&tag).await;
                     // The server is offline now, the next failures start a new
@@ -221,17 +226,30 @@ impl HealthMonitor {
         }
     }
 
-    fn create_adapter(&self, server: &crate::application::media_server_service::ManagedServer) -> Option<Arc<dyn MediaServerAdapter>> {
+    fn create_adapter(
+        &self,
+        server: &crate::application::media_server_service::ManagedServer,
+    ) -> Option<Arc<dyn MediaServerAdapter>> {
         let config = server.to_config();
         match config.server_type.as_str() {
-            "zlmediakit" => Some(Arc::new(crate::adapter::media_server::zlmediakit::ZlMediaKitAdapter::new(config))),
-            "srs" => Some(Arc::new(crate::adapter::media_server::srs::SrsAdapter::new(config))),
-            "xiu" => Some(Arc::new(crate::adapter::media_server::xiu::XiuAdapter::new(config))),
+            "zlmediakit" => Some(Arc::new(
+                crate::adapter::media_server::zlmediakit::ZlMediaKitAdapter::new(config),
+            )),
+            "srs" => Some(Arc::new(
+                crate::adapter::media_server::srs::SrsAdapter::new(config),
+            )),
+            "xiu" => Some(Arc::new(
+                crate::adapter::media_server::xiu::XiuAdapter::new(config),
+            )),
             _ => None,
         }
     }
 
-    async fn update_server_status(&self, tag: &str, status: &crate::adapter::media_server::ServerStatus) {
+    async fn update_server_status(
+        &self,
+        tag: &str,
+        status: &crate::adapter::media_server::ServerStatus,
+    ) {
         let key = format!("{}:{}", SERVER_KEY_PREFIX, tag);
         let fields = [
             ("name", status.name.as_str()),
@@ -242,7 +260,10 @@ impl HealthMonitor {
             ("memory_usage", &format!("{:.1}", status.memory_usage)),
             ("bandwidth_in", &status.bandwidth_in.to_string()),
             ("bandwidth_out", &status.bandwidth_out.to_string()),
-            ("last_heartbeat", &chrono::Utc::now().timestamp().to_string()),
+            (
+                "last_heartbeat",
+                &chrono::Utc::now().timestamp().to_string(),
+            ),
         ];
 
         if let Err(e) = self.redis.hmset(&key, &fields).await {

@@ -1,11 +1,11 @@
 use async_trait::async_trait;
 
-use std::sync::Arc;
-use dashmap::DashMap;
-use tokio::sync::{ broadcast };
-use crate::protocol::event::{SignalEvent, EventHandler, FnEventHandler};
 use crate::domain::traits::EventPublisher;
 use crate::error::AppError;
+use crate::protocol::event::{EventHandler, FnEventHandler, SignalEvent};
+use dashmap::DashMap;
+use std::sync::Arc;
+use tokio::sync::broadcast;
 
 #[derive(Clone)]
 pub struct EventBus {
@@ -23,7 +23,9 @@ impl EventBus {
 
     pub async fn publish(&self, event: SignalEvent) -> anyhow::Result<()> {
         let _event_type = event.event_type();
-        self.tx.send(event.clone()).map_err(|e| anyhow::anyhow!("broadcast send: {}", e))?;
+        self.tx
+            .send(event.clone())
+            .map_err(|e| anyhow::anyhow!("broadcast send: {}", e))?;
 
         let event_type = event.event_type();
 
@@ -55,12 +57,10 @@ impl EventBus {
     }
 
     pub fn on(&self, event_type: &str, handler: Arc<dyn EventHandler>) {
-
         self.handlers
             .entry(event_type.to_string())
             .or_default()
             .push(handler);
-
     }
     pub fn on_fn<F, Fut>(&self, event_type: &str, f: F)
     where
@@ -102,13 +102,17 @@ impl EventBus {
 }
 
 impl Default for EventBus {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[async_trait]
 impl EventPublisher for EventBus {
     async fn publish(&self, event: SignalEvent) -> Result<(), AppError> {
-        self.tx.send(event).map_err(|e| AppError::Internal(e.to_string()))?;
+        self.tx
+            .send(event)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
         Ok(())
     }
 

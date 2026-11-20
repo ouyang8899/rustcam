@@ -1,10 +1,4 @@
 // @ts-check
-/**
- * 无人机消息的运行时校验（规则 §10.4 / §10.7）。
- *
- * 所有 WS 消息与 REST 响应在进入 store 之前都必须过一遍这里的校验，
- * 避免异常数据导致页面崩溃（规则 §16「前端消息未校验 → 页面崩溃」）。
- */
 
 /**
  * @typedef {Object} Telemetry
@@ -50,38 +44,18 @@
  * @property {number} ts_ms
  */
 
-/**
- * 是不是普通对象。
- * @param {unknown} value
- * @returns {value is Record<string, unknown>}
- */
 function isObject(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/**
- * 是不是有限数值。
- * @param {unknown} value
- * @returns {value is number}
- */
 function isNumber(value) {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
-/**
- * 是不是非空字符串。
- * @param {unknown} value
- * @returns {value is string}
- */
 function isNonEmptyString(value) {
   return typeof value === 'string' && value.length > 0
 }
 
-/**
- * 遥测校验（规则 §10.4 的 isTelemetry）。
- * @param {unknown} value
- * @returns {boolean}
- */
 export function isTelemetry(value) {
   if (!isObject(value)) return false
   return (
@@ -100,11 +74,6 @@ export function isTelemetry(value) {
   )
 }
 
-/**
- * 告警校验。
- * @param {unknown} value
- * @returns {boolean}
- */
 export function isAlert(value) {
   if (!isObject(value)) return false
   return (
@@ -115,11 +84,6 @@ export function isAlert(value) {
   )
 }
 
-/**
- * 控制权状态校验。
- * @param {unknown} value
- * @returns {boolean}
- */
 export function isControl(value) {
   if (!isObject(value)) return false
   return (
@@ -131,11 +95,6 @@ export function isControl(value) {
   )
 }
 
-/**
- * 指令回执校验。
- * @param {unknown} value
- * @returns {boolean}
- */
 export function isCommandReply(value) {
   if (!isObject(value)) return false
   return (
@@ -145,11 +104,6 @@ export function isCommandReply(value) {
   )
 }
 
-/**
- * 审计记录校验。
- * @param {unknown} value
- * @returns {boolean}
- */
 export function isAudit(value) {
   if (!isObject(value)) return false
   return (
@@ -160,21 +114,11 @@ export function isAudit(value) {
   )
 }
 
-/**
- * 设备档案校验。
- * @param {unknown} value
- * @returns {boolean}
- */
 export function isDrone(value) {
   if (!isObject(value)) return false
   return isNonEmptyString(value.drone_tag)
 }
 
-/**
- * 围栏校验。
- * @param {unknown} value
- * @returns {boolean}
- */
 export function isFence(value) {
   if (!isObject(value)) return false
   const type = typeof value.type === 'string' ? value.type.toLowerCase() : ''
@@ -185,11 +129,6 @@ export function isFence(value) {
   )
 }
 
-/**
- * 航线校验。
- * @param {unknown} value
- * @returns {boolean}
- */
 export function isRoute(value) {
   if (!isObject(value)) return false
   return (
@@ -202,22 +141,11 @@ export function isRoute(value) {
   )
 }
 
-/**
- * WS 信封校验：必须带 msg_type 与 data。
- * @param {unknown} value
- * @returns {boolean}
- */
 export function isWsEnvelope(value) {
   if (!isObject(value)) return false
   return isNonEmptyString(value.msg_type) && isObject(value.data)
 }
 
-/**
- * 按 msg_type 校验数据体。
- * @param {string} msgType
- * @param {unknown} data
- * @returns {boolean}
- */
 export function isPayloadOf(msgType, data) {
   switch (msgType) {
     case 'telemetry':

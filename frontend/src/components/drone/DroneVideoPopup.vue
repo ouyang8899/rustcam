@@ -163,7 +163,7 @@ async function resolveVideo() {
   bottom: 12px;
   width: 320px;
   z-index: 6;
-  border-radius: 10px;
+  border-radius: 0;
   overflow: hidden;
   background: rgba(8, 15, 30, 0.94);
   border: 1px solid var(--border);

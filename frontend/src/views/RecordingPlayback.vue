@@ -1,103 +1,98 @@
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <h1 class="page-title">录像回放</h1>
-      <div class="page-toolbar">
-        <el-button :icon="Refresh" :loading="loading" @click="refresh">刷新</el-button>
+  <PageView title="录像回放">
+    <template #toolbar>
+      <el-button :icon="Refresh" :loading="loading" @click="refresh">刷新</el-button>
+    </template>
+
+    <FilterBar>
+      <template #left>
+        <el-select v-model="filters.device_tag" clearable placeholder="选择设备" style="width: 150px" @change="onDeviceChange">
+          <el-option v-for="d in deviceOptions" :key="d.device_tag" :value="d.device_tag" :label="d.name || d.device_tag" />
+        </el-select>
+        <el-select v-model="filters.channel_tag" clearable placeholder="选择通道" style="width: 120px" :disabled="!filters.device_tag" @change="onFilterChange">
+          <el-option v-for="ch in channelOptions" :key="ch.channel_tag" :value="ch.channel_tag" :label="`通道 ${ch.channel_tag}`" />
+        </el-select>
+        <el-date-picker
+          v-model="filters.dateRange"
+          type="datetimerange"
+          range-separator="至"
+          start-placeholder="开始时间"
+          end-placeholder="结束时间"
+          value-format="YYYY-MM-DD HH:mm:ss"
+          style="width: 360px"
+          @change="onFilterChange"
+        />
+      </template>
+      <template #right>
+        <el-button type="primary" @click="searchRecordings">查询</el-button>
+      </template>
+    </FilterBar>
+
+    <DataCard title="选择录像时间段">
+      <EmptyState v-if="!currentFile" title="请选择设备、通道和时间范围进行查询" />
+
+      <div v-else class="playback-container">
+        <div class="video-wrapper">
+          <VideoPlayer
+            ref="videoPlayerRef"
+            :src="currentPlayUrl"
+            :is-live="false"
+            :autoplay="true"
+            @ended="onPlaybackEnded"
+            @timeupdate="onTimeUpdate"
+          />
+        </div>
+
+        <div class="playback-info">
+          <div class="file-info">
+            <span class="label">当前文件:</span>
+            <span>{{ formatDateTime(currentFile.start_time) }} - {{ formatDateTime(currentFile.end_time) }}</span>
+            <el-tag :type="segmentTypeTagType(currentFile.segment_type)" size="small">{{ segmentTypeLabel(currentFile.segment_type) }}</el-tag>
+          </div>
+
+          <div class="playback-progress">
+            <span>{{ formatDuration(currentTime) }}</span>
+            <el-slider v-model="seekPosition" :min="0" :max="duration || 100" @change="onSeek" />
+            <span>{{ formatDuration(duration) }}</span>
+          </div>
+
+          <div class="playback-controls">
+            <el-button-group>
+              <el-button @click="togglePlay">
+                {{ isPlaying ? '暂停' : '播放' }}
+              </el-button>
+              <el-button @click="skipBackward">-10s</el-button>
+              <el-button @click="skipForward">+10s</el-button>
+            </el-button-group>
+            <el-select v-model="playbackRate" style="width: 100px" @change="onRateChange">
+              <el-option :value="0.5" label="0.5x" />
+              <el-option :value="1" label="1x" />
+              <el-option :value="1.5" label="1.5x" />
+              <el-option :value="2" label="2x" />
+            </el-select>
+          </div>
+        </div>
+
+        <div v-if="files.length > 0" class="files-list">
+          <div class="files-list-header">
+            <span>录像片段 ({{ files.length }}个)</span>
+          </div>
+          <div class="files-list-body">
+            <div
+              v-for="(f, i) in files"
+              :key="f.id"
+              :class="['file-item', { active: currentFileIndex === i }]"
+              @click="switchToFile(i)"
+            >
+              <span class="file-time">{{ formatDateTime(f.start_time) }}</span>
+              <span class="file-duration">{{ formatDuration(f.duration_secs) }}</span>
+              <el-tag :type="segmentTypeTagType(f.segment_type)" size="small">{{ segmentTypeLabel(f.segment_type) }}</el-tag>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
-    <div class="page-body">
-      <DataCard>
-        <template #header>
-          <span class="data-card__title">选择录像时间段</span>
-          <div class="data-card__toolbar">
-            <el-select v-model="filters.device_tag" clearable placeholder="选择设备" style="width: 150px" @change="onDeviceChange">
-              <el-option v-for="d in deviceOptions" :key="d.device_tag" :value="d.device_tag" :label="d.name || d.device_tag" />
-            </el-select>
-            <el-select v-model="filters.channel_tag" clearable placeholder="选择通道" style="width: 120px" :disabled="!filters.device_tag" @change="onFilterChange">
-              <el-option v-for="ch in channelOptions" :key="ch.channel_tag" :value="ch.channel_tag" :label="`通道 ${ch.channel_tag}`" />
-            </el-select>
-            <el-date-picker
-              v-model="filters.dateRange"
-              type="datetimerange"
-              range-separator="至"
-              start-placeholder="开始时间"
-              end-placeholder="结束时间"
-              value-format="YYYY-MM-DD HH:mm:ss"
-              style="width: 360px"
-              @change="onFilterChange"
-            />
-            <el-button type="primary" @click="searchRecordings">查询</el-button>
-          </div>
-        </template>
-
-        <div v-if="!currentFile" class="empty-state">
-          <p>请选择设备、通道和时间范围进行查询</p>
-        </div>
-
-        <div v-else class="playback-container">
-          <div class="video-wrapper">
-            <VideoPlayer
-              ref="videoPlayerRef"
-              :src="currentPlayUrl"
-              :is-live="false"
-              :autoplay="true"
-              @ended="onPlaybackEnded"
-              @timeupdate="onTimeUpdate"
-            />
-          </div>
-
-          <div class="playback-info">
-            <div class="file-info">
-              <span class="label">当前文件:</span>
-              <span>{{ formatDateTime(currentFile.start_time) }} - {{ formatDateTime(currentFile.end_time) }}</span>
-              <el-tag :type="segmentTypeTagType(currentFile.segment_type)" size="small">{{ segmentTypeLabel(currentFile.segment_type) }}</el-tag>
-            </div>
-
-            <div class="playback-progress">
-              <span>{{ formatDuration(currentTime) }}</span>
-              <el-slider v-model="seekPosition" :min="0" :max="duration || 100" @change="onSeek" />
-              <span>{{ formatDuration(duration) }}</span>
-            </div>
-
-            <div class="playback-controls">
-              <el-button-group>
-                <el-button @click="togglePlay">
-                  {{ isPlaying ? '暂停' : '播放' }}
-                </el-button>
-                <el-button @click="skipBackward">-10s</el-button>
-                <el-button @click="skipForward">+10s</el-button>
-              </el-button-group>
-              <el-select v-model="playbackRate" style="width: 100px" @change="onRateChange">
-                <el-option :value="0.5" label="0.5x" />
-                <el-option :value="1" label="1x" />
-                <el-option :value="1.5" label="1.5x" />
-                <el-option :value="2" label="2x" />
-              </el-select>
-            </div>
-          </div>
-
-          <div v-if="files.length > 0" class="files-list">
-            <div class="files-list-header">
-              <span>录像片段 ({{ files.length }}个)</span>
-            </div>
-            <div class="files-list-body">
-              <div
-                v-for="(f, i) in files"
-                :key="f.id"
-                :class="['file-item', { active: currentFileIndex === i }]"
-                @click="switchToFile(i)"
-              >
-                <span class="file-time">{{ formatDateTime(f.start_time) }}</span>
-                <span class="file-duration">{{ formatDuration(f.duration_secs) }}</span>
-                <el-tag :type="segmentTypeTagType(f.segment_type)" size="small">{{ segmentTypeLabel(f.segment_type) }}</el-tag>
-              </div>
-            </div>
-          </div>
-        </div>
-      </DataCard>
-    </div>
-  </div>
+    </DataCard>
+  </PageView>
 </template>
 
 <script setup>
@@ -108,6 +103,9 @@ import { useRecordingStore } from '../stores/recordingStore'
 import { useToast } from '../composables/useToast'
 import { request } from '../utils/request'
 import DataCard from '../components/common/DataCard.vue'
+import PageView from '../components/common/PageView.vue'
+import FilterBar from '../components/common/FilterBar.vue'
+import EmptyState from '../components/common/EmptyState.vue'
 
 const recStore = useRecordingStore()
 const toast = useToast()
@@ -180,7 +178,6 @@ function segmentTypeLabel(type) {
   return map[type] || type || '-'
 }
 
-/** 'YYYY-MM-DD HH:mm:ss'（本地时间）-> ISO8601 UTC（RFC3339） */
 function toApiTime(value) {
   if (!value) return value
   const normalized = String(value).replace(' ', 'T')
@@ -379,11 +376,6 @@ function formatDateTime(ts) {
 }
 .file-duration {
   font-size: 12px;
-  color: #999;
-}
-.empty-state {
-  text-align: center;
-  padding: 48px 0;
   color: #999;
 }
 </style>

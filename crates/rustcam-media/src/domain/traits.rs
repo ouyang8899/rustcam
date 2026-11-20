@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 
-use crate::domain::{ Device, Protocol, Stream, Session, SessionType, Recording };
-use crate::adapter::media_server::{ StreamInfo };
-use crate::protocol::event::SignalEvent;
+use crate::adapter::media_server::StreamInfo;
+use crate::domain::{Device, Protocol, Recording, Session, SessionType, Stream};
 use crate::error::AppError;
+use crate::protocol::event::SignalEvent;
 
 #[async_trait]
 pub trait DeviceLookup: Send + Sync {
@@ -13,7 +13,12 @@ pub trait DeviceLookup: Send + Sync {
     async fn get_device(&self, id: i64) -> Result<Option<Device>, AppError>;
     async fn set_online(&self, tag: &str) -> Result<(), AppError>;
     async fn set_offline(&self, tag: &str, reason: Option<&str>) -> Result<(), AppError>;
-    async fn update_device_host_port(&self, tag: &str, host: &str, port: u16) -> Result<(), AppError>;
+    async fn update_device_host_port(
+        &self,
+        tag: &str,
+        host: &str,
+        port: u16,
+    ) -> Result<(), AppError>;
     async fn log_ptz_control(
         &self,
         user_id: Option<uuid::Uuid>,
@@ -48,18 +53,31 @@ pub trait DeviceLookup: Send + Sync {
 #[async_trait]
 pub trait StreamManager: Send + Sync {
     async fn start_pull_stream(
-        &self, device_tag: &str, channel_tag: &str, rtsp_url: &str,
+        &self,
+        device_tag: &str,
+        channel_tag: &str,
+        rtsp_url: &str,
     ) -> Result<StreamInfo, AppError>;
     async fn start_gb28181_stream(
-        &self, device_tag: &str, channel_tag: &str, stream_key: &str,
+        &self,
+        device_tag: &str,
+        channel_tag: &str,
+        stream_key: &str,
     ) -> Result<StreamInfo, AppError>;
     async fn stop_stream(&self, app: &str, stream_key: &str) -> Result<(), AppError>;
     async fn stop_streams_by_device(&self, device_tag: &str) -> Result<(), AppError>;
-    async fn stop_streams_by_channel(&self, device_tag: &str, channel_tag: &str) -> Result<(), AppError>;
+    async fn stop_streams_by_channel(
+        &self,
+        device_tag: &str,
+        channel_tag: &str,
+    ) -> Result<(), AppError>;
     async fn generate_token(&self, device_id: &str) -> Result<String, AppError>;
     async fn validate_token(&self, token: &str) -> Option<String>;
     async fn build_play_links(
-        &self, device: &Device, token: &str, stream_id: &str,
+        &self,
+        device: &Device,
+        token: &str,
+        stream_id: &str,
     ) -> crate::domain::device::PlayLinks;
     async fn get_stats(&self) -> serde_json::Value;
     async fn get_stream_by_stream_key(&self, app: &str, stream_key: &str) -> Option<Stream>;
@@ -69,10 +87,15 @@ pub trait StreamManager: Send + Sync {
 #[async_trait]
 pub trait SessionManager: Send + Sync {
     async fn create_session(
-        &self, session_type: SessionType, device_id: i64, user_id: i64,
+        &self,
+        session_type: SessionType,
+        device_id: i64,
+        user_id: i64,
     ) -> Result<Session, AppError>;
     async fn activate_session(
-        &self, session_id: i64, rtsp_url: &str,
+        &self,
+        session_id: i64,
+        rtsp_url: &str,
     ) -> Result<StreamInfo, AppError>;
     async fn deactivate_session(&self, session_id: i64) -> Result<(), AppError>;
     fn get_session(&self, id: i64) -> Result<Option<Session>, AppError>;
@@ -88,7 +111,10 @@ pub trait EventPublisher: Send + Sync {
 #[async_trait]
 pub trait RecordingManager: Send + Sync {
     async fn start_recording(
-        &self, device_id: i64, stream_key: &str, media_server: &str,
+        &self,
+        device_id: i64,
+        stream_key: &str,
+        media_server: &str,
     ) -> Result<Recording, AppError>;
     async fn stop_recording(&self, recording_id: i64) -> Result<(), AppError>;
     async fn stop_recording_by_stream_key(&self, stream_key: &str) -> Result<(), AppError>;
@@ -97,8 +123,12 @@ pub trait RecordingManager: Send + Sync {
 
 #[async_trait]
 pub trait CacheStore: Send + Sync {
-
-    async fn set_json(&self, key: &str, value: &serde_json::Value, ttl_secs: Option<u64>) -> Result<(), AppError>;
+    async fn set_json(
+        &self,
+        key: &str,
+        value: &serde_json::Value,
+        ttl_secs: Option<u64>,
+    ) -> Result<(), AppError>;
 
     async fn get_json(&self, key: &str) -> Result<Option<serde_json::Value>, AppError>;
 
@@ -110,7 +140,11 @@ pub trait CacheStore: Send + Sync {
 
     async fn delete_stream_info(&self, stream_key: &str) -> Result<(), AppError>;
 
-    async fn publish_event_json(&self, event: &str, data: &serde_json::Value) -> Result<(), AppError>;
+    async fn publish_event_json(
+        &self,
+        event: &str,
+        data: &serde_json::Value,
+    ) -> Result<(), AppError>;
 
     async fn incr(&self, key: &str) -> Result<i64, AppError>;
 
@@ -130,20 +164,21 @@ pub trait CacheStore: Send + Sync {
 
     async fn hget(&self, key: &str, field: &str) -> Result<Option<String>, AppError>;
 
-    async fn hgetall(&self, key: &str) -> Result<std::collections::HashMap<String, String>, AppError>;
+    async fn hgetall(
+        &self,
+        key: &str,
+    ) -> Result<std::collections::HashMap<String, String>, AppError>;
 }
 
 #[async_trait]
 pub trait CacheStoreExt: CacheStore {
-
     async fn set<T: serde::Serialize + Send + Sync>(
         &self,
         key: &str,
         value: &T,
         ttl_secs: Option<u64>,
     ) -> Result<(), AppError> {
-        let json = serde_json::to_value(value)
-            .map_err(|e| AppError::Internal(e.to_string()))?;
+        let json = serde_json::to_value(value).map_err(|e| AppError::Internal(e.to_string()))?;
         self.set_json(key, &json, ttl_secs).await
     }
 
@@ -153,8 +188,8 @@ pub trait CacheStoreExt: CacheStore {
     ) -> Result<Option<T>, AppError> {
         match self.get_json(key).await? {
             Some(json) => {
-                let value = serde_json::from_value(json)
-                    .map_err(|e| AppError::Internal(e.to_string()))?;
+                let value =
+                    serde_json::from_value(json).map_err(|e| AppError::Internal(e.to_string()))?;
                 Ok(Some(value))
             }
             None => Ok(None),
@@ -166,8 +201,7 @@ pub trait CacheStoreExt: CacheStore {
         event: &str,
         data: &T,
     ) -> Result<(), AppError> {
-        let json = serde_json::to_value(data)
-            .map_err(|e| AppError::Internal(e.to_string()))?;
+        let json = serde_json::to_value(data).map_err(|e| AppError::Internal(e.to_string()))?;
         self.publish_event_json(event, &json).await
     }
 }

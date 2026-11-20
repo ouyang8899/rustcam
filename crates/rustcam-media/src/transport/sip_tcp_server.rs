@@ -1,18 +1,18 @@
-use std::sync::Arc;
-use std::net::SocketAddr;
-use std::time::Duration;
-use dashmap::DashMap;
-use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{AsyncReadExt, BufReader};
-use tokio::sync::{Mutex, Semaphore};
-use tokio_util::sync::CancellationToken;
-use crate::protocol::gb28181::Gb28181Adapter;
-use crate::protocol::adapter::SignalAdapter;
-use crate::protocol::adapter_manager;
-use crate::protocol::traits::ProtocolDeps;
-use crate::protocol::event::SignalEvent;
 use crate::infrastructure::event_bus::EventBus;
 use crate::monitoring::Metrics;
+use crate::protocol::adapter::SignalAdapter;
+use crate::protocol::adapter_manager;
+use crate::protocol::event::SignalEvent;
+use crate::protocol::gb28181::Gb28181Adapter;
+use crate::protocol::traits::ProtocolDeps;
+use dashmap::DashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::io::{AsyncReadExt, BufReader};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{Mutex, Semaphore};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Debug)]
 pub struct SipTcpServerConfig {
@@ -79,7 +79,10 @@ impl TcpConnectionEntry {
 
     fn is_idle(&self, idle_secs: i64) -> bool {
         let now = chrono::Utc::now().timestamp();
-        now - self.last_message_at.load(std::sync::atomic::Ordering::Relaxed) > idle_secs
+        now - self
+            .last_message_at
+            .load(std::sync::atomic::Ordering::Relaxed)
+            > idle_secs
     }
 }
 
@@ -118,7 +121,6 @@ impl SipTcpServer {
     }
 
     pub async fn run(&self) -> anyhow::Result<()> {
-
         let cleanup_handle = self.start_cleanup_task();
         self.join_handles.lock().await.push(cleanup_handle);
 
@@ -168,12 +170,9 @@ impl SipTcpServer {
     }
 
     async fn shutdown(&self) {
-
         self.shutdown_token.cancel();
 
-        let addrs: Vec<String> = self.connections.iter()
-            .map(|e| e.key().clone())
-            .collect();
+        let addrs: Vec<String> = self.connections.iter().map(|e| e.key().clone()).collect();
 
         for addr_key in addrs {
             if let Some((_, entry)) = self.connections.remove(&addr_key) {
@@ -187,7 +186,6 @@ impl SipTcpServer {
         for handle in handles.drain(..) {
             let _ = handle.await;
         }
-
     }
 
     fn start_cleanup_task(&self) -> tokio::task::JoinHandle<()> {
@@ -225,14 +223,13 @@ impl SipTcpServer {
         event_bus: &Arc<EventBus>,
         connection_timeout: u64,
     ) {
-        let addrs: Vec<String> = connections.iter()
-            .map(|e| e.key().clone())
-            .collect();
+        let addrs: Vec<String> = connections.iter().map(|e| e.key().clone()).collect();
 
         for addr_key in addrs {
-
             let entry_arc = { connections.get(&addr_key).map(|e| e.value().clone()) };
-            let Some(entry_arc) = entry_arc else { continue; };
+            let Some(entry_arc) = entry_arc else {
+                continue;
+            };
             let adapter = entry_arc.adapter.clone();
             let idle_timeout = {
                 let guard = adapter.lock().await;
@@ -271,7 +268,10 @@ impl SipTcpServer {
                             reason: Some(format!("TCP idle timeout from {}", remote_addr)),
                         };
                         if let Err(e) = event_bus.publish(event).await {
-                            tracing::error!("[SipTcpServer] Failed to publish DeviceOffline: {}", e);
+                            tracing::error!(
+                                "[SipTcpServer] Failed to publish DeviceOffline: {}",
+                                e
+                            );
                         }
                     }
                 }
@@ -289,7 +289,6 @@ impl SipTcpServer {
         connections: Arc<DashMap<String, Arc<TcpConnectionEntry>>>,
         shutdown_token: CancellationToken,
     ) -> anyhow::Result<()> {
-
         let mut adapter: Box<dyn SignalAdapter + Send + Sync> = Box::new(Gb28181Adapter::new(
             deps,
             Arc::new(|device_tag, entry| {
@@ -306,7 +305,8 @@ impl SipTcpServer {
         let (reader, write_half) = stream.into_split();
         adapter.set_tcp_write(write_half);
 
-        let adapter_arc: Arc<Mutex<Box<dyn SignalAdapter + Send + Sync>>> = Arc::new(Mutex::new(adapter));
+        let adapter_arc: Arc<Mutex<Box<dyn SignalAdapter + Send + Sync>>> =
+            Arc::new(Mutex::new(adapter));
         {
             let mut guard = adapter_arc.lock().await;
             guard.set_adapter_entry(adapter_arc.clone());
@@ -320,7 +320,8 @@ impl SipTcpServer {
 
         let mut reader = BufReader::new(reader);
         let mut buffer = vec![0u8; config.read_buffer_size];
-        let mut keepalive_interval = tokio::time::interval(Duration::from_secs(config.keepalive_interval_secs));
+        let mut keepalive_interval =
+            tokio::time::interval(Duration::from_secs(config.keepalive_interval_secs));
         let read_timeout = Duration::from_secs(config.read_timeout_secs);
 
         loop {
@@ -434,9 +435,7 @@ mod tests {
             adapter: Arc::new(Mutex::new(adapter)),
             device_tag: Mutex::new(None),
             connected_at: std::time::Instant::now() - age,
-            last_message_at: AtomicI64::new(
-                chrono::Utc::now().timestamp() - idle.as_secs() as i64,
-            ),
+            last_message_at: AtomicI64::new(chrono::Utc::now().timestamp() - idle.as_secs() as i64),
             remote_addr: REMOTE.parse().unwrap(),
         })
     }

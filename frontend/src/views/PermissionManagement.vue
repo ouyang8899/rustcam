@@ -1,53 +1,49 @@
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <h1 class="page-title">权限管理</h1>
-      <div class="page-toolbar">
-        <el-button type="primary" :icon="Plus" @click="openCreateModal">创建权限</el-button>
-      </div>
-    </div>
-    <div class="page-body">
-      <DataCard>
-        <el-skeleton animated :loading="loading" :rows="4">
-          <template #default>
-            <el-table :data="permissions" style="margin-top: 0">
-              <el-table-column label="权限名" prop="name" min-width="200" />
-              <el-table-column label="对象" width="140">
-                <template #default="{ row }">{{ objectOf(row.name) }}</template>
-              </el-table-column>
-              <el-table-column label="动作" width="140">
-                <template #default="{ row }">{{ actionOf(row.name) }}</template>
-              </el-table-column>
-              <el-table-column label="描述" min-width="180">
-                <template #default="{ row }">{{ row.description || '-' }}</template>
-              </el-table-column>
-              <el-table-column label="创建时间" width="180">
-                <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
-              </el-table-column>
-              <el-table-column label="操作" width="160">
-                <template #default="{ row }">
-                  <el-button size="small" @click="openEditModal(row)">编辑</el-button>
-                  <el-button size="small" type="danger" plain @click="confirmDelete(row)">删除</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-            <el-empty v-if="permissions.length === 0" description="暂无权限点" />
-          </template>
-        </el-skeleton>
+  <PageView title="权限管理">
+    <template #toolbar>
+      <el-button type="primary" :icon="Plus" @click="openCreateModal">创建权限</el-button>
+    </template>
 
-        <div v-if="total > pageSize" class="pagination-wrapper">
-          <el-pagination
-            v-model:current-page="currentPage"
-            :page-size="pageSize"
-            :total="total"
-            layout="prev, pager, next"
-            @current-change="fetchPermissions"
-          />
-        </div>
-      </DataCard>
-    </div>
+    <DataCard>
+      <el-skeleton animated :loading="loading" :rows="4">
+        <template #default>
+          <el-table :data="permissions" border stripe size="small" style="margin-top: 0">
+            <el-table-column label="权限名" prop="name" min-width="200" />
+            <el-table-column label="对象" width="140">
+              <template #default="{ row }">{{ objectOf(row.name) }}</template>
+            </el-table-column>
+            <el-table-column label="动作" width="140">
+              <template #default="{ row }">{{ actionOf(row.name) }}</template>
+            </el-table-column>
+            <el-table-column label="描述" min-width="180">
+              <template #default="{ row }">{{ row.description || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="创建时间" width="180">
+              <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="160">
+              <template #default="{ row }">
+                <el-button size="small" @click="openEditModal(row)">编辑</el-button>
+                <el-button size="small" type="danger" plain @click="confirmDelete(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <EmptyState v-if="permissions.length === 0" title="暂无权限点" />
+        </template>
+      </el-skeleton>
+    </DataCard>
 
-    <el-dialog v-model="showCreateModal" title="创建权限" width="460px" :close-on-click-modal="false">
+    <template #footer>
+      <PaginationBar
+        v-model:page="currentPage"
+        v-model:page-size="pageSize"
+        :total="total"
+        show-sizes
+        @change="fetchPermissions"
+      />
+    </template>
+
+    <AppDialog v-model="showCreateModal" title="创建权限" size="sm" :close-on-click-modal="false">
       <el-form label-position="top">
         <el-form-item label="权限名 *" required>
           <el-input v-model="createForm.name" placeholder="例如 drone:control:acquire" />
@@ -61,9 +57,9 @@
         <el-button @click="showCreateModal = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitCreate">创建</el-button>
       </template>
-    </el-dialog>
+    </AppDialog>
 
-    <el-dialog v-model="showEditModal" :title="`编辑权限: ${editPermission?.name}`" width="460px" :close-on-click-modal="false">
+    <AppDialog v-model="showEditModal" :title="`编辑权限: ${editPermission?.name}`" size="sm" :close-on-click-modal="false">
       <el-form label-position="top">
         <el-form-item label="权限名 *" required>
           <el-input v-model="editForm.name" />
@@ -76,8 +72,8 @@
         <el-button @click="showEditModal = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitEdit">保存</el-button>
       </template>
-    </el-dialog>
-  </div>
+    </AppDialog>
+  </PageView>
 </template>
 
 <script setup>
@@ -87,6 +83,10 @@ import { Plus } from '@element-plus/icons-vue'
 import { useToast } from '../composables/useToast'
 import * as permissionApi from '../api/permissions'
 import DataCard from '../components/common/DataCard.vue'
+import PageView from '../components/common/PageView.vue'
+import EmptyState from '../components/common/EmptyState.vue'
+import AppDialog from '../components/common/AppDialog.vue'
+import PaginationBar from '../components/common/PaginationBar.vue'
 
 const toast = useToast()
 
@@ -95,7 +95,7 @@ const loading = ref(false)
 const submitting = ref(false)
 const total = ref(0)
 const currentPage = ref(1)
-const pageSize = 20
+const pageSize = ref(20)
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
 const editPermission = ref(null)
@@ -107,21 +107,16 @@ onMounted(async () => {
   await fetchPermissions()
 })
 
-/**
- * 拉取权限点列表（服务端分页）。
- *
- * 删完最后一页的最后一条时要回退一页，否则会停在空页上。
- */
 async function fetchPermissions() {
   loading.value = true
   try {
-    const res = await permissionApi.getPermissions({
-      limit: pageSize,
-      offset: (currentPage.value - 1) * pageSize,
-    })
-    total.value = res.total || 0
-    permissions.value = res.items || []
-    const maxPage = Math.max(1, Math.ceil(total.value / pageSize))
+      const res = await permissionApi.getPermissions({
+        limit: pageSize.value,
+        offset: (currentPage.value - 1) * pageSize.value,
+      })
+      total.value = res.total || 0
+      permissions.value = res.items || []
+      const maxPage = Math.max(1, Math.ceil(total.value / pageSize.value))
     if (currentPage.value > maxPage) {
       currentPage.value = maxPage
       await fetchPermissions()
@@ -200,7 +195,3 @@ function formatDate(dateStr) {
   return new Date(dateStr).toLocaleString('zh-CN', { hour12: false })
 }
 </script>
-
-<style scoped>
-.pagination-wrapper { display: flex; justify-content: center; margin-top: 16px; }
-</style>

@@ -2,32 +2,23 @@ import { defineStore } from 'pinia'
 import { getMapSettings, updateMapSettings } from '../api/settings'
 
 // Map settings live in the backend database:
-//   browser_tms_url - TMS tile url used by the web map
-//   client_tms_url  - TMS tile url used by the desktop client map
-//   wfs_url         - WFS service url shared by web and client
-//   *_min/max_zoom  - zoom range for the web map and the client map
 export const useSettingsStore = defineStore('settings', {
   state: () => ({
-    browserTmsUrl: '',
-    clientTmsUrl: '',
+    browserLayers: [],
+    clientLayers: [],
     mapWfsUrl: '',
-    browserMinZoom: 0,
-    browserMaxZoom: 19,
-    clientMinZoom: 0,
-    clientMaxZoom: 19,
+    mapWfsSrs: 'EPSG:4326',
     mapAutoLocate: localStorage.getItem('mapAutoLocate') === 'true',
     settingsLoaded: false,
   }),
 
   actions: {
     applyMapSettings(data) {
-      this.browserTmsUrl = data.browser_tms_url || ''
-      this.clientTmsUrl = data.client_tms_url || ''
-      this.mapWfsUrl = data.wfs_url || ''
-      this.browserMinZoom = Number.isInteger(data.browser_min_zoom) ? data.browser_min_zoom : 0
-      this.browserMaxZoom = Number.isInteger(data.browser_max_zoom) ? data.browser_max_zoom : 19
-      this.clientMinZoom = Number.isInteger(data.client_min_zoom) ? data.client_min_zoom : 0
-      this.clientMaxZoom = Number.isInteger(data.client_max_zoom) ? data.client_max_zoom : 19
+      this.browserLayers = Array.isArray(data.browser_layers) ? data.browser_layers : []
+      this.clientLayers = Array.isArray(data.client_layers) ? data.client_layers : []
+      const wfs = data.wfs || {}
+      this.mapWfsUrl = wfs.url || ''
+      this.mapWfsSrs = wfs.srs || 'EPSG:4326'
     },
 
     async loadMapSettings(force = false) {
@@ -42,13 +33,9 @@ export const useSettingsStore = defineStore('settings', {
 
     async saveMapSettings() {
       const data = await updateMapSettings({
-        browser_tms_url: this.browserTmsUrl,
-        client_tms_url: this.clientTmsUrl,
-        wfs_url: this.mapWfsUrl,
-        browser_min_zoom: this.browserMinZoom,
-        browser_max_zoom: this.browserMaxZoom,
-        client_min_zoom: this.clientMinZoom,
-        client_max_zoom: this.clientMaxZoom,
+        browser_layers: this.browserLayers,
+        client_layers: this.clientLayers,
+        wfs: { url: this.mapWfsUrl, srs: this.mapWfsSrs },
       })
       if (data) this.applyMapSettings(data)
       this.settingsLoaded = true

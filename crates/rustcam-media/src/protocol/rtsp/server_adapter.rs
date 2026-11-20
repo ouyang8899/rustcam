@@ -10,14 +10,13 @@ use tokio::task::JoinHandle;
 
 use crate::domain::SessionType;
 use crate::error::{AppError, Result};
-use crate::media::rtp_server::{UDPRtpServer, RtpServerActive};
+use crate::media::rtp_server::{RtpServerActive, UDPRtpServer};
 use crate::protocol::adapter::SignalAdapter;
 use crate::protocol::event::{ProtocolType, PtzCommand, SignalEvent, TransportType};
-use crate::protocol::rtsp::auth::{
-    build_www_authenticate, generate_nonce, RtspAuthContext,
-};
+use crate::protocol::rtsp::auth::{build_www_authenticate, generate_nonce, RtspAuthContext};
 use crate::protocol::rtsp::common::{
-    parse_interleaved_channels, InterleavedBuilder, InterleavedFrame, InterleavedStats, RtcpPacket, RTSP_USER_AGENT,
+    parse_interleaved_channels, InterleavedBuilder, InterleavedFrame, InterleavedStats, RtcpPacket,
+    RTSP_USER_AGENT,
 };
 use crate::protocol::rtsp::response::RtspResponse;
 use crate::protocol::rtsp::sdp::SdpParser;
@@ -87,7 +86,11 @@ impl RtspServerAdapter {
 
     fn parse_request_line(line: &str) -> Option<(String, String, String)> {
         let mut it = line.split_whitespace();
-        Some((it.next()?.to_string(), it.next()?.to_string(), it.next()?.to_string()))
+        Some((
+            it.next()?.to_string(),
+            it.next()?.to_string(),
+            it.next()?.to_string(),
+        ))
     }
 
     fn parse_headers(lines: &[&str]) -> HashMap<String, String> {
@@ -369,7 +372,6 @@ impl RtspServerAdapter {
                     rr_handle,
                 },
             );
-
         }
     }
 
@@ -488,7 +490,9 @@ impl RtspServerAdapter {
             loop {
                 interval.tick().await;
 
-                let Some(rtp_src) = *client_addr.lock().await else { continue };
+                let Some(rtp_src) = *client_addr.lock().await else {
+                    continue;
+                };
                 let rtcp_target_port = if client_rtcp_port > 0 {
                     client_rtcp_port
                 } else {
@@ -520,8 +524,8 @@ impl RtspServerAdapter {
                     0,
                 );
 
-                  match rtcp_socket.send_to(&rr, rtcp_addr).await {
-                      Ok(_) => {},
+                match rtcp_socket.send_to(&rr, rtcp_addr).await {
+                    Ok(_) => {}
                     Err(e) => tracing::warn!(
                         "[RTSP] RTCP RR 发送失败 track={} target={}: {}",
                         track_id,
@@ -560,7 +564,11 @@ impl RtspServerAdapter {
             return Some(RtspResponse::unauthorized(cseq, &www));
         };
 
-        tracing::warn!("[RTSP] 认证暂未实现 method={} stream={}", method, stream_key);
+        tracing::warn!(
+            "[RTSP] 认证暂未实现 method={} stream={}",
+            method,
+            stream_key
+        );
         Some(RtspResponse::unauthorized(cseq, &www))
     }
 
@@ -652,11 +660,8 @@ impl RtspServerAdapter {
                     Self::default_h264_track()
                 };
 
-                let sdp = SdpParser::build_sdp(
-                    &stream_key,
-                    &self.deps.config.server.host,
-                    &sdp_tracks,
-                );
+                let sdp =
+                    SdpParser::build_sdp(&stream_key, &self.deps.config.server.host, &sdp_tracks);
                 (events, Some(RtspResponse::describe(cseq, &sdp)))
             }
 
@@ -740,8 +745,7 @@ impl RtspServerAdapter {
                         s.transport_mode = RtpTransportMode::Udp;
                         s.rtp_port = Some(rtp_port);
 
-                        let mut tt =
-                            TrackTransport::new_udp(track_id.clone(), rtp_port, rtcp_port);
+                        let mut tt = TrackTransport::new_udp(track_id.clone(), rtp_port, rtcp_port);
                         tt.server = Some(Arc::clone(&server));
                         tt.local_ssrc = Some(local_ssrc);
                         tt.client_rtp = Some(client_rtp);
@@ -879,10 +883,7 @@ impl RtspServerAdapter {
 
                 self.release_all_udp_tracks().await;
 
-                let session_id = self
-                    .session
-                    .clone()
-                    .unwrap_or_else(|| sess_id.to_string());
+                let session_id = self.session.clone().unwrap_or_else(|| sess_id.to_string());
 
                 events.push(SignalEvent::StopPlay {
                     device_tag: self.device_tag.clone(),
@@ -918,26 +919,15 @@ impl RtspServerAdapter {
 
         let header_str = match std::str::from_utf8(&data[..header_end]) {
             Ok(s) => s,
-            Err(_) => {
-                return (
-                    Vec::new(),
-                    Some(RtspResponse::error(0, 400, "Bad Request")),
-                )
-            }
+            Err(_) => return (Vec::new(), Some(RtspResponse::error(0, 400, "Bad Request"))),
         };
 
         let lines: Vec<&str> = header_str.split("\r\n").collect();
         if lines.is_empty() {
-            return (
-                Vec::new(),
-                Some(RtspResponse::error(0, 400, "Bad Request")),
-            );
+            return (Vec::new(), Some(RtspResponse::error(0, 400, "Bad Request")));
         }
         let Some((method, url, _version)) = Self::parse_request_line(lines[0]) else {
-            return (
-                Vec::new(),
-                Some(RtspResponse::error(0, 400, "Bad Request")),
-            );
+            return (Vec::new(), Some(RtspResponse::error(0, 400, "Bad Request")));
         };
         let headers = Self::parse_headers(&lines[1..]);
 

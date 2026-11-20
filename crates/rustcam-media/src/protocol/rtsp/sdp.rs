@@ -40,7 +40,9 @@ impl SdpParser {
 
         for line in sdp.lines() {
             let line = line.trim();
-            if line.is_empty() { continue; }
+            if line.is_empty() {
+                continue;
+            }
 
             let (key, val) = match line.split_once('=') {
                 Some((k, v)) => (k.trim(), v.trim()),
@@ -49,15 +51,21 @@ impl SdpParser {
 
             match key {
                 "v" => {}
-                "o" => { info.origin = Some(val.to_string()); }
-                "s" => { info.session_name = val.to_string(); }
+                "o" => {
+                    info.origin = Some(val.to_string());
+                }
+                "s" => {
+                    info.session_name = val.to_string();
+                }
                 "c" => {
                     if let Some(addr) = Self::parse_connection(val) {
                         info.connection_addr = Some(addr);
                     }
                 }
                 "t" => {}
-                "b" => { info.bandwidth = Some(val.to_string()); }
+                "b" => {
+                    info.bandwidth = Some(val.to_string());
+                }
                 "a" => {
                     if let Some(pending_list) = pending_track.take() {
                         if let Some(updated) = Self::parse_attribute(val, Some(pending_list)) {
@@ -68,20 +76,26 @@ impl SdpParser {
                 "m" => {
                     if let Some(pending_list) = pending_track.take() {
                         for pending in pending_list {
-                            if let Some(track) = pending.into_track() { info.tracks.push(track); }
+                            if let Some(track) = pending.into_track() {
+                                info.tracks.push(track);
+                            }
                         }
                     }
                     if let Some(pending_list) = Self::parse_media_line(val) {
                         pending_track = Some(pending_list);
                     }
                 }
-                _ => { info.attributes.insert(key.to_string(), val.to_string()); }
+                _ => {
+                    info.attributes.insert(key.to_string(), val.to_string());
+                }
             }
         }
 
         if let Some(pending_list) = pending_track {
             for pending in pending_list {
-                if let Some(track) = pending.into_track() { info.tracks.push(track); }
+                if let Some(track) = pending.into_track() {
+                    info.tracks.push(track);
+                }
             }
         }
 
@@ -92,7 +106,9 @@ impl SdpParser {
         let parts: Vec<&str> = val.split_whitespace().collect();
         if parts.len() >= 3 && parts[0] == "IN" && parts[1] == "IP4" {
             Some(parts[2].to_string())
-        } else { None }
+        } else {
+            None
+        }
     }
 
     fn parse_media_line(val: &str) -> Option<Vec<PendingTrack>> {
@@ -105,21 +121,32 @@ impl SdpParser {
                     tracks.push(PendingTrack::new(media.clone(), payload_type));
                 }
             }
-            if tracks.is_empty() { None } else { Some(tracks) }
-        } else { None }
+            if tracks.is_empty() {
+                None
+            } else {
+                Some(tracks)
+            }
+        } else {
+            None
+        }
     }
 
-    fn parse_attribute(val: &str, mut pending: Option<Vec<PendingTrack>>) -> Option<Vec<PendingTrack>> {
+    fn parse_attribute(
+        val: &str,
+        mut pending: Option<Vec<PendingTrack>>,
+    ) -> Option<Vec<PendingTrack>> {
         if let Some(ref mut pending_list) = pending {
             if val.starts_with("rtpmap:") {
                 let after_prefix = &val[7..];
                 let parts: Vec<&str> = after_prefix.split_whitespace().collect();
                 if parts.len() >= 2 {
                     if let Ok(pt) = parts[0].parse::<u8>() {
-                        if let Some(track) = pending_list.iter_mut().find(|t| t.payload_type == pt) {
+                        if let Some(track) = pending_list.iter_mut().find(|t| t.payload_type == pt)
+                        {
                             if let Some((codec, rest)) = parts[1].split_once('/') {
                                 track.codec = Some(codec.to_string());
-                                track.clock_rate = rest.split('/').next().and_then(|s| s.parse().ok());
+                                track.clock_rate =
+                                    rest.split('/').next().and_then(|s| s.parse().ok());
                             }
                         }
                     }
@@ -128,7 +155,8 @@ impl SdpParser {
                 let fmtp_part = &val[5..];
                 if let Some((pt_str, params)) = fmtp_part.split_once(' ') {
                     if let Ok(pt) = pt_str.parse::<u8>() {
-                        if let Some(track) = pending_list.iter_mut().find(|t| t.payload_type == pt) {
+                        if let Some(track) = pending_list.iter_mut().find(|t| t.payload_type == pt)
+                        {
                             track.fmtp = Some(params.to_string());
                         }
                     }
@@ -172,8 +200,14 @@ impl SdpParser {
         ];
 
         for track in tracks {
-            lines.push(format!("m={} 0 RTP/AVP {}", track.media, track.payload_type));
-            lines.push(format!("a=rtpmap:{} {}/{}", track.payload_type, track.codec, track.clock_rate));
+            lines.push(format!(
+                "m={} 0 RTP/AVP {}",
+                track.media, track.payload_type
+            ));
+            lines.push(format!(
+                "a=rtpmap:{} {}/{}",
+                track.payload_type, track.codec, track.clock_rate
+            ));
             if let Some(ref fmtp) = track.fmtp {
                 lines.push(format!("a=fmtp:{} {}", track.payload_type, fmtp));
             }
@@ -200,7 +234,11 @@ struct PendingTrack {
 
 impl PendingTrack {
     fn new(media: String, payload_type: u8) -> Self {
-        Self { media, payload_type, ..Default::default() }
+        Self {
+            media,
+            payload_type,
+            ..Default::default()
+        }
     }
 
     fn into_track(self) -> Option<SdpTrack> {
@@ -258,8 +296,12 @@ a=rtpmap:97 MPEG4/44100"#;
     #[test]
     fn test_build_sdp() {
         let tracks = vec![SdpTrack {
-            media: "video".to_string(), payload_type: 96, codec: "H264".to_string(),
-            clock_rate: 90000, fmtp: Some("packetization-mode=1".to_string()), control: None,
+            media: "video".to_string(),
+            payload_type: 96,
+            codec: "H264".to_string(),
+            clock_rate: 90000,
+            fmtp: Some("packetization-mode=1".to_string()),
+            control: None,
             direction: SdpDirection::RecvOnly,
             attributes: std::collections::HashMap::new(),
         }];

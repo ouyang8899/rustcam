@@ -147,8 +147,7 @@ pub fn get_session(id: &str) -> Option<Arc<tokio::sync::RwLock<RtspSession>>> {
 }
 
 pub fn remove_session(id: &str) {
-    if RTSP_SESSIONS.remove(id).is_some() {
-    }
+    if RTSP_SESSIONS.remove(id).is_some() {}
 }
 
 pub fn session_count() -> usize {
@@ -158,7 +157,6 @@ pub fn session_count() -> usize {
 pub fn get_session_by_stream_key(
     stream_key: &str,
 ) -> Option<Arc<tokio::sync::RwLock<RtspSession>>> {
-
     let candidates: Vec<Arc<tokio::sync::RwLock<RtspSession>>> =
         RTSP_SESSIONS.iter().map(|r| r.value().clone()).collect();
     for c in candidates {
@@ -178,12 +176,13 @@ pub fn cleanup_timed_out_sessions(timeout_secs: u64) -> usize {
     for id in &ids {
         RTSP_SESSIONS.remove(id);
     }
-    if !ids.is_empty() {
-    }
+    if !ids.is_empty() {}
     ids.len()
 }
 
-pub async fn cleanup_expired(cluster: Arc<crate::infrastructure::cluster::ClusterManager>) -> usize {
+pub async fn cleanup_expired(
+    cluster: Arc<crate::infrastructure::cluster::ClusterManager>,
+) -> usize {
     let ids: Vec<String> = RTSP_SESSIONS
         .iter()
         .filter(|r| r.value().blocking_read().is_timeout(60))
@@ -192,7 +191,6 @@ pub async fn cleanup_expired(cluster: Arc<crate::infrastructure::cluster::Cluste
 
     let mut removed = 0;
     for id in ids {
-
         let (tag, stream_id) = {
             let Some(sess_guard) = RTSP_SESSIONS.get(&id) else {
                 continue;
@@ -218,7 +216,12 @@ pub async fn cleanup_expired(cluster: Arc<crate::infrastructure::cluster::Cluste
 
         if let Some(adapter) = cluster.get_server(&tag) {
             if let Err(e) = adapter.close_rtp_server(&stream_id).await {
-                tracing::warn!("[RTSP] Cleanup: failed to close RTP server {} on {}: {}", stream_id, tag, e);
+                tracing::warn!(
+                    "[RTSP] Cleanup: failed to close RTP server {} on {}: {}",
+                    stream_id,
+                    tag,
+                    e
+                );
             } else {
             }
         }

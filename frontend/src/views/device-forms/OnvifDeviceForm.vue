@@ -31,15 +31,12 @@
       <el-col :span="12">
         <el-form-item label="自定义分组">
           <el-select v-model="localForm.group_id" placeholder="选择分组（可选）" clearable style="width: 100%">
-            <template v-for="group in groupTree" :key="group.id">
-              <el-option :label="group.name" :value="group.id" />
-              <template v-for="child in (group.children || [])" :key="child.id">
-                <el-option :label="'  ├─ ' + child.name" :value="child.id" />
-                <template v-for="grandchild in (child.children || [])" :key="grandchild.id">
-                  <el-option :label="'    └─ ' + grandchild.name" :value="grandchild.id" />
-                </template>
-              </template>
-            </template>
+            <el-option
+              v-for="group in flatGroups"
+              :key="group.id"
+              :label="group.label"
+              :value="group.id"
+            />
           </el-select>
         </el-form-item>
       </el-col>
@@ -90,7 +87,7 @@
       <el-switch v-model="localForm.enable_stream_config" size="small" />
     </el-form-item>
     
-    <div v-if="localForm.enable_stream_config" style="background: #f5f7fa; padding: 16px; border-radius: 4px; margin-bottom: 16px">
+    <div v-if="localForm.enable_stream_config" style="background: #f5f7fa; padding: 16px; border-radius: 0; margin-bottom: 16px">
       <p style="margin: 0 0 12px 0; color: #909399; font-size: 12px;">ONVIF 设备会自动获取媒体参数，如有兼容性问题可手动覆盖：</p>
       <el-row :gutter="12">
         <el-col :span="8">
@@ -130,7 +127,7 @@
       <el-switch v-model="localForm.enable_recording" size="small" />
     </el-form-item>
     
-    <div v-if="localForm.enable_recording" style="background: #f5f7fa; padding: 16px; border-radius: 4px; margin-bottom: 16px">
+    <div v-if="localForm.enable_recording" style="background: #f5f7fa; padding: 16px; border-radius: 0; margin-bottom: 16px">
       <el-row :gutter="12">
         <el-col :span="8">
           <el-form-item label="录像格式">
@@ -173,7 +170,7 @@
       <el-checkbox v-model="localForm.is_public">公开设备（无需登录可观看）</el-checkbox>
     </el-form-item>
 
-    <el-dialog v-model="showDiscoverDialog" title="发现(ONVIF)设备" width="780px" draggable destroy-on-close>
+    <AppDialog v-model="showDiscoverDialog" title="发现(ONVIF)设备" size="lg" draggable>
       <el-skeleton animated :rows="4" :loading="broadcastDiscovering">
         <el-table :data="discoveredDevices" empty-text="未发现设备，请确保设备已启动且网络可达" highlight-current-row @row-click="(row) => selectedDevice = row">
           <el-table-column label="名称" show-overflow-tooltip>
@@ -247,22 +244,28 @@
           确认添加 {{ onvifSelectedStreams.length > 0 ? `(${onvifSelectedStreams.length}个通道)` : (manualRtspUrl.trim() ? '(1个通道)' : '') }}
         </el-button>
       </template>
-    </el-dialog>
+    </AppDialog>
   </div>
 </template>
 
 <script setup>
 import { reactive, ref, computed, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { useToast } from '../../composables/useToast'
+
+const toast = useToast()
 import { request } from '../../utils/request'
+import { useDeviceTreeStore } from '../../stores/deviceTreeStore'
+import AppDialog from '../../components/common/AppDialog.vue'
 
 const props = defineProps({
   modelValue: Object,
   mediaServerOptions: Array,
   regionTree: Array,
-  groupTree: Array,
   deviceTag: String,
 })
+
+const treeStore = useDeviceTreeStore()
+const flatGroups = computed(() => treeStore.flatGroups)
 
 const localForm = reactive({
   name: '',
@@ -338,10 +341,10 @@ async function onBroadcastDiscover() {
     const res = await request.post('/onvif/discover', {})
     discoveredDevices.value = res.data?.data || []
     if (discoveredDevices.value.length === 0) {
-      ElMessage.warning('未发现 ONVIF 设备，请确保设备已启动且网络可达')
+      toast.warning('未发现 ONVIF 设备，请确保设备已启动且网络可达')
     }
   } catch (e) {
-    ElMessage.error('广播发现失败: ' + (e?.message || e))
+    toast.error('广播发现失败: ' + (e?.message || e))
   } finally {
     broadcastDiscovering.value = false
   }
@@ -351,7 +354,7 @@ async function onFetchProfiles() {
   const dev = selectedDevice.value
   if (!dev) return
   const address = dev.address || dev.x_addr || ''
-  if (!address) { ElMessage.warning('设备地址为空'); return }
+  if (!address) { toast.warning('设备地址为空'); return }
   fetchingProfiles.value = true
   onvifStreams.value = []
   onvifSelectedStreams.value = []
@@ -366,7 +369,7 @@ async function onFetchProfiles() {
     const capsData = capsRes.data?.data
     const profiles = capsData?.profiles || []
     if (profiles.length === 0) {
-      ElMessage.warning('未发现媒体通道，请检查地址和认证信息')
+      toast.warning('未发现媒体通道，请检查地址和认证信息')
       return
     }
     const streamRes = await request.post('/onvif/stream-uris', {
@@ -389,16 +392,16 @@ async function onFetchProfiles() {
     }).filter(s => s.rtsp_url)
     if (onvifStreams.value.length > 0) {
       selectAllStreams.value = true
-      ElMessage.success(`已获取 ${onvifStreams.value.length} 个视频通道`)
+      toast.success(`已获取 ${onvifStreams.value.length} 个视频通道`)
     } else {
-      ElMessage.warning('未发现 RTSP 链接，请检查用户名和密码')
+      toast.warning('未发现 RTSP 链接，请检查用户名和密码')
     }
     capabilities.value = {
       ptz: !!(capsData?.capabilities?.ptz),
       audio: capsData?.capabilities?.has_audio || false,
     }
   } catch (e) {
-    ElMessage.error('获取能力失败: ' + (e?.message || e))
+    toast.error('获取能力失败: ' + (e?.message || e))
   } finally {
     fetchingProfiles.value = false
   }
@@ -423,15 +426,15 @@ async function onConfirmDevice() {
     
     if (onvifSelectedStreams.value.length > 0) {
       localForm.pull_urls = onvifSelectedStreams.value.map((s, i) => ({ protocol: 'rtsp', url: s.rtsp_url, priority: i + 1 }))
-      ElMessage.success(`设备已选择 ${onvifSelectedStreams.value.length} 个通道`)
+      toast.success(`设备已选择 ${onvifSelectedStreams.value.length} 个通道`)
     } else {
       localForm.pull_urls = [{ protocol: 'rtsp', url: manualRtspUrl.value.trim(), priority: 1 }]
-      ElMessage.success(`设备已添加（手动RTSP URL）`)
+      toast.success(`设备已添加（手动RTSP URL）`)
     }
     
     closeDiscoverDialog()
   } catch (e) {
-    ElMessage.error('确认失败: ' + (e?.message || e))
+    toast.error('确认失败: ' + (e?.message || e))
   } finally {
     submitting.value = false
   }
@@ -481,7 +484,7 @@ async function loadData(deviceTag) {
       max_file_size_mb: devRecording.max_file_size_mb || 0,
     }
   } catch (e) {
-    ElMessage.error('加载设备数据失败: ' + (e?.message || e))
+    toast.error('加载设备数据失败: ' + (e?.message || e))
   }
 }
 

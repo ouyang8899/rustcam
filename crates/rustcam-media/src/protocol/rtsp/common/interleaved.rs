@@ -50,10 +50,8 @@ impl InterleavedParser {
             }
 
             let channel = self.buffer[offset + 1];
-            let payload_len = u16::from_be_bytes([
-                self.buffer[offset + 2],
-                self.buffer[offset + 3],
-            ]) as usize;
+            let payload_len =
+                u16::from_be_bytes([self.buffer[offset + 2], self.buffer[offset + 3]]) as usize;
 
             if payload_len > MAX_INTERLEAVED_PAYLOAD {
                 tracing::warn!(
@@ -175,11 +173,17 @@ impl InterleavedStats {
             self.rtp_frame_count += 1;
             if frame.payload.len() >= 12 {
                 let seq = u16::from_be_bytes([frame.payload[2], frame.payload[3]]);
-                let timestamp = u32::from_be_bytes([frame.payload[4], frame.payload[5], frame.payload[6], frame.payload[7]]);
+                let timestamp = u32::from_be_bytes([
+                    frame.payload[4],
+                    frame.payload[5],
+                    frame.payload[6],
+                    frame.payload[7],
+                ]);
                 if let Some(ssrc) = RtcpPacket::extract_ssrc_from_rtp(&frame.payload) {
                     self.rtcp_stats.last_remote_ssrc = Some(ssrc);
                 }
-                self.rtcp_stats.update_from_rtp(seq, timestamp, std::time::Instant::now());
+                self.rtcp_stats
+                    .update_from_rtp(seq, timestamp, std::time::Instant::now());
             }
         } else {
             self.rtcp_frame_count += 1;
@@ -189,8 +193,14 @@ impl InterleavedStats {
                     rtp_timestamp,
                     sender_packet_count,
                     sender_octet_count,
-                } = report_type {
-                    self.rtcp_stats.update_from_sr(ntp_timestamp, rtp_timestamp, sender_packet_count, sender_octet_count);
+                } = report_type
+                {
+                    self.rtcp_stats.update_from_sr(
+                        ntp_timestamp,
+                        rtp_timestamp,
+                        sender_packet_count,
+                        sender_octet_count,
+                    );
                 }
             }
         }
@@ -220,8 +230,14 @@ mod tests {
 
     #[test]
     fn test_parse_channels() {
-        assert_eq!(parse_interleaved_channels("RTP/AVP/TCP;unicast;interleaved=0-1"), Some((0, 1)));
-        assert_eq!(parse_interleaved_channels("RTP/AVP/TCP;unicast;interleaved=2-3"), Some((2, 3)));
+        assert_eq!(
+            parse_interleaved_channels("RTP/AVP/TCP;unicast;interleaved=0-1"),
+            Some((0, 1))
+        );
+        assert_eq!(
+            parse_interleaved_channels("RTP/AVP/TCP;unicast;interleaved=2-3"),
+            Some((2, 3))
+        );
         assert_eq!(parse_interleaved_channels("RTP/AVP/UDP"), None);
     }
 }

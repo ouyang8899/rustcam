@@ -1,7 +1,7 @@
-use std::sync::Arc;
-use axum::{extract::State, Json};
 use crate::api::response::ApiResponse;
 use crate::api::state::FullState;
+use axum::{extract::State, Json};
+use std::sync::Arc;
 
 pub async fn dashboard_handler(
     State(state): State<Arc<FullState>>,

@@ -58,7 +58,8 @@ impl TourSchemeService {
             .await?
             .ok_or_else(|| AppError::NotFound(format!("轮询方案 {} 不存在", id)))?;
         let (layout_w, layout_item_ids) = self.layout_meta(req.scheme.layout_id).await?;
-        validate_tour_scheme(&req.scheme, layout_w, &layout_item_ids).map_err(AppError::BadRequest)?;
+        validate_tour_scheme(&req.scheme, layout_w, &layout_item_ids)
+            .map_err(AppError::BadRequest)?;
         // 布局变更时旧锁定已失效，服务端清空锁定集合。
         let clear_locks = current.layout_id != req.scheme.layout_id;
         let updated = self

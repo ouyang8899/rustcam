@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dashmap::DashMap;
-use tokio::io::{ AsyncReadExt, BufReader };
+use tokio::io::{AsyncReadExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinSet;
@@ -147,7 +147,6 @@ impl TcpRtspRtpServer {
     }
 
     pub async fn run(self: Arc<Self>) -> anyhow::Result<()> {
-
         let cleanup_handle = self.start_cleanup_task();
 
         let mut connections_join: JoinSet<()> = JoinSet::new();
@@ -206,12 +205,9 @@ impl TcpRtspRtpServer {
 
         self.shutdown().await;
         cleanup_handle.abort();
-        let _ = tokio::time::timeout(
-            Duration::from_secs(5),
-            async {
-                while connections_join.join_next().await.is_some() {}
-            },
-        )
+        let _ = tokio::time::timeout(Duration::from_secs(5), async {
+            while connections_join.join_next().await.is_some() {}
+        })
         .await;
 
         Ok(())
@@ -234,8 +230,13 @@ impl TcpRtspRtpServer {
             if !entry.try_mark_disconnected() {
                 continue;
             }
-            Self::finalize_connection(&entry, &self.event_bus, &self.event_callback, "server shutdown")
-                .await;
+            Self::finalize_connection(
+                &entry,
+                &self.event_bus,
+                &self.event_callback,
+                "server shutdown",
+            )
+            .await;
             self.metrics.connection_closed();
         }
 
@@ -336,7 +337,6 @@ impl TcpRtspRtpServer {
         addr: SocketAddr,
         shutdown_token: CancellationToken,
     ) -> anyhow::Result<()> {
-
         let _ = stream.set_nodelay(true);
 
         let (reader, write_half) = stream.into_split();
@@ -396,13 +396,11 @@ impl TcpRtspRtpServer {
         let mut reader = BufReader::with_capacity(READ_CHUNK, reader);
         let mut buffer = vec![0u8; READ_CHUNK];
 
-        let mut keepalive_tick =
-            tokio::time::interval(Duration::from_secs(KEEPALIVE_TICK_SECS));
+        let mut keepalive_tick = tokio::time::interval(Duration::from_secs(KEEPALIVE_TICK_SECS));
         keepalive_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         keepalive_tick.tick().await;
 
-        let mut event_poll =
-            tokio::time::interval(Duration::from_millis(EVENT_POLL_INTERVAL_MS));
+        let mut event_poll = tokio::time::interval(Duration::from_millis(EVENT_POLL_INTERVAL_MS));
         event_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         event_poll.tick().await;
 

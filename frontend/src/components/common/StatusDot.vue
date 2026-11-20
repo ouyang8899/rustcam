@@ -1,28 +1,22 @@
 <template>
-  <span class="status-dot" :class="status"></span>
+  <span class="status-dot" :class="cls" :title="title" />
 </template>
 
 <script setup>
-defineProps({
-  status: {
-    type: String,
-    default: 'offline',
-  }
+import { computed } from 'vue'
+
+const props = defineProps({
+  status: { type: String, default: 'offline' },
+  title: { type: String, default: '' },
+})
+
+const cls = computed(() => {
+  const s = (props.status || '').toLowerCase()
+  if (s === 'online' || s === 'recording') return 'online'
+  if (s === 'warning') return 'warning'
+  if (s === 'error') return 'error'
+  if (s === 'maintaining') return 'maintaining'
+  return 'offline'
 })
 </script>
 
-<style scoped>
-.status-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.status-dot.online    { background-color: var(--color-success); animation: pulse-online 2s ease-in-out infinite; }
-.status-dot.offline { background-color: var(--status-offline); }
-.status-dot.warning  { background-color: var(--color-warning); }
-.status-dot.error    { background-color: var(--color-danger); }
-.status-dot.maintaining { background-color: var(--color-warning); animation: pulse-online 1.5s ease-in-out infinite; }
-.status-dot.recording { background-color: var(--color-danger); animation: pulse-online 1.5s ease-in-out infinite; }
-</style>

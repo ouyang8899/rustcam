@@ -1,60 +1,56 @@
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <h1 class="page-title">用户管理</h1>
-      <div class="page-toolbar">
-        <el-button type="primary" :icon="Plus" @click="openCreateModal">创建用户</el-button>
-      </div>
-    </div>
-    <div class="page-body">
-      <DataCard>
-        <el-skeleton animated :loading="loading" :rows="4">
-          <template #default>
-            <el-table :data="users" style="margin-top: 0">
-              <el-table-column label="用户名" prop="username" />
-              <el-table-column label="角色" min-width="160">
-                <template #default="{ row }">
-                  <el-tag v-for="role in row.roles" :key="role" size="small" style="margin-right: 4px">{{ role }}</el-tag>
-                  <span v-if="!row.roles?.length">-</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="超级用户" width="120" align="center">
-                <template #default="{ row }">
-                  <el-switch
-                    :model-value="!!row.is_super"
-                    :disabled="!canManageSuper || row.id === currentUserId"
-                    @change="(value) => toggleSuper(row, value)"
-                  />
-                </template>
-              </el-table-column>
-              <el-table-column label="创建时间" width="180">
-                <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
-              </el-table-column>
-              <el-table-column label="操作" width="220">
-                <template #default="{ row }">
-                  <el-button size="small" @click="openEditModal(row)">编辑</el-button>
-                  <el-button size="small" @click="openRolesModal(row)">角色</el-button>
-                  <el-button v-if="row.id !== currentUserId" size="small" type="danger" plain @click="confirmDelete(row)">删除</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-            <el-empty v-if="users.length === 0" description="暂无用户" />
-          </template>
-        </el-skeleton>
+  <PageView title="用户管理">
+    <template #toolbar>
+      <el-button type="primary" :icon="Plus" @click="openCreateModal">创建用户</el-button>
+    </template>
 
-        <div v-if="total > pageSize" class="pagination-wrapper">
-          <el-pagination
-            v-model:current-page="currentPage"
-            :page-size="pageSize"
-            :total="total"
-            layout="prev, pager, next"
-            @current-change="fetchUsers"
-          />
-        </div>
-      </DataCard>
-    </div>
+    <DataCard>
+      <el-skeleton animated :loading="loading" :rows="4">
+        <template #default>
+          <el-table :data="users" border stripe size="small" style="margin-top: 0">
+            <el-table-column label="用户名" prop="username" />
+            <el-table-column label="角色" min-width="160">
+              <template #default="{ row }">
+                <el-tag v-for="role in row.roles" :key="role" size="small" style="margin-right: 4px">{{ role }}</el-tag>
+                <span v-if="!row.roles?.length">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="超级用户" width="120" align="center">
+              <template #default="{ row }">
+                <el-switch
+                  :model-value="!!row.is_super"
+                  :disabled="!canManageSuper || row.id === currentUserId"
+                  @change="(value) => toggleSuper(row, value)"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column label="创建时间" width="180">
+              <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="220">
+              <template #default="{ row }">
+                <el-button size="small" @click="openEditModal(row)">编辑</el-button>
+                <el-button size="small" @click="openRolesModal(row)">角色</el-button>
+                <el-button v-if="row.id !== currentUserId" size="small" type="danger" plain @click="confirmDelete(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <EmptyState v-if="users.length === 0" title="暂无用户" />
+        </template>
+      </el-skeleton>
+    </DataCard>
 
-    <el-dialog v-model="showCreateModal" title="创建用户" width="420px" :close-on-click-modal="false">
+    <template #footer>
+      <PaginationBar
+        v-model:page="currentPage"
+        v-model:page-size="pageSize"
+        :total="total"
+        show-sizes
+        @change="fetchUsers"
+      />
+    </template>
+
+    <AppDialog v-model="showCreateModal" title="创建用户" size="sm" :close-on-click-modal="false">
       <el-form label-position="top">
         <el-form-item label="用户名 *" required>
           <el-input v-model="createForm.username" />
@@ -67,9 +63,9 @@
         <el-button @click="showCreateModal = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitCreate">创建</el-button>
       </template>
-    </el-dialog>
+    </AppDialog>
 
-    <el-dialog v-model="showEditModal" :title="`编辑用户: ${editUser?.username}`" width="420px" :close-on-click-modal="false">
+    <AppDialog v-model="showEditModal" :title="`编辑用户: ${editUser?.username}`" size="sm" :close-on-click-modal="false">
       <el-form-item label="新密码 (留空保持不变)">
         <el-input v-model="editForm.password" type="password" show-password placeholder="留空保持不变" />
       </el-form-item>
@@ -77,9 +73,9 @@
         <el-button @click="showEditModal = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitEdit">保存</el-button>
       </template>
-    </el-dialog>
+    </AppDialog>
 
-    <el-dialog v-model="showRolesModal" :title="`分配角色: ${rolesUser?.username}`" width="420px" :close-on-click-modal="false">
+    <AppDialog v-model="showRolesModal" :title="`分配角色: ${rolesUser?.username}`" size="sm" :close-on-click-modal="false">
       <div style="display: flex; flex-direction: column; gap: 8px">
         <div
           v-for="role in availableRoles"
@@ -98,8 +94,8 @@
         <el-button @click="showRolesModal = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitRoles">保存</el-button>
       </template>
-    </el-dialog>
-  </div>
+    </AppDialog>
+  </PageView>
 </template>
 
 <script setup>
@@ -111,6 +107,10 @@ import { useToast } from '../composables/useToast'
 import * as userApi from '../api/users'
 import * as roleApi from '../api/roles'
 import DataCard from '../components/common/DataCard.vue'
+import PageView from '../components/common/PageView.vue'
+import EmptyState from '../components/common/EmptyState.vue'
+import AppDialog from '../components/common/AppDialog.vue'
+import PaginationBar from '../components/common/PaginationBar.vue'
 
 const auth = useAuthStore()
 const toast = useToast()
@@ -121,14 +121,13 @@ const loading = ref(false)
 const submitting = ref(false)
 const total = ref(0)
 const currentPage = ref(1)
-const pageSize = 20
+const pageSize = ref(20)
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
 const showRolesModal = ref(false)
 const editUser = ref(null)
 const rolesUser = ref(null)
 const currentUserId = auth.currentUser?.id
-/** 只有超级用户能改超级用户标志（服务端同样会实时复核）。 */
 const canManageSuper = computed(() => !!auth.currentUser?.is_super)
 
 const createForm = ref({ username: '', password: '' })
@@ -137,21 +136,16 @@ const rolesForm = ref({ roleIds: [] })
 
 onMounted(async () => { await Promise.all([fetchUsers(), fetchRoles()]) })
 
-/**
- * 拉取用户列表（服务端分页）。
- *
- * 删完最后一页的最后一条时要回退一页，否则会停在空页上。
- */
 async function fetchUsers() {
   loading.value = true
   try {
-    const res = await userApi.getUsers({
-      limit: pageSize,
-      offset: (currentPage.value - 1) * pageSize,
-    })
-    total.value = res.total || 0
-    users.value = res.items || []
-    const maxPage = Math.max(1, Math.ceil(total.value / pageSize))
+      const res = await userApi.getUsers({
+        limit: pageSize.value,
+        offset: (currentPage.value - 1) * pageSize.value,
+      })
+      total.value = res.total || 0
+      users.value = res.items || []
+      const maxPage = Math.max(1, Math.ceil(total.value / pageSize.value))
     if (currentPage.value > maxPage) {
       currentPage.value = maxPage
       await fetchUsers()
@@ -176,11 +170,6 @@ async function submitRoles() { submitting.value = true; try { await userApi.assi
 
 async function confirmDelete(user) { try { await ElMessageBox.confirm(`确定删除用户 "${user.username}" 吗？`, '确认删除', { type: 'warning' }); await userApi.deleteUser(user.id); toast.success('用户已删除'); await fetchUsers() } catch {} }
 
-/**
- * 设置/取消超级用户标志。
- *
- * 变更后该用户的会话会被服务端吊销，需要重新登录才会生效。
- */
 async function toggleSuper(user, value) {
   const tip = value
     ? `确定把 "${user.username}" 设为超级用户吗？超级用户自动拥有全部权限。`
@@ -202,7 +191,3 @@ async function toggleSuper(user, value) {
 
 function formatDate(dateStr) { if (!dateStr) return '-'; return new Date(dateStr).toLocaleString('zh-CN', { hour12: false }) }
 </script>
-
-<style scoped>
-.pagination-wrapper { display: flex; justify-content: center; margin-top: 16px; }
-</style>

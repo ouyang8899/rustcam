@@ -18,6 +18,9 @@
 #include <QTimer>
 #include <QDir>
 #include <QDateTime>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QStyleFactory>
 #include <QTranslator>
 #include <QLocale>
@@ -137,41 +140,33 @@ void App::onSessionInvalid()
 void App::loadMapSettings()
 {
     ServerApi::instance()->get("/api/v1/settings/map", [this](bool success, const QJsonObject& resp, const QString& error) {
-        QString tmsUrl;
-        QString wfsUrl;
-        int minZoom = 0;
-        int maxZoom = 19;
+        QString layersJson = QStringLiteral("[]");
+        QString wfsJson = QStringLiteral("{}");
 
         if (success) {
             const QJsonObject data = resp.value("data").toObject();
-            tmsUrl = data.value("client_tms_url").toString();
-            wfsUrl = data.value("wfs_url").toString();
-            minZoom = data.value("client_min_zoom").toInt(0);
-            maxZoom = data.value("client_max_zoom").toInt(19);
+            const QJsonArray layers = data.value("client_layers").toArray();
+            layersJson = QString::fromUtf8(QJsonDocument(layers).toJson(QJsonDocument::Compact));
+            const QJsonObject wfs = data.value("wfs").toObject();
+            wfsJson = QString::fromUtf8(QJsonDocument(wfs).toJson(QJsonDocument::Compact));
         } else {
             LOG_WARNING("App", QString("Failed to load map settings: %1").arg(error));
         }
 
         if (success) {
-            SystemConfig::instance()->setValue(CFG_MAP_TMS_URL, tmsUrl);
-            SystemConfig::instance()->setValue(CFG_MAP_WFS_URL, wfsUrl);
-            SystemConfig::instance()->setValue(CFG_MAP_MIN_ZOOM, minZoom);
-            SystemConfig::instance()->setValue(CFG_MAP_MAX_ZOOM, maxZoom);
+            SystemConfig::instance()->setValue(CFG_MAP_LAYERS_JSON, layersJson);
+            SystemConfig::instance()->setValue(CFG_MAP_WFS_JSON, wfsJson);
         } else {
             // Keep the last known values so that the map still has a basemap.
-            tmsUrl = SystemConfig::instance()->getValue(CFG_MAP_TMS_URL).toString();
-            wfsUrl = SystemConfig::instance()->getValue(CFG_MAP_WFS_URL).toString();
-            minZoom = SystemConfig::instance()->getValue(CFG_MAP_MIN_ZOOM, 0);
-            maxZoom = SystemConfig::instance()->getValue(CFG_MAP_MAX_ZOOM, 19);
+            layersJson = SystemConfig::instance()->getValue(CFG_MAP_LAYERS_JSON).toString();
+            wfsJson = SystemConfig::instance()->getValue(CFG_MAP_WFS_JSON).toString();
         }
 
-        LOG_INFO("App", QString("Map settings loaded, client tms url: %1 (zoom %2-%3)").arg(tmsUrl).arg(minZoom).arg(maxZoom));
+        LOG_INFO("App", QString("Map settings loaded, client layers: %1").arg(layersJson));
 
         EventDataPtr data = EventData::create();
-        data->m_payload.insert("tms_url", tmsUrl);
-        data->m_payload.insert("wfs_url", wfsUrl);
-        data->m_payload.insert("min_zoom", minZoom);
-        data->m_payload.insert("max_zoom", maxZoom);
+        data->m_payload.insert("client_layers", layersJson);
+        data->m_payload.insert("wfs", wfsJson);
         EventBus::instance()->publish(TOPIC_MAP_TILES_URL, data);
     });
 }

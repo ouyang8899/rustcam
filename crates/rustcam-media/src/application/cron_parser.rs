@@ -8,12 +8,17 @@ pub struct CronExpr {
 
 impl CronExpr {
     pub fn parse(expr: &str) -> Result<Self, CronError> {
-        let schedule = Schedule::from_str(expr).map_err(|e| CronError::InvalidExpression(e.to_string()))?;
+        let schedule =
+            Schedule::from_str(expr).map_err(|e| CronError::InvalidExpression(e.to_string()))?;
         Ok(Self { schedule })
     }
 
     pub fn matches(&self, dt: &DateTime<Utc>) -> bool {
-        self.schedule.upcoming(Utc).next().map(|t| t >= *dt).unwrap_or(false)
+        self.schedule
+            .upcoming(Utc)
+            .next()
+            .map(|t| t >= *dt)
+            .unwrap_or(false)
     }
 }
 

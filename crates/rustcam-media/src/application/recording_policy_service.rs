@@ -1,12 +1,12 @@
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use std::sync::Arc;
-use chrono::{ DateTime, Utc, Timelike, Datelike };
 
-use crate::domain::recording_policy::{
-    PolicyType, ScheduleType, RecordingPolicy, TimeWindow,
-    CreateRecordingPolicyRequest, UpdateRecordingPolicyRequest,
-    RecordingSegmentQuery, RecordingFileResponse, PaginatedRecordingFiles, PlayUrlResponse,
-};
 use crate::domain::recording::RecordingFormat;
+use crate::domain::recording_policy::{
+    CreateRecordingPolicyRequest, PaginatedRecordingFiles, PlayUrlResponse, PolicyType,
+    RecordingFileResponse, RecordingPolicy, RecordingSegmentQuery, ScheduleType, TimeWindow,
+    UpdateRecordingPolicyRequest,
+};
 use crate::error::{AppError, Result};
 
 pub struct RecordingPolicyService {
@@ -22,7 +22,13 @@ impl RecordingPolicyService {
         Self { repo, cluster }
     }
 
-    fn build_play_url(&self, server_tag: &str, device_tag: &str, channel_tag: &str, start_time: &DateTime<Utc>) -> String {
+    fn build_play_url(
+        &self,
+        server_tag: &str,
+        device_tag: &str,
+        channel_tag: &str,
+        start_time: &DateTime<Utc>,
+    ) -> String {
         let base = self
             .cluster
             .get_server_http_base_url(server_tag)
@@ -37,7 +43,10 @@ impl RecordingPolicyService {
         )
     }
 
-    pub async fn create_policy(&self, req: CreateRecordingPolicyRequest) -> Result<RecordingPolicy> {
+    pub async fn create_policy(
+        &self,
+        req: CreateRecordingPolicyRequest,
+    ) -> Result<RecordingPolicy> {
         let format = match req.format.as_deref() {
             Some("hls") | Some("HLS") => RecordingFormat::Hls,
             Some("flv") | Some("FLV") => RecordingFormat::Flv,
@@ -88,8 +97,15 @@ impl RecordingPolicyService {
         Ok(policy)
     }
 
-    pub async fn update_policy(&self, id: i64, req: UpdateRecordingPolicyRequest) -> Result<RecordingPolicy> {
-        let mut policy = self.repo.get_recording_policy(id).await?
+    pub async fn update_policy(
+        &self,
+        id: i64,
+        req: UpdateRecordingPolicyRequest,
+    ) -> Result<RecordingPolicy> {
+        let mut policy = self
+            .repo
+            .get_recording_policy(id)
+            .await?
             .ok_or_else(|| AppError::NotFound(format!("Policy {} not found", id)))?;
 
         if let Some(enabled) = req.enabled {
@@ -198,18 +214,26 @@ impl RecordingPolicyService {
         device_tag: Option<&str>,
         policy_type: Option<&str>,
     ) -> Result<i64> {
-        self.repo.count_recording_policies(device_tag, policy_type).await
+        self.repo
+            .count_recording_policies(device_tag, policy_type)
+            .await
     }
 
     pub async fn find_policies_by_device(&self, device_tag: &str) -> Result<Vec<RecordingPolicy>> {
-        let mut policies = self.repo.list_recording_policies_by_device_tag(device_tag).await?;
+        let mut policies = self
+            .repo
+            .list_recording_policies_by_device_tag(device_tag)
+            .await?;
         for policy in &mut policies {
             policy.time_windows = self.repo.list_recording_time_windows(policy.id).await?;
         }
         Ok(policies)
     }
 
-    pub async fn find_alarm_triggered_policies(&self, alarm_type: &str) -> Result<Vec<RecordingPolicy>> {
+    pub async fn find_alarm_triggered_policies(
+        &self,
+        alarm_type: &str,
+    ) -> Result<Vec<RecordingPolicy>> {
         let mut policies = self.repo.list_alarm_triggered_policies(alarm_type).await?;
         for policy in &mut policies {
             policy.time_windows = self.repo.list_recording_time_windows(policy.id).await?;
@@ -217,65 +241,80 @@ impl RecordingPolicyService {
         Ok(policies)
     }
 
-    pub async fn list_recording_segments(&self, query: RecordingSegmentQuery) -> Result<PaginatedRecordingFiles> {
+    pub async fn list_recording_segments(
+        &self,
+        query: RecordingSegmentQuery,
+    ) -> Result<PaginatedRecordingFiles> {
         let segment_type_str = query.segment_type.map(|st| st.to_string());
         let device_tag = query.device_tag.clone();
         let channel_tag = query.channel_tag.clone();
 
-        let total = self.repo.count_recording_segments_filtered(
-            device_tag.as_deref(),
-            channel_tag.as_deref(),
-            segment_type_str.as_deref(),
-            query.start_time,
-            query.end_time,
-        ).await?;
+        let total = self
+            .repo
+            .count_recording_segments_filtered(
+                device_tag.as_deref(),
+                channel_tag.as_deref(),
+                segment_type_str.as_deref(),
+                query.start_time,
+                query.end_time,
+            )
+            .await?;
 
-        let segments = self.repo.list_recording_segments_filtered_paginated(
-            device_tag.as_deref(),
-            channel_tag.as_deref(),
-            segment_type_str.as_deref(),
-            query.start_time,
-            query.end_time,
-            query.page_limit(),
-            query.page_offset(),
-        ).await?;
+        let segments = self
+            .repo
+            .list_recording_segments_filtered_paginated(
+                device_tag.as_deref(),
+                channel_tag.as_deref(),
+                segment_type_str.as_deref(),
+                query.start_time,
+                query.end_time,
+                query.page_limit(),
+                query.page_offset(),
+            )
+            .await?;
 
         // 每个文件属于哪个录像任务：外部应用按任务类型分别处理
         let task_ids: Vec<i64> = segments.iter().filter_map(|s| s.recording_id).collect();
         let task_infos = self.repo.recording_task_infos(&task_ids).await?;
 
-        let files: Vec<RecordingFileResponse> = segments.into_iter().map(|seg| {
-            // play_url 多数情况下没有落库，这里按媒体服务器上的实际路径补齐，
-            // 客户端就不需要为每个分段再请求一次 play-url。
-            let play_url = match seg.play_url.clone() {
-                Some(url) if !url.is_empty() => Some(url),
-                _ => {
-                    let server_tag = seg.server_tag.clone().unwrap_or_else(|| "default".to_string());
-                    Some(self.build_play_url(
-                        &server_tag,
-                        &seg.device_tag,
-                        &seg.channel_tag,
-                        &seg.start_time,
-                    ))
-                }
-            };
+        let files: Vec<RecordingFileResponse> = segments
+            .into_iter()
+            .map(|seg| {
+                // play_url 多数情况下没有落库，这里按媒体服务器上的实际路径补齐，
+                // 客户端就不需要为每个分段再请求一次 play-url。
+                let play_url = match seg.play_url.clone() {
+                    Some(url) if !url.is_empty() => Some(url),
+                    _ => {
+                        let server_tag = seg
+                            .server_tag
+                            .clone()
+                            .unwrap_or_else(|| "default".to_string());
+                        Some(self.build_play_url(
+                            &server_tag,
+                            &seg.device_tag,
+                            &seg.channel_tag,
+                            &seg.start_time,
+                        ))
+                    }
+                };
 
-            RecordingFileResponse {
-                id: format!("seg_{}", seg.id),
-                device_tag: seg.device_tag.clone(),
-                channel_tag: seg.channel_tag.clone(),
-                start_time: seg.start_time,
-                end_time: seg.end_time,
-                duration_secs: seg.duration_secs,
-                file_path: seg.file_path.clone(),
-                server_tag: seg.server_tag.clone(),
-                play_url,
-                file_size: seg.file_size,
-                segment_type: seg.segment_type,
-                alarm_id: seg.alarm_id,
-                task: seg.recording_id.and_then(|id| task_infos.get(&id).cloned()),
-            }
-        }).collect();
+                RecordingFileResponse {
+                    id: format!("seg_{}", seg.id),
+                    device_tag: seg.device_tag.clone(),
+                    channel_tag: seg.channel_tag.clone(),
+                    start_time: seg.start_time,
+                    end_time: seg.end_time,
+                    duration_secs: seg.duration_secs,
+                    file_path: seg.file_path.clone(),
+                    server_tag: seg.server_tag.clone(),
+                    play_url,
+                    file_size: seg.file_size,
+                    segment_type: seg.segment_type,
+                    alarm_id: seg.alarm_id,
+                    task: seg.recording_id.and_then(|id| task_infos.get(&id).cloned()),
+                }
+            })
+            .collect();
 
         let page = query.page.unwrap_or(1);
         let limit = query.page_limit();
@@ -291,14 +330,21 @@ impl RecordingPolicyService {
     }
 
     pub async fn get_play_url(&self, segment_id: &str) -> Result<PlayUrlResponse> {
-        let id = segment_id.strip_prefix("seg_")
+        let id = segment_id
+            .strip_prefix("seg_")
             .and_then(|s| s.parse::<i64>().ok())
             .ok_or_else(|| AppError::BadRequest("Invalid segment ID format".to_string()))?;
 
-        let segment = self.repo.get_recording_segment(id).await?
+        let segment = self
+            .repo
+            .get_recording_segment(id)
+            .await?
             .ok_or_else(|| AppError::NotFound(format!("Segment {} not found", id)))?;
 
-        let server_tag = segment.server_tag.clone().unwrap_or_else(|| "default".to_string());
+        let server_tag = segment
+            .server_tag
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
         let play_url = self.build_play_url(
             &server_tag,
             &segment.device_tag,
@@ -329,7 +375,8 @@ impl RecordingPolicyService {
 
             for window in &policy.time_windows {
                 if window.days.contains(&current_day) {
-                    if Self::is_time_in_window(&current_time, &window.start_time, &window.end_time) {
+                    if Self::is_time_in_window(&current_time, &window.start_time, &window.end_time)
+                    {
                         return true;
                     }
                 }

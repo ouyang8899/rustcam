@@ -42,6 +42,12 @@ SELECT id, device_id, device_tag, channel_tag, alarm_id, alarm_type, alarm_time,
        alarm_priority, description, processed, created_at
 FROM alarms
 <where>
+<if test="search != null">
+and (device_tag ILIKE '%' || #{search} || '%' OR channel_tag ILIKE '%' || #{search} || '%' OR description ILIKE '%' || #{search} || '%' OR alarm_type ILIKE '%' || #{search} || '%')
+</if>
+<if test="processed != null">
+and processed = #{processed}
+</if>
 <if test="device_tag != null">
 and device_tag = #{device_tag}
 </if>
@@ -66,6 +72,12 @@ LIMIT #{limit} OFFSET #{offset}
 SELECT COUNT(*) as count
 FROM alarms
 <where>
+<if test="search != null">
+and (device_tag ILIKE '%' || #{search} || '%' OR channel_tag ILIKE '%' || #{search} || '%' OR description ILIKE '%' || #{search} || '%' OR alarm_type ILIKE '%' || #{search} || '%')
+</if>
+<if test="processed != null">
+and processed = #{processed}
+</if>
 <if test="device_tag != null">
 and device_tag = #{device_tag}
 </if>

@@ -1,5 +1,5 @@
-use rsip::{ message::HasHeaders, SipMessage as RsipSipMessage };
 use crate::protocol::gb28181::GB28181_USER_AGENT;
+use rsip::{message::HasHeaders, SipMessage as RsipSipMessage};
 
 use std::collections::HashMap;
 
@@ -1109,23 +1109,24 @@ impl SipMessageBuffer {
             self.buffer.drain(..total_len);
 
             match rsip::SipMessage::try_from(single_msg.as_str()) {
-                Ok(rsip_msg) => {
-                    match SipMessage::from_rsip_message(&rsip_msg) {
-                        Some(sip_msg) => return Some((sip_msg, total_len, single_msg)),
-                        None => {
-                            let uri_preview = format!("{:?}", rsip_msg);
-                            tracing::warn!("[SIP] Failed to convert rsip message: rsip_msg={}", &uri_preview[..uri_preview.len().min(200)]);
+                Ok(rsip_msg) => match SipMessage::from_rsip_message(&rsip_msg) {
+                    Some(sip_msg) => return Some((sip_msg, total_len, single_msg)),
+                    None => {
+                        let uri_preview = format!("{:?}", rsip_msg);
+                        tracing::warn!(
+                            "[SIP] Failed to convert rsip message: rsip_msg={}",
+                            &uri_preview[..uri_preview.len().min(200)]
+                        );
 
-                            match SipMessage::parse(&single_msg) {
-                                Some(msg) => return Some((msg, total_len, single_msg)),
-                                None => {
-                                    tracing::warn!("[SIP] Fallback parse also failed for INVITE");
-                                    continue;
-                                }
+                        match SipMessage::parse(&single_msg) {
+                            Some(msg) => return Some((msg, total_len, single_msg)),
+                            None => {
+                                tracing::warn!("[SIP] Fallback parse also failed for INVITE");
+                                continue;
                             }
                         }
                     }
-                }
+                },
                 Err(e) => {
                     tracing::warn!("[SIP] rsip parse failed: {:?}", e);
 

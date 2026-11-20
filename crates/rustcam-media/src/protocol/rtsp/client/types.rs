@@ -1,8 +1,8 @@
+use crate::protocol::rtsp::common::RtcpStats;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use crate::protocol::rtsp::common::{ RtcpStats };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RtpTransportMode {
@@ -56,20 +56,25 @@ pub enum TrackTransport {
 impl std::fmt::Debug for TrackTransport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TrackTransport::Udp { rtp_port, rtcp_port, local_rtp_port, local_rtcp_port, server_addr, server: _ } => {
-                f.debug_struct("TrackTransport::Udp")
-                    .field("rtp_port", rtp_port)
-                    .field("rtcp_port", rtcp_port)
-                    .field("local_rtp_port", local_rtp_port)
-                    .field("local_rtcp_port", local_rtcp_port)
-                    .field("server_addr", server_addr)
-                    .finish()
-            }
-            TrackTransport::Tcp { interleaved } => {
-                f.debug_struct("TrackTransport::Tcp")
-                    .field("interleaved", interleaved)
-                    .finish()
-            }
+            TrackTransport::Udp {
+                rtp_port,
+                rtcp_port,
+                local_rtp_port,
+                local_rtcp_port,
+                server_addr,
+                server: _,
+            } => f
+                .debug_struct("TrackTransport::Udp")
+                .field("rtp_port", rtp_port)
+                .field("rtcp_port", rtcp_port)
+                .field("local_rtp_port", local_rtp_port)
+                .field("local_rtcp_port", local_rtcp_port)
+                .field("server_addr", server_addr)
+                .finish(),
+            TrackTransport::Tcp { interleaved } => f
+                .debug_struct("TrackTransport::Tcp")
+                .field("interleaved", interleaved)
+                .finish(),
         }
     }
 }

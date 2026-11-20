@@ -1,17 +1,16 @@
-use std::sync::Arc;
+use crate::api::http::handlers::device_handler::PaginatedResponse;
+use crate::api::response::ApiResponse;
+use crate::api::state::FullState;
+use crate::domain::recording_policy::{
+    CreateRecordingPolicyRequest, PolicyType, RecordingPolicy, UpdateRecordingPolicyRequest,
+};
+use crate::error::AppError;
 use axum::{
-    extract::{Path, State, Query},
+    extract::{Path, Query, State},
     Json,
 };
 use serde::Deserialize;
-use crate::api::response::ApiResponse;
-use crate::api::http::handlers::device_handler::PaginatedResponse;
-use crate::api::state::FullState;
-use crate::error::AppError;
-use crate::domain::recording_policy::{
-    RecordingPolicy, PolicyType,
-    CreateRecordingPolicyRequest, UpdateRecordingPolicyRequest,
-};
+use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
 pub struct PolicyQuery {
@@ -24,10 +23,18 @@ pub struct PolicyQuery {
 }
 
 impl PolicyQuery {
-    pub fn limit(&self) -> usize { self.limit.unwrap_or(50).min(500) }
-    pub fn offset(&self) -> usize { self.offset.unwrap_or(0) }
-    pub fn device_tag(&self) -> Option<&str> { self.device_tag.as_deref().filter(|s| !s.is_empty()) }
-    pub fn policy_type(&self) -> Option<&str> { self.policy_type.as_deref().filter(|s| !s.is_empty()) }
+    pub fn limit(&self) -> usize {
+        self.limit.unwrap_or(50).min(500)
+    }
+    pub fn offset(&self) -> usize {
+        self.offset.unwrap_or(0)
+    }
+    pub fn device_tag(&self) -> Option<&str> {
+        self.device_tag.as_deref().filter(|s| !s.is_empty())
+    }
+    pub fn policy_type(&self) -> Option<&str> {
+        self.policy_type.as_deref().filter(|s| !s.is_empty())
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,7 +78,10 @@ pub async fn get_policy_handler(
 ) -> Result<Json<ApiResponse<RecordingPolicy>>, AppError> {
     let registry = &state.app.registry;
 
-    let policy = registry.recording_policy_service.get_policy(id).await?
+    let policy = registry
+        .recording_policy_service
+        .get_policy(id)
+        .await?
         .ok_or_else(|| AppError::NotFound(format!("Policy {} not found", id)))?;
 
     Ok(Json(ApiResponse::success(policy)))
@@ -99,7 +109,10 @@ pub async fn update_policy_handler(
 ) -> Result<Json<ApiResponse<RecordingPolicy>>, AppError> {
     let registry = &state.app.registry;
 
-    let policy = registry.recording_policy_service.update_policy(id, req).await?;
+    let policy = registry
+        .recording_policy_service
+        .update_policy(id, req)
+        .await?;
 
     Ok(Json(ApiResponse::success(policy)))
 }

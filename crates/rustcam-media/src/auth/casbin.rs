@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use casbin::{ CoreApi, DefaultModel, Enforcer, MgmtApi, NullAdapter };
+use casbin::{CoreApi, DefaultModel, Enforcer, MgmtApi, NullAdapter};
 use tokio::sync::RwLock;
 
 use super::errors::{AuthError, Result};
@@ -86,7 +86,11 @@ impl CasbinManager {
     }
 
     pub async fn enforce(&self, role: &str, obj: &str, act: &str) -> bool {
-        self.enforcer.read().await.enforce((role, obj, act)).unwrap_or(false)
+        self.enforcer
+            .read()
+            .await
+            .enforce((role, obj, act))
+            .unwrap_or(false)
     }
 }
 
@@ -131,7 +135,9 @@ pub(crate) fn parse_permission(name: &str) -> Result<(String, String)> {
     let trimmed = name.trim();
 
     if trimmed.is_empty() {
-        return Err(AuthError::BadRequest("Permission name is empty".to_string()));
+        return Err(AuthError::BadRequest(
+            "Permission name is empty".to_string(),
+        ));
     }
 
     if trimmed.chars().any(|c| c.is_whitespace()) {
@@ -244,7 +250,9 @@ mod tests {
         let permission = Permission::new(permission_name.into(), None);
 
         RoleRepository::create(repo.as_ref(), &role).await.unwrap();
-        PermissionRepository::create(repo.as_ref(), &permission).await.unwrap();
+        PermissionRepository::create(repo.as_ref(), &permission)
+            .await
+            .unwrap();
         RoleRepository::set_role_permissions(repo.as_ref(), role.id, &[permission.id])
             .await
             .unwrap();
@@ -274,7 +282,9 @@ mod tests {
 
         let (admin, _) = seed(&repo, "Admin", "drone:control:acquire").await;
         let operator = Role::new("Operator".into(), None);
-        RoleRepository::create(repo.as_ref(), &operator).await.unwrap();
+        RoleRepository::create(repo.as_ref(), &operator)
+            .await
+            .unwrap();
         RoleRepository::set_role_parents(repo.as_ref(), operator.id, &[admin.id])
             .await
             .unwrap();
@@ -294,8 +304,12 @@ mod tests {
         let (admin, _) = seed(&repo, "Admin", "device:read").await;
         let operator = Role::new("Operator".into(), None);
         let viewer = Role::new("Viewer".into(), None);
-        RoleRepository::create(repo.as_ref(), &operator).await.unwrap();
-        RoleRepository::create(repo.as_ref(), &viewer).await.unwrap();
+        RoleRepository::create(repo.as_ref(), &operator)
+            .await
+            .unwrap();
+        RoleRepository::create(repo.as_ref(), &viewer)
+            .await
+            .unwrap();
         RoleRepository::set_role_parents(repo.as_ref(), operator.id, &[admin.id])
             .await
             .unwrap();
@@ -316,7 +330,9 @@ mod tests {
 
         let (admin, _) = seed(&repo, "Admin", "device:read").await;
         let operator = Role::new("Operator".into(), None);
-        RoleRepository::create(repo.as_ref(), &operator).await.unwrap();
+        RoleRepository::create(repo.as_ref(), &operator)
+            .await
+            .unwrap();
 
         let casbin = CasbinManager::new_with_model_path(model_path(), repo.clone())
             .await
@@ -344,7 +360,9 @@ mod tests {
             .unwrap();
 
         let broken = Permission::new("bad name".into(), None);
-        PermissionRepository::create(repo.as_ref(), &broken).await.unwrap();
+        PermissionRepository::create(repo.as_ref(), &broken)
+            .await
+            .unwrap();
         RoleRepository::set_role_permissions(repo.as_ref(), role.id, &[broken.id])
             .await
             .unwrap();

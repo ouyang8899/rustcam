@@ -1,20 +1,14 @@
 <!-- @ts-check -->
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <div class="header-left">
-        <h1 class="page-title">电子围栏</h1>
-        <span class="header-sub">禁飞区 / 允许区，越界自动告警并阻止非法定点</span>
-      </div>
-      <div class="page-toolbar">
-        <el-radio-group v-model="mapMode" size="small">
-          <el-radio-button value="2d">2D 绘制</el-radio-button>
-          <el-radio-button value="3d">3D 绘制</el-radio-button>
-        </el-radio-group>
-        <el-button :icon="Plus" @click="newFence">新建围栏</el-button>
-        <el-button type="primary" :disabled="!canSave" @click="save">保存</el-button>
-      </div>
-    </div>
+  <PageView title="电子围栏" subtitle="禁飞区 / 允许区，越界自动告警并阻止非法定点">
+    <template #toolbar>
+      <el-radio-group v-model="mapMode" size="small">
+        <el-radio-button value="2d">2D 绘制</el-radio-button>
+        <el-radio-button value="3d">3D 绘制</el-radio-button>
+      </el-radio-group>
+      <el-button :icon="Plus" @click="newFence">新建围栏</el-button>
+      <el-button type="primary" :disabled="!canSave" @click="save">保存</el-button>
+    </template>
 
     <div class="fence-body">
       <aside class="fence-rail">
@@ -37,7 +31,7 @@
             {{ fenceScope(f) }}
           </div>
         </div>
-        <el-empty v-if="store.fences.length === 0" description="暂无围栏" :image-size="60" />
+        <EmptyState v-if="store.fences.length === 0" title="暂无围栏" />
 
         <div class="rail-title" style="margin-top: 14px">围栏属性</div>
         <el-form label-position="top" size="small">
@@ -153,16 +147,21 @@
         </CesiumGlobe>
       </div>
     </div>
-  </div>
+  </PageView>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { useDroneStore } from '../../stores/droneStore'
 import { fenceColors, fenceRuleLabel } from '../../utils/fenceStyle'
 import CesiumGlobe from '../../components/drone/CesiumGlobe.vue'
+import PageView from '../../components/common/PageView.vue'
+import EmptyState from '../../components/common/EmptyState.vue'
+import { useToast } from '../../composables/useToast'
+
+const toast = useToast()
 import GeofenceDraw from '../../components/drone/GeofenceDraw.vue'
 
 const store = useDroneStore()
@@ -171,9 +170,7 @@ const drawRef = ref(null)
 const points = ref([])
 const circle = reactive({ lat: 0, lon: 0, radius_m: 0 })
 const circleStep = ref(0)
-/** 规则 §10.5：多边形与圆形默认使用 terra-draw 二维绘制，三维模式走 Cesium。 */
 const mapMode = ref('2d')
-/** 三维正在绘制：首次点击开启新图形，右键结束后回到预览态。 */
 const drawingActive = ref(false)
 
 const form = reactive({
@@ -231,13 +228,11 @@ function clearDraft() {
   else points.value = []
 }
 
-/** 无人机显示名；空 drone_tag 表示围栏对全部无人机生效。 */
 function droneName(deviceId) {
   if (!deviceId) return '全部无人机'
   return store.drones.find((d) => d.drone_tag === deviceId)?.name || deviceId
 }
 
-/** 围栏适用范围文案：全部 / 多架名称。 */
 function fenceScope(fence) {
   const ids = fence.drone_tags?.length
     ? fence.drone_tags
@@ -327,7 +322,6 @@ function haversine(a, b) {
 
 function onMapClick({ lon, lat }) {
   if (form.shape === 'polygon') {
-    // 与 2D 一致：未在绘制时首次点击清除旧图形，重新开始。
     if (!drawingActive.value) {
       points.value = []
       drawingActive.value = true
@@ -348,15 +342,11 @@ function onMapClick({ lon, lat }) {
   circleStep.value = 2
 }
 
-/**
- * 三维右键结束：多边形停止加点，圆形用右键位置落定半径。
- * @param {{ lon: number, lat: number } | null} pos
- */
 function onDrawFinish(pos) {
   if (!drawingActive.value) return
   if (form.shape === 'polygon') {
     if (points.value.length < 3) {
-      ElMessage.warning('请至少绘制 3 个顶点')
+      toast.warning('请至少绘制 3 个顶点')
       return
     }
     drawingActive.value = false
@@ -371,7 +361,6 @@ function onDrawFinish(pos) {
   drawingActive.value = false
 }
 
-/** 圆环各顶点均值即圆心；半径取各顶点到圆心的平均距离。 */
 function circleFromRing(ring) {
   const pts = ring.slice(0, -1)
   const center = pts.reduce(
@@ -385,10 +374,6 @@ function circleFromRing(ring) {
   return { lon: center.lon, lat: center.lat, radius_m: radius }
 }
 
-/**
- * terra-draw 变化回调：把绘制结果实时回填为顶点/圆心，顶栏“保存”直接复用。
- * @param {any} geometry
- */
 function onDrawChange(geometry) {
   const ring = geometry?.coordinates?.[0] || []
   if (form.shape === 'circle') {
@@ -422,7 +407,7 @@ function onDrawChange(geometry) {
 
 async function save() {
   if (!canSave.value) {
-    ElMessage.warning(form.shape === 'circle' ? '请完成圆形围栏绘制' : '至少需要 3 个顶点')
+    toast.warning(form.shape === 'circle' ? '请完成圆形围栏绘制' : '至少需要 3 个顶点')
     return
   }
   let geojson = ''
@@ -457,15 +442,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.header-left {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-.header-sub {
-  font-size: 12px;
-  color: var(--text-muted);
-}
 .fence-body {
   flex: 1;
   min-height: 0;
@@ -478,7 +454,7 @@ onMounted(async () => {
   min-height: 0;
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--bg-surface);
   padding: 12px;
 }
@@ -489,7 +465,7 @@ onMounted(async () => {
 }
 .fence-item {
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: 0;
   border: 1px solid transparent;
   cursor: pointer;
   margin-bottom: 6px;
@@ -532,7 +508,7 @@ onMounted(async () => {
 .fence-map {
   min-height: 0;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 0;
   overflow: hidden;
 }
 .fence-map :deep(.cesium-globe) { height: 100%; }

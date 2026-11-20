@@ -10,6 +10,7 @@
 #include <QListWidget>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 
 namespace rustcam {
 
@@ -67,9 +68,8 @@ private:
 
     QLineEdit* m_screenshotPathEdit;
 
-    QLineEdit* m_clientTmsUrlEdit;
+    QPlainTextEdit* m_mapLayersView;
     QLineEdit* m_wfsUrlEdit;
-    QLineEdit* m_zoomRangeEdit;
 };
 
 }

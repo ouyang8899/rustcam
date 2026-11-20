@@ -15,11 +15,7 @@ use crate::error::{AppError, Result};
 const TOUR_OBJECT: &str = "tour";
 
 /// 校验当前用户是否具备视频轮询权限；任一角色命中即放行。
-async fn require_tour_permission(
-    state: &Arc<FullState>,
-    user: &UserInfo,
-    act: &str,
-) -> Result<()> {
+async fn require_tour_permission(state: &Arc<FullState>, user: &UserInfo, act: &str) -> Result<()> {
     for role in &user.roles {
         if state.auth.casbin.enforce(role, TOUR_OBJECT, act).await {
             return Ok(());

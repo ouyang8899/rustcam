@@ -1,28 +1,28 @@
-use std::sync::Arc;
+use crate::application::{
+    zlmediakit_hook::ZlMediaKitHookHandler, ChannelService, DeviceService, MapSettingsService,
+    MediaServerService, PlayService, PlayerLayoutService, RecordingPolicyService,
+    RecordingSchedulerService, RecordingService, SessionService, StreamRecoveryService,
+    StreamService, TourSchemeService, WsBroadcaster,
+};
+use crate::auth::auth_db::PostgresAuthRepository;
+pub use crate::auth::casbin::CasbinManager;
+use crate::auth::AuthState;
 use crate::config::AppConfig;
 use crate::context::{InfraContext, MediaContext};
+use crate::domain::device::Protocol;
+use crate::domain::traits::{CacheStore, DeviceLookup, EventPublisher, StreamManager};
 use crate::infrastructure::cluster::ClusterManager;
 use crate::infrastructure::db_repository::DbRepository;
-use crate::application::{
-    DeviceService, StreamService, SessionService, RecordingService,
-    MediaServerService,PlayerLayoutService, MapSettingsService,
-    PlayService, WsBroadcaster, StreamRecoveryService,
-    zlmediakit_hook::ZlMediaKitHookHandler, ChannelService,
-    RecordingPolicyService, RecordingSchedulerService,
-    TourSchemeService,
-};
-use crate::domain::traits::{DeviceLookup, StreamManager, EventPublisher, CacheStore};
-use crate::domain::device::Protocol;
-use crate::protocol::traits::ProtocolDeps;
-use crate::protocol::adapter_manager::{AdapterEntry, set_adapter as am_set, remove_adapter as am_remove, register_adapter_factory, set_default_deps};
-use crate::auth::AuthState;
-pub use crate::auth::casbin::CasbinManager;
-use crate::auth::auth_db::PostgresAuthRepository;
 use crate::media::MediaSessionManager;
+use crate::protocol::adapter_manager::{
+    register_adapter_factory, remove_adapter as am_remove, set_adapter as am_set, set_default_deps,
+    AdapterEntry,
+};
+use crate::protocol::traits::ProtocolDeps;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct ServiceRegistry {
-
     pub infra: InfraContext,
 
     pub media: MediaContext,
@@ -44,7 +44,6 @@ pub struct ServiceRegistry {
     pub media_server_service: Arc<MediaServerService>,
 
     // pub hook_service: Arc<HookService>,
-
     pub zlmediakit_hook_handler: Arc<ZlMediaKitHookHandler>,
 
     pub player_layout_service: Arc<PlayerLayoutService>,
@@ -65,9 +64,7 @@ pub struct ServiceRegistry {
 }
 
 impl ServiceRegistry {
-
     pub async fn new(config: AppConfig) -> anyhow::Result<Self> {
-
         let db = Arc::new(
             DbRepository::new_without_load_with_pool(
                 &config.database.url,
@@ -75,7 +72,7 @@ impl ServiceRegistry {
                 config.database.max_connections as u64,
             )
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to initialize database: {}", e))?
+            .map_err(|e| anyhow::anyhow!("Failed to initialize database: {}", e))?,
         );
 
         for cfg in &config.media_servers.servers {
@@ -92,7 +89,8 @@ impl ServiceRegistry {
                     name: cfg.name.clone(),
                     url: cfg.url.clone(),
                     api_key: cfg.api_key.clone(),
-                    server_type: crate::domain::server::ServerType::from_str(&cfg.server_type).unwrap_or(crate::domain::server::ServerType::Zlmediakit),
+                    server_type: crate::domain::server::ServerType::from_str(&cfg.server_type)
+                        .unwrap_or(crate::domain::server::ServerType::Zlmediakit),
                     weight: cfg.weight,
                     enabled: cfg.enabled,
                     server_tag: tag.clone(),
@@ -101,16 +99,22 @@ impl ServiceRegistry {
                     updated_at: chrono::Utc::now(),
                 };
                 if let Err(e) = db.create_server(&new_server).await {
-                    tracing::warn!("[ServiceRegistry] Failed to sync config server to DB: {}", e);
+                    tracing::warn!(
+                        "[ServiceRegistry] Failed to sync config server to DB: {}",
+                        e
+                    );
                 }
             } else if !cfg.protocol_ports.is_empty() {
-
                 if let Ok(Some(mut existing)) = db.get_server_by_tag(&tag).await {
                     if existing.protocol_ports.is_empty() {
                         existing.protocol_ports = cfg.protocol_ports.clone();
                         existing.updated_at = chrono::Utc::now();
                         if let Err(e) = db.update_server(&existing).await {
-                            tracing::warn!("[ServiceRegistry] Failed to fill protocol ports for '{}': {}", tag, e);
+                            tracing::warn!(
+                                "[ServiceRegistry] Failed to fill protocol ports for '{}': {}",
+                                tag,
+                                e
+                            );
                         } else {
                         }
                     }
@@ -132,7 +136,7 @@ impl ServiceRegistry {
             configured_servers,
         ));
 
-        let media = MediaContext::new(&infra, cluster,media_server_service.clone()).await?;
+        let media = MediaContext::new(&infra, cluster, media_server_service.clone()).await?;
 
         let recording_service = Arc::new(RecordingService::new(
             infra.db.clone(),
@@ -169,10 +173,7 @@ impl ServiceRegistry {
             stream_service.clone(),
         ));
 
-        let session_service = Arc::new(SessionService::new(
-            infra.clone(),
-            media.clone(),
-        ));
+        let session_service = Arc::new(SessionService::new(infra.clone(), media.clone()));
 
         // let hook_service = Arc::new(HookService::new(
         //     infra.db.clone(),
@@ -185,32 +186,21 @@ impl ServiceRegistry {
         // ));
 
         let zlmediakit_hook_handler = Arc::new(
-            ZlMediaKitHookHandler::from_context(
-                &infra,
-                &media,
-            ).with_stream_recovery_service(stream_recovery_service.clone())
+            ZlMediaKitHookHandler::from_context(&infra, &media)
+                .with_stream_recovery_service(stream_recovery_service.clone()),
         );
 
-        let player_layout_service = Arc::new(PlayerLayoutService::new(
-            infra.db.clone(),
-        ));
+        let player_layout_service = Arc::new(PlayerLayoutService::new(infra.db.clone()));
 
-        let tour_scheme_service = Arc::new(TourSchemeService::new(
-            infra.db.clone(),
-        ));
+        let tour_scheme_service = Arc::new(TourSchemeService::new(infra.db.clone()));
 
-        let map_settings_service = Arc::new(MapSettingsService::new(
-            infra.db.clone(),
-        ));
+        let map_settings_service = Arc::new(MapSettingsService::new(infra.db.clone()));
 
-        let channel_service = Arc::new(ChannelService::new(
-            infra.db.clone(),
-        ));
+        let channel_service = Arc::new(ChannelService::new(infra.db.clone()));
 
         let register_fn: Arc<dyn Fn(String, AdapterEntry) + Send + Sync> =
             Arc::new(|key, entry| am_set(key, entry));
-        let unregister_fn: Arc<dyn Fn(String) + Send + Sync> =
-            Arc::new(|key| am_remove(&key));
+        let unregister_fn: Arc<dyn Fn(String) + Send + Sync> = Arc::new(|key| am_remove(&key));
         let protocol_deps = ProtocolDeps::new(
             device_service.clone() as Arc<dyn DeviceLookup>,
             stream_service.clone() as Arc<dyn StreamManager>,
@@ -218,10 +208,14 @@ impl ServiceRegistry {
             media.cluster.clone(),
             infra.redis.clone() as Arc<dyn CacheStore>,
             infra.config.clone(),
-        ).with_registration(register_fn, unregister_fn);
+        )
+        .with_registration(register_fn, unregister_fn);
 
         set_default_deps(protocol_deps.clone());
-        register_adapter_factory(Protocol::Onvif, Arc::new(|deps, _key| Box::new(crate::protocol::onvif::OnvifAdapter::new(deps))));
+        register_adapter_factory(
+            Protocol::Onvif,
+            Arc::new(|deps, _key| Box::new(crate::protocol::onvif::OnvifAdapter::new(deps))),
+        );
 
         let ws_broadcaster = infra.ws_broadcaster.clone();
         let play_service = media.play_service.clone();
@@ -253,8 +247,20 @@ impl ServiceRegistry {
 
     pub async fn get_auth_state(&self) -> anyhow::Result<AuthState> {
         let jwt_config = self.infra.config().jwt.clone();
-        let default_username = self.infra.config().server.default_username.as_deref().unwrap_or("admin");
-        let default_password = self.infra.config().server.default_password.as_deref().unwrap_or("admin");
+        let default_username = self
+            .infra
+            .config()
+            .server
+            .default_username
+            .as_deref()
+            .unwrap_or("admin");
+        let default_password = self
+            .infra
+            .config()
+            .server
+            .default_password
+            .as_deref()
+            .unwrap_or("admin");
 
         if self.infra.config().auth.auto_init_schema {
             let url = self.infra.config().database.url.clone();
@@ -262,7 +268,7 @@ impl ServiceRegistry {
             let pass = default_password.to_string();
             tokio::spawn(async move {
                 match PostgresAuthRepository::new(&url, &user, &pass).await {
-                    Ok(_) => {},
+                    Ok(_) => {}
                     Err(e) => tracing::warn!("[AuthState] auth schema init failed: {}", e),
                 }
             });
@@ -274,8 +280,9 @@ impl ServiceRegistry {
         auth_repo.init_tables().await;
 
         let casbin = Arc::new(
-            CasbinManager::new(auth_repo.clone()).await
-                .map_err(|e| anyhow::anyhow!("Casbin init failed: {}", e))?
+            CasbinManager::new(auth_repo.clone())
+                .await
+                .map_err(|e| anyhow::anyhow!("Casbin init failed: {}", e))?,
         );
 
         Ok(AuthState::new(
@@ -288,7 +295,9 @@ impl ServiceRegistry {
 
     pub async fn start_all(&self) {
         self.device_service.start().await;
-        self.session_service.start(self.infra.config().session.expiration_secs).await;
+        self.session_service
+            .start(self.infra.config().session.expiration_secs)
+            .await;
         self.stream_recovery_service.clone().start().await;
         self.recording_scheduler_service.clone().start().await;
         self.start_health_monitor().await;
@@ -333,7 +342,6 @@ impl ServiceRegistry {
         let mut statuses: Vec<crate::adapter::media_server::ServerStatus> = Vec::new();
 
         for server in &servers {
-
             let status = self
                 .infra
                 .redis
@@ -344,7 +352,9 @@ impl ServiceRegistry {
             let online = status.as_ref().map(|s| s.online).unwrap_or(false);
             let sessions = status.as_ref().map(|s| s.session_count).unwrap_or(0);
 
-            if online { online_count += 1; }
+            if online {
+                online_count += 1;
+            }
 
             let cpu_usage = status.as_ref().map(|s| s.cpu_usage).unwrap_or(0.0);
             let memory_usage = status.as_ref().map(|s| s.memory_usage).unwrap_or(0.0);
@@ -375,7 +385,11 @@ impl ServiceRegistry {
         }
 
         let server_count = servers.len();
-        let health_score = if server_count == 0 { 0.0 } else { (online_count as f64 / server_count as f64) * 100.0 };
+        let health_score = if server_count == 0 {
+            0.0
+        } else {
+            (online_count as f64 / server_count as f64) * 100.0
+        };
 
         let aggregate = ServerAggregate::build(
             &statuses,

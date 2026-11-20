@@ -3,7 +3,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 
 use std::net::SocketAddr;
-use std::sync::{ Arc };
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::tcp::OwnedWriteHalf;
 
@@ -34,7 +34,7 @@ fn xml_escape(s: &str) -> String {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
-                '\'' => out.push_str("&apos;"),
+            '\'' => out.push_str("&apos;"),
             _ => out.push(c),
         }
     }
@@ -74,7 +74,6 @@ pub struct OnvifAdapter {
 
 impl OnvifAdapter {
     pub fn new(deps: ProtocolDeps) -> Self {
-
         let rtsp_port = deps
             .config
             .media_servers
@@ -831,9 +830,7 @@ impl SignalAdapter for OnvifAdapter {
 
         let parent_tag = match &device.parent_device_tag {
             Some(tag) => tag.clone(),
-            None => {
-                channel_id.to_string()
-            }
+            None => channel_id.to_string(),
         };
 
         let parent = match self.deps.device_lookup.find_by_tag(&parent_tag).await {
@@ -933,8 +930,7 @@ impl SignalAdapter for OnvifAdapter {
                     .await
                     .map_err(|e| tracing::warn!("[ONVIF] RemovePreset failed: {}", e));
             }
-            _ => {
-            }
+            _ => {}
         }
 
         Ok(())
@@ -945,7 +941,6 @@ impl SignalAdapter for OnvifAdapter {
         device_tag: &str,
         requester_node_id: MediaNodeId,
     ) -> Result<()> {
-
         let try_send_error = |msg: &str| {
             let resp = SignalEvent::AudioTalkResponse {
                 node_id: requester_node_id.clone(),
@@ -1057,7 +1052,10 @@ impl SignalAdapter for OnvifAdapter {
             if let Some(bc_node_id) = bc_node_id {
                 let _removed = session.remove_and_stop_node(&bc_node_id).await;
             } else {
-                tracing::warn!("[ONVIF] No ONVIF_BROADCAST_VOICE node found in session for device {}", device_tag);
+                tracing::warn!(
+                    "[ONVIF] No ONVIF_BROADCAST_VOICE node found in session for device {}",
+                    device_tag
+                );
             }
         } else {
             tracing::warn!("[ONVIF] No media session found for device {}", device_tag);

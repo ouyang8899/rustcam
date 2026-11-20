@@ -1,19 +1,17 @@
-use std::time::Duration;
 use axum::{
     extract::Query,
+    http::{header, header::HeaderValue, StatusCode},
     response::IntoResponse,
-    http::{header, StatusCode, header::HeaderValue},
 };
 use serde::Deserialize;
+use std::time::Duration;
 
 #[derive(Debug, Deserialize)]
 pub struct WfsProxyQuery {
     pub url: String,
 }
 
-pub async fn wfs_proxy_handler(
-    Query(query): Query<WfsProxyQuery>,
-) -> impl IntoResponse {
+pub async fn wfs_proxy_handler(Query(query): Query<WfsProxyQuery>) -> impl IntoResponse {
     let url = &query.url;
 
     if url.is_empty() {
@@ -27,7 +25,11 @@ pub async fn wfs_proxy_handler(
         Ok(c) => c,
         Err(e) => {
             tracing::error!("[WfsProxy] Failed to create client: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create HTTP client").into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create HTTP client",
+            )
+                .into_response();
         }
     };
 
@@ -56,13 +58,20 @@ pub async fn wfs_proxy_handler(
                     if let Some(ct) = content_type {
                         headers.insert(header::CONTENT_TYPE, ct);
                     } else {
-                        headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                        headers.insert(
+                            header::CONTENT_TYPE,
+                            HeaderValue::from_static("application/json"),
+                        );
                     }
                     res
                 }
                 Err(e) => {
                     tracing::error!("[WfsProxy] Failed to read body: {}", e);
-                    (StatusCode::BAD_GATEWAY, format!("Failed to read response: {}", e)).into_response()
+                    (
+                        StatusCode::BAD_GATEWAY,
+                        format!("Failed to read response: {}", e),
+                    )
+                        .into_response()
                 }
             }
         }

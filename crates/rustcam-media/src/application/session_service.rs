@@ -1,10 +1,10 @@
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::context::{InfraContext, MediaContext};
-use crate::domain::{Session, SessionType, SessionState};
 use crate::adapter::media_server::StreamInfo;
+use crate::context::{InfraContext, MediaContext};
 use crate::domain::traits::CacheStore;
+use crate::domain::{Session, SessionState, SessionType};
 use crate::error::{AppError, Result};
 use crate::protocol::event::SignalEvent;
 
@@ -59,7 +59,6 @@ impl SessionService {
                 Self::cleanup_expired_sessions(&repo, &redis, &cluster, exp_secs).await;
             }
         });
-
     }
 
     pub async fn stop(&self) {
@@ -74,7 +73,13 @@ impl SessionService {
         event: &SignalEvent,
     ) -> anyhow::Result<()> {
         match event {
-            SignalEvent::StartPlay { device_tag, session_id: _, channel_id, session_type, .. } => {
+            SignalEvent::StartPlay {
+                device_tag,
+                session_id: _,
+                channel_id,
+                session_type,
+                ..
+            } => {
                 if *session_type == SessionType::Broadcast {
                     return Ok(());
                 }
@@ -92,7 +97,11 @@ impl SessionService {
                 }
             }
 
-            SignalEvent::StopPlay { session_id, session_type, .. } => {
+            SignalEvent::StopPlay {
+                session_id,
+                session_type,
+                ..
+            } => {
                 if *session_type == SessionType::Broadcast {
                     return Ok(());
                 }
@@ -107,7 +116,11 @@ impl SessionService {
                 if let Some(target_id) = target_id {
                     infra.db.sessions_cache().remove(&target_id);
                     if let Err(e) = infra.db.delete_session(target_id).await {
-                        tracing::error!("[SessionService] Failed to delete session {}: {}", target_id, e);
+                        tracing::error!(
+                            "[SessionService] Failed to delete session {}: {}",
+                            target_id,
+                            e
+                        );
                     }
                 }
             }
@@ -121,7 +134,10 @@ impl SessionService {
         match self.infra.db.create_session(&session).await {
             Ok(id) => {
                 session.id = id;
-                self.infra.db.sessions_cache().insert(session.id, session.clone());
+                self.infra
+                    .db
+                    .sessions_cache()
+                    .insert(session.id, session.clone());
             }
             Err(e) => {
                 tracing::error!("[SessionService] Failed to persist session: {}", e);
@@ -131,25 +147,38 @@ impl SessionService {
     }
 
     pub async fn activate_session(&self, id: i64, rtsp_url: &str) -> Result<StreamInfo> {
-        let session = self.get_session(id)?
+        let session = self
+            .get_session(id)?
             .ok_or_else(|| AppError::SessionNotFound(id.to_string()))?;
 
-        let server = self.media.cluster.select_server().await
-            .ok_or_else(|| AppError::MediaServerError("No available media server".to_string()))?;
+        let server =
+            self.media.cluster.select_server().await.ok_or_else(|| {
+                AppError::MediaServerError("No available media server".to_string())
+            })?;
 
-        let device_tag = session.device_tag.as_ref()
+        let device_tag = session
+            .device_tag
+            .as_ref()
             .ok_or_else(|| AppError::NotFound("Session has no device_tag".to_string()))?;
-        let device = self.infra.db.get_device_by_device_tag(device_tag)
-            .ok_or_else(|| AppError::NotFound(format!("Device with tag {} not found", device_tag)))?;
+        let device = self
+            .infra
+            .db
+            .get_device_by_device_tag(device_tag)
+            .ok_or_else(|| {
+                AppError::NotFound(format!("Device with tag {} not found", device_tag))
+            })?;
         let app = device.app.unwrap_or_else(|| "live".to_string());
 
         let stream_key = crate::common::device_utils::format_stream_key(
             session.device_tag.as_deref().unwrap_or(""),
-            session.channel_tag.as_deref().unwrap_or("")
+            session.channel_tag.as_deref().unwrap_or(""),
         );
         let stream_info = server.add_stream_proxy(&app, &stream_key, rtsp_url).await?;
 
-        self.infra.redis.set_stream_info(&stream_key, &stream_info).await?;
+        self.infra
+            .redis
+            .set_stream_info(&stream_key, &stream_info)
+            .await?;
 
         let mut session = session;
         session.set_active(server.name().to_string());
@@ -159,13 +188,20 @@ impl SessionService {
     }
 
     pub async fn deactivate_session(&self, id: i64) -> Result<()> {
-        let session = self.get_session(id)?
+        let session = self
+            .get_session(id)?
             .ok_or_else(|| AppError::SessionNotFound(id.to_string()))?;
 
         let stream_key = session.stream_key();
         if !stream_key.is_empty() {
             if let Some(server_id) = &session.media_server_tag {
-                if let Some(server) = self.media.cluster.get_all_servers().iter().find(|s| s.name() == server_id) {
+                if let Some(server) = self
+                    .media
+                    .cluster
+                    .get_all_servers()
+                    .iter()
+                    .find(|s| s.name() == server_id)
+                {
                     if let Err(e) = server.remove_stream_proxy("live", &stream_key).await {
                         tracing::warn!("[SessionService] Failed to remove stream: {}", e);
                     }
@@ -192,20 +228,35 @@ impl SessionService {
     }
 
     pub fn get_active_count(&self) -> usize {
-        self.infra.db.sessions_cache().iter()
+        self.infra
+            .db
+            .sessions_cache()
+            .iter()
             .filter(|s| s.state == SessionState::Active)
             .count()
     }
 
     /// Number of sessions that are not terminated yet.
     pub fn get_live_count(&self) -> usize {
-        self.infra.db.sessions_cache().iter()
+        self.infra
+            .db
+            .sessions_cache()
+            .iter()
             .filter(|s| s.state != SessionState::Terminated)
             .count()
     }
 
-    pub async fn list_sessions_paginated(&self, search: Option<&str>, state: Option<&str>, limit: usize, offset: usize) -> Vec<Session> {
-        self.infra.db.list_sessions_paginated(search, state, limit, offset).await
+    pub async fn list_sessions_paginated(
+        &self,
+        search: Option<&str>,
+        state: Option<&str>,
+        limit: usize,
+        offset: usize,
+    ) -> Vec<Session> {
+        self.infra
+            .db
+            .list_sessions_paginated(search, state, limit, offset)
+            .await
     }
 
     pub async fn count_sessions(&self, search: Option<&str>, state: Option<&str>) -> usize {
@@ -238,7 +289,11 @@ impl SessionService {
         for (session_id, stream_key, media_server_tag) in expired {
             if !stream_key.is_empty() {
                 if let Some(server_id) = &media_server_tag {
-                    if let Some(server) = cluster.get_all_servers().iter().find(|s| s.name() == server_id) {
+                    if let Some(server) = cluster
+                        .get_all_servers()
+                        .iter()
+                        .find(|s| s.name() == server_id)
+                    {
                         let _ = server.remove_stream_proxy("live", &stream_key).await;
                     }
                     let _ = redis.delete_stream_info(&stream_key).await;
@@ -260,7 +315,11 @@ impl SessionService {
 
         for session_id in to_delete {
             if let Err(e) = repo.delete_session(session_id).await {
-                tracing::error!("[SessionService] Failed to delete expired session {}: {}", session_id, e);
+                tracing::error!(
+                    "[SessionService] Failed to delete expired session {}: {}",
+                    session_id,
+                    e
+                );
             }
         }
     }

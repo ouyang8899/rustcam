@@ -1,8 +1,11 @@
+use crate::domain::server::{Server, ServerType};
+use crate::domain::{
+    Channel, Device, DeviceStatus, DeviceType, Protocol, PullUrl, PushUrl, Recording,
+    RecordingFormat, RecordingState, Stream, StreamConfig, StreamState,
+};
 use rbatis::html_sql;
 use rbatis::rbdc::datetime::DateTime as RbatisDateTime;
 use rbatis::sql;
-use crate::domain::server::{Server, ServerType};
-use crate::domain::{Device, Protocol, DeviceStatus, DeviceType, PushUrl, PullUrl, Recording, RecordingState, RecordingFormat, Stream, StreamState, StreamConfig, Channel};
 
 use crate::domain::region::RegionRow;
 use crate::error::AppError;
@@ -83,7 +86,12 @@ impl TryFrom<DeviceRow> for Device {
             "rtmp" => Protocol::Rtmp,
             "hls" => Protocol::Hls,
             "webrtc" => Protocol::WebRTC,
-            _ => return Err(AppError::Internal(format!("Unknown protocol: {}", row.protocol))),
+            _ => {
+                return Err(AppError::Internal(format!(
+                    "Unknown protocol: {}",
+                    row.protocol
+                )))
+            }
         };
 
         let status = match row.status.to_lowercase().as_str() {
@@ -93,7 +101,10 @@ impl TryFrom<DeviceRow> for Device {
             _ => DeviceStatus::Offline,
         };
 
-        let mut ext = row.extended.clone().unwrap_or(serde_json::Value::Object(Default::default()));
+        let mut ext = row
+            .extended
+            .clone()
+            .unwrap_or(serde_json::Value::Object(Default::default()));
         let ext_obj = ext.as_object().cloned().unwrap_or_default();
 
         if let Some(obj) = ext.as_object_mut() {
@@ -101,10 +112,16 @@ impl TryFrom<DeviceRow> for Device {
                 obj.insert("rtsp_url".to_string(), serde_json::json!(row.rtsp_url));
             }
             if row.gb_username.is_some() {
-                obj.insert("gb_username".to_string(), serde_json::json!(row.gb_username));
+                obj.insert(
+                    "gb_username".to_string(),
+                    serde_json::json!(row.gb_username),
+                );
             }
             if row.gb_password.is_some() {
-                obj.insert("gb_password".to_string(), serde_json::json!(row.gb_password));
+                obj.insert(
+                    "gb_password".to_string(),
+                    serde_json::json!(row.gb_password),
+                );
             }
             if row.ssrc.is_some() && !obj.contains_key("ssrc") {
                 obj.insert("ssrc".to_string(), serde_json::json!(row.ssrc));
@@ -113,26 +130,39 @@ impl TryFrom<DeviceRow> for Device {
 
         let get_str = |key: &str| ext_obj.get(key).and_then(|v| v.as_str().map(String::from));
         let get_push_urls = || -> Vec<PushUrl> {
-            row.push_urls.as_ref()
+            row.push_urls
+                .as_ref()
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .or_else(|| ext_obj.get("push_urls").and_then(|v| serde_json::from_value(v.clone()).ok()))
+                .or_else(|| {
+                    ext_obj
+                        .get("push_urls")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                })
                 .unwrap_or_default()
         };
         let get_pull_urls = || -> Vec<PullUrl> {
-            row.pull_urls.as_ref()
+            row.pull_urls
+                .as_ref()
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .or_else(|| ext_obj.get("pull_urls").and_then(|v| serde_json::from_value(v.clone()).ok()))
+                .or_else(|| {
+                    ext_obj
+                        .get("pull_urls")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                })
                 .unwrap_or_default()
         };
         let get_stream_config = || -> Option<StreamConfig> {
-            ext_obj.get("stream_config")
+            ext_obj
+                .get("stream_config")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
         };
 
         let created_at = chrono::DateTime::from_timestamp(row.created_at.unix_timestamp(), 0)
             .unwrap_or_else(chrono::Utc::now);
 
-        let device_type = row.device_type.as_ref()
+        let device_type = row
+            .device_type
+            .as_ref()
             .map(|dt| match dt.as_str() {
                 "NVR" => DeviceType::NVR,
                 "IPC" => DeviceType::IPC,
@@ -152,14 +182,22 @@ impl TryFrom<DeviceRow> for Device {
             status,
             is_public: row.is_public,
             created_at,
-            host: if row.host.is_empty() { get_str("host").unwrap_or_default() } else { row.host },
+            host: if row.host.is_empty() {
+                get_str("host").unwrap_or_default()
+            } else {
+                row.host
+            },
             port: row.port.unwrap_or(0) as u16,
             device_username: row.device_username.clone(),
             device_password: row.device_password.clone(),
             push_urls: get_push_urls(),
             pull_urls: get_pull_urls(),
-            playback_username: row.playback_username.or_else(|| get_str("playback_username")),
-            playback_password: row.playback_password.or_else(|| get_str("playback_password")),
+            playback_username: row
+                .playback_username
+                .or_else(|| get_str("playback_username")),
+            playback_password: row
+                .playback_password
+                .or_else(|| get_str("playback_password")),
             media_server_tag: row.media_server_tag.or_else(|| get_str("media_server_tag")),
             app: row.app.or_else(|| get_str("app")),
             device_tag: row.device_tag,
@@ -191,9 +229,7 @@ impl Device {
 }
 
 #[html_sql("sql/device.html")]
-pub async fn device_select_all(
-    rb: &dyn rbatis::Executor,
-) -> rbatis::Result<Vec<DeviceRow>> {
+pub async fn device_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<DeviceRow>> {
     impled!()
 }
 
@@ -333,9 +369,7 @@ pub async fn device_select_online_paginated(
 }
 
 #[html_sql("sql/device.html")]
-pub async fn device_count_online(
-    rb: &dyn rbatis::Executor,
-) -> rbatis::Result<i64> {
+pub async fn device_count_online(rb: &dyn rbatis::Executor) -> rbatis::Result<i64> {
     impled!()
 }
 
@@ -349,9 +383,7 @@ pub async fn stream_select_active_paginated(
 }
 
 #[html_sql("sql/stream.html")]
-pub async fn stream_count_active(
-    rb: &dyn rbatis::Executor,
-) -> rbatis::Result<i64> {
+pub async fn stream_count_active(rb: &dyn rbatis::Executor) -> rbatis::Result<i64> {
     impled!()
 }
 
@@ -365,9 +397,7 @@ pub async fn session_select_active_paginated(
 }
 
 #[html_sql("sql/session.html")]
-pub async fn session_count_active(
-    rb: &dyn rbatis::Executor,
-) -> rbatis::Result<i64> {
+pub async fn session_count_active(rb: &dyn rbatis::Executor) -> rbatis::Result<i64> {
     impled!()
 }
 
@@ -397,7 +427,9 @@ pub async fn device_select_paginated(
     protocol: Option<&str>,
     status: Option<&str>,
     device_type: Option<&str>,
-    group_id: Option<i64>,
+    group_ids: Option<Vec<i64>>,
+    ungrouped: Option<bool>,
+    unassigned_region: Option<bool>,
     limit: i64,
     offset: i64,
 ) -> rbatis::Result<Vec<DeviceRow>> {
@@ -412,15 +444,15 @@ pub async fn device_count(
     protocol: Option<&str>,
     status: Option<&str>,
     device_type: Option<&str>,
-    group_id: Option<i64>,
+    group_ids: Option<Vec<i64>>,
+    ungrouped: Option<bool>,
+    unassigned_region: Option<bool>,
 ) -> rbatis::Result<i64> {
     impled!()
 }
 
 #[html_sql("sql/device.html")]
-pub async fn device_count_top_level(
-    rb: &dyn rbatis::Executor,
-) -> rbatis::Result<i64> {
+pub async fn device_count_top_level(rb: &dyn rbatis::Executor) -> rbatis::Result<i64> {
     impled!()
 }
 
@@ -459,8 +491,9 @@ impl TryFrom<ServerRow> for Server {
     type Error = AppError;
 
     fn try_from(row: ServerRow) -> Result<Self, Self::Error> {
-        let server_type = ServerType::from_str(&row.server_type)
-            .ok_or_else(|| AppError::Internal(format!("unknown server_type: {}", row.server_type)))?;
+        let server_type = ServerType::from_str(&row.server_type).ok_or_else(|| {
+            AppError::Internal(format!("unknown server_type: {}", row.server_type))
+        })?;
         Ok(Server {
             id: row.id,
             name: row.name,
@@ -480,9 +513,7 @@ impl TryFrom<ServerRow> for Server {
 }
 
 #[html_sql("sql/server.html")]
-pub async fn server_select_all(
-    rb: &dyn rbatis::Executor,
-) -> rbatis::Result<Vec<ServerRow>> {
+pub async fn server_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<ServerRow>> {
     impled!()
 }
 
@@ -590,9 +621,7 @@ pub async fn session_count(
 }
 
 #[sql("SELECT id, session_type, device_tag, channel_tag, user_id, state, client_ip, client_type, tcp_id, media_server_tag, protocol, created_at, last_activity, expires_at, bytes_sent, bytes_received FROM sessions ORDER BY created_at DESC")]
-pub async fn session_select_all(
-    rb: &dyn rbatis::Executor,
-) -> rbatis::Result<Vec<SessionRow>> {
+pub async fn session_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<SessionRow>> {
     impled!()
 }
 
@@ -745,7 +774,12 @@ impl TryFrom<RecordingRow> for Recording {
             "stopping" => RecordingState::Stopping,
             "completed" => RecordingState::Completed,
             "error" => RecordingState::Error,
-            _ => return Err(AppError::Internal(format!("Unknown recording state: {}", row.state))),
+            _ => {
+                return Err(AppError::Internal(format!(
+                    "Unknown recording state: {}",
+                    row.state
+                )))
+            }
         };
 
         let format = match row.format.to_lowercase().as_str() {
@@ -753,17 +787,27 @@ impl TryFrom<RecordingRow> for Recording {
             "mp4" => RecordingFormat::Mp4,
             "flv" => RecordingFormat::Flv,
             "ts" => RecordingFormat::Ts,
-            _ => return Err(AppError::Internal(format!("Unknown recording format: {}", row.format))),
+            _ => {
+                return Err(AppError::Internal(format!(
+                    "Unknown recording format: {}",
+                    row.format
+                )))
+            }
         };
 
         let created_at = chrono::DateTime::from_timestamp(row.created_at.unix_timestamp(), 0)
             .unwrap_or_else(chrono::Utc::now);
 
-        let started_at = row.started_at.and_then(|s| chrono::DateTime::from_timestamp(s.unix_timestamp(), 0));
+        let started_at = row
+            .started_at
+            .and_then(|s| chrono::DateTime::from_timestamp(s.unix_timestamp(), 0));
 
-        let stopped_at = row.stopped_at.and_then(|s| chrono::DateTime::from_timestamp(s.unix_timestamp(), 0));
+        let stopped_at = row
+            .stopped_at
+            .and_then(|s| chrono::DateTime::from_timestamp(s.unix_timestamp(), 0));
 
-        let labels: Vec<String> = row.labels
+        let labels: Vec<String> = row
+            .labels
             .as_ref()
             .and_then(|l| serde_json::from_str(l).ok())
             .unwrap_or_default();
@@ -817,8 +861,12 @@ impl Recording {
             file_size: self.file_size as i64,
             duration_secs: self.duration_secs as i64,
             created_at: RbatisDateTime::from_timestamp_millis(self.created_at.timestamp_millis()),
-            started_at: self.started_at.map(|dt| RbatisDateTime::from_timestamp_millis(dt.timestamp_millis())),
-            stopped_at: self.stopped_at.map(|dt| RbatisDateTime::from_timestamp_millis(dt.timestamp_millis())),
+            started_at: self
+                .started_at
+                .map(|dt| RbatisDateTime::from_timestamp_millis(dt.timestamp_millis())),
+            stopped_at: self
+                .stopped_at
+                .map(|dt| RbatisDateTime::from_timestamp_millis(dt.timestamp_millis())),
             error_message: self.error_message.clone(),
             labels: labels_json,
             filename: self.filename.clone(),
@@ -834,9 +882,7 @@ impl Recording {
 }
 
 #[html_sql("sql/recording.html")]
-pub async fn recording_select_all(
-    rb: &dyn rbatis::Executor,
-) -> rbatis::Result<Vec<RecordingRow>> {
+pub async fn recording_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<RecordingRow>> {
     impled!()
 }
 
@@ -1039,11 +1085,17 @@ impl TryFrom<StreamRow> for Stream {
             "stopping" => StreamState::Stopping,
             "stopped" => StreamState::Stopped,
             "error" => StreamState::Error,
-            _ => return Err(AppError::Internal(format!("Unknown stream state: {}", row.state))),
+            _ => {
+                return Err(AppError::Internal(format!(
+                    "Unknown stream state: {}",
+                    row.state
+                )))
+            }
         };
 
-        let last_keepalive_at = chrono::DateTime::from_timestamp(row.last_keepalive_at.unix_timestamp(), 0)
-            .unwrap_or_else(chrono::Utc::now);
+        let last_keepalive_at =
+            chrono::DateTime::from_timestamp(row.last_keepalive_at.unix_timestamp(), 0)
+                .unwrap_or_else(chrono::Utc::now);
         let created_at = chrono::DateTime::from_timestamp(row.created_at.unix_timestamp(), 0)
             .unwrap_or_else(chrono::Utc::now);
 
@@ -1083,7 +1135,9 @@ impl Stream {
             viewer_count: Some(self.viewer_count as i32),
             bandwidth_in: Some(self.bandwidth_in as i64),
             bandwidth_out: Some(self.bandwidth_out as i64),
-            last_keepalive_at: RbatisDateTime::from_timestamp_millis(self.last_keepalive_at.timestamp_millis()),
+            last_keepalive_at: RbatisDateTime::from_timestamp_millis(
+                self.last_keepalive_at.timestamp_millis(),
+            ),
             created_at: RbatisDateTime::from_timestamp_millis(self.created_at.timestamp_millis()),
         }
     }
@@ -1110,9 +1164,7 @@ pub async fn stream_count(
 }
 
 #[sql("SELECT id, device_tag, channel_tag, media_server_tag, app, token, state, retry_count, max_retries, last_error, viewer_count, bandwidth_in, bandwidth_out, last_keepalive_at, created_at FROM streams ORDER BY created_at DESC")]
-pub async fn stream_select_all(
-    rb: &dyn rbatis::Executor,
-) -> rbatis::Result<Vec<StreamRow>> {
+pub async fn stream_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<StreamRow>> {
     impled!()
 }
 
@@ -1205,17 +1257,30 @@ impl From<ServerRow> for crate::config::MediaServerConfig {
 
 #[sql("SELECT code, name, level, parent_code, province_name, city_name, district_name, gb28181_code, 0 as device_count
        FROM gb28181_regions WHERE level = 1 ORDER BY name")]
-pub async fn region_select_provinces(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<RegionRow>> { impled!() }
+pub async fn region_select_provinces(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<RegionRow>> {
+    impled!()
+}
 
-#[sql("SELECT code, name, level, parent_code, province_name, city_name, district_name, gb28181_code,
+#[sql(
+    "SELECT code, name, level, parent_code, province_name, city_name, district_name, gb28181_code,
               (SELECT count(*) FROM devices d WHERE d.region_code = r.code) as device_count
-       FROM gb28181_regions r WHERE parent_code = $1 ORDER BY name")]
-pub async fn region_select_children(rb: &dyn rbatis::Executor, parent_code: &str) -> rbatis::Result<Vec<RegionRow>> { impled!() }
+       FROM gb28181_regions r WHERE parent_code = $1 ORDER BY name"
+)]
+pub async fn region_select_children(
+    rb: &dyn rbatis::Executor,
+    parent_code: &str,
+) -> rbatis::Result<Vec<RegionRow>> {
+    impled!()
+}
 
-#[sql("SELECT code, name, level, parent_code, province_name, city_name, district_name, gb28181_code,
+#[sql(
+    "SELECT code, name, level, parent_code, province_name, city_name, district_name, gb28181_code,
               (SELECT count(*) FROM devices d WHERE d.region_code = r.code) as device_count
-       FROM gb28181_regions r WHERE level <= 3 ORDER BY name")]
-pub async fn region_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<RegionRow>> { impled!() }
+       FROM gb28181_regions r WHERE level <= 3 ORDER BY name"
+)]
+pub async fn region_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<RegionRow>> {
+    impled!()
+}
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct GroupRow {
@@ -1261,16 +1326,47 @@ impl TryFrom<GroupRow> for crate::domain::device_group::DeviceGroup {
 }
 
 #[html_sql("sql/groups.html")]
-pub async fn group_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<GroupRow>> { impled!() }
+pub async fn group_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<GroupRow>> {
+    impled!()
+}
 
 #[html_sql("sql/groups.html")]
-pub async fn group_insert(rb: &dyn rbatis::Executor, name: &str, parent_id: Option<i64>, sort_order: i32) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+pub async fn group_insert(
+    rb: &dyn rbatis::Executor,
+    name: &str,
+    parent_id: Option<i64>,
+    sort_order: i32,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[html_sql("sql/groups.html")]
-pub async fn group_update(rb: &dyn rbatis::Executor, id: i64, name: &str, parent_id: Option<i64>, sort_order: i32) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+pub async fn group_update(
+    rb: &dyn rbatis::Executor,
+    id: i64,
+    name: &str,
+    parent_id: Option<i64>,
+    sort_order: i32,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[sql("DELETE FROM device_groups WHERE id = $1")]
-pub async fn group_delete(rb: &dyn rbatis::Executor, id: i64) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+pub async fn group_delete(
+    rb: &dyn rbatis::Executor,
+    id: i64,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
+
+/// 删除分组前先把挂在它下面的设备解绑，避免 device.group_id 悬空。
+#[html_sql("sql/groups.html")]
+pub async fn device_clear_group(
+    rb: &dyn rbatis::Executor,
+    id: i64,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct LayoutRow {
@@ -1288,8 +1384,20 @@ impl From<LayoutRow> for crate::domain::player_layout::PlayerLayout {
     fn from(r: LayoutRow) -> Self {
         let layout_json: Vec<crate::domain::player_layout::LayoutItem> =
             serde_json::from_value(r.layout_json.clone()).unwrap_or_default();
-        let created_at = r.created_at.map(|dt| chrono::DateTime::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(chrono::Utc::now)).unwrap_or_else(chrono::Utc::now);
-        let updated_at = r.updated_at.map(|dt| chrono::DateTime::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(chrono::Utc::now)).unwrap_or_else(chrono::Utc::now);
+        let created_at = r
+            .created_at
+            .map(|dt| {
+                chrono::DateTime::from_timestamp(dt.unix_timestamp(), 0)
+                    .unwrap_or_else(chrono::Utc::now)
+            })
+            .unwrap_or_else(chrono::Utc::now);
+        let updated_at = r
+            .updated_at
+            .map(|dt| {
+                chrono::DateTime::from_timestamp(dt.unix_timestamp(), 0)
+                    .unwrap_or_else(chrono::Utc::now)
+            })
+            .unwrap_or_else(chrono::Utc::now);
         Self {
             id: r.id as i32,
             name: r.name,
@@ -1309,19 +1417,47 @@ pub struct LayoutInsertResult {
 }
 
 #[html_sql("sql/layout.html")]
-pub async fn layout_select_by_id(rb: &dyn rbatis::Executor, id: i64) -> rbatis::Result<Vec<LayoutRow>> { impled!() }
+pub async fn layout_select_by_id(
+    rb: &dyn rbatis::Executor,
+    id: i64,
+) -> rbatis::Result<Vec<LayoutRow>> {
+    impled!()
+}
 
 #[html_sql("sql/layout.html")]
-pub async fn layout_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<LayoutRow>> { impled!() }
+pub async fn layout_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<LayoutRow>> {
+    impled!()
+}
 
 #[html_sql("sql/layout.html")]
-pub async fn layout_select_default(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<LayoutRow>> { impled!() }
+pub async fn layout_select_default(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<LayoutRow>> {
+    impled!()
+}
 
 #[html_sql("sql/layout.html")]
-pub async fn layout_insert(rb: &dyn rbatis::Executor, name: &str, rows: i32, cols: i32, layout_json: serde_json::Value, is_default: bool) -> rbatis::Result<Vec<LayoutInsertResult>> { impled!() }
+pub async fn layout_insert(
+    rb: &dyn rbatis::Executor,
+    name: &str,
+    rows: i32,
+    cols: i32,
+    layout_json: serde_json::Value,
+    is_default: bool,
+) -> rbatis::Result<Vec<LayoutInsertResult>> {
+    impled!()
+}
 
 #[html_sql("sql/layout.html")]
-pub async fn layout_update(rb: &dyn rbatis::Executor, id: i64, name: Option<&str>, rows: Option<i32>, cols: Option<i32>, layout_json: Option<serde_json::Value>, is_default: Option<bool>) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+pub async fn layout_update(
+    rb: &dyn rbatis::Executor,
+    id: i64,
+    name: Option<&str>,
+    rows: Option<i32>,
+    cols: Option<i32>,
+    layout_json: Option<serde_json::Value>,
+    is_default: Option<bool>,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct PtzPresetRow {
@@ -1338,8 +1474,12 @@ pub struct PtzPresetRow {
 impl From<PtzPresetRow> for crate::domain::ptz::PtzPreset {
     fn from(r: PtzPresetRow) -> Self {
         Self {
-            id: uuid::Uuid::parse_str(&r.id).map(|u| u.as_u64_pair().0 as i64).unwrap_or(0),
-            device_id: uuid::Uuid::parse_str(&r.device_id).map(|u| u.as_u64_pair().0 as i64).unwrap_or(0),
+            id: uuid::Uuid::parse_str(&r.id)
+                .map(|u| u.as_u64_pair().0 as i64)
+                .unwrap_or(0),
+            device_id: uuid::Uuid::parse_str(&r.device_id)
+                .map(|u| u.as_u64_pair().0 as i64)
+                .unwrap_or(0),
             name: r.name,
             token: r.token,
             position_pan: r.position_pan,
@@ -1370,10 +1510,19 @@ pub async fn ptz_preset_select_by_device_id(
 }
 
 #[html_sql("sql/layout.html")]
-pub async fn layout_set_default(rb: &dyn rbatis::Executor) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+pub async fn layout_set_default(
+    rb: &dyn rbatis::Executor,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[sql("DELETE FROM player_window_layouts WHERE id = $1")]
-pub async fn layout_delete(rb: &dyn rbatis::Executor, id: i64) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+pub async fn layout_delete(
+    rb: &dyn rbatis::Executor,
+    id: i64,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct TourSchemeRow {
@@ -1397,8 +1546,20 @@ pub struct TourSchemeRow {
 
 impl From<TourSchemeRow> for crate::domain::video_tour::TourScheme {
     fn from(r: TourSchemeRow) -> Self {
-        let created_at = r.created_at.map(|dt| chrono::DateTime::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(chrono::Utc::now)).unwrap_or_else(chrono::Utc::now);
-        let updated_at = r.updated_at.map(|dt| chrono::DateTime::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(chrono::Utc::now)).unwrap_or_else(chrono::Utc::now);
+        let created_at = r
+            .created_at
+            .map(|dt| {
+                chrono::DateTime::from_timestamp(dt.unix_timestamp(), 0)
+                    .unwrap_or_else(chrono::Utc::now)
+            })
+            .unwrap_or_else(chrono::Utc::now);
+        let updated_at = r
+            .updated_at
+            .map(|dt| {
+                chrono::DateTime::from_timestamp(dt.unix_timestamp(), 0)
+                    .unwrap_or_else(chrono::Utc::now)
+            })
+            .unwrap_or_else(chrono::Utc::now);
         Self {
             id: r.id,
             name: r.name,
@@ -1426,10 +1587,19 @@ pub struct TourSchemeInsertResult {
 }
 
 #[html_sql("sql/video_tour.html")]
-pub async fn tour_scheme_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<TourSchemeRow>> { impled!() }
+pub async fn tour_scheme_select_all(
+    rb: &dyn rbatis::Executor,
+) -> rbatis::Result<Vec<TourSchemeRow>> {
+    impled!()
+}
 
 #[html_sql("sql/video_tour.html")]
-pub async fn tour_scheme_select_by_id(rb: &dyn rbatis::Executor, id: i64) -> rbatis::Result<Vec<TourSchemeRow>> { impled!() }
+pub async fn tour_scheme_select_by_id(
+    rb: &dyn rbatis::Executor,
+    id: i64,
+) -> rbatis::Result<Vec<TourSchemeRow>> {
+    impled!()
+}
 
 #[html_sql("sql/video_tour.html")]
 pub async fn tour_scheme_insert(
@@ -1446,7 +1616,9 @@ pub async fn tour_scheme_insert(
     run_window: Option<serde_json::Value>,
     safety_max_duration_ms: Option<i64>,
     backfill_limit: i32,
-) -> rbatis::Result<Vec<TourSchemeInsertResult>> { impled!() }
+) -> rbatis::Result<Vec<TourSchemeInsertResult>> {
+    impled!()
+}
 
 #[html_sql("sql/video_tour.html")]
 pub async fn tour_scheme_update(
@@ -1465,21 +1637,24 @@ pub async fn tour_scheme_update(
     run_window: Option<serde_json::Value>,
     safety_max_duration_ms: Option<i64>,
     backfill_limit: i32,
-) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[sql("DELETE FROM video_tour_schemes WHERE id = $1")]
-pub async fn tour_scheme_delete(rb: &dyn rbatis::Executor, id: i64) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+pub async fn tour_scheme_delete(
+    rb: &dyn rbatis::Executor,
+    id: i64,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct MapSettingsRow {
     pub id: i64,
-    pub browser_tms_url: String,
-    pub client_tms_url: String,
-    pub wfs_url: String,
-    pub browser_min_zoom: i32,
-    pub browser_max_zoom: i32,
-    pub client_min_zoom: i32,
-    pub client_max_zoom: i32,
+    pub browser_layers: Option<serde_json::Value>,
+    pub client_layers: Option<serde_json::Value>,
+    pub wfs: Option<serde_json::Value>,
     pub updated_at: Option<RbatisDateTime>,
 }
 
@@ -1487,35 +1662,46 @@ impl From<MapSettingsRow> for crate::domain::map_settings::MapSettings {
     fn from(r: MapSettingsRow) -> Self {
         let updated_at = r
             .updated_at
-            .map(|dt| chrono::DateTime::from_timestamp(dt.unix_timestamp(), 0).unwrap_or_else(chrono::Utc::now))
+            .map(|dt| {
+                chrono::DateTime::from_timestamp(dt.unix_timestamp(), 0)
+                    .unwrap_or_else(chrono::Utc::now)
+            })
             .unwrap_or_else(chrono::Utc::now);
         Self {
-            browser_tms_url: r.browser_tms_url,
-            client_tms_url: r.client_tms_url,
-            wfs_url: r.wfs_url,
-            browser_min_zoom: r.browser_min_zoom,
-            browser_max_zoom: r.browser_max_zoom,
-            client_min_zoom: r.client_min_zoom,
-            client_max_zoom: r.client_max_zoom,
+            browser_layers: decode_layers(r.browser_layers),
+            client_layers: decode_layers(r.client_layers),
+            wfs: r
+                .wfs
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default(),
             updated_at,
         }
     }
 }
 
+/// Decode a jsonb array column into the typed layer list.
+/// A malformed or missing column degrades to an empty list instead of
+/// failing the whole settings read.
+fn decode_layers(value: Option<serde_json::Value>) -> Vec<crate::domain::map_settings::MapLayer> {
+    value
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default()
+}
+
 #[html_sql("sql/map_settings.html")]
-pub async fn map_settings_select(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<MapSettingsRow>> { impled!() }
+pub async fn map_settings_select(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<MapSettingsRow>> {
+    impled!()
+}
 
 #[html_sql("sql/map_settings.html")]
 pub async fn map_settings_upsert(
     rb: &dyn rbatis::Executor,
-    browser_tms_url: &str,
-    client_tms_url: &str,
-    wfs_url: &str,
-    browser_min_zoom: i32,
-    browser_max_zoom: i32,
-    client_min_zoom: i32,
-    client_max_zoom: i32,
-) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+    browser_layers: Option<serde_json::Value>,
+    client_layers: Option<serde_json::Value>,
+    wfs: Option<serde_json::Value>,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct AlarmRow {
@@ -1568,7 +1754,9 @@ pub async fn alarm_insert(
     alarm_method: i32,
     alarm_priority: i32,
     description: Option<&str>,
-) -> rbatis::Result<Vec<AlarmRow>> { impled!() }
+) -> rbatis::Result<Vec<AlarmRow>> {
+    impled!()
+}
 
 #[html_sql("sql/alarm.html")]
 pub async fn alarm_select_by_device(
@@ -1576,33 +1764,54 @@ pub async fn alarm_select_by_device(
     device_id: i64,
     limit: i64,
     offset: i64,
-) -> rbatis::Result<Vec<AlarmRow>> { impled!() }
+) -> rbatis::Result<Vec<AlarmRow>> {
+    impled!()
+}
 
 #[html_sql("sql/alarm.html")]
 pub async fn alarm_select_all(
     rb: &dyn rbatis::Executor,
     limit: i64,
     offset: i64,
-) -> rbatis::Result<Vec<AlarmRow>> { impled!() }
+) -> rbatis::Result<Vec<AlarmRow>> {
+    impled!()
+}
 
 #[sql("SELECT id, device_id, device_tag, channel_tag, alarm_id, alarm_type, alarm_time, alarm_method, alarm_priority, description, processed, created_at FROM alarms WHERE id = $1")]
 pub async fn alarm_select_by_id(
     rb: &dyn rbatis::Executor,
     id: i64,
-) -> rbatis::Result<Vec<AlarmRow>> { impled!() }
+) -> rbatis::Result<Vec<AlarmRow>> {
+    impled!()
+}
 
 #[sql("SELECT COUNT(*) FROM alarms WHERE device_id = $1")]
-pub async fn alarm_count_by_device(rb: &dyn rbatis::Executor, device_id: i64) -> rbatis::Result<i64> { impled!() }
+pub async fn alarm_count_by_device(
+    rb: &dyn rbatis::Executor,
+    device_id: i64,
+) -> rbatis::Result<i64> {
+    impled!()
+}
 
 #[sql("SELECT COUNT(*) FROM alarms")]
-pub async fn alarm_count_all(rb: &dyn rbatis::Executor) -> rbatis::Result<i64> { impled!() }
+pub async fn alarm_count_all(rb: &dyn rbatis::Executor) -> rbatis::Result<i64> {
+    impled!()
+}
 
 #[sql("UPDATE alarms SET processed = $1 WHERE id = $2")]
-pub async fn alarm_mark_processed(rb: &dyn rbatis::Executor, processed: bool, id: i64) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+pub async fn alarm_mark_processed(
+    rb: &dyn rbatis::Executor,
+    processed: bool,
+    id: i64,
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[html_sql("sql/alarm.html")]
 pub async fn alarm_select_filtered(
     rb: &dyn rbatis::Executor,
+    search: Option<&str>,
+    processed: Option<bool>,
     device_tag: Option<&str>,
     channel_tag: Option<&str>,
     alarm_type: Option<&str>,
@@ -1610,17 +1819,23 @@ pub async fn alarm_select_filtered(
     end_time: Option<RbatisDateTime>,
     limit: i64,
     offset: i64,
-) -> rbatis::Result<Vec<AlarmRow>> { impled!() }
+) -> rbatis::Result<Vec<AlarmRow>> {
+    impled!()
+}
 
 #[html_sql("sql/alarm.html")]
 pub async fn alarm_count_filtered(
     rb: &dyn rbatis::Executor,
+    search: Option<&str>,
+    processed: Option<bool>,
     device_tag: Option<&str>,
     channel_tag: Option<&str>,
     alarm_type: Option<&str>,
     start_time: Option<RbatisDateTime>,
     end_time: Option<RbatisDateTime>,
-) -> rbatis::Result<i64> { impled!() }
+) -> rbatis::Result<i64> {
+    impled!()
+}
 
 use crate::domain::gb28181_ref::{GbDeviceType, GbIndustryCode, GbNetworkCode};
 
@@ -1692,13 +1907,27 @@ impl From<GbNetworkCodeRow> for GbNetworkCode {
 }
 
 #[sql("SELECT code, name, name_en, category, description, can_have_children, sort_order FROM gb_device_types ORDER BY sort_order")]
-pub async fn gb_device_type_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<GbDeviceTypeRow>> { impled!() }
+pub async fn gb_device_type_select_all(
+    rb: &dyn rbatis::Executor,
+) -> rbatis::Result<Vec<GbDeviceTypeRow>> {
+    impled!()
+}
 
 #[sql("SELECT code, name, name_en, description, sort_order FROM gb_industry_codes ORDER BY sort_order")]
-pub async fn gb_industry_code_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<GbIndustryCodeRow>> { impled!() }
+pub async fn gb_industry_code_select_all(
+    rb: &dyn rbatis::Executor,
+) -> rbatis::Result<Vec<GbIndustryCodeRow>> {
+    impled!()
+}
 
-#[sql("SELECT code, name, name_en, description, sort_order FROM gb_network_codes ORDER BY sort_order")]
-pub async fn gb_network_code_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<GbNetworkCodeRow>> { impled!() }
+#[sql(
+    "SELECT code, name, name_en, description, sort_order FROM gb_network_codes ORDER BY sort_order"
+)]
+pub async fn gb_network_code_select_all(
+    rb: &dyn rbatis::Executor,
+) -> rbatis::Result<Vec<GbNetworkCodeRow>> {
+    impled!()
+}
 
 impl TryFrom<ChannelRow> for Channel {
     type Error = AppError;
@@ -1711,7 +1940,9 @@ impl TryFrom<ChannelRow> for Channel {
             _ => DeviceStatus::Offline,
         };
 
-        let device_type = row.device_type.as_ref()
+        let device_type = row
+            .device_type
+            .as_ref()
             .map(|dt| match dt.as_str() {
                 "NVR" => DeviceType::NVR,
                 "IPC" => DeviceType::IPC,
@@ -1727,7 +1958,9 @@ impl TryFrom<ChannelRow> for Channel {
         let created_at = chrono::DateTime::from_timestamp(row.created_at.unix_timestamp(), 0)
             .unwrap_or_else(chrono::Utc::now);
 
-        let updated_at = row.updated_at.and_then(|u| chrono::DateTime::from_timestamp(u.unix_timestamp(), 0));
+        let updated_at = row
+            .updated_at
+            .and_then(|u| chrono::DateTime::from_timestamp(u.unix_timestamp(), 0));
 
         Ok(Channel {
             id: row.id,
@@ -1760,19 +1993,23 @@ impl TryFrom<ChannelRow> for Channel {
 pub async fn channel_select_by_device_tag(
     rb: &dyn rbatis::Executor,
     device_tag: &str,
-) -> rbatis::Result<Vec<ChannelRow>> { impled!() }
+) -> rbatis::Result<Vec<ChannelRow>> {
+    impled!()
+}
 
 #[html_sql("sql/channel.html")]
 pub async fn channel_select_by_device_tag_and_channel_tag(
     rb: &dyn rbatis::Executor,
     device_tag: &str,
     channel_tag: &str,
-) -> rbatis::Result<Vec<ChannelRow>> { impled!() }
+) -> rbatis::Result<Vec<ChannelRow>> {
+    impled!()
+}
 
 #[html_sql("sql/channel.html")]
-pub async fn channel_select_all(
-    rb: &dyn rbatis::Executor,
-) -> rbatis::Result<Vec<ChannelRow>> { impled!() }
+pub async fn channel_select_all(rb: &dyn rbatis::Executor) -> rbatis::Result<Vec<ChannelRow>> {
+    impled!()
+}
 
 #[html_sql("sql/channel.html")]
 pub async fn channel_select_paginated(
@@ -1780,9 +2017,15 @@ pub async fn channel_select_paginated(
     device_tag: Option<String>,
     search: Option<String>,
     status: Option<String>,
+    group_ids: Option<Vec<i64>>,
+    ungrouped: Option<bool>,
+    region_code: Option<String>,
+    unassigned_region: Option<bool>,
     limit: i64,
     offset: i64,
-) -> rbatis::Result<Vec<ChannelRow>> { impled!() }
+) -> rbatis::Result<Vec<ChannelRow>> {
+    impled!()
+}
 
 #[html_sql("sql/channel.html")]
 pub async fn channel_count(
@@ -1790,7 +2033,13 @@ pub async fn channel_count(
     device_tag: Option<String>,
     search: Option<String>,
     status: Option<String>,
-) -> rbatis::Result<i64> { impled!() }
+    group_ids: Option<Vec<i64>>,
+    ungrouped: Option<bool>,
+    region_code: Option<String>,
+    unassigned_region: Option<bool>,
+) -> rbatis::Result<i64> {
+    impled!()
+}
 
 #[html_sql("sql/channel.html")]
 pub async fn channel_insert(
@@ -1816,7 +2065,9 @@ pub async fn channel_insert(
     extended: Option<serde_json::Value>,
     created_at: Option<RbatisDateTime>,
     updated_at: Option<RbatisDateTime>,
-) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[html_sql("sql/channel.html")]
 pub async fn channel_update(
@@ -1839,7 +2090,9 @@ pub async fn channel_update(
     parental: Option<i32>,
     extended: Option<serde_json::Value>,
     updated_at: Option<RbatisDateTime>,
-) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[html_sql("sql/channel.html")]
 pub async fn channel_update_position(
@@ -1849,20 +2102,26 @@ pub async fn channel_update_position(
     latitude: Option<f64>,
     longitude: Option<f64>,
     updated_at: Option<RbatisDateTime>,
-) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[html_sql("sql/channel.html")]
 pub async fn channel_delete_by_device_tag(
     rb: &dyn rbatis::Executor,
     device_tag: &str,
-) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[html_sql("sql/channel.html")]
 pub async fn channel_delete_by_device_tag_and_channel_tag(
     rb: &dyn rbatis::Executor,
     device_tag: &str,
     channel_tag: &str,
-) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct BroadcastSessionRow {
@@ -1890,26 +2149,36 @@ pub async fn broadcast_session_insert(
     device_port: i32,
     transport: &str,
     created_at: Option<RbatisDateTime>,
-) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[html_sql("sql/broadcast_session.html")]
 pub async fn broadcast_session_delete_by_device_tag(
     rb: &dyn rbatis::Executor,
     device_tag: &str,
-) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[html_sql("sql/broadcast_session.html")]
 pub async fn broadcast_session_select_by_device_tag(
     rb: &dyn rbatis::Executor,
     device_tag: &str,
-) -> rbatis::Result<Vec<BroadcastSessionRow>> { impled!() }
+) -> rbatis::Result<Vec<BroadcastSessionRow>> {
+    impled!()
+}
 
 #[html_sql("sql/broadcast_session.html")]
 pub async fn broadcast_session_select_all(
     rb: &dyn rbatis::Executor,
-) -> rbatis::Result<Vec<BroadcastSessionRow>> { impled!() }
+) -> rbatis::Result<Vec<BroadcastSessionRow>> {
+    impled!()
+}
 
-use crate::domain::recording_policy::{PolicyType, ScheduleType, SegmentType, RecordingPolicy, TimeWindow, RecordingSegment};
+use crate::domain::recording_policy::{
+    PolicyType, RecordingPolicy, RecordingSegment, ScheduleType, SegmentType, TimeWindow,
+};
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct RecordingPolicyRow {
@@ -1962,12 +2231,14 @@ impl TryFrom<RecordingPolicyRow> for RecordingPolicy {
     type Error = crate::error::AppError;
 
     fn try_from(row: RecordingPolicyRow) -> Result<Self, Self::Error> {
-        let policy_type = PolicyType::from_str(&row.policy_type)
-            .ok_or_else(|| crate::error::AppError::Internal(format!("Invalid policy type: {}", row.policy_type)))?;
+        let policy_type = PolicyType::from_str(&row.policy_type).ok_or_else(|| {
+            crate::error::AppError::Internal(format!("Invalid policy type: {}", row.policy_type))
+        })?;
 
-        let schedule_type = row.schedule_type.as_ref().map(|s| {
-            ScheduleType::from_str(s).unwrap_or(ScheduleType::TimeWindows)
-        });
+        let schedule_type = row
+            .schedule_type
+            .as_ref()
+            .map(|s| ScheduleType::from_str(s).unwrap_or(ScheduleType::TimeWindows));
 
         let format = match row.format.to_uppercase().as_str() {
             "HLS" => crate::domain::recording::RecordingFormat::Hls,
@@ -2019,8 +2290,9 @@ impl TryFrom<RecordingSegmentRow> for RecordingSegment {
     type Error = crate::error::AppError;
 
     fn try_from(row: RecordingSegmentRow) -> Result<Self, Self::Error> {
-        let segment_type = SegmentType::from_str(&row.segment_type)
-            .ok_or_else(|| crate::error::AppError::Internal(format!("Invalid segment type: {}", row.segment_type)))?;
+        let segment_type = SegmentType::from_str(&row.segment_type).ok_or_else(|| {
+            crate::error::AppError::Internal(format!("Invalid segment type: {}", row.segment_type))
+        })?;
 
         Ok(RecordingSegment {
             id: row.id,
@@ -2071,7 +2343,9 @@ pub async fn policy_insert(
     output_path: Option<&str>,
     created_at: Option<RbatisDateTime>,
     updated_at: Option<RbatisDateTime>,
-) -> rbatis::Result<Vec<RecordingPolicyInsertResult>> { impled!() }
+) -> rbatis::Result<Vec<RecordingPolicyInsertResult>> {
+    impled!()
+}
 
 #[html_sql("sql/recording_policy.html")]
 pub async fn policy_update(
@@ -2091,43 +2365,57 @@ pub async fn policy_update(
     max_duration_secs: Option<i32>,
     max_file_size_mb: Option<i32>,
     output_path: Option<&str>,
-) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[html_sql("sql/recording_policy.html")]
 pub async fn policy_delete_by_id(
     rb: &dyn rbatis::Executor,
     id: i64,
-) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[html_sql("sql/recording_policy.html")]
 pub async fn policy_select_all(
     rb: &dyn rbatis::Executor,
-) -> rbatis::Result<Vec<RecordingPolicyRow>> { impled!() }
+) -> rbatis::Result<Vec<RecordingPolicyRow>> {
+    impled!()
+}
 
 #[html_sql("sql/recording_policy.html")]
 pub async fn policy_select_by_id(
     rb: &dyn rbatis::Executor,
     id: i64,
-) -> rbatis::Result<Vec<RecordingPolicyRow>> { impled!() }
+) -> rbatis::Result<Vec<RecordingPolicyRow>> {
+    impled!()
+}
 
 #[html_sql("sql/recording_policy.html")]
 pub async fn policy_select_by_device_tag(
     rb: &dyn rbatis::Executor,
     device_tag: &str,
-) -> rbatis::Result<Vec<RecordingPolicyRow>> { impled!() }
+) -> rbatis::Result<Vec<RecordingPolicyRow>> {
+    impled!()
+}
 
 #[html_sql("sql/recording_policy.html")]
 pub async fn policy_select_by_device_and_channel(
     rb: &dyn rbatis::Executor,
     device_tag: &str,
     channel_tag: &str,
-) -> rbatis::Result<Vec<RecordingPolicyRow>> { impled!() }
+) -> rbatis::Result<Vec<RecordingPolicyRow>> {
+    impled!()
+}
 
 #[html_sql("sql/recording_policy.html")]
 pub async fn policy_select_by_alarm_triggered(
     rb: &dyn rbatis::Executor,
     alarm_type: &str,
-) -> rbatis::Result<Vec<RecordingPolicyRow>> { impled!() }
+) -> rbatis::Result<Vec<RecordingPolicyRow>> {
+    impled!()
+}
 
 #[html_sql("sql/recording_policy.html")]
 pub async fn policy_select_paginated(
@@ -2136,14 +2424,18 @@ pub async fn policy_select_paginated(
     policy_type: Option<&str>,
     limit: i64,
     offset: i64,
-) -> rbatis::Result<Vec<RecordingPolicyRow>> { impled!() }
+) -> rbatis::Result<Vec<RecordingPolicyRow>> {
+    impled!()
+}
 
 #[html_sql("sql/recording_policy.html")]
 pub async fn policy_count(
     rb: &dyn rbatis::Executor,
     device_tag: Option<&str>,
     policy_type: Option<&str>,
-) -> rbatis::Result<i64> { impled!() }
+) -> rbatis::Result<i64> {
+    impled!()
+}
 
 #[html_sql("sql/recording_time_window.html")]
 pub async fn time_window_insert(
@@ -2152,25 +2444,33 @@ pub async fn time_window_insert(
     start_time: &str,
     end_time: &str,
     days: &str,
-) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[html_sql("sql/recording_time_window.html")]
 pub async fn time_window_delete_by_policy_id(
     rb: &dyn rbatis::Executor,
     policy_id: i64,
-) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[html_sql("sql/recording_time_window.html")]
 pub async fn time_window_delete_by_id(
     rb: &dyn rbatis::Executor,
     id: i64,
-) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[html_sql("sql/recording_time_window.html")]
 pub async fn time_window_select_by_policy_id(
     rb: &dyn rbatis::Executor,
     policy_id: i64,
-) -> rbatis::Result<Vec<RecordingTimeWindowRow>> { impled!() }
+) -> rbatis::Result<Vec<RecordingTimeWindowRow>> {
+    impled!()
+}
 
 #[html_sql("sql/recording_segment.html")]
 pub async fn segment_insert(
@@ -2187,7 +2487,9 @@ pub async fn segment_insert(
     segment_type: &str,
     alarm_id: Option<i64>,
     play_url: Option<&str>,
-) -> rbatis::Result<Vec<RecordingSegmentInsertResult>> { impled!() }
+) -> rbatis::Result<Vec<RecordingSegmentInsertResult>> {
+    impled!()
+}
 
 #[html_sql("sql/recording_segment.html")]
 pub async fn segment_update(
@@ -2197,13 +2499,17 @@ pub async fn segment_update(
     duration_secs: Option<i64>,
     file_size: Option<i64>,
     file_path: Option<&str>,
-) -> rbatis::Result<rbatis::rbdc::ExecResult> { impled!() }
+) -> rbatis::Result<rbatis::rbdc::ExecResult> {
+    impled!()
+}
 
 #[html_sql("sql/recording_segment.html")]
 pub async fn segment_select_by_id(
     rb: &dyn rbatis::Executor,
     id: i64,
-) -> rbatis::Result<Vec<RecordingSegmentRow>> { impled!() }
+) -> rbatis::Result<Vec<RecordingSegmentRow>> {
+    impled!()
+}
 
 #[html_sql("sql/recording_segment.html")]
 pub async fn segment_select_by_device_channel_time(
@@ -2212,13 +2518,17 @@ pub async fn segment_select_by_device_channel_time(
     channel_tag: Option<&str>,
     start_time: RbatisDateTime,
     end_time: RbatisDateTime,
-) -> rbatis::Result<Vec<RecordingSegmentRow>> { impled!() }
+) -> rbatis::Result<Vec<RecordingSegmentRow>> {
+    impled!()
+}
 
 #[html_sql("sql/recording_segment.html")]
 pub async fn segment_select_by_recording_id(
     rb: &dyn rbatis::Executor,
     recording_id: i64,
-) -> rbatis::Result<Vec<RecordingSegmentRow>> { impled!() }
+) -> rbatis::Result<Vec<RecordingSegmentRow>> {
+    impled!()
+}
 
 #[html_sql("sql/recording_segment.html")]
 pub async fn segment_select_paginated(
@@ -2230,7 +2540,9 @@ pub async fn segment_select_paginated(
     segment_type: Option<&str>,
     limit: i64,
     offset: i64,
-) -> rbatis::Result<Vec<RecordingSegmentRow>> { impled!() }
+) -> rbatis::Result<Vec<RecordingSegmentRow>> {
+    impled!()
+}
 
 #[html_sql("sql/recording_segment.html")]
 pub async fn segment_count_by_device_channel_time(
@@ -2240,7 +2552,9 @@ pub async fn segment_count_by_device_channel_time(
     start_time: RbatisDateTime,
     end_time: RbatisDateTime,
     segment_type: Option<&str>,
-) -> rbatis::Result<i64> { impled!() }
+) -> rbatis::Result<i64> {
+    impled!()
+}
 
 #[html_sql("sql/recording_segment.html")]
 pub async fn segment_select_filtered_paginated(
@@ -2252,7 +2566,9 @@ pub async fn segment_select_filtered_paginated(
     end_time: Option<RbatisDateTime>,
     limit: i64,
     offset: i64,
-) -> rbatis::Result<Vec<RecordingSegmentRow>> { impled!() }
+) -> rbatis::Result<Vec<RecordingSegmentRow>> {
+    impled!()
+}
 
 #[html_sql("sql/recording_segment.html")]
 pub async fn segment_count_filtered(
@@ -2262,4 +2578,6 @@ pub async fn segment_count_filtered(
     segment_type: Option<&str>,
     start_time: Option<RbatisDateTime>,
     end_time: Option<RbatisDateTime>,
-) -> rbatis::Result<i64> { impled!() }
+) -> rbatis::Result<i64> {
+    impled!()
+}

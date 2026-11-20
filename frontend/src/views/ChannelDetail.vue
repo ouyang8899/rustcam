@@ -1,206 +1,191 @@
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <div class="header-left">
-        <el-button text @click="$router.back()">
-          <el-icon><ArrowLeft /></el-icon> 返回
-        </el-button>
-        <h1 class="page-title">{{ channel?.name || '通道详情' }}</h1>
+  <PageView :title="channel?.name || '通道详情'">
+    <template #toolbar>
+      <el-button text @click="$router.back()">
+        <el-icon><ArrowLeft /></el-icon> 返回
+      </el-button>
+      <el-button type="primary" @click="editVisible = true">编辑</el-button>
+      <el-button :icon="Refresh" @click="fetchData">刷新</el-button>
+    </template>
+
+    <div class="detail-layout" v-if="channel">
+      <div class="detail-main">
+        <DataCard class="player-card" title="视频预览">
+          <template #toolbar>
+            <div class="stream-selector">
+              <el-radio-group v-model="selectedStreamType" size="small">
+                <el-radio-button value="hls" :disabled="!playLinks?.hls">HLS</el-radio-button>
+                <el-radio-button value="flv" :disabled="!playLinks?.flv">FLV</el-radio-button>
+                <el-radio-button value="wsflv" :disabled="!playLinks?.web_flv">WS-FLV</el-radio-button>
+                <el-radio-button value="rtsp" :disabled="!playLinks?.rtsp_signaling">RTSP</el-radio-button>
+              </el-radio-group>
+            </div>
+          </template>
+          <div class="player-with-ptz">
+            <div class="player-wrapper">
+              <VideoPlayer
+                v-if="currentStreamUrl && !loading"
+                :liveSrc="currentStreamUrl"
+                :type="selectedStreamType"
+                :isLive="true"
+                :autoplay="true"
+                :deviceTag="route.params.deviceTag"
+                :channelTag="route.params.channelTag"
+                :enableBroadcast="true"
+              />
+              <div v-else-if="loading" class="loading-state">
+                <el-icon class="is-loading"><Loading /></el-icon>
+                <span>加载中...</span>
+              </div>
+              <div v-else class="empty-state">
+                <el-icon><VideoPlay /></el-icon>
+                <span>暂无视频流</span>
+              </div>
+            </div>
+
+            <div v-if="device && (device.protocol?.toLowerCase() === 'onvif' || device.protocol?.toLowerCase() === 'gb28181')" class="ptz-sidebar">
+              <div class="ptz-control-header">
+                <span class="ptz-label">云台控制</span>
+                <div class="ptz-status-dot" :class="{ active: ptzStatus?.moving }"></div>
+              </div>
+              <div class="ptz-dpad">
+                <button class="dpad-btn dpad-up" @mousedown="ptzControl('up', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4l-8 8h5v8h6v-8h5z"/></svg>
+                </button>
+                <button class="dpad-btn dpad-left" @mousedown="ptzControl('left', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 12l8-8v5h8v6h-8V4z"/></svg>
+                </button>
+                <button class="dpad-center" @click="ptzControl('stop', 1)">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                </button>
+                <button class="dpad-btn dpad-right" @mousedown="ptzControl('right', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 12l-8 8v-5H4v-6h8V4z"/></svg>
+                </button>
+                <button class="dpad-btn dpad-down" @mousedown="ptzControl('down', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 20l8-8h-5V4h-6v8H4z"/></svg>
+                </button>
+              </div>
+              <div class="ptz-aux-row">
+                <div class="aux-group">
+                  <span class="aux-label">变倍</span>
+                  <div class="aux-btns">
+                    <button class="aux-btn" @mousedown="ptzControl('zoom_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">+</button>
+                    <button class="aux-btn" @mousedown="ptzControl('zoom_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">−</button>
+                  </div>
+                </div>
+                <div class="aux-group">
+                  <span class="aux-label">聚焦</span>
+                  <div class="aux-btns">
+                    <button class="aux-btn" @mousedown="ptzControl('focus_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">+</button>
+                    <button class="aux-btn" @mousedown="ptzControl('focus_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">−</button>
+                  </div>
+                </div>
+                <div class="aux-group">
+                  <span class="aux-label">光圈</span>
+                  <div class="aux-btns">
+                    <button class="aux-btn" @mousedown="ptzControl('iris_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">+</button>
+                    <button class="aux-btn" @mousedown="ptzControl('iris_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">−</button>
+                  </div>
+                </div>
+              </div>
+              <div class="ptz-joystick-area" ref="joystickRef" @mousedown="startJoystick" @touchstart.prevent="startJoystick">
+                <div class="joystick-base">
+                  <div class="joystick-stick" :style="joystickStyle"></div>
+                </div>
+              </div>
+              <div class="ptz-position" v-if="ptzStatus?.position">
+                <span class="pos-label">位置</span>
+                <span class="pos-value">P:{{ ptzStatus.position.pan?.toFixed(2) }} T:{{ ptzStatus.position.tilt?.toFixed(2) }} Z:{{ ptzStatus.position.zoom?.toFixed(2) }}</span>
+              </div>
+            </div>
+          </div>
+        </DataCard>
+
+        <DataCard v-if="device && (device.protocol?.toLowerCase() === 'onvif' || device.protocol?.toLowerCase() === 'gb28181')" class="preset-card" title="预制位">
+          <template #toolbar>
+            <el-button size="small" type="primary" @click="showPresetDialog = true">保存当前</el-button>
+          </template>
+          <EmptyState v-if="presets.length === 0" title="暂无预制位" />
+          <div v-else class="preset-grid">
+            <div v-for="preset in presets" :key="preset.token" class="preset-tile">
+              <div class="preset-info">
+                <span class="preset-name">{{ preset.name }}</span>
+              </div>
+              <div class="preset-actions">
+                <el-button size="small" type="primary" @click="gotoPreset(preset)">调用</el-button>
+                <el-button size="small" type="danger" plain @click="removePreset(preset)">删除</el-button>
+              </div>
+            </div>
+          </div>
+        </DataCard>
+
+        <DataCard class="links-card" title="播放链接">
+          <div class="links-list" v-if="playLinks">
+            <div class="link-item" v-if="playLinks.rtsp_signaling">
+              <div class="link-info">
+                <el-tag size="small" type="info">RTSP</el-tag>
+                <span class="link-url">{{ playLinks.rtsp_signaling }}</span>
+              </div>
+              <el-button size="small" @click="copyLink(playLinks.rtsp_signaling)">复制</el-button>
+            </div>
+            <div class="link-item" v-if="playLinks.flv">
+              <div class="link-info">
+                <el-tag size="small" type="warning">FLV</el-tag>
+                <span class="link-url">{{ playLinks.flv }}</span>
+              </div>
+              <el-button size="small" @click="copyLink(playLinks.flv)">复制</el-button>
+            </div>
+            <div class="link-item" v-if="playLinks.web_flv">
+              <div class="link-info">
+                <el-tag size="small" type="danger">HTTP-FLV</el-tag>
+                <span class="link-url">{{ playLinks.web_flv }}</span>
+              </div>
+              <el-button size="small" @click="copyLink(playLinks.web_flv)">复制</el-button>
+            </div>
+            <div class="link-item" v-if="playLinks.hls">
+              <div class="link-info">
+                <el-tag size="small" type="success">HLS</el-tag>
+                <span class="link-url">{{ playLinks.hls }}</span>
+              </div>
+              <el-button size="small" @click="copyLink(playLinks.hls)">复制</el-button>
+            </div>
+            <div class="link-item" v-if="playLinks.webrtc">
+              <div class="link-info">
+                <el-tag size="small" type="primary">WebRTC</el-tag>
+                <span class="link-url">{{ playLinks.webrtc }}</span>
+              </div>
+              <el-button size="small" @click="copyLink(playLinks.webrtc)">复制</el-button>
+            </div>
+          </div>
+          <EmptyState v-else title="暂无播放链接" />
+        </DataCard>
       </div>
-      <div class="page-toolbar">
-        <el-button type="primary" @click="editVisible = true">编辑</el-button>
-        <el-button :icon="Refresh" @click="fetchData">刷新</el-button>
-      </div>
-    </div>
 
-    <div class="page-body" v-if="channel">
-      <div class="detail-layout">
-        <div class="detail-main">
-          <el-card shadow="never" class="player-card">
-            <template #header>
-              <div class="card-header">
-                <span>视频预览</span>
-                <div class="stream-selector">
-                  <el-radio-group v-model="selectedStreamType" size="small">
-                    <el-radio-button value="hls" :disabled="!playLinks?.hls">HLS</el-radio-button>
-                    <el-radio-button value="flv" :disabled="!playLinks?.flv">FLV</el-radio-button>
-                    <el-radio-button value="wsflv" :disabled="!playLinks?.web_flv">WS-FLV</el-radio-button>
-                    <el-radio-button value="rtsp" :disabled="!playLinks?.rtsp_signaling">RTSP</el-radio-button>
-                  </el-radio-group>
-                </div>
-              </div>
-            </template>
-            <div class="player-with-ptz">
-              <div class="player-wrapper">
-                <VideoPlayer
-                  v-if="currentStreamUrl && !loading"
-                  :liveSrc="currentStreamUrl"
-                  :type="selectedStreamType"
-                  :isLive="true"
-                  :autoplay="true"
-                  :deviceTag="route.params.deviceTag"
-                  :channelTag="route.params.channelTag"
-                  :enableBroadcast="true"
-                />
-                <div v-else-if="loading" class="loading-state">
-                  <el-icon class="is-loading"><Loading /></el-icon>
-                  <span>加载中...</span>
-                </div>
-                <div v-else class="empty-state">
-                  <el-icon><VideoPlay /></el-icon>
-                  <span>暂无视频流</span>
-                </div>
-              </div>
-
-              <div v-if="device && (device.protocol?.toLowerCase() === 'onvif' || device.protocol?.toLowerCase() === 'gb28181')" class="ptz-sidebar">
-                <div class="ptz-control-header">
-                  <span class="ptz-label">云台控制</span>
-                  <div class="ptz-status-dot" :class="{ active: ptzStatus?.moving }"></div>
-                </div>
-                <div class="ptz-dpad">
-                  <button class="dpad-btn dpad-up" @mousedown="ptzControl('up', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4l-8 8h5v8h6v-8h5z"/></svg>
-                  </button>
-                  <button class="dpad-btn dpad-left" @mousedown="ptzControl('left', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 12l8-8v5h8v6h-8V4z"/></svg>
-                  </button>
-                  <button class="dpad-center" @click="ptzControl('stop', 1)">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-                  </button>
-                  <button class="dpad-btn dpad-right" @mousedown="ptzControl('right', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 12l-8 8v-5H4v-6h8V4z"/></svg>
-                  </button>
-                  <button class="dpad-btn dpad-down" @mousedown="ptzControl('down', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 20l8-8h-5V4h-6v8H4z"/></svg>
-                  </button>
-                </div>
-                <div class="ptz-aux-row">
-                  <div class="aux-group">
-                    <span class="aux-label">变倍</span>
-                    <div class="aux-btns">
-                      <button class="aux-btn" @mousedown="ptzControl('zoom_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">+</button>
-                      <button class="aux-btn" @mousedown="ptzControl('zoom_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">−</button>
-                    </div>
-                  </div>
-                  <div class="aux-group">
-                    <span class="aux-label">聚焦</span>
-                    <div class="aux-btns">
-                      <button class="aux-btn" @mousedown="ptzControl('focus_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">+</button>
-                      <button class="aux-btn" @mousedown="ptzControl('focus_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">−</button>
-                    </div>
-                  </div>
-                  <div class="aux-group">
-                    <span class="aux-label">光圈</span>
-                    <div class="aux-btns">
-                      <button class="aux-btn" @mousedown="ptzControl('iris_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">+</button>
-                      <button class="aux-btn" @mousedown="ptzControl('iris_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">−</button>
-                    </div>
-                  </div>
-                </div>
-                <div class="ptz-joystick-area" ref="joystickRef" @mousedown="startJoystick" @touchstart.prevent="startJoystick">
-                  <div class="joystick-base">
-                    <div class="joystick-stick" :style="joystickStyle"></div>
-                  </div>
-                </div>
-                <div class="ptz-position" v-if="ptzStatus?.position">
-                  <span class="pos-label">位置</span>
-                  <span class="pos-value">P:{{ ptzStatus.position.pan?.toFixed(2) }} T:{{ ptzStatus.position.tilt?.toFixed(2) }} Z:{{ ptzStatus.position.zoom?.toFixed(2) }}</span>
-                </div>
-              </div>
-            </div>
-          </el-card>
-
-          <el-card v-if="device && (device.protocol?.toLowerCase() === 'onvif' || device.protocol?.toLowerCase() === 'gb28181')" shadow="never" class="preset-card">
-            <template #header>
-              <div class="preset-header">
-                <span>预制位</span>
-                <el-button size="small" type="primary" @click="showPresetDialog = true">保存当前</el-button>
-              </div>
-            </template>
-            <div v-if="presets.length === 0" class="empty-presets">暂无预制位</div>
-            <div v-else class="preset-grid">
-              <div v-for="preset in presets" :key="preset.token" class="preset-tile">
-                <div class="preset-info">
-                  <span class="preset-name">{{ preset.name }}</span>
-                </div>
-                <div class="preset-actions">
-                  <el-button size="small" type="primary" @click="gotoPreset(preset)">调用</el-button>
-                  <el-button size="small" type="danger" plain @click="removePreset(preset)">删除</el-button>
-                </div>
-              </div>
-            </div>
-          </el-card>
-
-          <el-card shadow="never" class="links-card">
-            <template #header><span>播放链接</span></template>
-            <div class="links-list" v-if="playLinks">
-              <div class="link-item" v-if="playLinks.rtsp_signaling">
-                <div class="link-info">
-                  <el-tag size="small" type="info">RTSP</el-tag>
-                  <span class="link-url">{{ playLinks.rtsp_signaling }}</span>
-                </div>
-                <el-button size="small" @click="copyLink(playLinks.rtsp_signaling)">复制</el-button>
-              </div>
-              <div class="link-item" v-if="playLinks.flv">
-                <div class="link-info">
-                  <el-tag size="small" type="warning">FLV</el-tag>
-                  <span class="link-url">{{ playLinks.flv }}</span>
-                </div>
-                <el-button size="small" @click="copyLink(playLinks.flv)">复制</el-button>
-              </div>
-              <div class="link-item" v-if="playLinks.web_flv">
-                <div class="link-info">
-                  <el-tag size="small" type="danger">HTTP-FLV</el-tag>
-                  <span class="link-url">{{ playLinks.web_flv }}</span>
-                </div>
-                <el-button size="small" @click="copyLink(playLinks.web_flv)">复制</el-button>
-              </div>
-              <div class="link-item" v-if="playLinks.hls">
-                <div class="link-info">
-                  <el-tag size="small" type="success">HLS</el-tag>
-                  <span class="link-url">{{ playLinks.hls }}</span>
-                </div>
-                <el-button size="small" @click="copyLink(playLinks.hls)">复制</el-button>
-              </div>
-              <div class="link-item" v-if="playLinks.webrtc">
-                <div class="link-info">
-                  <el-tag size="small" type="primary">WebRTC</el-tag>
-                  <span class="link-url">{{ playLinks.webrtc }}</span>
-                </div>
-                <el-button size="small" @click="copyLink(playLinks.webrtc)">复制</el-button>
-              </div>
-            </div>
-            <el-empty v-else description="暂无播放链接" />
-          </el-card>
-        </div>
-
-        <div class="detail-sidebar">
-          <el-card shadow="never">
-            <template #header><span>通道信息</span></template>
-            <el-descriptions :column="1" border size="small">
-              <el-descriptions-item label="设备标识">{{ channel.device_tag }}</el-descriptions-item>
-              <el-descriptions-item label="通道标识">{{ channel.channel_tag }}</el-descriptions-item>
-              <el-descriptions-item label="状态">
-                <el-tag size="small" :type="statusType">{{ channel.status }}</el-tag>
-              </el-descriptions-item>
-              <el-descriptions-item label="类型">{{ channel.device_type }}</el-descriptions-item>
-              <el-descriptions-item label="地址">{{ channel.ip_address ? (channel.port ? `${channel.ip_address}:${channel.port}` : channel.ip_address) : '-' }}</el-descriptions-item>
-              <el-descriptions-item label="厂商">{{ channel.manufacturer || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="型号">{{ channel.model || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="创建时间">{{ formatDate(channel.created_at) }}</el-descriptions-item>
-            </el-descriptions>
-          </el-card>
-        </div>
+      <div class="detail-sidebar">
+        <DataCard title="通道信息">
+          <el-descriptions :column="1" border size="small">
+            <el-descriptions-item label="设备标识">{{ channel.device_tag }}</el-descriptions-item>
+            <el-descriptions-item label="通道标识">{{ channel.channel_tag }}</el-descriptions-item>
+            <el-descriptions-item label="状态">
+              <el-tag size="small" :type="statusType">{{ channel.status }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="类型">{{ channel.device_type }}</el-descriptions-item>
+            <el-descriptions-item label="地址">{{ channel.ip_address ? (channel.port ? `${channel.ip_address}:${channel.port}` : channel.ip_address) : '-' }}</el-descriptions-item>
+            <el-descriptions-item label="厂商">{{ channel.manufacturer || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="型号">{{ channel.model || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="创建时间">{{ formatDate(channel.created_at) }}</el-descriptions-item>
+          </el-descriptions>
+        </DataCard>
       </div>
     </div>
 
-    <el-dialog v-model="showPresetDialog" title="保存预制位" width="400px">
+    <AppDialog v-model="showPresetDialog" title="保存预制位" size="sm">
       <el-input v-model="newPresetName" placeholder="例如: 大门入口" />
       <template #footer>
         <el-button @click="showPresetDialog = false">取消</el-button>
         <el-button type="primary" :disabled="!newPresetName.trim()" @click="savePreset">保存</el-button>
       </template>
-    </el-dialog>
+    </AppDialog>
 
     <ChannelEditDialog
       v-model="editVisible"
@@ -210,23 +195,28 @@
       :channel="channel"
       @saved="fetchData"
     />
-  </div>
+  </PageView>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Refresh, VideoPlay, Loading } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
 import { useChannelStore } from '../stores/channelStore'
 import { useDeviceStore } from '../stores/deviceStore'
+import { useToast } from '../composables/useToast'
 import VideoPlayer from '../components/VideoPlayer.vue'
 import ChannelEditDialog from '../components/channel/ChannelEditDialog.vue'
+import PageView from '../components/common/PageView.vue'
+import DataCard from '../components/common/DataCard.vue'
+import EmptyState from '../components/common/EmptyState.vue'
+import AppDialog from '../components/common/AppDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
 const channelStore = useChannelStore()
 const deviceStore = useDeviceStore()
+const toast = useToast()
 
 const channel = ref(null)
 const device = ref(null)
@@ -290,7 +280,7 @@ async function fetchData() {
     }
     updateDefaultStreamType()
   } catch (e) {
-    ElMessage.error('获取通道信息失败')
+    toast.error('获取通道信息失败')
   } finally {
     loading.value = false
   }
@@ -339,9 +329,9 @@ async function savePreset() {
     await fetchPresets()
     showPresetDialog.value = false
     newPresetName.value = ''
-    ElMessage.success('预制位已保存')
+    toast.success('预制位已保存')
   } catch {
-    ElMessage.error('保存预制位失败')
+    toast.error('保存预制位失败')
   }
 }
 
@@ -350,7 +340,7 @@ async function gotoPreset(preset) {
     const { deviceTag, channelTag } = route.params
     await channelStore.channelPtzControl(deviceTag, channelTag, 'goto_preset', ptzSpeed.value, preset.token)
   } catch {
-    ElMessage.error('调用预制位失败')
+    toast.error('调用预制位失败')
   }
 }
 
@@ -359,9 +349,9 @@ async function removePreset(preset) {
     const { deviceTag, channelTag } = route.params
     await channelStore.deleteChannelPtzPreset(deviceTag, channelTag, preset.token)
     await fetchPresets()
-    ElMessage.success('预制位已删除')
+    toast.success('预制位已删除')
   } catch {
-    ElMessage.error('删除预制位失败')
+    toast.error('删除预制位失败')
   }
 }
 
@@ -436,7 +426,7 @@ function stopPtzStatusPolling() {
 
 function copyLink(url) {
   navigator.clipboard.writeText(url)
-  ElMessage.success('已复制到剪贴板')
+  toast.success('已复制到剪贴板')
 }
 
 function formatDate(dateStr) {
@@ -468,35 +458,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.page-container {
-  padding: 20px;
-  min-height: 100vh;
-  background: var(--el-bg-page);
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.page-title {
-  font-size: 20px;
-  font-weight: 600;
-  margin: 0;
-}
-
-.page-toolbar {
-  display: flex;
-  gap: 8px;
-}
 
 .detail-layout {
   display: grid;
@@ -515,13 +476,7 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.player-card :deep(.el-card__header) {
+.player-card :deep(.data-card__header) {
   padding: 12px 16px;
 }
 
@@ -782,21 +737,8 @@ onUnmounted(() => {
   color: var(--el-text-color-secondary);
 }
 
-.preset-card :deep(.el-card__header) {
+.preset-card :deep(.data-card__header) {
   padding: 12px 16px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-}
-
-.preset-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.preset-header span {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
 }
 
 .preset-grid {
@@ -842,13 +784,6 @@ onUnmounted(() => {
   flex: 1;
   padding: 4px 8px;
   font-size: 11px;
-}
-
-.empty-presets {
-  text-align: center;
-  padding: 32px 0;
-  color: var(--el-text-color-secondary);
-  font-size: 13px;
 }
 
 .links-card .links-list {

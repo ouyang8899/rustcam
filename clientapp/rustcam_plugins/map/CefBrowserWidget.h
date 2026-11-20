@@ -29,10 +29,8 @@ public:
 
     void setPageUrl(const QString& url);
 
-    void initialize(double lon, double lat, int zoom, const QString& tmsUrl = QString(),
-                    int minZoom = 0, int maxZoom = 19);
-    void setTilesUrl(const QString& tmsUrl);
-    void setZoomLimits(int minZoom, int maxZoom);
+    void initialize(double lon, double lat, int zoom, const QString& layersJson = QString());
+    void setTilesUrl(const QString& layersJson);
     void setCenter(double lon, double lat, int zoom = -1);
     void locateMarker(const QString& id);
     void addMarker(const QString& id, double lon, double lat,

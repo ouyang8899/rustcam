@@ -105,9 +105,7 @@ impl TcpConnection {
 
         match tokio::time::timeout(std::time::Duration::from_secs(RESPONSE_TIMEOUT_SECS), rx).await
         {
-            Ok(Ok(response)) => {
-                Ok(response)
-            }
+            Ok(Ok(response)) => Ok(response),
             Ok(Err(_)) => {
                 self.pending_responses.lock().await.remove(&cseq);
                 Err(RtspError::ConnectionFailed("连接已关闭".into()))
@@ -151,8 +149,7 @@ impl TcpConnection {
                                     Some(tx) => {
                                         let _ = tx.send(response);
                                     }
-                                    None => {
-                                    }
+                                    None => {}
                                 }
                             }
                             None => {}

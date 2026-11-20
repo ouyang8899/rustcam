@@ -6,7 +6,8 @@ use super::types::{
 };
 use crate::media::rtp_server::UDPRtpServer;
 use crate::protocol::rtsp::common::{
-    ReceivedData, RequestBuilder, RtcpPacket, RtcpReportType, RtspError, RtpUpdateResult, RTSP_USER_AGENT,
+    ReceivedData, RequestBuilder, RtcpPacket, RtcpReportType, RtpUpdateResult, RtspError,
+    RTSP_USER_AGENT,
 };
 use crate::protocol::rtsp::sdp::{SdpDirection, SdpInfo, SdpParser};
 use std::net::SocketAddr;
@@ -148,8 +149,7 @@ impl RtspClient {
                 let auth = self.auth_handler.read().await;
                 if auth.has_auth_method() {
                     let header = auth.build_authorization(request.method(), request.uri());
-                    if let Ok(ref _h) = header {
-                    }
+                    if let Ok(ref _h) = header {}
                     header.ok()
                 } else {
                     tracing::warn!("[RtspClient] No auth method available");
@@ -262,7 +262,6 @@ impl RtspClient {
     }
 
     pub async fn start_rtsp_receive(self: &Arc<Self>) -> Result<(), RtspError> {
-
         let connection = {
             let guard = self.connection.read().await;
             guard
@@ -349,8 +348,8 @@ impl RtspClient {
     }
 
     pub async fn options(&self) -> Result<String, RtspError> {
-        let request = RequestBuilder::new("OPTIONS", &self.full_uri)
-            .header("User-Agent", RTSP_USER_AGENT);
+        let request =
+            RequestBuilder::new("OPTIONS", &self.full_uri).header("User-Agent", RTSP_USER_AGENT);
         let ret = self.send_request(request).await?;
         Ok(ret)
     }
@@ -469,9 +468,7 @@ impl RtspClient {
                         .allocate_udp("rtsp_client", track_id, "rtsp_client")
                         .await
                     {
-                        Ok((port, ssrc, server)) => {
-                            Some((port, ssrc, server))
-                        }
+                        Ok((port, ssrc, server)) => Some((port, ssrc, server)),
                         Err(e) => {
                             tracing::warn!("[RtspClient] UDP 端口分配失败: {}，回退 TCP", e);
                             None
@@ -487,42 +484,42 @@ impl RtspClient {
             None
         };
 
-        let (transport_str, _udp_info, tcp_channels) = if let Some((port, _, _)) = udp_alloc.as_ref()
-        {
-            let s = match direction {
-                MediaDirection::RecvOnly => {
-                    format!("RTP/AVP/UDP;unicast;client_port={}-{}", port, port + 1)
-                }
-                MediaDirection::SendOnly => format!(
-                    "RTP/AVP/UDP;unicast;client_port={}-{};mode=record",
-                    port,
-                    port + 1
-                ),
-                MediaDirection::SendRecv => format!(
-                    "RTP/AVP/UDP;unicast;client_port={}-{};mode=play",
-                    port,
-                    port + 1
-                ),
+        let (transport_str, _udp_info, tcp_channels) =
+            if let Some((port, _, _)) = udp_alloc.as_ref() {
+                let s = match direction {
+                    MediaDirection::RecvOnly => {
+                        format!("RTP/AVP/UDP;unicast;client_port={}-{}", port, port + 1)
+                    }
+                    MediaDirection::SendOnly => format!(
+                        "RTP/AVP/UDP;unicast;client_port={}-{};mode=record",
+                        port,
+                        port + 1
+                    ),
+                    MediaDirection::SendRecv => format!(
+                        "RTP/AVP/UDP;unicast;client_port={}-{};mode=play",
+                        port,
+                        port + 1
+                    ),
+                };
+                (s, Some((*port, *port + 1)), None)
+            } else {
+                let rtp_ch = (track_idx * 2) as u8;
+                let rtcp_ch = rtp_ch + 1;
+                let s = match direction {
+                    MediaDirection::RecvOnly => {
+                        format!("RTP/AVP/TCP;unicast;interleaved={}-{}", rtp_ch, rtcp_ch)
+                    }
+                    MediaDirection::SendOnly => format!(
+                        "RTP/AVP/TCP;unicast;interleaved={}-{};mode=record",
+                        rtp_ch, rtcp_ch
+                    ),
+                    MediaDirection::SendRecv => format!(
+                        "RTP/AVP/TCP;unicast;interleaved={}-{};mode=play",
+                        rtp_ch, rtcp_ch
+                    ),
+                };
+                (s, None, Some((rtp_ch, rtcp_ch)))
             };
-            (s, Some((*port, *port + 1)), None)
-        } else {
-            let rtp_ch = (track_idx * 2) as u8;
-            let rtcp_ch = rtp_ch + 1;
-            let s = match direction {
-                MediaDirection::RecvOnly => {
-                    format!("RTP/AVP/TCP;unicast;interleaved={}-{}", rtp_ch, rtcp_ch)
-                }
-                MediaDirection::SendOnly => format!(
-                    "RTP/AVP/TCP;unicast;interleaved={}-{};mode=record",
-                    rtp_ch, rtcp_ch
-                ),
-                MediaDirection::SendRecv => format!(
-                    "RTP/AVP/TCP;unicast;interleaved={}-{};mode=play",
-                    rtp_ch, rtcp_ch
-                ),
-            };
-            (s, None, Some((rtp_ch, rtcp_ch)))
-        };
 
         let setup_uri = {
             let tracks = self.tracks.read().await;
@@ -745,7 +742,6 @@ impl RtspClient {
             .await;
         self.start_session_keepalive(Arc::clone(&self.running))
             .await;
-
     }
 
     fn spawn_udp_receive(
@@ -839,7 +835,6 @@ impl RtspClient {
     ) {
         match data {
             ReceivedData::RtspResponse(resp) => {
-
                 tracing::warn!(
                     "TCP consumer 收到意外的 RTSP 响应: {:?}",
                     resp.lines().next()

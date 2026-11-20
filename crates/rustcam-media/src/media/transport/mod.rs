@@ -1,10 +1,10 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
+use crate::media::errors::Result;
+use crate::media::node::DataType;
 use async_trait::async_trait;
 use bytes::BytesMut;
 use std::collections::HashMap;
-use crate::media::errors::{ Result };
-use crate::media::node::DataType;
+use std::net::SocketAddr;
+use std::sync::Arc;
 
 #[async_trait]
 pub trait DataTransport: Send + Sync {
@@ -17,17 +17,17 @@ pub trait DataTransport: Send + Sync {
     async fn close(&self) -> Result<()>;
 }
 
-pub mod udp;
-pub mod tcp;
 pub mod gb28181_broadcast;
-pub mod websocket;
 pub mod onvif_backchannel;
+pub mod tcp;
+pub mod udp;
+pub mod websocket;
 
-pub use udp::UdpTransport;
-pub use tcp::{TcpTransport, Gb28181TcpTransport};
 pub use gb28181_broadcast::GB28181BroadcastVoiceTransport;
-pub use websocket::{WebSocketMediaTransport, WebSocketMediaNodeTransport};
 pub use onvif_backchannel::OnvifBackchannelTransport;
+pub use tcp::{Gb28181TcpTransport, TcpTransport};
+pub use udp::UdpTransport;
+pub use websocket::{WebSocketMediaNodeTransport, WebSocketMediaTransport};
 
 pub struct NullTransport;
 

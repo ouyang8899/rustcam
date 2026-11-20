@@ -1,68 +1,74 @@
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <h1 class="page-title">角色管理</h1>
-      <div class="page-toolbar">
-        <el-button type="primary" :icon="Plus" @click="openCreateModal">创建角色</el-button>
-      </div>
-    </div>
-    <div class="page-body">
-      <DataCard>
-        <el-skeleton animated :loading="loading" :rows="4">
-          <template #default>
-            <el-table :data="roles" style="margin-top: 0">
-              <el-table-column label="角色名" prop="name" min-width="140" />
-              <el-table-column label="描述" min-width="200">
-                <template #default="{ row }">{{ row.description || '-' }}</template>
-              </el-table-column>
-              <el-table-column label="直接权限" min-width="220">
-                <template #default="{ row }">
-                  <el-tag
-                    v-for="perm in (details[row.id]?.permissions || []).slice(0, 4)"
-                    :key="perm"
-                    size="small"
-                    style="margin-right: 4px"
-                  >{{ perm }}</el-tag>
-                  <span v-if="(details[row.id]?.permissions || []).length > 4">
-                    +{{ details[row.id].permissions.length - 4 }}
-                  </span>
-                  <span v-if="!(details[row.id]?.permissions || []).length">-</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="继承自" min-width="160">
-                <template #default="{ row }">
-                  <el-tag
-                    v-for="parent in (details[row.id]?.parent_roles || [])"
-                    :key="parent.id"
-                    size="small"
-                    type="warning"
-                    style="margin-right: 4px"
-                  >{{ parent.name }}</el-tag>
-                  <span v-if="!(details[row.id]?.parent_roles || []).length">-</span>
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="260">
-                <template #default="{ row }">
-                  <el-button size="small" @click="openPermissionsModal(row)">权限</el-button>
-                  <el-button size="small" @click="openParentsModal(row)">继承</el-button>
-                  <el-button size="small" @click="openEditModal(row)">编辑</el-button>
-                  <el-button
-                    v-if="row.name !== 'Admin'"
-                    size="small"
-                    type="danger"
-                    plain
-                    @click="confirmDelete(row)"
-                  >删除</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-            <el-empty v-if="roles.length === 0" description="暂无角色" />
-          </template>
-        </el-skeleton>
-      </DataCard>
-    </div>
+  <PageView title="角色管理">
+    <template #toolbar>
+      <el-button type="primary" :icon="Plus" @click="openCreateModal">创建角色</el-button>
+    </template>
 
-    <el-dialog v-model="showCreateModal" title="创建角色" width="420px" :close-on-click-modal="false">
+    <DataCard>
+      <el-skeleton animated :loading="loading" :rows="4">
+        <template #default>
+          <el-table :data="pagedRoles" border stripe size="small" style="margin-top: 0">
+            <el-table-column label="角色名" prop="name" min-width="140" />
+            <el-table-column label="描述" min-width="200">
+              <template #default="{ row }">{{ row.description || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="直接权限" min-width="220">
+              <template #default="{ row }">
+                <el-tag
+                  v-for="perm in (details[row.id]?.permissions || []).slice(0, 4)"
+                  :key="perm"
+                  size="small"
+                  style="margin-right: 4px"
+                >{{ perm }}</el-tag>
+                <span v-if="(details[row.id]?.permissions || []).length > 4">
+                  +{{ details[row.id].permissions.length - 4 }}
+                </span>
+                <span v-if="!(details[row.id]?.permissions || []).length">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="继承自" min-width="160">
+              <template #default="{ row }">
+                <el-tag
+                  v-for="parent in (details[row.id]?.parent_roles || [])"
+                  :key="parent.id"
+                  size="small"
+                  type="warning"
+                  style="margin-right: 4px"
+                >{{ parent.name }}</el-tag>
+                <span v-if="!(details[row.id]?.parent_roles || []).length">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="260">
+              <template #default="{ row }">
+                <el-button size="small" @click="openPermissionsModal(row)">权限</el-button>
+                <el-button size="small" @click="openParentsModal(row)">继承</el-button>
+                <el-button size="small" @click="openEditModal(row)">编辑</el-button>
+                <el-button
+                  v-if="row.name !== 'Admin'"
+                  size="small"
+                  type="danger"
+                  plain
+                  @click="confirmDelete(row)"
+                >删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <EmptyState v-if="roles.length === 0" title="暂无角色" />
+        </template>
+      </el-skeleton>
+    </DataCard>
+
+    <template #footer>
+      <PaginationBar
+        v-model:page-size="pageSize"
+        :total="roles.length"
+        :page="currentPage"
+        show-sizes
+        @update:page="currentPage = $event"
+      />
+    </template>
+
+    <AppDialog v-model="showCreateModal" title="创建角色" size="sm" :close-on-click-modal="false">
       <el-form label-position="top">
         <el-form-item label="角色名 *" required>
           <el-input v-model="createForm.name" placeholder="例如 Operator" />
@@ -75,9 +81,9 @@
         <el-button @click="showCreateModal = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitCreate">创建</el-button>
       </template>
-    </el-dialog>
+    </AppDialog>
 
-    <el-dialog v-model="showEditModal" :title="`编辑角色: ${editRole?.name}`" width="420px" :close-on-click-modal="false">
+    <AppDialog v-model="showEditModal" :title="`编辑角色: ${editRole?.name}`" size="sm" :close-on-click-modal="false">
       <el-form label-position="top">
         <el-form-item label="角色名 *" required>
           <el-input v-model="editForm.name" />
@@ -90,9 +96,9 @@
         <el-button @click="showEditModal = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitEdit">保存</el-button>
       </template>
-    </el-dialog>
+    </AppDialog>
 
-    <el-dialog v-model="showPermissionsModal" :title="`角色权限: ${permissionRole?.name}`" width="560px" :close-on-click-modal="false">
+    <AppDialog v-model="showPermissionsModal" :title="`角色权限: ${permissionRole?.name}`" size="md" :close-on-click-modal="false">
       <div v-for="group in permissionGroups" :key="group.object" style="margin-bottom: 16px">
         <div style="font-weight: 600; margin-bottom: 8px">{{ group.object }}</div>
         <el-checkbox-group v-model="permissionForm.permissionIds">
@@ -104,14 +110,14 @@
           />
         </el-checkbox-group>
       </div>
-      <el-empty v-if="permissionGroups.length === 0" description="暂无权限点" />
+      <EmptyState v-if="permissionGroups.length === 0" title="暂无权限点" />
       <template #footer>
         <el-button @click="showPermissionsModal = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitPermissions">保存</el-button>
       </template>
-    </el-dialog>
+    </AppDialog>
 
-    <el-dialog v-model="showParentsModal" :title="`继承角色: ${parentsRole?.name}`" width="520px" :close-on-click-modal="false">
+    <AppDialog v-model="showParentsModal" :title="`继承角色: ${parentsRole?.name}`" size="md" :close-on-click-modal="false">
       <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px">
         勾选父角色后，本角色将自动获得父角色的全部权限；不允许自身继承或形成环。
       </div>
@@ -123,13 +129,13 @@
           :label="role.name"
         />
       </el-checkbox-group>
-      <el-empty v-if="parentCandidates.length === 0" description="无可选父角色" />
+      <EmptyState v-if="parentCandidates.length === 0" title="无可选父角色" />
       <template #footer>
         <el-button @click="showParentsModal = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitParents">保存</el-button>
       </template>
-    </el-dialog>
-  </div>
+    </AppDialog>
+  </PageView>
 </template>
 
 <script setup>
@@ -140,6 +146,10 @@ import { useToast } from '../composables/useToast'
 import * as roleApi from '../api/roles'
 import * as permissionApi from '../api/permissions'
 import DataCard from '../components/common/DataCard.vue'
+import PageView from '../components/common/PageView.vue'
+import EmptyState from '../components/common/EmptyState.vue'
+import AppDialog from '../components/common/AppDialog.vue'
+import PaginationBar from '../components/common/PaginationBar.vue'
 
 const toast = useToast()
 
@@ -148,6 +158,13 @@ const permissions = ref([])
 const details = ref({})
 const loading = ref(false)
 const submitting = ref(false)
+
+const currentPage = ref(1)
+const pageSize = ref(20)
+const pagedRoles = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return roles.value.slice(start, start + pageSize.value)
+})
 
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
@@ -186,6 +203,8 @@ async function fetchRoles() {
   loading.value = true
   try {
     roles.value = await roleApi.getRoles()
+    const maxPage = Math.max(1, Math.ceil(roles.value.length / pageSize.value))
+    if (currentPage.value > maxPage) currentPage.value = maxPage
     await loadDetails()
   } catch (e) {
     toast.error('获取角色列表失败: ' + e.message)
@@ -208,11 +227,6 @@ async function loadDetails() {
   details.value = Object.fromEntries(entries.filter(([, detail]) => detail))
 }
 
-/**
- * 拉取全部权限点，供「角色权限」弹窗勾选。
- *
- * 权限点接口是分页的，这里一次取满（上限 500，与服务端一致）。
- */
 async function fetchPermissions() {
   try {
     const res = await permissionApi.getPermissions({ limit: 500 })
@@ -324,6 +338,3 @@ async function submitParents() {
   }
 }
 </script>
-
-<style scoped>
-</style>

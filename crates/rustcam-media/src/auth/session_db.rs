@@ -13,7 +13,8 @@ const SESSION_COLUMNS: &str = "id, user_id, client_type, client_name, client_ip,
     to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS last_seen_at";
 
 /// 与 users 联表时的限定列名，避免 id / user_id 列歧义。
-const SESSION_COLUMNS_JOINED: &str = "s.id, s.user_id, s.client_type, s.client_name, s.client_ip, s.user_agent, \
+const SESSION_COLUMNS_JOINED: &str =
+    "s.id, s.user_id, s.client_type, s.client_name, s.client_ip, s.user_agent, \
     to_char(s.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at, \
     to_char(s.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS last_seen_at";
 
@@ -62,10 +63,7 @@ impl PostgresAuthRepository {
             ),
         };
         let rows: Vec<Value> = self.rb.exec_decode(sql, args).await?;
-        Ok(rows
-            .first()
-            .and_then(|row| row["c"].as_i64())
-            .unwrap_or(0))
+        Ok(rows.first().and_then(|row| row["c"].as_i64()).unwrap_or(0))
     }
 }
 
@@ -139,7 +137,10 @@ impl SessionRepository for PostgresAuthRepository {
             )
             .await?;
         let total = self.count_active(Some(user_id)).await?;
-        Ok((rows.iter().map(parse_session).collect::<Result<Vec<_>>>()?, total))
+        Ok((
+            rows.iter().map(parse_session).collect::<Result<Vec<_>>>()?,
+            total,
+        ))
     }
 
     async fn list_all_active_paged(

@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::{timeout, Duration as TokioDuration};
-use serde::{Deserialize, Serialize};
 /// Timeout of a single API call against a media server.
 pub const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 4;
 
@@ -29,7 +29,12 @@ impl MediaServerClient {
             .expect("Failed to create HTTP client");
 
         let base_url = base_url.trim_end_matches('/').to_string();
-        Self { base_url, secret: secret.to_string(), http, timeout_secs }
+        Self {
+            base_url,
+            secret: secret.to_string(),
+            http,
+            timeout_secs,
+        }
     }
 
     pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
@@ -53,29 +58,28 @@ impl MediaServerClient {
             self.http.get(&url_with_secret).send(),
         )
         .await
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "GET request timeout after {}s",
-                self.timeout_secs
-            )
-        })??;
+        .map_err(|_| anyhow::anyhow!("GET request timeout after {}s", self.timeout_secs))??;
         let _elapsed = start.elapsed();
 
         let status = resp.status();
-        let body_text = resp.text().await
+        let body_text = resp
+            .text()
+            .await
             .map_err(|e| anyhow::anyhow!("read body failed: {}", e))?;
 
         if !status.is_success() {
             anyhow::bail!("API error: {} - {}", status, body_text);
         }
 
-        let body: serde_json::Value = serde_json::from_str(&body_text)
-            .context("Deserialize response")?;
+        let body: serde_json::Value =
+            serde_json::from_str(&body_text).context("Deserialize response")?;
         serde_json::from_value(body).context("Deserialize response")
     }
 
     pub async fn post<T: DeserializeOwned, B: serde::Serialize>(
-        &self, path: &str, body: &B,
+        &self,
+        path: &str,
+        body: &B,
     ) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let url_with_secret = format!("{}?secret={}", url, self.secret);
@@ -87,24 +91,21 @@ impl MediaServerClient {
             self.http.post(&url_with_secret).json(body).send(),
         )
         .await
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "POST request timeout after {}s",
-                self.timeout_secs
-            )
-        })??;
+        .map_err(|_| anyhow::anyhow!("POST request timeout after {}s", self.timeout_secs))??;
         let _elapsed = start.elapsed();
 
         let status = resp.status();
-        let body_text = resp.text().await
+        let body_text = resp
+            .text()
+            .await
             .map_err(|e| anyhow::anyhow!("read body failed: {}", e))?;
 
         if !status.is_success() {
             anyhow::bail!("API error: {} - {}", status, body_text);
         }
 
-        let body: serde_json::Value = serde_json::from_str(&body_text)
-            .context("Deserialize response")?;
+        let body: serde_json::Value =
+            serde_json::from_str(&body_text).context("Deserialize response")?;
         serde_json::from_value(body).context("Deserialize response")
     }
 
@@ -129,28 +130,27 @@ impl MediaServerClient {
             self.http.post(&url_with_secret).send(),
         )
         .await
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "POST request timeout after {}s",
-                self.timeout_secs
-            )
-        })??;
+        .map_err(|_| anyhow::anyhow!("POST request timeout after {}s", self.timeout_secs))??;
         let _elapsed = start.elapsed();
 
         let status = resp.status();
-        let body_text = resp.text().await
+        let body_text = resp
+            .text()
+            .await
             .map_err(|e| anyhow::anyhow!("read body failed: {}", e))?;
 
         if !status.is_success() {
             anyhow::bail!("API error: {} - {}", status, body_text);
         }
 
-        let body: serde_json::Value = serde_json::from_str(&body_text)
-            .context("Deserialize response")?;
+        let body: serde_json::Value =
+            serde_json::from_str(&body_text).context("Deserialize response")?;
         serde_json::from_value(body).context("Deserialize response")
     }
 
-    pub fn base_url(&self) -> &str { &self.base_url }
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
 }
 
 #[cfg(test)]

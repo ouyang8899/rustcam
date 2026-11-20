@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use axum::{extract::State, Json};
 use serde::Deserialize;
+use std::sync::Arc;
 
 use crate::api::state::FullState;
 use crate::api::ApiResponse;
@@ -32,18 +32,24 @@ pub struct OnvifStreamUriRequest {
 pub async fn onvif_discover_handler(
     State(_state): State<Arc<FullState>>,
 ) -> Result<Json<ApiResponse<Vec<serde_json::Value>>>, AppError> {
-    let devices = OnvifProbeService::discover_multicast().await
+    let devices = OnvifProbeService::discover_multicast()
+        .await
         .map_err(|e| AppError::Internal(format!("ONVIF discovery failed: {}", e)))?;
 
-    let result: Vec<serde_json::Value> = devices.into_iter().map(|d| serde_json::json!({
-        "host": d.host,
-        "port": d.port,
-        "urn": d.urn,
-        "x_addr": d.x_addr,
-        "name": d.name,
-        "manufacturer": d.manufacturer,
-        "model": d.model,
-    })).collect();
+    let result: Vec<serde_json::Value> = devices
+        .into_iter()
+        .map(|d| {
+            serde_json::json!({
+                "host": d.host,
+                "port": d.port,
+                "urn": d.urn,
+                "x_addr": d.x_addr,
+                "name": d.name,
+                "manufacturer": d.manufacturer,
+                "model": d.model,
+            })
+        })
+        .collect();
 
     Ok(Json(ApiResponse::success(result)))
 }
@@ -52,9 +58,15 @@ pub async fn onvif_probe_handler(
     State(_state): State<Arc<FullState>>,
     Json(req): Json<OnvifProbeRequest>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
-    let device = OnvifProbeService::probe_unicast(&req.host, req.port).await
+    let device = OnvifProbeService::probe_unicast(&req.host, req.port)
+        .await
         .map_err(|e| AppError::Internal(format!("ONVIF probe failed: {}", e)))?
-        .ok_or_else(|| AppError::NotFound(format!("No ONVIF device found at {}:{}", req.host, req.port)))?;
+        .ok_or_else(|| {
+            AppError::NotFound(format!(
+                "No ONVIF device found at {}:{}",
+                req.host, req.port
+            ))
+        })?;
 
     let result = serde_json::json!({
         "host": device.host,
@@ -73,9 +85,14 @@ pub async fn onvif_capabilities_handler(
     State(_state): State<Arc<FullState>>,
     Json(req): Json<OnvifCapabilitiesRequest>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
-    let caps = OnvifProbeService::get_capabilities(&req.x_addr, &req.username, &req.password).await
+    let caps = OnvifProbeService::get_capabilities(&req.x_addr, &req.username, &req.password)
+        .await
         .map_err(|e| {
-            tracing::error!("[ONVIF] get_capabilities failed: x_addr={}, error={}", req.x_addr, e);
+            tracing::error!(
+                "[ONVIF] get_capabilities failed: x_addr={}, error={}",
+                req.x_addr,
+                e
+            );
             AppError::BadRequest(format!("Failed to get capabilities: {}", e))
         })?;
 
@@ -112,19 +129,32 @@ pub async fn onvif_stream_uris_handler(
         &req.username,
         &req.password,
         &req.profiles,
-    ).await
-        .map_err(|e| {
-            tracing::error!("[ONVIF] get_stream_uris failed: x_addr={}, error={}", req.x_addr, e);
-            AppError::BadRequest(format!("Failed to get stream URIs: {}", e))
-        })?;
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(
+            "[ONVIF] get_stream_uris failed: x_addr={}, error={}",
+            req.x_addr,
+            e
+        );
+        AppError::BadRequest(format!("Failed to get stream URIs: {}", e))
+    })?;
 
-    let streams: Vec<serde_json::Value> = result.streams.into_iter().map(|s| serde_json::json!({
-        "token": s.token,
-        "name": s.name,
-        "rtsp_url": s.rtsp_url,
-    })).collect();
+    let streams: Vec<serde_json::Value> = result
+        .streams
+        .into_iter()
+        .map(|s| {
+            serde_json::json!({
+                "token": s.token,
+                "name": s.name,
+                "rtsp_url": s.rtsp_url,
+            })
+        })
+        .collect();
 
-    Ok(Json(ApiResponse::success(serde_json::json!({ "streams": streams }))))
+    Ok(Json(ApiResponse::success(
+        serde_json::json!({ "streams": streams }),
+    )))
 }
 
 #[derive(Debug, Deserialize)]
@@ -168,10 +198,15 @@ pub async fn onvif_create_devices_handler(
     Json(req): Json<OnvifCreateDevicesRequest>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
     if req.streams.is_empty() {
-        return Err(AppError::BadRequest("At least one stream is required".to_string()));
+        return Err(AppError::BadRequest(
+            "At least one stream is required".to_string(),
+        ));
     }
 
-    let result = state.app.registry.device_service
+    let result = state
+        .app
+        .registry
+        .device_service
         .create_onvif_devices(
             req.urn.as_deref(),
             &req.x_addr,
@@ -203,5 +238,7 @@ pub async fn onvif_check_online_handler(
     Json(req): Json<OnvifCheckOnlineRequest>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
     let online = OnvifProbeService::check_online(&req.x_addr, &req.username, &req.password).await;
-    Ok(Json(ApiResponse::success(serde_json::json!({ "online": online }))))
+    Ok(Json(ApiResponse::success(
+        serde_json::json!({ "online": online }),
+    )))
 }

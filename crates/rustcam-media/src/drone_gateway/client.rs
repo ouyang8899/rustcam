@@ -373,10 +373,8 @@ pub trait DroneApi: Send + Sync + 'static {
     async fn delete_drone(&self, drone_tag: &str) -> Result<bool, DroneApiError>;
 
     /// 列出机载链路实体（adapter）；`include_disabled` 为真时包含已停用的。
-    async fn list_adapters(
-        &self,
-        include_disabled: bool,
-    ) -> Result<Vec<AdapterDto>, DroneApiError>;
+    async fn list_adapters(&self, include_disabled: bool)
+        -> Result<Vec<AdapterDto>, DroneApiError>;
     /// 读取单个 adapter 配置。
     async fn get_adapter(&self, adapter_id: &str) -> Result<AdapterDto, DroneApiError>;
     /// 新建或更新 adapter 配置。
@@ -501,7 +499,10 @@ impl DroneApi for NoopDroneApi {
     async fn delete_drone(&self, _drone_tag: &str) -> Result<bool, DroneApiError> {
         Err(DroneApiError::unavailable("drone-service 未配置"))
     }
-    async fn list_adapters(&self, _include_disabled: bool) -> Result<Vec<AdapterDto>, DroneApiError> {
+    async fn list_adapters(
+        &self,
+        _include_disabled: bool,
+    ) -> Result<Vec<AdapterDto>, DroneApiError> {
         Err(DroneApiError::unavailable("drone-service 未配置"))
     }
     async fn get_adapter(&self, _adapter_id: &str) -> Result<AdapterDto, DroneApiError> {
@@ -675,7 +676,9 @@ impl DroneClient {
             adapter_link: AdapterLinkClient::new(channel),
             reconnect_min: Duration::from_secs(config.reconnect_min_secs.max(1)),
             reconnect_max: Duration::from_secs(
-                config.reconnect_max_secs.max(config.reconnect_min_secs.max(1)),
+                config
+                    .reconnect_max_secs
+                    .max(config.reconnect_min_secs.max(1)),
             ),
         })
     }
@@ -1076,7 +1079,10 @@ impl DroneApi for DroneClient {
         Ok(resp.into_inner().deleted)
     }
 
-    async fn list_adapters(&self, include_disabled: bool) -> Result<Vec<AdapterDto>, DroneApiError> {
+    async fn list_adapters(
+        &self,
+        include_disabled: bool,
+    ) -> Result<Vec<AdapterDto>, DroneApiError> {
         let mut admin = self.admin.clone();
         let resp = admin
             .list_adapters(ListAdaptersRequest { include_disabled })
@@ -1585,10 +1591,7 @@ mod tests {
         let back = profile_dto(msg);
         assert_eq!(back.unique_id, dto.unique_id);
         assert_eq!(back.mavlink_addr, dto.mavlink_addr);
-        assert!(
-            back.signing_secret.is_empty(),
-            "密钥本体不得随档案回传"
-        );
+        assert!(back.signing_secret.is_empty(), "密钥本体不得随档案回传");
         assert!(back.has_signing_secret, "只回『是否已配置』标记");
         assert_eq!(back.mavlink_version, dto.mavlink_version);
         assert_eq!(back.mavlink_sysid, dto.mavlink_sysid);
@@ -1613,7 +1616,10 @@ mod tests {
         };
         let dto = drone_dto(msg);
         assert_eq!(dto.autopilot, "ardupilot", "autopilot 是档案配置值");
-        assert_eq!(dto.autopilot_detected, "px4", "autopilot_detected 是运行时探测值");
+        assert_eq!(
+            dto.autopilot_detected, "px4",
+            "autopilot_detected 是运行时探测值"
+        );
         assert_eq!(dto.mavlink_version, 1);
         assert!(!dto.signing_allow_unsigned);
         assert!(dto.has_signing_secret);

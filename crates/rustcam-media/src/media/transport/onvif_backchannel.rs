@@ -1,5 +1,5 @@
 use crate::media::errors::{MediaError, Result};
-use crate::media::node::{ DataType, MediaNode };
+use crate::media::node::{DataType, MediaNode};
 use crate::protocol::rtsp::client::client::{RtspClient, RtspClientCallback};
 use crate::protocol::rtsp::client::state::RtspState;
 use crate::protocol::rtsp::client::types::{MediaDirection, RtpTransportMode};
@@ -77,7 +77,6 @@ impl OnvifBackchannelTransport {
     }
 
     async fn reconnect(self: &Arc<Self>) -> Result<()> {
-
         {
             let mut guard = self.audio_tx.lock().unwrap();
             guard.take();
@@ -131,8 +130,7 @@ impl OnvifBackchannelTransport {
             .map_err(|e| MediaError::Transport(format!("Failed to start RTSP client: {}", e)))?;
 
         match client.options().await {
-            Ok(_resp) => {
-            }
+            Ok(_resp) => {}
             Err(e) => {
                 tracing::error!("[ONVIF Backchannel] OPTIONS failed: {:?}", e);
                 return Err(MediaError::Transport(format!("OPTIONS failed: {:?}", e)));
@@ -142,8 +140,7 @@ impl OnvifBackchannelTransport {
         let describe_result = client.describe_with_backchannel().await;
 
         match &describe_result {
-            Ok(_tracks) => {
-            }
+            Ok(_tracks) => {}
             Err(e) => {
                 tracing::error!(
                     "[ONVIF Backchannel] DESCRIBE with backchannel failed: {:?}",
@@ -338,8 +335,7 @@ struct OnvifBackchannelCallback {
 }
 
 impl RtspClientCallback for OnvifBackchannelCallback {
-    fn on_state_change(&self, _state: &RtspState) {
-    }
+    fn on_state_change(&self, _state: &RtspState) {}
 
     fn on_rtp_packet(&self, _track_id: &str, _data: &[u8], _ssrc: u32) {}
 
@@ -351,14 +347,10 @@ impl RtspClientCallback for OnvifBackchannelCallback {
         report_type: &RtcpReportType,
     ) {
         match report_type {
-            RtcpReportType::ReceiverReport { .. } => {
-            }
-            RtcpReportType::SenderReport { .. } => {
-            }
-            RtcpReportType::Bye { .. } => {
-            }
-            RtcpReportType::Unknown => {
-            }
+            RtcpReportType::ReceiverReport { .. } => {}
+            RtcpReportType::SenderReport { .. } => {}
+            RtcpReportType::Bye { .. } => {}
+            RtcpReportType::Unknown => {}
         }
     }
 
@@ -388,8 +380,7 @@ impl RtspClientCallback for OnvifBackchannelCallback {
         });
     }
 
-    fn on_teardown_complete(&self) {
-    }
+    fn on_teardown_complete(&self) {}
 }
 
 #[async_trait]
@@ -444,7 +435,6 @@ impl crate::media::node::MediaTransport for OnvifBackchannelTransport {
     }
 
     async fn close(&self) -> Result<()> {
-
         self.is_closing.store(true, Ordering::SeqCst);
 
         {

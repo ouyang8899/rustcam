@@ -1,4 +1,3 @@
-
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,7 +20,6 @@ impl bb8::ManageConnection for Bb8ManageConnection {
     type Error = Error;
 
     async fn connect(&self) -> Result<Self::Connection, Self::Error> {
-
         let conn = self
             .manager
             .driver
@@ -50,7 +48,6 @@ pub struct PooledConn {
 impl Drop for PooledConn {
     fn drop(&mut self) {
         if let Some(conn) = self.conn.take() {
-
             let _ = self.pool.add(Some(conn));
         }
     }
@@ -102,7 +99,6 @@ impl Connection for PooledConn {
     }
 
     fn close(&mut self) -> BoxFuture<'_, Result<(), Error>> {
-
         let conn = self.conn.take();
         Box::pin(async move {
             match conn {
@@ -126,7 +122,6 @@ impl std::fmt::Debug for Bb8Pool {
 }
 
 impl Bb8Pool {
-
     pub async fn new(
         driver: Arc<Box<dyn Driver>>,
         option: Arc<Box<dyn ConnectOptions>>,
@@ -142,7 +137,6 @@ impl Bb8Pool {
             .max_size(max_size.max(1))
             .connection_timeout(connect_timeout)
             .idle_timeout(Some(Duration::from_secs(300)))
-
             .test_on_check_out(true)
             .build(Bb8ManageConnection { manager })
             .await
@@ -156,9 +150,11 @@ impl Bb8Pool {
     }
 
     async fn acquire(&self) -> Result<Box<dyn Connection>, Error> {
-        let mut guard = self.pool.get().await.map_err(|e| {
-            Error::from(format!("[DB] failed to get connection: {}", e))
-        })?;
+        let mut guard = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| Error::from(format!("[DB] failed to get connection: {}", e)))?;
 
         let taken = std::mem::take(&mut *guard);
         match taken {
@@ -177,7 +173,6 @@ impl rbdc::pool::Pool for Bb8Pool {
     where
         Self: Sized,
     {
-
         let driver = manager.driver.clone();
         let option = manager.option.clone();
         let m = ConnectionManager {
@@ -208,13 +203,9 @@ impl rbdc::pool::Pool for Bb8Pool {
         }
     }
 
-    async fn set_max_idle_conns(&self, _n: u64) {
+    async fn set_max_idle_conns(&self, _n: u64) {}
 
-    }
-
-    async fn set_max_open_conns(&self, _n: u64) {
-
-    }
+    async fn set_max_open_conns(&self, _n: u64) {}
 
     fn driver_type(&self) -> &str {
         self.driver

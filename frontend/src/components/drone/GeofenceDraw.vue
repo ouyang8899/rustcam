@@ -14,9 +14,11 @@ import { TerraDraw, TerraDrawCircleMode, TerraDrawPolygonMode } from 'terra-draw
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { FENCE_COLORS, fenceColors, fenceRule } from '../../utils/fenceStyle'
+import { buildRasterSource, selectLayers, viewZoomRange } from '../../utils/mapTiles'
+import { useToast } from '../../composables/useToast'
 
-// 同 Map2D.vue：经 Vite 预打包后 import.meta.url 推出的 Worker 地址失效，
-// GeoJSON 图层（围栏、TerraDraw 图形）会因 Worker 加载失败而完全不渲染。
+const toast = useToast()
+
 setWorkerUrl(`${import.meta.env.BASE_URL}maplibre/maplibre-gl-worker.mjs`)
 
 const DEFAULT_TMS_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
@@ -25,15 +27,11 @@ const DEFAULT_VIEW = { lat: 31.2304, lon: 121.4737, zoom: 10 }
 const props = defineProps({
   /** @type {{ lat: number, lon: number, zoom?: number }} */
   center: { type: Object, default: () => ({ lat: 31.2304, lon: 121.4737, zoom: 10 }) },
-  /** @type {Array<any>} 只读回显的围栏（当前编辑项由 initialGeometry 载入） */
   fences: { type: Array, default: () => [] },
-  /** @type {any} 载入到 TerraDraw 中可编辑的 GeoJSON */
   initialGeometry: { type: Object, default: null },
   /** @type {'polygon' | 'circle'} */
   shape: { type: String, default: 'polygon' },
-  /** @type {'no_fly' | 'allowed'} 当前编辑围栏的规则，决定绘制中的图形颜色 */
   rule: { type: String, default: 'no_fly' },
-  /** @type {{ lon: number, lat: number, radius_m: number } | null} 圆形围栏回显圆心/半径 */
   initialCircle: { type: Object, default: null },
 })
 
@@ -43,20 +41,15 @@ const settingsStore = useSettingsStore()
 const mapEl = ref(null)
 /** @type {import('vue').Ref<any>} */
 const geometry = ref(null)
-/** 最近一次向上同步的几何，避免父组件回写触发重复清空/重绘。 */
 let lastEmitted = ''
-/** syncInitial 内部清空/载入时抑制中间态上报。 */
 let syncingInitial = false
-/** 拖拽顶点会高频触发 change，合并后再同步给父组件。 */
 let emitTimer = null
 /** @type {any} */
 let map = null
 /** @type {any} */
 let draw = null
-/** 当前规则，TerraDraw 样式函数在渲染时读取 */
 let currentRule = fenceRule(props.rule)
 
-/** 正在绘制/编辑的围栏按规则着色：禁飞区红、允许区绿 */
 function drawStyles() {
   return {
     fillColor: () => fenceColors(currentRule).fill,
@@ -67,7 +60,6 @@ function drawStyles() {
   }
 }
 
-/** 统一坐标精度，保证与父组件回写的几何可以直接比较。 */
 function canonicalGeometry(geo) {
   if (!geo || geo.type !== 'Polygon') return null
   return {
@@ -101,13 +93,6 @@ function parseGeometry(value) {
   }
 }
 
-/**
- * 圆形围栏后端只存圆心/半径，2D 回显时离散成多边形。
- * @param {number} lon
- * @param {number} lat
- * @param {number} radiusM
- * @param {number} steps
- */
 function circleRing(lon, lat, radiusM, steps = 64) {
   const R = 6378137
   const d = radiusM / R
@@ -159,23 +144,40 @@ function fenceCollection() {
 
 function addBasemap() {
   if (!map || map.getSource('basemap')) return
-  const configured = settingsStore.browserTmsUrl || ''
-  const configuredTiles = configured
-    .split('\n')
-    .map((u) => u.trim())
-    .filter((u) => u.includes('{x}') && u.includes('{z}'))
-  const tiles = configuredTiles.length > 0 ? configuredTiles : [DEFAULT_TMS_URL]
-  const hasNegY = tiles.some((u) => u.includes('{-y}'))
-  const normalized = tiles.map((u) => (hasNegY ? u.replace(/\{-y\}/g, '{y}') : u))
 
-  map.addSource('basemap', {
-    type: 'raster',
-    tiles: normalized,
-    tileSize: 256,
-    maxzoom: 19,
-    scheme: hasNegY ? 'tms' : 'xyz',
-  })
-  map.addLayer({ id: 'basemap-layer', type: 'raster', source: 'basemap' })
+  const layers = selectLayers(settingsStore.browserLayers, '2d')
+  let source = null
+  let chosen = null
+  for (const layer of layers) {
+    const candidate = buildRasterSource(layer)
+    if (candidate) {
+      source = candidate
+      chosen = layer
+      break
+    }
+    console.warn('[GeofenceDraw] 底图图层在该端不可用，已跳过:', layer.name || layer.url, layer.srs)
+    toast.warning(
+      `底图图层「${layer.name || layer.url}」的投影 ${layer.srs} 不被浏览器 2D 支持（仅 EPSG:3857），已跳过`,
+    )
+  }
+
+  const { minZoom, maxZoom } = viewZoomRange(chosen)
+
+  if (!source) {
+    source = {
+      type: 'raster',
+      tiles: [DEFAULT_TMS_URL],
+      tileSize: 256,
+      minzoom: minZoom,
+      maxzoom: maxZoom,
+      scheme: 'xyz',
+    }
+  }
+
+  map.addSource('basemap', source)
+  map.addLayer({ id: 'basemap-layer', type: 'raster', source: 'basemap', minzoom: minZoom, maxzoom: maxZoom })
+  map.setMinZoom(minZoom)
+  map.setMaxZoom(maxZoom)
 }
 
 function addFenceLayers() {
@@ -229,11 +231,6 @@ function flushEmitTimer() {
   }
 }
 
-/**
- * @param {boolean} [immediate] 完成/载入等关键节点立即上报，其余变更合并上报。
- * @param {boolean} [report] false 表示这是父组件下发的同步结果，只记录基线、不回传，
- *   否则“父写子→子回传→父重算→props 变化→父写子”会形成死循环。
- */
 function syncGeometry(immediate = false, report = true) {
   if (!draw) return
   const polygons = draw
@@ -264,10 +261,6 @@ function syncGeometry(immediate = false, report = true) {
   }, 120)
 }
 
-/**
- * 清空画布（含尚未完成的草稿），供父组件“清空/新建/切换/载入”复用。
- * @param {boolean} [silent] 父组件随后会写入新几何时用 silent，避免中间态把表单清空。
- */
 function clear(silent = false) {
   if (!draw) return
   flushEmitTimer()
@@ -291,7 +284,6 @@ function applyShape() {
   if (draw.getMode() !== mode) draw.setMode(mode)
 }
 
-/** 右键结束绘制：转发 TerraDraw 自身的 Enter 完成逻辑，与键盘结束保持一致。 */
 function finishByContextMenu(e) {
   if (e && typeof e.preventDefault === 'function') e.preventDefault()
   if (!map) return
@@ -316,7 +308,6 @@ function syncInitial() {
   }
   geo = canonicalGeometry(geo)
   const json = geo ? JSON.stringify(geo) : ''
-  // 父组件回写的就是刚同步上去的几何：保持现状，避免清空重绘造成闪烁。
   if (json === lastEmitted) return
   syncingInitial = true
   try {
@@ -344,7 +335,6 @@ watch(
   () => props.rule,
   (rule) => {
     currentRule = fenceRule(rule)
-    // 重新下发样式，触发 TerraDraw 以新规则重绘当前图形
     if (!draw) return
     try {
       draw.updateModeOptions('polygon', { styles: drawStyles() })
@@ -376,7 +366,6 @@ watch(
 onMounted(async () => {
   if (!mapEl.value) return
 
-  // 复用系统地图配置；没有配置时回退到 ArcGIS 影像。
   await settingsStore.loadMapSettings()
 
   map = new MapLibreMap({
@@ -401,12 +390,10 @@ onMounted(async () => {
     addBasemap()
     addFenceLayers()
 
-    // 规则 §10.5：TerraDraw + MapLibre 适配器；多边形与圆形都支持二维绘制。
     draw = new TerraDraw({
       adapter: new TerraDrawMapLibreGLAdapter({ map }),
       modes: [
         new TerraDrawPolygonMode({ styles: drawStyles() }),
-        // 圆形右键交由 contextmenu 统一结束，避免 pointerup 又开一个圆心
         new TerraDrawCircleMode({
           pointerEvents: {
             rightClick: false,
@@ -424,7 +411,6 @@ onMounted(async () => {
     applyShape()
     map.on('contextmenu', finishByContextMenu)
     draw.on('finish', (id) => {
-      // 只保留刚完成的图形，避免多次绘制后取到旧图形。
       for (const feature of draw.getSnapshot()) {
         if (feature.id !== id) draw.removeFeatures([feature.id])
       }

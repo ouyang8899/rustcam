@@ -1,4 +1,3 @@
-
 pub fn stream_key_to_cache_key(stream_key: &str) -> String {
     stream_key.replace('_', "/")
 }
@@ -14,12 +13,8 @@ pub fn format_cache_key_opt(device_tag: Option<&str>, channel_tag: Option<&str>)
         channel_tag.unwrap_or_default()
     )
 }
-pub fn format_cache_key(device_tag:&str,channel_tag:&str) -> String{
-  format!(
-        "{}/{}",
-        device_tag,
-        channel_tag
-    )
+pub fn format_cache_key(device_tag: &str, channel_tag: &str) -> String {
+    format!("{}/{}", device_tag, channel_tag)
 }
 pub fn format_stream_key(device_tag: &str, channel_tag: &str) -> String {
     format!("{}_{}", device_tag, channel_tag)

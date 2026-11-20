@@ -1,14 +1,14 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
-use async_trait::async_trait;
-use tokio::net::tcp::OwnedWriteHalf;
+use crate::domain::EventPublisher;
 use crate::error::Result;
 use crate::media::MediaNodeId;
-use crate::protocol::event::{SignalEvent, ProtocolType};
-use crate::protocol::traits::ProtocolDeps;
-use crate::protocol::matcher::ProtocolMatcher;
 use crate::protocol::adapter_manager::AdapterEntry;
-use crate::domain::EventPublisher;
+use crate::protocol::event::{ProtocolType, SignalEvent};
+use crate::protocol::matcher::ProtocolMatcher;
+use crate::protocol::traits::ProtocolDeps;
+use async_trait::async_trait;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::net::tcp::OwnedWriteHalf;
 
 #[async_trait]
 pub trait SignalAdapter: Send + Sync {
@@ -28,33 +28,60 @@ pub trait SignalAdapter: Send + Sync {
 
     fn name(&self) -> &'static str;
 
-    fn keepalive(&self) -> bool { true }
+    fn keepalive(&self) -> bool {
+        true
+    }
 
-    fn idle_timeout(&self) -> Option<u64> { Some(60) }
+    fn idle_timeout(&self) -> Option<u64> {
+        Some(60)
+    }
 
     fn set_tcp_write(&mut self, _write: OwnedWriteHalf) {}
 
-    async fn set_udp_peer(&mut self, _addr: SocketAddr) -> Result<()> { Ok(()) }
+    async fn set_udp_peer(&mut self, _addr: SocketAddr) -> Result<()> {
+        Ok(())
+    }
 
-    async fn set_local_addr(&mut self, _addr: SocketAddr) -> Result<()> { Ok(()) }
+    async fn set_local_addr(&mut self, _addr: SocketAddr) -> Result<()> {
+        Ok(())
+    }
 
     fn set_adapter_entry(&mut self, _entry: crate::protocol::adapter_manager::AdapterEntry) {}
 
     async fn start(&mut self, device_tag: &str, channel_tag: &str) -> Result<()>;
 
-    async fn start_playback(&mut self, _device_tag: &str, _start_time: chrono::DateTime<chrono::Utc>, _end_time: chrono::DateTime<chrono::Utc>) -> Result<()> {
+    async fn start_playback(
+        &mut self,
+        _device_tag: &str,
+        _start_time: chrono::DateTime<chrono::Utc>,
+        _end_time: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
         Ok(())
     }
 
-    async fn send_notify(&mut self, _device_tag: &str, _event_type: &str, _content: &str) -> Result<()> {
+    async fn send_notify(
+        &mut self,
+        _device_tag: &str,
+        _event_type: &str,
+        _content: &str,
+    ) -> Result<()> {
         Ok(())
     }
 
-    async fn ptz_control(&mut self, channel_id: &str, command: &crate::protocol::event::PtzCommand, speed: Option<u8>) -> Result<()>;
+    async fn ptz_control(
+        &mut self,
+        channel_id: &str,
+        command: &crate::protocol::event::PtzCommand,
+        speed: Option<u8>,
+    ) -> Result<()>;
 
-    async fn cleanup_expired_subscriptions(&self) -> usize { 0 }
+    async fn cleanup_expired_subscriptions(&self) -> usize {
+        0
+    }
 
-    async fn refresh_expiring_subscriptions(&mut self) -> usize { 0 }
+    async fn refresh_expiring_subscriptions(&mut self) -> usize {
+        0
+    }
 
     async fn send_device_config_query(&self, _config_type: &str) -> Result<String> {
         Ok(String::new())
@@ -80,7 +107,11 @@ pub trait SignalAdapter: Send + Sync {
         Ok(())
     }
 
-    async fn start_audio_talk_internal(&mut self, _device_tag: &str, _node_id: MediaNodeId) -> Result<()> {
+    async fn start_audio_talk_internal(
+        &mut self,
+        _device_tag: &str,
+        _node_id: MediaNodeId,
+    ) -> Result<()> {
         Ok(())
     }
 
@@ -100,17 +131,22 @@ pub trait SignalAdapter: Send + Sync {
         false
     }
 
-    async fn set_tcp_stream_for_talk(&mut self, _device_tag: &str, _stream: Arc<tokio::net::TcpStream>) -> Result<()> {
+    async fn set_tcp_stream_for_talk(
+        &mut self,
+        _device_tag: &str,
+        _stream: Arc<tokio::net::TcpStream>,
+    ) -> Result<()> {
         Ok(())
     }
 
-    fn needs_timeout_check(&self) -> bool { false }
+    fn needs_timeout_check(&self) -> bool {
+        false
+    }
 
     async fn handle_registration_timeout(&mut self) {}
 }
 
 pub trait AdapterFactory: Send + Sync {
-
     fn create(
         &self,
         deps: ProtocolDeps,
@@ -124,7 +160,15 @@ pub trait AdapterFactory: Send + Sync {
 }
 
 struct ClosureAdapterFactory {
-    create_fn: Box<dyn Fn(ProtocolDeps, Arc<dyn Fn(String, AdapterEntry) + Send + Sync>, Arc<dyn Fn(String) + Send + Sync>) -> Box<dyn SignalAdapter> + Send + Sync>,
+    create_fn: Box<
+        dyn Fn(
+                ProtocolDeps,
+                Arc<dyn Fn(String, AdapterEntry) + Send + Sync>,
+                Arc<dyn Fn(String) + Send + Sync>,
+            ) -> Box<dyn SignalAdapter>
+            + Send
+            + Sync,
+    >,
     protocol_type: ProtocolType,
     name: &'static str,
 }
@@ -152,7 +196,6 @@ pub struct AdapterRegistry {
 }
 
 impl AdapterRegistry {
-
     pub fn new() -> Self {
         Self {
             factories: Vec::new(),
@@ -165,9 +208,15 @@ impl AdapterRegistry {
         factory: F,
         protocol_type: ProtocolType,
         name: &'static str,
-    )
-    where
-        F: Fn(ProtocolDeps, Arc<dyn Fn(String, AdapterEntry) + Send + Sync>, Arc<dyn Fn(String) + Send + Sync>) -> Box<dyn SignalAdapter> + Send + Sync + 'static,
+    ) where
+        F: Fn(
+                ProtocolDeps,
+                Arc<dyn Fn(String, AdapterEntry) + Send + Sync>,
+                Arc<dyn Fn(String) + Send + Sync>,
+            ) -> Box<dyn SignalAdapter>
+            + Send
+            + Sync
+            + 'static,
     {
         self.factories.push(Box::new(ClosureAdapterFactory {
             create_fn: Box::new(factory),
@@ -176,11 +225,7 @@ impl AdapterRegistry {
         }));
     }
 
-    pub fn register_matcher(
-        &mut self,
-        matcher: ProtocolMatcher,
-        protocol: ProtocolType,
-    ) {
+    pub fn register_matcher(&mut self, matcher: ProtocolMatcher, protocol: ProtocolType) {
         self.matchers.push((matcher, protocol));
     }
 
@@ -196,7 +241,7 @@ impl AdapterRegistry {
     pub fn create_adapter(
         &self,
         protocol: &ProtocolType,
-        deps: ProtocolDeps
+        deps: ProtocolDeps,
     ) -> Option<Box<dyn SignalAdapter>> {
         let register_fn = deps.register_fn.clone();
         let unregister_fn = deps.unregister_fn.clone();

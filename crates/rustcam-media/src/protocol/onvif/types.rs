@@ -4,12 +4,15 @@ pub const NS_WSE: &str = "http://schemas.xmlsoap.org/ws/2004/08/event";
 pub const NS_ONVIF: &str = "http://www.onvif.org/ver10/schema";
 pub const NS_TEV: &str = "http://www.onvif.org/ver10/events/wsdl";
 pub const NS_TPTZ: &str = "http://www.onvif.org/ver20/ptz/wsdl";
-pub const NS_WSSE: &str = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd";
+pub const NS_WSSE: &str =
+    "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd";
 
 pub const DEVICE_TYPE: &str = "dn:NetworkVideoTransmitter";
 
 #[derive(Debug, Clone)]
-pub struct EndpointReference { pub address: String }
+pub struct EndpointReference {
+    pub address: String,
+}
 
 #[derive(Debug, Clone)]
 pub struct ProbeMatch {
@@ -30,7 +33,11 @@ impl ProbeMatch {
   <wsd:XAddrs>{}</wsd:XAddrs>
   <wsd:MetadataVersion>{}</wsd:MetadataVersion>
 </wsd:ProbeMatch>"#,
-            self.epr.address, self.types.join(" "), self.scopes.join(" "), self.x_addrs.join(" "), self.metadata_version
+            self.epr.address,
+            self.types.join(" "),
+            self.scopes.join(" "),
+            self.x_addrs.join(" "),
+            self.metadata_version
         )
     }
 }

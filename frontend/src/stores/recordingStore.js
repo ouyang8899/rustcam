@@ -95,11 +95,7 @@ export const useRecordingStore = defineStore('recordings', {
       this.filesLoading = true
       try {
         const data = await api.getRecordingFilesWithParams(params)
-        if (params.page && params.page > 1) {
-          this.recordingFiles = [...this.recordingFiles, ...(data.files || [])]
-        } else {
-          this.recordingFiles = data.files || []
-        }
+        this.recordingFiles = data.files || []
         this.filesTotal = data.total || 0
         this.filesPage = data.page || 1
         this.filesLimit = data.limit || 50

@@ -6,12 +6,13 @@ use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
 use rustcam_media::auth::casbin::CasbinManager;
-use rustcam_media::auth::config::JwtConfig;
+use rustcam_media::auth::config::{AuthConfig, JwtConfig};
 use rustcam_media::auth::middleware::{jwt_auth_layer, AuthState};
 use rustcam_media::auth::models::{Permission, Role};
 use rustcam_media::auth::repository::{
     InMemoryAuthRepository, PermissionRepository, RoleRepository,
 };
+use rustcam_media::auth::session_cache::SessionCache;
 use rustcam_media::drone_gateway::api::router;
 use rustcam_media::drone_gateway::client::{
     AdapterDto, AlertDto, AuditDto, CommandDto, CommandRequest, ControlDto, DroneApi,
@@ -54,7 +55,10 @@ impl DroneApi for FakeDroneApi {
             ..Default::default()
         }])
     }
-    async fn list_adapters(&self, _include_disabled: bool) -> Result<Vec<AdapterDto>, DroneApiError> {
+    async fn list_adapters(
+        &self,
+        _include_disabled: bool,
+    ) -> Result<Vec<AdapterDto>, DroneApiError> {
         Ok(vec![])
     }
     async fn get_adapter(&self, adapter_id: &str) -> Result<AdapterDto, DroneApiError> {
@@ -266,12 +270,20 @@ async fn casbin_with(role_name: &str, permissions: &[&str]) -> Arc<CasbinManager
     )
 }
 
+/// 测试用的固定会话 ID。
+///
+/// `jwt_auth_layer` 会校验令牌里的会话是否仍然有效（先查内存缓存，再查数据库），
+/// 而这些用例没有数据库，因此把会话预先标记为"新鲜"即可通过校验。
+const TEST_SESSION_ID: &str = "00000000-0000-0000-0000-000000000001";
+
 fn token_for(role: &str) -> String {
     rustcam_media::auth::jwt::encode_token(
         uuid::Uuid::new_v4(),
         "alice",
         vec![role.to_string()],
         "access",
+        TEST_SESSION_ID,
+        false,
         chrono::Duration::minutes(10),
         &JwtConfig::default().secret,
     )
@@ -285,12 +297,19 @@ fn guarded_router(casbin: Arc<CasbinManager>) -> axum::Router {
 }
 
 async fn auth_state(casbin: Arc<CasbinManager>) -> AuthState {
+    let auth_config = AuthConfig::default();
+    let session_cache = Arc::new(SessionCache::new(auth_config.session_cache_ttl_seconds));
+    session_cache.mark(uuid::Uuid::parse_str(TEST_SESSION_ID).unwrap());
+    let (revoker, _) = tokio::sync::broadcast::channel(256);
     AuthState {
         jwt_config: JwtConfig::default(),
+        auth_config,
         casbin,
         repo: Arc::new(
             rustcam_media::auth::auth_db::PostgresAuthRepository::with_rb(rbatis::RBatis::new()),
         ),
+        session_cache,
+        revoker,
     }
 }
 
@@ -499,7 +518,10 @@ impl DroneApi for UnavailableDroneApi {
             ..Default::default()
         }])
     }
-    async fn list_adapters(&self, _include_disabled: bool) -> Result<Vec<AdapterDto>, DroneApiError> {
+    async fn list_adapters(
+        &self,
+        _include_disabled: bool,
+    ) -> Result<Vec<AdapterDto>, DroneApiError> {
         Ok(vec![])
     }
     async fn get_adapter(&self, adapter_id: &str) -> Result<AdapterDto, DroneApiError> {
@@ -770,7 +792,10 @@ impl DroneApi for AdapterDroneApi {
     async fn delete_drone(&self, _drone_tag: &str) -> Result<bool, DroneApiError> {
         Ok(true)
     }
-    async fn list_adapters(&self, _include_disabled: bool) -> Result<Vec<AdapterDto>, DroneApiError> {
+    async fn list_adapters(
+        &self,
+        _include_disabled: bool,
+    ) -> Result<Vec<AdapterDto>, DroneApiError> {
         Ok(vec![AdapterDto {
             adapter_id: "adapter-1".into(),
             name: "东场链路".into(),
@@ -834,7 +859,11 @@ impl DroneApi for AdapterDroneApi {
     async fn list_fences(&self) -> Result<Vec<FenceDto>, DroneApiError> {
         Ok(vec![])
     }
-    async fn save_fence(&self, fence: FenceDto, _operator: &str) -> Result<FenceDto, DroneApiError> {
+    async fn save_fence(
+        &self,
+        fence: FenceDto,
+        _operator: &str,
+    ) -> Result<FenceDto, DroneApiError> {
         Ok(fence)
     }
     async fn delete_fence(&self, _id: &str, _operator: &str) -> Result<bool, DroneApiError> {
@@ -851,10 +880,18 @@ impl DroneApi for AdapterDroneApi {
     async fn get_command(&self, _cmd_id: &str) -> Result<CommandDto, DroneApiError> {
         Ok(CommandDto::default())
     }
-    async fn list_alerts(&self, _drone_tag: &str, _limit: i32) -> Result<Vec<AlertDto>, DroneApiError> {
+    async fn list_alerts(
+        &self,
+        _drone_tag: &str,
+        _limit: i32,
+    ) -> Result<Vec<AlertDto>, DroneApiError> {
         Ok(vec![])
     }
-    async fn list_audits(&self, _drone_tag: &str, _limit: i32) -> Result<Vec<AuditDto>, DroneApiError> {
+    async fn list_audits(
+        &self,
+        _drone_tag: &str,
+        _limit: i32,
+    ) -> Result<Vec<AuditDto>, DroneApiError> {
         Ok(vec![])
     }
     async fn telemetry_history(
@@ -904,20 +941,22 @@ impl DroneApi for AdapterDroneApi {
     ) -> Result<bool, DroneApiError> {
         Ok(true)
     }
-    async fn get_control(&self, _drone_tag: &str, _control_type: &str) -> Result<ControlDto, DroneApiError> {
+    async fn get_control(
+        &self,
+        _drone_tag: &str,
+        _control_type: &str,
+    ) -> Result<ControlDto, DroneApiError> {
         Ok(ControlDto::default())
     }
     async fn event_stream(&self, _drone_tags: Vec<String>) -> Result<EventStream, DroneApiError> {
-        Err(DroneApiError::unavailable("event stream not used in auth tests"))
+        Err(DroneApiError::unavailable(
+            "event stream not used in auth tests",
+        ))
     }
 }
 
 /// 按指定角色与权限点构造网关路由（adapter 接口要区分查看权与管理权）。
-async fn adapter_router(
-    api: Arc<dyn DroneApi>,
-    role: &str,
-    permissions: &[&str],
-) -> axum::Router {
+async fn adapter_router(api: Arc<dyn DroneApi>, role: &str, permissions: &[&str]) -> axum::Router {
     let casbin = casbin_with(role, permissions).await;
     let tickets = Arc::new(TicketStore::new(60));
     let app = router(api, tickets, casbin.clone(), None);
@@ -929,12 +968,7 @@ async fn adapter_router(
 
 #[tokio::test]
 async fn adapter_list_is_readable_with_view_permission() {
-    let app = adapter_router(
-        Arc::new(AdapterDroneApi),
-        "Viewer",
-        &["drone:view"],
-    )
-    .await;
+    let app = adapter_router(Arc::new(AdapterDroneApi), "Viewer", &["drone:view"]).await;
 
     let status = call_get(app, "/api/v1/drone/adapters", Some(&token_for("Viewer"))).await;
 
@@ -943,12 +977,7 @@ async fn adapter_list_is_readable_with_view_permission() {
 
 #[tokio::test]
 async fn adapter_write_requires_manage_permission() {
-    let app = adapter_router(
-        Arc::new(AdapterDroneApi),
-        "Viewer",
-        &["drone:view"],
-    )
-    .await;
+    let app = adapter_router(Arc::new(AdapterDroneApi), "Viewer", &["drone:view"]).await;
 
     let status = call_with_body(
         app,
@@ -982,11 +1011,7 @@ async fn creating_existing_adapter_is_rejected_as_conflict() {
     )
     .await;
 
-    assert_eq!(
-        status,
-        StatusCode::CONFLICT,
-        "标识已存在时应拒绝覆盖"
-    );
+    assert_eq!(status, StatusCode::CONFLICT, "标识已存在时应拒绝覆盖");
 }
 
 #[tokio::test]

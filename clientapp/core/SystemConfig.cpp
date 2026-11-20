@@ -232,10 +232,8 @@ bool SystemConfig::load() {
             {CFG_OSD_FONT_COLOR, "#FFFFFFFF"},
             {CFG_OSD_BG_ALPHA, 100},
             {CFG_PLUGIN_ORDER, QStringList({"live_video", "alarm", "playback", "map", "settings"})},
-            {CFG_MAP_TMS_URL, ""},
-            {CFG_MAP_WFS_URL, ""},
-            {CFG_MAP_MIN_ZOOM, 0},
-            {CFG_MAP_MAX_ZOOM, 19},
+            {CFG_MAP_LAYERS_JSON, "[]"},
+            {CFG_MAP_WFS_JSON, "{}"},
         };
 
         for (auto it = defaults.constBegin(); it != defaults.constEnd(); ++it) {

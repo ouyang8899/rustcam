@@ -1,9 +1,9 @@
-use std::sync::Arc;
-use axum::{extract::State, extract::Path, Json};
-use crate::api::state::FullState;
 use crate::api::response::ApiResponse;
+use crate::api::state::FullState;
+use crate::domain::player_layout::{CreateLayoutRequest, PlayerLayout, UpdateLayoutRequest};
 use crate::error::AppError;
-use crate::domain::player_layout::{PlayerLayout, CreateLayoutRequest, UpdateLayoutRequest};
+use axum::{extract::Path, extract::State, Json};
+use std::sync::Arc;
 
 pub async fn list_layouts_handler(
     State(state): State<Arc<FullState>>,
@@ -16,7 +16,12 @@ pub async fn get_layout_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i32>,
 ) -> Result<Json<ApiResponse<PlayerLayout>>, AppError> {
-    let layout = state.app.registry.player_layout_service.get(id).await?
+    let layout = state
+        .app
+        .registry
+        .player_layout_service
+        .get(id)
+        .await?
         .ok_or_else(|| AppError::NotFound(format!("Layout {} not found", id)))?;
     Ok(Json(ApiResponse::success(layout)))
 }
@@ -34,7 +39,12 @@ pub async fn update_layout_handler(
     Path(id): Path<i32>,
     Json(req): Json<UpdateLayoutRequest>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
-    state.app.registry.player_layout_service.update(id, req).await?;
+    state
+        .app
+        .registry
+        .player_layout_service
+        .update(id, req)
+        .await?;
     Ok(Json(ApiResponse::success(())))
 }
 
@@ -50,6 +60,11 @@ pub async fn set_default_layout_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i32>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
-    state.app.registry.player_layout_service.set_default(id).await?;
+    state
+        .app
+        .registry
+        .player_layout_service
+        .set_default(id)
+        .await?;
     Ok(Json(ApiResponse::success(())))
 }

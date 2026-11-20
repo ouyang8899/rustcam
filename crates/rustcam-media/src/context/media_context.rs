@@ -1,11 +1,10 @@
-use std::sync::Arc;
-use crate::infrastructure::cluster::ClusterManager;
 use crate::application::play_service::PlayService;
+use crate::infrastructure::cluster::ClusterManager;
 use crate::MediaServerService;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct MediaContext {
-
     pub cluster: Arc<ClusterManager>,
 
     pub play_service: Arc<PlayService>,
@@ -14,7 +13,6 @@ pub struct MediaContext {
 }
 
 impl MediaContext {
-
     pub async fn new(
         infra: &crate::context::infra_context::InfraContext,
         cluster: Arc<ClusterManager>,
@@ -29,7 +27,9 @@ impl MediaContext {
             media_server_service.clone(),
         ));
 
-        let zlm_server_url = media_server_service.list().iter()
+        let zlm_server_url = media_server_service
+            .list()
+            .iter()
             .find(|s| s.server_type == crate::domain::server::ServerType::Zlmediakit)
             .map(|s| {
                 s.url
@@ -49,7 +49,9 @@ impl MediaContext {
         })
     }
 
-    pub async fn select_server(&self) -> Option<Arc<dyn crate::adapter::media_server::MediaServerAdapter>> {
+    pub async fn select_server(
+        &self,
+    ) -> Option<Arc<dyn crate::adapter::media_server::MediaServerAdapter>> {
         self.cluster.select_server().await
     }
 }

@@ -1,293 +1,275 @@
 <template>
-  <div class="page-root">
-    <div class="body-content">
-      <div class="page-header">
-        <div class="header-left">
-          <el-button text @click="$router.back()">
-            <el-icon><Back /></el-icon> 返回
-          </el-button>
-          <el-divider direction="vertical" />
-          <span class="page-title">{{ stream?.stream_key || `流 #${id}` }}</span>
-          <el-tag v-if="stream" :type="stateType(stream.state)" size="small" style="margin-left: 8px">
-            {{ stateLabel(stream.state) }}
-          </el-tag>
-        </div>
-        <div class="header-right">
-          <el-button :icon="Refresh" size="small" :loading="loading" @click="fetchData">刷新</el-button>
-          <el-button 
-            v-if="stream?.state === 'Error' || stream?.state === 'Recovering' || stream?.state === 'Idle' || stream?.state === 'Stopped'" 
-            type="success" 
-            plain 
-            size="small" 
-            :loading="starting" 
-            @click="confirmRestart"
-          >重启</el-button>
-          <el-button 
-            v-if="stream?.state === 'Active' || stream?.state === 'Starting'" 
-            type="danger" 
-            plain 
-            size="small" 
-            :loading="stopping" 
-            @click="confirmStop"
-          >停止流</el-button>
-        </div>
-      </div>
+  <PageView :title="stream?.stream_key || `流 #${id}`">
+    <template #toolbar>
+      <el-button text @click="$router.back()">
+        <el-icon><Back /></el-icon> 返回
+      </el-button>
+      <el-tag v-if="stream" :type="stateType(stream.state)" size="small">
+        {{ stateLabel(stream.state) }}
+      </el-tag>
+      <el-button :icon="Refresh" size="small" :loading="loading" @click="fetchData">刷新</el-button>
+      <el-button
+        v-if="stream?.state === 'Error' || stream?.state === 'Recovering' || stream?.state === 'Idle' || stream?.state === 'Stopped'"
+        type="success"
+        plain
+        size="small"
+        :loading="starting"
+        @click="confirmRestart"
+      >重启</el-button>
+      <el-button
+        v-if="stream?.state === 'Active' || stream?.state === 'Starting'"
+        type="danger"
+        plain
+        size="small"
+        :loading="stopping"
+        @click="confirmStop"
+      >停止流</el-button>
+    </template>
 
-      <el-row :gutter="16" v-if="stream">
-        <el-col :span="16">
-          <el-card shadow="never">
-            <template #header>
-              <span>直播预览</span>
-            </template>
-            <div class="player-with-ptz">
-              <div class="player-wrapper">
-                <VideoPlayer
-                  v-if="playingUrl"
-                  ref="playerRef"
-                  :liveSrc="playingUrl"
-                  :type="playingType"
-                  :isLive="true"
-                  :autoplay="true"
-                />
-                <div v-else class="player-placeholder">
-                  <el-icon size="48"><VideoPlay /></el-icon>
-                  <p>暂无直播流</p>
-                  <el-button type="primary" size="small" @click="startPreview" :loading="previewLoading">
-                    开始预览
-                  </el-button>
-                </div>
-              </div>
-
-              <div v-if="supportPtz && stream?.channel_tag" class="ptz-sidebar">
-                <div class="ptz-control-header">
-                  <span class="ptz-label">云台控制</span>
-                  <div class="ptz-status-dot" :class="{ active: ptzStatus?.moving }"></div>
-                </div>
-                <div class="ptz-dpad">
-                  <button class="dpad-btn dpad-up" @mousedown="ptzControl('up', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4l-8 8h5v8h6v-8h5z"/></svg>
-                  </button>
-                  <button class="dpad-btn dpad-left" @mousedown="ptzControl('left', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 12l8-8v5h8v6h-8v5z"/></svg>
-                  </button>
-                  <button class="dpad-center" @click="ptzControl('stop', 1)">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-                  </button>
-                  <button class="dpad-btn dpad-right" @mousedown="ptzControl('right', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 12l-8 8v-5H4v-6h8V4z"/></svg>
-                  </button>
-                  <button class="dpad-btn dpad-down" @mousedown="ptzControl('down', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
-                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 20l8-8h-5V4h-6v8H4z"/></svg>
-                  </button>
-                </div>
-                <div class="ptz-aux-row">
-                  <div class="aux-group">
-                    <span class="aux-label">变倍</span>
-                    <div class="aux-btns">
-                      <button class="aux-btn" @mousedown="ptzControl('zoom_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">+</button>
-                      <button class="aux-btn" @mousedown="ptzControl('zoom_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">−</button>
-                    </div>
-                  </div>
-                  <div class="aux-group">
-                    <span class="aux-label">聚焦</span>
-                    <div class="aux-btns">
-                      <button class="aux-btn" @mousedown="ptzControl('focus_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">+</button>
-                      <button class="aux-btn" @mousedown="ptzControl('focus_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">−</button>
-                    </div>
-                  </div>
-                  <div class="aux-group">
-                    <span class="aux-label">光圈</span>
-                    <div class="aux-btns">
-                      <button class="aux-btn" @mousedown="ptzControl('iris_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">+</button>
-                      <button class="aux-btn" @mousedown="ptzControl('iris_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">−</button>
-                    </div>
-                  </div>
-                </div>
-                <div class="ptz-joystick-area" ref="joystickRef" @mousedown="startJoystick" @touchstart.prevent="startJoystick">
-                  <div class="joystick-base">
-                    <div class="joystick-stick" :style="joystickStyle"></div>
-                  </div>
-                </div>
-                <div class="ptz-position" v-if="ptzStatus?.position">
-                  <span class="pos-label">位置</span>
-                  <span class="pos-value">P:{{ ptzStatus.position.pan?.toFixed(2) }} T:{{ ptzStatus.position.tilt?.toFixed(2) }} Z:{{ ptzStatus.position.zoom?.toFixed(2) }}</span>
-                </div>
+    <el-row :gutter="16" v-if="stream">
+      <el-col :span="16">
+        <DataCard title="直播预览">
+          <div class="player-with-ptz">
+            <div class="player-wrapper">
+              <VideoPlayer
+                v-if="playingUrl"
+                ref="playerRef"
+                :liveSrc="playingUrl"
+                :type="playingType"
+                :isLive="true"
+                :autoplay="true"
+              />
+              <div v-else class="player-placeholder">
+                <el-icon size="48"><VideoPlay /></el-icon>
+                <p>暂无直播流</p>
+                <el-button type="primary" size="small" @click="startPreview" :loading="previewLoading">
+                  开始预览
+                </el-button>
               </div>
             </div>
-          </el-card>
 
-          <el-card v-if="supportPtz && stream?.channel_tag" shadow="never" class="preset-card">
-            <template #header>
-              <div class="preset-header">
-                <span>预制位</span>
-                <el-button size="small" type="primary" @click="showPresetDialog = true">保存当前</el-button>
+            <div v-if="supportPtz && stream?.channel_tag" class="ptz-sidebar">
+              <div class="ptz-control-header">
+                <span class="ptz-label">云台控制</span>
+                <div class="ptz-status-dot" :class="{ active: ptzStatus?.moving }"></div>
               </div>
-            </template>
-            <div v-if="presets.length === 0" class="empty-presets">暂无预制位</div>
-            <div v-else class="preset-grid">
-              <div v-for="preset in presets" :key="preset.token" class="preset-tile">
-                <div class="preset-info">
-                  <span class="preset-name">{{ preset.name }}</span>
+              <div class="ptz-dpad">
+                <button class="dpad-btn dpad-up" @mousedown="ptzControl('up', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4l-8 8h5v8h6v-8h5z"/></svg>
+                </button>
+                <button class="dpad-btn dpad-left" @mousedown="ptzControl('left', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 12l8-8v5h8v6h-8V4z"/></svg>
+                </button>
+                <button class="dpad-center" @click="ptzControl('stop', 1)">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                </button>
+                <button class="dpad-btn dpad-right" @mousedown="ptzControl('right', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 12l-8 8v-5H4v-6h8V4z"/></svg>
+                </button>
+                <button class="dpad-btn dpad-down" @mousedown="ptzControl('down', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 20l8-8h-5V4h-6v8H4z"/></svg>
+                </button>
+              </div>
+              <div class="ptz-aux-row">
+                <div class="aux-group">
+                  <span class="aux-label">变倍</span>
+                  <div class="aux-btns">
+                    <button class="aux-btn" @mousedown="ptzControl('zoom_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">+</button>
+                    <button class="aux-btn" @mousedown="ptzControl('zoom_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">−</button>
+                  </div>
                 </div>
-                <div class="preset-actions">
-                  <el-button size="small" type="primary" @click="gotoPreset(preset)">调用</el-button>
-                  <el-button size="small" type="danger" plain @click="removePreset(preset)">删除</el-button>
+                <div class="aux-group">
+                  <span class="aux-label">聚焦</span>
+                  <div class="aux-btns">
+                    <button class="aux-btn" @mousedown="ptzControl('focus_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">+</button>
+                    <button class="aux-btn" @mousedown="ptzControl('focus_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">−</button>
+                  </div>
                 </div>
+                <div class="aux-group">
+                  <span class="aux-label">光圈</span>
+                  <div class="aux-btns">
+                    <button class="aux-btn" @mousedown="ptzControl('iris_in', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">+</button>
+                    <button class="aux-btn" @mousedown="ptzControl('iris_out', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">−</button>
+                  </div>
+                </div>
+              </div>
+              <div class="ptz-joystick-area" ref="joystickRef" @mousedown="startJoystick" @touchstart.prevent="startJoystick">
+                <div class="joystick-base">
+                  <div class="joystick-stick" :style="joystickStyle"></div>
+                </div>
+              </div>
+              <div class="ptz-position" v-if="ptzStatus?.position">
+                <span class="pos-label">位置</span>
+                <span class="pos-value">P:{{ ptzStatus.position.pan?.toFixed(2) }} T:{{ ptzStatus.position.tilt?.toFixed(2) }} Z:{{ ptzStatus.position.zoom?.toFixed(2) }}</span>
               </div>
             </div>
-          </el-card>
+          </div>
+        </DataCard>
 
-          <el-card shadow="never" style="margin-top: 16px">
-            <template #header>
-              <span>直播链接</span>
-              <el-button text size="small" style="float: right" @click="copyAll">
-                复制全部
-              </el-button>
-            </template>
-            <el-table :data="playLinkRows" border size="small">
-              <el-table-column label="协议" width="100" align="center">
-                <template #default="{ row }">
-                  <el-tag size="small">{{ row.protocol }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="地址" min-width="300">
-                <template #default="{ row }">
-                  <el-tooltip :content="row.url" placement="top" :show-after="300">
-                    <span class="url-text">{{ row.url }}</span>
-                  </el-tooltip>
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="120" align="center">
-                <template #default="{ row }">
-                  <el-button size="small" @click="playProtocol(row.protocol, row.url)">播放</el-button>
-                  <el-button size="small" @click="copyUrl(row.url)">复制</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-          </el-card>
-        </el-col>
+        <DataCard v-if="supportPtz && stream?.channel_tag" class="preset-card" title="预制位">
+          <template #toolbar>
+            <el-button size="small" type="primary" @click="showPresetDialog = true">保存当前</el-button>
+          </template>
+          <EmptyState v-if="presets.length === 0" title="暂无预制位" />
+          <div v-else class="preset-grid">
+            <div v-for="preset in presets" :key="preset.token" class="preset-tile">
+              <div class="preset-info">
+                <span class="preset-name">{{ preset.name }}</span>
+              </div>
+              <div class="preset-actions">
+                <el-button size="small" type="primary" @click="gotoPreset(preset)">调用</el-button>
+                <el-button size="small" type="danger" plain @click="removePreset(preset)">删除</el-button>
+              </div>
+            </div>
+          </div>
+        </DataCard>
 
-        <el-col :span="8">
-          <el-card shadow="never">
-            <template #header>基本信息</template>
+        <DataCard title="直播链接" style="margin-top: 16px">
+          <template #toolbar>
+            <el-button text size="small" @click="copyAll">
+              复制全部
+            </el-button>
+          </template>
+          <el-table :data="playLinkRows" border stripe size="small">
+            <el-table-column label="协议" width="100" align="center">
+              <template #default="{ row }">
+                <el-tag size="small">{{ row.protocol }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="地址" min-width="300">
+              <template #default="{ row }">
+                <el-tooltip :content="row.url" placement="top" :show-after="300">
+                  <span class="url-text">{{ row.url }}</span>
+                </el-tooltip>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="120" align="center">
+              <template #default="{ row }">
+                <el-button size="small" @click="playProtocol(row.protocol, row.url)">播放</el-button>
+                <el-button size="small" @click="copyUrl(row.url)">复制</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </DataCard>
+      </el-col>
+
+      <el-col :span="8">
+        <DataCard title="基本信息">
+          <el-descriptions :column="1" border size="small">
+            <el-descriptions-item label="流 ID">{{ stream.id }}</el-descriptions-item>
+            <el-descriptions-item label="流标识">{{ stream.stream_key }}</el-descriptions-item>
+            <el-descriptions-item label="状态">
+              <el-tag :type="stateType(stream.state)" size="small">{{ stateLabel(stream.state) }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="自动恢复">
+              <el-tag size="small" :type="stream.auto_recover ? 'success' : 'info'">
+                {{ stream.auto_recover ? '是' : '否' }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="重试次数">{{ stream.retry_count || 0 }} / {{ stream.max_retries || 20 }}</el-descriptions-item>
+            <el-descriptions-item label="错误信息" v-if="stream.last_error">
+              <span style="color: var(--color-danger); font-size: 12px;">{{ stream.last_error }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="观看人数">{{ stream.viewer_count || 0 }}</el-descriptions-item>
+            <el-descriptions-item label="媒体服务器">{{ stream.media_server_tag }}</el-descriptions-item>
+            <el-descriptions-item label="应用">{{ stream.app }}</el-descriptions-item>
+            <el-descriptions-item label="设备标识">{{ stream.device_tag || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="通道标识">{{ stream.channel_tag || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="创建时间">{{ formatTime(stream.created_at) }}</el-descriptions-item>
+          </el-descriptions>
+        </DataCard>
+
+        <DataCard title="设备信息" style="margin-top: 16px">
+          <template #toolbar>
+            <el-button text size="small" @click="$router.push(`/devices/${device.device_tag}`)">
+              查看详情
+            </el-button>
+          </template>
+          <div v-if="device">
             <el-descriptions :column="1" border size="small">
-              <el-descriptions-item label="流 ID">{{ stream.id }}</el-descriptions-item>
-              <el-descriptions-item label="流标识">{{ stream.stream_key }}</el-descriptions-item>
-              <el-descriptions-item label="状态">
-                <el-tag :type="stateType(stream.state)" size="small">{{ stateLabel(stream.state) }}</el-tag>
+              <el-descriptions-item label="名称">{{ device.name }}</el-descriptions-item>
+              <el-descriptions-item label="协议">
+                <el-tag size="small">{{ device.protocol }}</el-tag>
               </el-descriptions-item>
-              <el-descriptions-item label="自动恢复">
-                <el-tag size="small" :type="stream.auto_recover ? 'success' : 'info'">
-                  {{ stream.auto_recover ? '是' : '否' }}
+              <el-descriptions-item label="状态">
+                <span class="status-dot" :class="device.status?.toLowerCase()" />
+                {{ device.status }}
+              </el-descriptions-item>
+              <el-descriptions-item label="设备地址">{{ device.host ? (device.port ? `${device.host}:${device.port}` : device.host) : '-' }}</el-descriptions-item>
+              <el-descriptions-item label="媒体服务器">{{ device.media_server_tag || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="应用">{{ device.app || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="流标识">{{ device.stream_key || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="设备标签">{{ device.device_tag || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="父设备">{{ device.parent_device_tag || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="公开流">
+                <el-tag size="small" :type="device.is_public ? 'success' : 'info'">
+                  {{ device.is_public ? '是' : '否' }}
                 </el-tag>
               </el-descriptions-item>
-              <el-descriptions-item label="重试次数">{{ stream.retry_count || 0 }} / {{ stream.max_retries || 20 }}</el-descriptions-item>
-              <el-descriptions-item label="错误信息" v-if="stream.last_error">
-                <span style="color: var(--color-danger); font-size: 12px;">{{ stream.last_error }}</span>
+              <el-descriptions-item label="有流">
+                <el-tag size="small" :type="device.has_stream ? 'success' : 'info'">
+                  {{ device.has_stream ? '是' : '否' }}
+                </el-tag>
               </el-descriptions-item>
-              <el-descriptions-item label="观看人数">{{ stream.viewer_count || 0 }}</el-descriptions-item>
-              <el-descriptions-item label="媒体服务器">{{ stream.media_server_tag }}</el-descriptions-item>
-              <el-descriptions-item label="应用">{{ stream.app }}</el-descriptions-item>
-              <el-descriptions-item label="设备标识">{{ stream.device_tag || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="通道标识">{{ stream.channel_tag || '-' }}</el-descriptions-item>
-              <el-descriptions-item label="创建时间">{{ formatTime(stream.created_at) }}</el-descriptions-item>
+              <el-descriptions-item label="创建时间">{{ formatTime(device.created_at) }}</el-descriptions-item>
+              <el-descriptions-item label="推流地址" v-if="device.push_urls?.length">
+                <div v-for="(url, i) in device.push_urls" :key="i" class="url-item">
+                  <el-tag size="small" type="warning">{{ url.protocol }}</el-tag>
+                  <span class="url-text">{{ url.url }}</span>
+                </div>
+              </el-descriptions-item>
+              <el-descriptions-item label="拉流地址" v-if="device.pull_urls?.length">
+                <div v-for="(url, i) in device.pull_urls" :key="i" class="url-item">
+                  <el-tag size="small" type="info">{{ url.protocol }}</el-tag>
+                  <span class="url-text">{{ url.url }}</span>
+                </div>
+              </el-descriptions-item>
             </el-descriptions>
-          </el-card>
+          </div>
+          <el-skeleton v-else animated :rows="3" />
+        </DataCard>
 
-          <el-card shadow="never" style="margin-top: 16px">
-            <template #header>
-              <span>设备信息</span>
-              <el-button text size="small" style="float: right" @click="$router.push(`/devices/${device.device_tag}`)">
-                查看详情
-              </el-button>
-            </template>
-            <div v-if="device">
-              <el-descriptions :column="1" border size="small">
-                <el-descriptions-item label="名称">{{ device.name }}</el-descriptions-item>
-                <el-descriptions-item label="协议">
-                  <el-tag size="small">{{ device.protocol }}</el-tag>
-                </el-descriptions-item>
-                <el-descriptions-item label="状态">
-                  <span class="status-dot" :class="device.status?.toLowerCase()" />
-                  {{ device.status }}
-                </el-descriptions-item>
-                <el-descriptions-item label="设备地址">{{ device.host ? (device.port ? `${device.host}:${device.port}` : device.host) : '-' }}</el-descriptions-item>
-                <el-descriptions-item label="媒体服务器">{{ device.media_server_tag || '-' }}</el-descriptions-item>
-                <el-descriptions-item label="应用">{{ device.app || '-' }}</el-descriptions-item>
-                <el-descriptions-item label="流标识">{{ device.stream_key || '-' }}</el-descriptions-item>
-                <el-descriptions-item label="设备标签">{{ device.device_tag || '-' }}</el-descriptions-item>
-                <el-descriptions-item label="父设备">{{ device.parent_device_tag || '-' }}</el-descriptions-item>
-                <el-descriptions-item label="公开流">
-                  <el-tag size="small" :type="device.is_public ? 'success' : 'info'">
-                    {{ device.is_public ? '是' : '否' }}
-                  </el-tag>
-                </el-descriptions-item>
-                <el-descriptions-item label="有流">
-                  <el-tag size="small" :type="device.has_stream ? 'success' : 'info'">
-                    {{ device.has_stream ? '是' : '否' }}
-                  </el-tag>
-                </el-descriptions-item>
-                <el-descriptions-item label="创建时间">{{ formatTime(device.created_at) }}</el-descriptions-item>
-                <el-descriptions-item label="推流地址" v-if="device.push_urls?.length">
-                  <div v-for="(url, i) in device.push_urls" :key="i" class="url-item">
-                    <el-tag size="small" type="warning">{{ url.protocol }}</el-tag>
-                    <span class="url-text">{{ url.url }}</span>
-                  </div>
-                </el-descriptions-item>
-                <el-descriptions-item label="拉流地址" v-if="device.pull_urls?.length">
-                  <div v-for="(url, i) in device.pull_urls" :key="i" class="url-item">
-                    <el-tag size="small" type="info">{{ url.protocol }}</el-tag>
-                    <span class="url-text">{{ url.url }}</span>
-                  </div>
-                </el-descriptions-item>
-              </el-descriptions>
-            </div>
-            <el-skeleton v-else animated :rows="3" />
-          </el-card>
+        <DataCard title="通道信息" style="margin-top: 16px" v-if="stream.channel_tag">
+          <template #toolbar>
+            <el-button text size="small" @click="$router.push(`/channels/${stream.device_tag}/${stream.channel_tag}`)">
+              查看详情
+            </el-button>
+          </template>
+          <div v-if="channel">
+            <el-descriptions :column="1" border size="small">
+              <el-descriptions-item label="通道名称">{{ channel.name || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="通道标识">{{ channel.channel_tag }}</el-descriptions-item>
+              <el-descriptions-item label="状态">
+                <span class="status-dot" :class="channel.status?.toLowerCase()" />
+                {{ channel.status || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="媒体服务器">{{ channel.media_server_name || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="创建时间">{{ formatTime(channel.created_at) }}</el-descriptions-item>
+            </el-descriptions>
+          </div>
+          <el-skeleton v-else animated :rows="3" />
+        </DataCard>
+      </el-col>
+    </el-row>
 
-          <el-card shadow="never" style="margin-top: 16px" v-if="stream.channel_tag">
-            <template #header>
-              <span>通道信息</span>
-              <el-button text size="small" style="float: right" @click="$router.push(`/channels/${stream.device_tag}/${stream.channel_tag}`)">
-                查看详情
-              </el-button>
-            </template>
-            <div v-if="channel">
-              <el-descriptions :column="1" border size="small">
-                <el-descriptions-item label="通道名称">{{ channel.name || '-' }}</el-descriptions-item>
-                <el-descriptions-item label="通道标识">{{ channel.channel_tag }}</el-descriptions-item>
-                <el-descriptions-item label="状态">
-                  <span class="status-dot" :class="channel.status?.toLowerCase()" />
-                  {{ channel.status || '-' }}
-                </el-descriptions-item>
-                <el-descriptions-item label="媒体服务器">{{ channel.media_server_name || '-' }}</el-descriptions-item>
-                <el-descriptions-item label="创建时间">{{ formatTime(channel.created_at) }}</el-descriptions-item>
-              </el-descriptions>
-            </div>
-            <el-skeleton v-else animated :rows="3" />
-          </el-card>
-        </el-col>
-      </el-row>
+    <el-skeleton v-else-if="loading" animated :rows="8" />
 
-      <el-skeleton v-else-if="loading" animated :rows="8" />
+    <EmptyState v-else title="流不存在" />
 
-      <el-empty v-else description="流不存在" />
-
-      <el-dialog v-model="showPresetDialog" title="保存预制位" width="400px">
-        <el-input v-model="newPresetName" placeholder="例如: 大门入口" />
-        <template #footer>
-          <el-button @click="showPresetDialog = false">取消</el-button>
-          <el-button type="primary" :disabled="!newPresetName.trim()" @click="savePreset">保存</el-button>
-        </template>
-      </el-dialog>
-    </div>
-  </div>
+    <AppDialog v-model="showPresetDialog" title="保存预制位" size="sm">
+      <el-input v-model="newPresetName" placeholder="例如: 大门入口" />
+      <template #footer>
+        <el-button @click="showPresetDialog = false">取消</el-button>
+        <el-button type="primary" :disabled="!newPresetName.trim()" @click="savePreset">保存</el-button>
+      </template>
+    </AppDialog>
+  </PageView>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { Refresh, Back, VideoPlay } from '@element-plus/icons-vue'
 import VideoPlayer from '../components/VideoPlayer.vue'
 import { useStreamStore } from '../stores/streamStore'
@@ -295,12 +277,18 @@ import { useDeviceStore } from '../stores/deviceStore'
 import { useChannelStore } from '../stores/channelStore'
 import * as api from '../api/streams'
 import * as channelsApi from '../api/channels'
+import { useToast } from '../composables/useToast'
+import PageView from '../components/common/PageView.vue'
+import DataCard from '../components/common/DataCard.vue'
+import EmptyState from '../components/common/EmptyState.vue'
+import AppDialog from '../components/common/AppDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
 const streamStore = useStreamStore()
 const deviceStore = useDeviceStore()
 const channelStore = useChannelStore()
+const toast = useToast()
 
 const id = computed(() => Number(route.params.id))
 const loading = ref(false)
@@ -388,7 +376,7 @@ async function fetchData() {
       await fetchPresets()
     }
   } catch (e) {
-    ElMessage.error('加载失败: ' + (e?.message || e))
+    toast.error('加载失败: ' + (e?.message || e))
   } finally {
     loading.value = false
   }
@@ -396,7 +384,7 @@ async function fetchData() {
 
 async function startPreview() {
   if (!playLinks.value?.hls && !playLinks.value?.flv && !playLinks.value?.web_flv) {
-    ElMessage.warning('无可用播放链接')
+    toast.warning('无可用播放链接')
     return
   }
   playingUrl.value = playLinks.value.hls || playLinks.value.flv || playLinks.value.web_flv
@@ -425,7 +413,7 @@ async function copyUrl(url) {
     document.execCommand('copy')
     document.body.removeChild(el)
   }
-  ElMessage.success('已复制')
+  toast.success('已复制')
 }
 
 async function copyAll() {
@@ -469,9 +457,9 @@ async function savePreset() {
     await fetchPresets()
     showPresetDialog.value = false
     newPresetName.value = ''
-    ElMessage.success('预制位已保存')
+    toast.success('预制位已保存')
   } catch {
-    ElMessage.error('保存预制位失败')
+    toast.error('保存预制位失败')
   }
 }
 
@@ -480,7 +468,7 @@ async function gotoPreset(preset) {
     const { device_tag, channel_tag } = stream.value
     await channelStore.channelPtzControl(device_tag, channel_tag, 'goto_preset', ptzSpeed.value, preset.token)
   } catch {
-    ElMessage.error('调用预制位失败')
+    toast.error('调用预制位失败')
   }
 }
 
@@ -489,9 +477,9 @@ async function removePreset(preset) {
     const { device_tag, channel_tag } = stream.value
     await channelStore.deleteChannelPtzPreset(device_tag, channel_tag, preset.token)
     await fetchPresets()
-    ElMessage.success('预制位已删除')
+    toast.success('预制位已删除')
   } catch {
-    ElMessage.error('删除预制位失败')
+    toast.error('删除预制位失败')
   }
 }
 
@@ -568,10 +556,10 @@ async function confirmStop() {
     await ElMessageBox.confirm('确定停止此流吗？', '确认', { type: 'warning' })
     stopping.value = true
     await api.stopStream(id.value)
-    ElMessage.success('流已停止')
+    toast.success('流已停止')
     router.push('/streams')
   } catch (e) {
-    if (e !== 'cancel') ElMessage.error('停止失败')
+    if (e !== 'cancel') toast.error('停止失败')
   } finally {
     stopping.value = false
   }
@@ -582,10 +570,10 @@ async function confirmRestart() {
     await ElMessageBox.confirm('确定重启此流吗？', '确认', { type: 'warning' })
     starting.value = true
     await streamStore.restartStream(id.value)
-    ElMessage.success('流已启动')
+    toast.success('流已启动')
     await fetchData()
   } catch (e) {
-    if (e !== 'cancel') ElMessage.error('启动失败')
+    if (e !== 'cancel') toast.error('启动失败')
   } finally {
     starting.value = false
   }
@@ -623,10 +611,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-.header-left { display: flex; align-items: center; }
-.header-right { display: flex; gap: 8px; }
-.page-title { font-size: var(--text-xl); font-weight: var(--weight-semibold); color: var(--text-primary); }
 
 .player-with-ptz {
   display: flex;
@@ -862,21 +846,8 @@ onUnmounted(() => {
   color: var(--el-text-color-secondary);
 }
 
-.preset-card :deep(.el-card__header) {
+.preset-card :deep(.data-card__header) {
   padding: 12px 16px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-}
-
-.preset-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.preset-header span {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
 }
 
 .preset-grid {
@@ -922,19 +893,6 @@ onUnmounted(() => {
   flex: 1;
   padding: 4px 8px;
   font-size: 11px;
-}
-
-.empty-presets {
-  text-align: center;
-  padding: 32px 0;
-  color: var(--el-text-color-secondary);
-  font-size: 13px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
 }
 
 .player-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 300px; color: var(--text-muted); gap: var(--space-3); }

@@ -1,82 +1,78 @@
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <h1 class="page-title">录制策略</h1>
-      <div class="page-toolbar">
-        <el-button :icon="Refresh" :loading="loading" @click="fetchPolicies">刷新</el-button>
-        <el-button type="primary" :icon="Plus" @click="openCreateDialog">新建策略</el-button>
-      </div>
-    </div>
-    <div class="page-body">
-      <DataCard>
-        <el-skeleton animated :loading="loading" :rows="5">
-          <el-table v-if="policies.length > 0" :data="policies" style="margin-top: 0">
-            <el-table-column label="状态" width="80">
-              <template #default="{ row }">
-                <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '禁用' }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="设备" prop="device_tag" width="140" />
-            <el-table-column label="通道" prop="channel_tag" width="80" />
-            <el-table-column label="类型" width="120">
-              <template #default="{ row }">
-                <el-tag :type="row.policy_type === 'Timed' ? '' : 'warning'" size="small">
-                  {{ row.policy_type === 'Timed' ? '定时录制' : '报警触发' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="时间计划" min-width="180">
-              <template #default="{ row }">
-                <span v-if="row.policy_type === 'Timed' && row.schedule_type === 'TimeWindows'">
-                  <span v-for="(tw, i) in row.time_windows" :key="i" class="time-window-tag">
-                    {{ tw.days?.map(d => ['日','一','二','三','四','五','六'][d] || d).join('') || '每天' }} {{ tw.start_time }}-{{ tw.end_time }}
-                  </span>
-                </span>
-                <span v-else-if="row.cron_expr">{{ row.cron_expr }}</span>
-                <span v-else>-</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="报警类型" width="100">
-              <template #default="{ row }">
-                <span v-if="row.policy_type === 'AlarmTriggered'">{{ row.alarm_type || '-' }}</span>
-                <span v-else>-</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="预录/后录/恢复" width="160">
-              <template #default="{ row }">
-                <span v-if="row.policy_type === 'AlarmTriggered'">
-                  {{ row.pre_record_secs || 0 }}s / {{ row.post_record_secs || 0 }}s / {{ row.alarm_recovery_secs ?? 300 }}s
-                </span>
-                <span v-else>-</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="格式" prop="format" width="80" />
-            <el-table-column label="创建时间" width="160">
-              <template #default="{ row }"><span>{{ formatDate(row.created_at) }}</span></template>
-            </el-table-column>
-            <el-table-column label="操作" width="140">
-              <template #default="{ row }">
-                <el-button size="small" @click="openEditDialog(row)">编辑</el-button>
-                <el-button size="small" type="danger" plain @click="confirmDelete(row)">删除</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-          <el-empty v-else description="暂无录制策略，点击上方按钮创建" :image-size="60" />
-          <el-pagination
-            class="pagination-bar"
-            layout="total, sizes, prev, pager, next, jumper"
-            :total="policyTotal"
-            :current-page="page"
-            :page-size="pageSize"
-            :page-sizes="[20, 50, 100, 200]"
-            @current-change="onPageChange"
-            @size-change="onPageSizeChange"
-          />
-        </el-skeleton>
-      </DataCard>
-    </div>
+  <PageView title="录制策略">
+    <template #toolbar>
+      <el-button :icon="Refresh" :loading="loading" @click="fetchPolicies">刷新</el-button>
+      <el-button type="primary" :icon="Plus" @click="openCreateDialog">新建策略</el-button>
+    </template>
 
-    <el-dialog v-model="showDialog" :title="isEditing ? '编辑录制策略' : '新建录制策略'" width="600px" destroy-on-close>
+    <DataCard>
+      <el-skeleton animated :loading="loading" :rows="5">
+        <el-table v-if="policies.length > 0" :data="policies" border stripe size="small" style="margin-top: 0">
+          <el-table-column label="状态" width="80">
+            <template #default="{ row }">
+              <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '禁用' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="设备" prop="device_tag" width="140" />
+          <el-table-column label="通道" prop="channel_tag" width="80" />
+          <el-table-column label="类型" width="120">
+            <template #default="{ row }">
+              <el-tag :type="row.policy_type === 'Timed' ? '' : 'warning'" size="small">
+                {{ row.policy_type === 'Timed' ? '定时录制' : '报警触发' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="时间计划" min-width="180">
+            <template #default="{ row }">
+              <span v-if="row.policy_type === 'Timed' && row.schedule_type === 'TimeWindows'">
+                <span v-for="(tw, i) in row.time_windows" :key="i" class="time-window-tag">
+                  {{ tw.days?.map(d => ['日','一','二','三','四','五','六'][d] || d).join('') || '每天' }} {{ tw.start_time }}-{{ tw.end_time }}
+                </span>
+              </span>
+              <span v-else-if="row.cron_expr">{{ row.cron_expr }}</span>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="报警类型" width="100">
+            <template #default="{ row }">
+              <span v-if="row.policy_type === 'AlarmTriggered'">{{ row.alarm_type || '-' }}</span>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="预录/后录/恢复" width="160">
+            <template #default="{ row }">
+              <span v-if="row.policy_type === 'AlarmTriggered'">
+                {{ row.pre_record_secs || 0 }}s / {{ row.post_record_secs || 0 }}s / {{ row.alarm_recovery_secs ?? 300 }}s
+              </span>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="格式" prop="format" width="80" />
+          <el-table-column label="创建时间" width="160">
+            <template #default="{ row }"><span>{{ formatDate(row.created_at) }}</span></template>
+          </el-table-column>
+          <el-table-column label="操作" width="140">
+            <template #default="{ row }">
+              <el-button size="small" @click="openEditDialog(row)">编辑</el-button>
+              <el-button size="small" type="danger" plain @click="confirmDelete(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <EmptyState v-else title="暂无录制策略，点击上方按钮创建" />
+      </el-skeleton>
+    </DataCard>
+
+    <template #footer>
+      <PaginationBar
+        :total="policyTotal"
+        :page="page"
+        v-model:page-size="pageSize"
+        show-sizes
+        @update:page="onPageChange"
+      />
+    </template>
+
+    <AppDialog v-model="showDialog" :title="isEditing ? '编辑录制策略' : '新建录制策略'" size="md">
       <el-form :model="form" label-position="top" :rules="formRules" ref="formRef">
         <el-form-item label="设备 *" prop="device_tag">
           <el-select
@@ -218,18 +214,22 @@
         <el-button @click="showDialog = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitForm">确定</el-button>
       </template>
-    </el-dialog>
-  </div>
+    </AppDialog>
+  </PageView>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, shallowRef } from 'vue'
-import { ElMessageBox, ElMessage } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { Refresh, Plus } from '@element-plus/icons-vue'
 import { useRecordingStore } from '../stores/recordingStore'
 import { useToast } from '../composables/useToast'
 import { request } from '../utils/request'
 import DataCard from '../components/common/DataCard.vue'
+import PageView from '../components/common/PageView.vue'
+import PaginationBar from '../components/common/PaginationBar.vue'
+import EmptyState from '../components/common/EmptyState.vue'
+import AppDialog from '../components/common/AppDialog.vue'
 
 const recStore = useRecordingStore()
 const toast = useToast()
@@ -325,12 +325,6 @@ async function fetchPolicies() {
 
 function onPageChange(p) {
   page.value = p
-  fetchPolicies()
-}
-
-function onPageSizeChange(size) {
-  pageSize.value = size
-  page.value = 1
   fetchPolicies()
 }
 
@@ -434,7 +428,6 @@ function openEditDialog(row) {
     max_duration_secs: row.max_duration_secs || 3600,
     max_file_size_mb: row.max_file_size_mb || 512,
   }
-  // 载入当前设备到下拉选项，否则下拉框只能显示 device_tag 原始值而非设备名
   ensureDeviceOption(row.device_tag)
   onDeviceChange(row.device_tag, true).then(() => {
     showDialog.value = true
@@ -442,7 +435,6 @@ function openEditDialog(row) {
   showDialog.value = true
 }
 
-/** 确保指定设备存在于设备下拉选项中（编辑回填时使用） */
 async function ensureDeviceOption(deviceTag) {
   if (!deviceTag) return
   if (deviceOptions.value.some((d) => d.device_tag === deviceTag)) return

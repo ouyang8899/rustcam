@@ -13,11 +13,16 @@ export const useStreamStore = defineStore('streams', {
   }),
 
   actions: {
-    async fetchStreams(offset = 0) {
+    async fetchStreams(offset = 0, filters = {}) {
       this.loading = true
       this.error = null
       try {
-        const data = await api.getStreams({ limit: this.pageSize, offset })
+        const data = await api.getStreams({
+          limit: this.pageSize,
+          offset,
+          search: filters.search || undefined,
+          state: filters.state || undefined,
+        })
         this.streams = data.items || data
         this.total = data.total || this.streams.length
       } catch (e) {

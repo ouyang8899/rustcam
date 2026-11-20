@@ -1,45 +1,41 @@
 <!-- @ts-check -->
 <template>
-  <div class="page-container live-page">
-    <div class="page-header">
-      <div class="header-left">
-        <h1 class="page-title">实时飞行</h1>
-        <span class="header-sub">
-          {{ selected ? selected.name || selected.drone_tag : '未选择无人机' }}
-          <el-tag v-if="selected" size="small" :type="selected.online ? 'success' : 'info'" style="margin-left: 8px">
-            {{ selected.online ? '在线' : '离线' }}
-          </el-tag>
-        </span>
-      </div>
-      <div class="page-toolbar">
-        <el-radio-group v-model="mapMode" size="small">
-          <el-radio-button value="2d">2D</el-radio-button>
-          <el-radio-button value="3d">3D</el-radio-button>
-        </el-radio-group>
-        <el-select
-          v-model="routeId"
-          size="small"
-          clearable
-          placeholder="不显示航线"
-          style="width: 180px"
-        >
-          <el-option
-            v-for="r in store.routes"
-            :key="r.id"
-            :label="`${r.name} · ${r.waypoints.length} 点`"
-            :value="r.id"
-          />
-        </el-select>
-        <span v-if="selectedRoute" class="route-transit">
-          距起点 {{ formatDistance(transitMeters) }}
-        </span>
-        <el-tag :type="store.wsConnected ? 'success' : 'info'" effect="plain">
-          WS {{ store.wsConnected ? '已连接' : '未连接' }}
-        </el-tag>
-        <el-button :icon="Refresh" @click="refresh">刷新</el-button>
-        <el-button :icon="Aim" :disabled="!telemetry" @click="locate">定位</el-button>
-      </div>
-    </div>
+  <PageView
+    class="live-page"
+    title="实时飞行"
+    :subtitle="selected ? selected.name || selected.drone_tag : '未选择无人机'"
+  >
+    <template #toolbar>
+      <el-tag v-if="selected" size="small" :type="selected.online ? 'success' : 'info'">
+        {{ selected.online ? '在线' : '离线' }}
+      </el-tag>
+      <el-radio-group v-model="mapMode" size="small">
+        <el-radio-button value="2d">2D</el-radio-button>
+        <el-radio-button value="3d">3D</el-radio-button>
+      </el-radio-group>
+      <el-select
+        v-model="routeId"
+        size="small"
+        clearable
+        placeholder="不显示航线"
+        style="width: 180px"
+      >
+        <el-option
+          v-for="r in store.routes"
+          :key="r.id"
+          :label="`${r.name} · ${r.waypoints.length} 点`"
+          :value="r.id"
+        />
+      </el-select>
+      <span v-if="selectedRoute" class="route-transit">
+        距起点 {{ formatDistance(transitMeters) }}
+      </span>
+      <el-tag :type="store.wsConnected ? 'success' : 'info'" effect="plain">
+        WS {{ store.wsConnected ? '已连接' : '未连接' }}
+      </el-tag>
+      <el-button :icon="Refresh" @click="refresh">刷新</el-button>
+      <el-button :icon="Aim" :disabled="!telemetry" @click="locate">定位</el-button>
+    </template>
 
     <div class="live-body">
       <aside class="drone-rail">
@@ -60,7 +56,7 @@
             </div>
           </div>
         </div>
-        <el-empty v-if="store.drones.length === 0" description="暂无无人机" :image-size="60" />
+        <EmptyState v-if="store.drones.length === 0" title="暂无无人机" />
       </aside>
 
       <div class="globe-area">
@@ -139,7 +135,7 @@
               />
             </div>
           </template>
-          <el-empty v-else description="尚未收到遥测" :image-size="60" />
+          <EmptyState v-else title="尚未收到遥测" />
         </div>
 
         <div class="panel">
@@ -231,7 +227,7 @@
 
         <div class="panel">
           <div class="panel-head"><span>最近指令</span></div>
-          <div v-if="recentCommands.length === 0" class="empty-hint">暂无指令</div>
+          <EmptyState v-if="recentCommands.length === 0" title="暂无指令" />
           <div v-for="c in recentCommands" :key="c.cmd_id" class="cmd-item">
             <span class="cmd-kind">{{ c.kind || c.cmd_id?.slice(0, 8) }}</span>
             <el-tag size="small" :type="statusType(c.status)">{{ c.status }}</el-tag>
@@ -248,39 +244,39 @@
       :default-seconds="leaseSeconds"
       @confirm="onLeaseConfirm"
     />
-  </div>
+  </PageView>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import { Aim, Refresh } from '@element-plus/icons-vue'
 import { useDroneStore } from '../../stores/droneStore'
+import { useToast } from '../../composables/useToast'
 import { DEFAULT_LEASE_SECONDS } from '../../utils/droneLease'
 import { droneVideoAvailability } from '../../utils/droneVideo.js'
 import CesiumGlobe from '../../components/drone/CesiumGlobe.vue'
 import Map2D from '../../components/drone/Map2D.vue'
 import DroneVideoPopup from '../../components/drone/DroneVideoPopup.vue'
 import LeaseDialog from '../../components/drone/LeaseDialog.vue'
+import PageView from '../../components/common/PageView.vue'
+import EmptyState from '../../components/common/EmptyState.vue'
 
 const store = useDroneStore()
 const route = useRoute()
+const toast = useToast()
 const globeRef = ref(null)
 const map2dRef = ref(null)
 const mapMode = ref('3d')
 const selectedId = ref('')
-/** 当前地图上显示的计划航线 id；空表示不显示。 */
 const routeId = ref('')
 const pickMode = ref(false)
-/** 点击无人机后弹出的实时视频浮窗。 */
 const videoOpen = ref(false)
 const videoDroneTag = ref('')
 const gotoForm = reactive({ lat: 31.2304, lon: 121.4737, alt: 30 })
 const gimbal = reactive({ pitch: -30, yaw: 0 })
-/** 机体绝对航向（度）。 */
 const bodyYaw = ref(0)
-/** 申请控制权时的租约时长（秒）；隐式取权与续约沿用同一时长。 */
 const leaseSeconds = ref(DEFAULT_LEASE_SECONDS)
 const leaseDialogVisible = ref(false)
 
@@ -296,14 +292,12 @@ const telemetry = computed(() =>
 const control = computed(() =>
   store.getControl(selectedId.value, 'flight')
 )
-/** 实时地图上叠加的“意图航线”：当前无人机已保存的航线。 */
 const liveRoute = computed(() => {
   const r = store.routes.find((x) => x.id === routeId.value)
   if (!r) return []
   if (r.drone_tag && r.drone_tag !== selectedId.value) return []
   return r.waypoints || []
 })
-/** 本次执行航线的横向偏移（米，正=右，负=左）。 */
 const routeOffset = ref(0)
 
 const END_ACTION_LABELS = {
@@ -314,7 +308,6 @@ const END_ACTION_LABELS = {
 const selectedRoute = computed(
   () => store.routes.find((x) => x.id === routeId.value) || null
 )
-/** 当前位置到航线起点的转场距离（米）。 */
 const transitMeters = computed(() => {
   const t = telemetry.value
   const w = selectedRoute.value?.waypoints?.[0]
@@ -324,7 +317,6 @@ const transitMeters = computed(() => {
 const canCommand = computed(() => !!selected.value && selected.value.online)
 const now = ref(Date.now())
 const leaseRemain = computed(() => {
-  // 显式依赖 now，租约倒计时才会每秒刷新（规则 §10.7）。
   now.value
   const c = control.value
   if (!c?.held || !c.expire_at_ms) return 0
@@ -378,7 +370,6 @@ function select(id) {
   loadRoutes(id)
 }
 
-/** 拉取当前无人机的航线；保留已选航线，失效时回退到第一条。 */
 async function loadRoutes(id) {
   if (!id) return
   try {
@@ -396,16 +387,15 @@ function onDroneSelect(id) {
   openDroneVideo(id)
 }
 
-/** 在线且有关联摄像头时，才弹出该无人机的实时视频。 */
 function openDroneVideo(id) {
   const drone = store.drones.find(d => d.drone_tag === id)
   const availability = droneVideoAvailability(drone)
   if (!availability.ok) {
     videoOpen.value = false
     if (availability.reason === 'offline') {
-      ElMessage.warning('无人机离线，暂时无法查看实时视频')
+      toast.warning('无人机离线，暂时无法查看实时视频')
     } else if (availability.reason === 'no_camera') {
-      ElMessage.warning('该无人机未关联摄像头')
+      toast.warning('该无人机未关联摄像头')
     }
     return
   }
@@ -447,7 +437,7 @@ function onMapClick({ lon, lat }) {
   gotoForm.lon = Number(lon.toFixed(6))
   gotoForm.lat = Number(lat.toFixed(6))
   pickMode.value = false
-  ElMessage.success('目标点已选择')
+  toast.success('目标点已选择')
 }
 
 async function ensureControl() {
@@ -458,7 +448,7 @@ async function ensureControl() {
 
 async function maybeCommand(kind, params, confirmText) {
   if (!canCommand.value) {
-    ElMessage.warning('无人机不在线')
+    toast.warning('无人机不在线')
     return false
   }
   if (!(await ensureControl())) return false
@@ -477,9 +467,6 @@ async function maybeCommand(kind, params, confirmText) {
   return !!reply
 }
 
-/**
- * 二次确认文案：必须包含目标点、高度与返航点（规则 §10.7）。
- */
 function confirmTextFor(kind, detail) {
   const t = telemetry.value
   const home = t && t.home_lat
@@ -514,18 +501,14 @@ function goto() {
   )
 }
 
-/**
- * 触发一次航线任务。执行、起飞、租约维护、返航都由 drone-service 负责，
- * 前端只做二次确认并展示结果。
- */
 async function executeSelectedRoute() {
   const r = selectedRoute.value
   if (!r) {
-    ElMessage.warning('请先在顶部选择航线')
+    toast.warning('请先在顶部选择航线')
     return
   }
   if (!canCommand.value) {
-    ElMessage.warning('无人机不在线')
+    toast.warning('无人机不在线')
     return
   }
   if (!(await ensureControl())) return
@@ -545,10 +528,9 @@ async function executeSelectedRoute() {
   }
   try {
     await store.executeRoute(r.id, selectedId.value, routeOffset.value)
-    // 服务端会把租约延长到覆盖整条任务，刷新一次状态让剩余时长立即同步。
     store.fetchControl(selectedId.value, 'flight')
   } catch (e) {
-    ElMessage.error(e?.response?.data?.message || e?.message || '航线执行失败')
+    toast.error(e?.response?.data?.message || e?.message || '航线执行失败')
   }
 }
 
@@ -579,7 +561,7 @@ async function turnBody() {
 
 async function gimbalMove() {
   if (!canCommand.value) {
-    ElMessage.warning('无人机不在线')
+    toast.warning('无人机不在线')
     return
   }
   if (!(await ensureControlGimbal())) return
@@ -606,7 +588,7 @@ async function ensureControlGimbal() {
 
 async function camera(action) {
   if (!canCommand.value) {
-    ElMessage.warning('无人机不在线')
+    toast.warning('无人机不在线')
     return
   }
   if (!(await ensureControlGimbal())) return
@@ -631,9 +613,9 @@ async function onLeaseConfirm(seconds) {
   leaseSeconds.value = seconds
   const res = await store.acquireControl(selectedId.value, 'flight', 10, seconds)
   if (!res?.granted) {
-    ElMessage.warning(res?.reason || '控制权被占用')
+    toast.warning(res?.reason || '控制权被占用')
   } else {
-    ElMessage.success(`已获得控制权，${Math.round(seconds / 60)} 分钟后到期`)
+    toast.success(`已获得控制权，${Math.round(seconds / 60)} 分钟后到期`)
   }
   await store.fetchControl(selectedId.value, 'flight')
 }
@@ -665,15 +647,6 @@ onMounted(async () => {
 .live-page {
   background: var(--bg-base);
 }
-.header-left {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-.header-sub {
-  font-size: 12px;
-  color: var(--text-muted);
-}
 .live-body {
   flex: 1;
   min-height: 0;
@@ -687,7 +660,7 @@ onMounted(async () => {
   min-height: 0;
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--bg-surface);
 }
 .drone-rail {
@@ -702,7 +675,7 @@ onMounted(async () => {
   display: flex;
   gap: 10px;
   padding: 10px;
-  border-radius: 8px;
+  border-radius: 0;
   cursor: pointer;
   border: 1px solid transparent;
   margin-bottom: 6px;
@@ -733,7 +706,7 @@ onMounted(async () => {
 .globe-area {
   position: relative;
   min-height: 0;
-  border-radius: 10px;
+  border-radius: 0;
   overflow: hidden;
   border: 1px solid var(--border);
 }
@@ -761,7 +734,7 @@ onMounted(async () => {
 }
 .panel {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   padding: 10px;
   background: var(--bg-base);
 }

@@ -2,22 +2,27 @@ use std::sync::Arc;
 use std::time::Instant;
 use uuid::Uuid;
 
-use async_trait::async_trait;
-use tokio::sync::{ RwLock };
-use dashmap::DashMap;
 use crate::context::{InfraContext, MediaContext};
-use crate::domain::{ CreateAlarmRequest, Channel, Device, DeviceStatus, DeviceType, Protocol, CreateDeviceRequest, UpdateDeviceRequest, Stream, StreamConfig, StreamState };
-use crate::domain::traits::{ CacheStoreExt, DeviceLookup };
+use crate::domain::device_group::{
+    CreateGroupRequest, DeviceGroup, DeviceGroupNode, UpdateGroupRequest,
+};
+use crate::domain::ptz::{PtzControlResult, PtzPreset, PtzStatus};
 use crate::domain::region::{Region, RegionNode};
-use crate::domain::device_group::{DeviceGroup, DeviceGroupNode, CreateGroupRequest, UpdateGroupRequest};
-use crate::domain::ptz::{PtzPreset, PtzControlResult, PtzStatus};
+use crate::domain::traits::{CacheStoreExt, DeviceLookup};
+use crate::domain::{
+    Channel, CreateAlarmRequest, CreateDeviceRequest, Device, DeviceStatus, DeviceType, Protocol,
+    Stream, StreamConfig, StreamState, UpdateDeviceRequest,
+};
 use crate::error::{AppError, Result};
-use crate::protocol::event::{ SignalEvent, PtzCommand };
-use crate::protocol::onvif::{ OnvifDeviceClient };
-use crate::protocol::adapter_manager::{ self };
+use crate::protocol::adapter_manager::{self};
+use crate::protocol::event::{PtzCommand, SignalEvent};
+use crate::protocol::onvif::OnvifDeviceClient;
+use async_trait::async_trait;
+use dashmap::DashMap;
+use tokio::sync::RwLock;
 
-use crate::domain::{PullUrl, StreamProtocol};
 use crate::application::StreamService;
+use crate::domain::{PullUrl, StreamProtocol};
 
 pub struct DeviceService {
     infra: InfraContext,
@@ -28,7 +33,11 @@ pub struct DeviceService {
 }
 
 impl DeviceService {
-    pub fn new(infra: InfraContext, media: MediaContext, stream_service: Arc<StreamService>) -> Self {
+    pub fn new(
+        infra: InfraContext,
+        media: MediaContext,
+        stream_service: Arc<StreamService>,
+    ) -> Self {
         Self {
             infra,
             media,
@@ -50,7 +59,10 @@ impl DeviceService {
     }
 
     pub async fn start_device(&self, device_tag: &str) -> Result<()> {
-        let device = self.infra.db.get_device_by_device_tag(device_tag)
+        let device = self
+            .infra
+            .db
+            .get_device_by_device_tag(device_tag)
             .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
 
         let tag = device.device_tag.as_deref().unwrap_or(device_tag);
@@ -61,66 +73,81 @@ impl DeviceService {
                     let uname = device.device_username.as_deref().unwrap_or("");
                     let pwd = device.device_password.as_deref().unwrap_or("");
                     let full_url = Self::embed_rtsp_auth(&raw_url, uname, pwd);
-                    match self.stream_service.start_pull_stream(tag, tag, &full_url).await {
-                        Ok(_stream_info) => {
-                            Ok(())
-                        }
+                    match self
+                        .stream_service
+                        .start_pull_stream(tag, tag, &full_url)
+                        .await
+                    {
+                        Ok(_stream_info) => Ok(()),
                         Err(e) => Err(e),
                     }
                 } else {
-                    Err(AppError::BadRequest("ONVIF device has no pull_urls configured".to_string()))
+                    Err(AppError::BadRequest(
+                        "ONVIF device has no pull_urls configured".to_string(),
+                    ))
                 }
             }
             Protocol::Rtsp => {
-                let raw_url = device.select_source()
-                    .map(|(_, url)| url)
-                    .ok_or_else(|| AppError::BadRequest("RTSP device has no stream source".to_string()))?;
+                let raw_url = device.select_source().map(|(_, url)| url).ok_or_else(|| {
+                    AppError::BadRequest("RTSP device has no stream source".to_string())
+                })?;
                 let uname = device.device_username.as_deref().unwrap_or("");
                 let pwd = device.device_password.as_deref().unwrap_or("");
                 let full_url = Self::embed_rtsp_auth(&raw_url, uname, pwd);
-                match self.stream_service.start_pull_stream(tag, tag, &full_url).await {
-                    Ok(_stream_info) => {
-                        Ok(())
-                    }
+                match self
+                    .stream_service
+                    .start_pull_stream(tag, tag, &full_url)
+                    .await
+                {
+                    Ok(_stream_info) => Ok(()),
                     Err(e) => Err(e),
                 }
             }
             Protocol::Gb28181 => {
-                let adapter_key = device.parent_device_tag.clone().unwrap_or_else(|| tag.to_string());
-                let adapter = adapter_manager::get_adapter(&adapter_key)
-                    .ok_or_else(|| AppError::NotFound(format!("GB28181 device {} is offline", device_tag)))?;
+                let adapter_key = device
+                    .parent_device_tag
+                    .clone()
+                    .unwrap_or_else(|| tag.to_string());
+                let adapter = adapter_manager::get_adapter(&adapter_key).ok_or_else(|| {
+                    AppError::NotFound(format!("GB28181 device {} is offline", device_tag))
+                })?;
                 let mut inner = adapter.lock().await;
-                (&mut *inner).start(tag, "").await
+                (&mut *inner)
+                    .start(tag, "")
+                    .await
                     .map_err(|e| AppError::Internal(format!("INVITE failed: {}", e)))?;
                 Ok(())
             }
-            Protocol::Rtmp => {
-                Err(AppError::BadRequest("RTMP device requires push from device".to_string()))
-            }
+            Protocol::Rtmp => Err(AppError::BadRequest(
+                "RTMP device requires push from device".to_string(),
+            )),
             Protocol::Hls | Protocol::WebRTC => {
-                let url = device.select_source()
-                    .map(|(_, url)| url)
-                    .ok_or_else(|| AppError::BadRequest(format!("{} device has no stream source", device.protocol)))?;
+                let url = device.select_source().map(|(_, url)| url).ok_or_else(|| {
+                    AppError::BadRequest(format!("{} device has no stream source", device.protocol))
+                })?;
                 match self.stream_service.start_pull_stream(tag, tag, &url).await {
-                    Ok(_stream_info) => {
-                        Ok(())
-                    }
+                    Ok(_stream_info) => Ok(()),
                     Err(e) => Err(e),
                 }
             }
-            Protocol::Custom(ref name) => {
-                Err(AppError::BadRequest(format!("Custom protocol '{}' not supported", name)))
-            }
+            Protocol::Custom(ref name) => Err(AppError::BadRequest(format!(
+                "Custom protocol '{}' not supported",
+                name
+            ))),
         }
     }
 
     pub async fn start_all_devices(&self) {
-
         let tags: Vec<String> = {
             let devices = self.infra.db.devices_cache();
             devices
                 .iter()
-                .filter(|d| matches!(d.protocol, Protocol::Onvif | Protocol::Rtsp | Protocol::Gb28181))
+                .filter(|d| {
+                    matches!(
+                        d.protocol,
+                        Protocol::Onvif | Protocol::Rtsp | Protocol::Gb28181
+                    )
+                })
                 .filter_map(|d| d.device_tag.clone())
                 .collect()
         };
@@ -184,8 +211,15 @@ impl DeviceService {
         event: &SignalEvent,
     ) -> anyhow::Result<()> {
         match event {
-            SignalEvent::DeviceRegister { device_id: _, device_tag, name, manufacturer, model, protocol, stream_key: _ } => {
-
+            SignalEvent::DeviceRegister {
+                device_id: _,
+                device_tag,
+                name,
+                manufacturer,
+                model,
+                protocol,
+                stream_key: _,
+            } => {
                 let proto = protocol.clone();
 
                 let existing = if let Some(ref tag) = device_tag {
@@ -207,14 +241,23 @@ impl DeviceService {
                     infra.ws_broadcaster.device_online(device.id);
                 }
 
-                let _ = infra.redis.publish_event("device_registered", &serde_json::json!({
-                    "device_tag": device_tag, "name": name,
-                    "manufacturer": manufacturer, "model": model,
-                    "protocol": protocol.to_string(),
-                })).await;
+                let _ = infra
+                    .redis
+                    .publish_event(
+                        "device_registered",
+                        &serde_json::json!({
+                            "device_tag": device_tag, "name": name,
+                            "manufacturer": manufacturer, "model": model,
+                            "protocol": protocol.to_string(),
+                        }),
+                    )
+                    .await;
             }
 
-            SignalEvent::DeviceOnline { device_id: _, device_tag } => {
+            SignalEvent::DeviceOnline {
+                device_id: _,
+                device_tag,
+            } => {
                 let tag = device_tag.as_deref().unwrap_or("");
                 if let Some(mut device) = infra.db.get_device_by_device_tag(tag) {
                     device.set_online();
@@ -223,23 +266,32 @@ impl DeviceService {
 
                     match device.protocol {
                         Protocol::Onvif => {
-                            let x_addr = device.extended.as_ref()
+                            let x_addr = device
+                                .extended
+                                .as_ref()
                                 .and_then(|e| e.get("x_addr"))
                                 .and_then(|v| v.as_str());
                             if let Some(x_addr) = x_addr {
                                 let mut client = OnvifDeviceClient::new(x_addr);
-                                if let (Some(u), Some(p)) = (&device.device_username, &device.device_password) {
+                                if let (Some(u), Some(p)) =
+                                    (&device.device_username, &device.device_password)
+                                {
                                     client = client.with_credentials(u, p);
                                 }
                                 match client.get_all_stream_uris().await {
                                     Ok(streams) => {
                                         for (profile, uri) in streams {
-                                            let uname = device.device_username.as_deref().unwrap_or("");
-                                            let pwd = device.device_password.as_deref().unwrap_or("");
-                                            let full_url = Self::embed_rtsp_auth(&uri.uri, uname, pwd);
-                                            match stream_service.start_pull_stream(tag, tag, &full_url).await {
-                                                Ok(_stream_info) => {
-                                                }
+                                            let uname =
+                                                device.device_username.as_deref().unwrap_or("");
+                                            let pwd =
+                                                device.device_password.as_deref().unwrap_or("");
+                                            let full_url =
+                                                Self::embed_rtsp_auth(&uri.uri, uname, pwd);
+                                            match stream_service
+                                                .start_pull_stream(tag, tag, &full_url)
+                                                .await
+                                            {
+                                                Ok(_stream_info) => {}
                                                 Err(e) => {
                                                     tracing::error!("[DeviceService] ONVIF auto-pull failed for profile {}: {}", profile.token, e);
                                                 }
@@ -258,10 +310,13 @@ impl DeviceService {
                                 let pwd = device.device_password.as_deref().unwrap_or("");
                                 let full_url = Self::embed_rtsp_auth(&raw_url, uname, pwd);
                                 match stream_service.start_pull_stream(tag, tag, &full_url).await {
-                                    Ok(_stream_info) => {
-                                    }
+                                    Ok(_stream_info) => {}
                                     Err(e) => {
-                                        tracing::error!("[DeviceService] RTSP auto-pull failed for {}: {}", tag, e);
+                                        tracing::error!(
+                                            "[DeviceService] RTSP auto-pull failed for {}: {}",
+                                            tag,
+                                            e
+                                        );
                                     }
                                 }
                             }
@@ -271,16 +326,26 @@ impl DeviceService {
                 }
             }
 
-            SignalEvent::DeviceOffline { device_id: _, device_tag, reason } => {
+            SignalEvent::DeviceOffline {
+                device_id: _,
+                device_tag,
+                reason,
+            } => {
                 let tag = device_tag.as_deref().unwrap_or("");
                 if let Some(mut device) = infra.db.get_device_by_device_tag(tag) {
                     device.set_offline();
                     infra.db.update_device(&device).await?;
-                    infra.ws_broadcaster.device_offline(device.id, reason.as_deref());
+                    infra
+                        .ws_broadcaster
+                        .device_offline(device.id, reason.as_deref());
                 }
             }
 
-            SignalEvent::DeviceKeepalive { device_id: _, device_tag, timestamp: _ } => {
+            SignalEvent::DeviceKeepalive {
+                device_id: _,
+                device_tag,
+                timestamp: _,
+            } => {
                 let tag = device_tag.as_deref().unwrap_or("");
                 if let Some(mut device) = infra.db.get_device_by_device_tag(tag) {
                     let was_offline = device.status == crate::domain::DeviceStatus::Offline;
@@ -288,24 +353,35 @@ impl DeviceService {
                     infra.db.update_device(&device).await?;
                     infra.ws_broadcaster.device_online(device.id);
                     if was_offline {
-                        let _ = infra.publish_event(SignalEvent::DeviceOnline {
-                            device_id: device.id,
-                            device_tag: Some(tag.to_string()),
-                        }).await;
+                        let _ = infra
+                            .publish_event(SignalEvent::DeviceOnline {
+                                device_id: device.id,
+                                device_tag: Some(tag.to_string()),
+                            })
+                            .await;
                     }
                 }
             }
 
-            SignalEvent::CatalogResponse { device_id: _, device_tag, channels } => {
+            SignalEvent::CatalogResponse {
+                device_id: _,
+                device_tag,
+                channels,
+            } => {
                 let catalog_sender = device_tag.as_deref().unwrap_or("");
                 let _device_count = channels.iter().filter(|ch| ch.is_directory()).count();
                 let _channel_count = channels.iter().filter(|ch| !ch.is_directory()).count();
 
                 if infra.db.get_device_by_device_tag(catalog_sender).is_none() {
-                    let mut sender_device = Device::new(catalog_sender.to_string(), Protocol::Gb28181);
+                    let mut sender_device =
+                        Device::new(catalog_sender.to_string(), Protocol::Gb28181);
                     sender_device.device_tag = Some(catalog_sender.to_string());
                     if let Err(e) = infra.db.create_device(&sender_device).await {
-                        tracing::error!("[DeviceService] Create catalog sender device {} failed: {}", catalog_sender, e);
+                        tracing::error!(
+                            "[DeviceService] Create catalog sender device {} failed: {}",
+                            catalog_sender,
+                            e
+                        );
                     }
                 }
 
@@ -317,9 +393,21 @@ impl DeviceService {
                     let parent_id = ch.parent_id.as_deref().unwrap_or(catalog_sender);
                     if !ch.is_directory() {
                         if ch.is_video_channel() {
-                            parent_device_attrs.insert(parent_id.to_string(), (ch.manufacturer.as_deref().unwrap_or(""), ch.model.as_deref().unwrap_or("")));
+                            parent_device_attrs.insert(
+                                parent_id.to_string(),
+                                (
+                                    ch.manufacturer.as_deref().unwrap_or(""),
+                                    ch.model.as_deref().unwrap_or(""),
+                                ),
+                            );
                         } else if !parent_device_attrs.contains_key(parent_id) {
-                            parent_device_attrs.insert(parent_id.to_string(), (ch.manufacturer.as_deref().unwrap_or(""), ch.model.as_deref().unwrap_or("")));
+                            parent_device_attrs.insert(
+                                parent_id.to_string(),
+                                (
+                                    ch.manufacturer.as_deref().unwrap_or(""),
+                                    ch.model.as_deref().unwrap_or(""),
+                                ),
+                            );
                         }
                     }
                 }
@@ -328,19 +416,26 @@ impl DeviceService {
                     let parent_id = ch.parent_id.as_deref().unwrap_or(catalog_sender);
 
                     if ch.is_directory() {
-
                         if parent_id != catalog_sender {
                             let current_parent = parent_id;
                             if infra.db.get_device_by_device_tag(current_parent).is_none() {
-                                let (manufacturer, model) = parent_device_attrs.get(current_parent).copied().unwrap_or(("", ""));
-                                let mut parent_device = Device::new(current_parent.to_string(), Protocol::Gb28181);
+                                let (manufacturer, model) = parent_device_attrs
+                                    .get(current_parent)
+                                    .copied()
+                                    .unwrap_or(("", ""));
+                                let mut parent_device =
+                                    Device::new(current_parent.to_string(), Protocol::Gb28181);
                                 parent_device.device_tag = Some(current_parent.to_string());
                                 parent_device.extended = Some(serde_json::json!({
                                     "manufacturer": manufacturer,
                                     "model": model,
                                 }));
                                 if let Err(e) = infra.db.create_device(&parent_device).await {
-                                    tracing::error!("[DeviceService] Create parent device {} failed: {}", current_parent, e);
+                                    tracing::error!(
+                                        "[DeviceService] Create parent device {} failed: {}",
+                                        current_parent,
+                                        e
+                                    );
                                 }
                             }
                         }
@@ -355,7 +450,11 @@ impl DeviceService {
                             device.extended = Some(extended);
                             device.parent_device_tag = Some(parent_id.to_string());
                             if let Err(e) = infra.db.update_device(&device).await {
-                                tracing::error!("[DeviceService] Update device {} failed: {}", ch.device_id, e);
+                                tracing::error!(
+                                    "[DeviceService] Update device {} failed: {}",
+                                    ch.device_id,
+                                    e
+                                );
                             }
                         } else {
                             let mut device = Device::new(ch.name.clone(), Protocol::Gb28181);
@@ -363,20 +462,32 @@ impl DeviceService {
                             device.parent_device_tag = Some(parent_id.to_string());
                             device.extended = Some(extended);
                             if let Err(e) = infra.db.create_device(&device).await {
-                                tracing::error!("[DeviceService] Create device {} failed: {}", ch.device_id, e);
+                                tracing::error!(
+                                    "[DeviceService] Create device {} failed: {}",
+                                    ch.device_id,
+                                    e
+                                );
                             }
                         }
                     } else {
                         if infra.db.get_device_by_device_tag(parent_id).is_none() {
-                            let (manufacturer, model) = parent_device_attrs.get(parent_id).copied().unwrap_or(("", ""));
-                            let mut parent_device = Device::new(parent_id.to_string(), Protocol::Gb28181);
+                            let (manufacturer, model) = parent_device_attrs
+                                .get(parent_id)
+                                .copied()
+                                .unwrap_or(("", ""));
+                            let mut parent_device =
+                                Device::new(parent_id.to_string(), Protocol::Gb28181);
                             parent_device.device_tag = Some(parent_id.to_string());
                             parent_device.extended = Some(serde_json::json!({
                                 "manufacturer": manufacturer,
                                 "model": model,
                             }));
                             if let Err(e) = infra.db.create_device(&parent_device).await {
-                                tracing::error!("[DeviceService] Create parent device {} failed: {}", parent_id, e);
+                                tracing::error!(
+                                    "[DeviceService] Create parent device {} failed: {}",
+                                    parent_id,
+                                    e
+                                );
                             }
                         }
 
@@ -385,21 +496,35 @@ impl DeviceService {
                             "model": ch.model,
                         });
 
-                        let status = if ch.is_online() { DeviceStatus::Online } else { DeviceStatus::Offline };
+                        let status = if ch.is_online() {
+                            DeviceStatus::Online
+                        } else {
+                            DeviceStatus::Offline
+                        };
 
                         if !ch.is_video_channel() {
                             continue;
                         }
 
-                        if let Ok(Some(mut channel)) = infra.db.get_channel(parent_id, &ch.device_id).await {
+                        if let Ok(Some(mut channel)) =
+                            infra.db.get_channel(parent_id, &ch.device_id).await
+                        {
                             channel.name = ch.name.clone();
                             channel.status = status;
                             channel.extended = Some(extended);
                             if let Err(e) = infra.db.update_channel(&channel).await {
-                                tracing::error!("[DeviceService] Update channel {} failed: {}", ch.device_id, e);
+                                tracing::error!(
+                                    "[DeviceService] Update channel {} failed: {}",
+                                    ch.device_id,
+                                    e
+                                );
                             }
                         } else {
-                            let mut channel = Channel::new(parent_id.to_string(), ch.device_id.clone(), ch.name.clone());
+                            let mut channel = Channel::new(
+                                parent_id.to_string(),
+                                ch.device_id.clone(),
+                                ch.name.clone(),
+                            );
                             channel.status = status;
                             channel.extended = Some(extended);
                             channel.device_type = DeviceType::IPC;
@@ -409,7 +534,11 @@ impl DeviceService {
                             channel.manufacturer = ch.manufacturer.as_ref().map(|s| s.to_string());
                             channel.model = ch.model.as_ref().map(|s| s.to_string());
                             if let Err(e) = infra.db.create_channel(&channel).await {
-                                tracing::error!("[DeviceService] Create channel {} failed: {}", ch.device_id, e);
+                                tracing::error!(
+                                    "[DeviceService] Create channel {} failed: {}",
+                                    ch.device_id,
+                                    e
+                                );
                             }
                         }
 
@@ -423,16 +552,36 @@ impl DeviceService {
                 if let Some(adapter) = adapter_manager::get_adapter(catalog_sender) {
                     let mut guard = adapter.lock().await;
                     for channel_id in &video_channel_ids {
-                          match guard.start(catalog_sender, channel_id).await {
-                              Ok(_) => {},
-                              Err(e) => tracing::error!("[DeviceService] Auto-INVITE failed for channel {}/{}: {}", catalog_sender, channel_id, e),
-                          }
+                        match guard.start(catalog_sender, channel_id).await {
+                            Ok(_) => {}
+                            Err(e) => tracing::error!(
+                                "[DeviceService] Auto-INVITE failed for channel {}/{}: {}",
+                                catalog_sender,
+                                channel_id,
+                                e
+                            ),
+                        }
                     }
                 }
             }
 
-            SignalEvent::Alarm { device_id, device_tag: event_device_tag, channel_tag, alarm_type, message, alarm_id, timestamp } => {
-                tracing::warn!("[DeviceService] Alarm: device={} channel={:?} type={} alarm_id={:?} msg={}", device_id, channel_tag, alarm_type, alarm_id, message);
+            SignalEvent::Alarm {
+                device_id,
+                device_tag: event_device_tag,
+                channel_tag,
+                alarm_type,
+                message,
+                alarm_id,
+                timestamp,
+            } => {
+                tracing::warn!(
+                    "[DeviceService] Alarm: device={} channel={:?} type={} alarm_id={:?} msg={}",
+                    device_id,
+                    channel_tag,
+                    alarm_type,
+                    alarm_id,
+                    message
+                );
                 let device_id_num: i64 = device_id.parse().unwrap_or(0);
                 let device_tag = match infra.db.get_device_by_id(device_id_num).await {
                     Ok(Some(d)) => d.device_tag.unwrap_or_default(),
@@ -452,40 +601,86 @@ impl DeviceService {
                 match infra.db.save_alarm(&create_req).await {
                     Ok(alarm) => {
                         // 告警已经落库，订阅者(录像调度器)需要真实的告警 id
-                        let _ = infra.event_bus.publish(SignalEvent::AlarmRaised {
-                            alarm_id: alarm.id,
-                            device_id: device_id.clone(),
-                            device_tag: Some(device_tag.clone()),
-                            channel_tag: channel_tag.clone(),
-                            alarm_type: alarm_type.clone(),
-                            timestamp: *timestamp,
-                        }).await;
+                        let _ = infra
+                            .event_bus
+                            .publish(SignalEvent::AlarmRaised {
+                                alarm_id: alarm.id,
+                                device_id: device_id.clone(),
+                                device_tag: Some(device_tag.clone()),
+                                channel_tag: channel_tag.clone(),
+                                alarm_type: alarm_type.clone(),
+                                timestamp: *timestamp,
+                            })
+                            .await;
                     }
                     Err(e) => {
                         tracing::error!("[DeviceService] Save alarm failed: {}", e);
                     }
                 }
-                let _ = infra.redis.publish_event("alarm", &serde_json::json!({
-                    "device_id": device_id, "alarm_type": alarm_type, "message": message,
-                })).await;
-                infra.ws_broadcaster.alarm(device_id_num, alarm_type, message);
+                let _ = infra
+                    .redis
+                    .publish_event(
+                        "alarm",
+                        &serde_json::json!({
+                            "device_id": device_id, "alarm_type": alarm_type, "message": message,
+                        }),
+                    )
+                    .await;
+                infra
+                    .ws_broadcaster
+                    .alarm(device_id_num, alarm_type, message);
             }
 
-            SignalEvent::PtzControl { device_id, command, speed } => {
-                Self::try_dispatch_ptz(infra, media, stream_service, ptz_last_cmd, &device_id, &command, &speed).await;
+            SignalEvent::PtzControl {
+                device_id,
+                command,
+                speed,
+            } => {
+                Self::try_dispatch_ptz(
+                    infra,
+                    media,
+                    stream_service,
+                    ptz_last_cmd,
+                    &device_id,
+                    &command,
+                    &speed,
+                )
+                .await;
             }
-            SignalEvent::QueryDeviceConfig { device_id: _, device_tag: _, config_type: _ } => {
-            }
-            SignalEvent::SetDeviceConfig { device_id: _, device_tag: _, config_type: _, config_value: _ } => {
-            }
-            SignalEvent::PresetQuery { device_id: _, device_tag: _, channel_id: _ } => {
-            }
-            SignalEvent::PresetSet { device_id: _, device_tag: _, channel_id: _, preset_name: _ } => {
-            }
-            SignalEvent::PresetGoto { device_id: _, device_tag: _, channel_id: _, preset_index: _ } => {
-            }
-            SignalEvent::PresetRemove { device_id: _, device_tag: _, channel_id: _, preset_index: _ } => {
-            }
+            SignalEvent::QueryDeviceConfig {
+                device_id: _,
+                device_tag: _,
+                config_type: _,
+            } => {}
+            SignalEvent::SetDeviceConfig {
+                device_id: _,
+                device_tag: _,
+                config_type: _,
+                config_value: _,
+            } => {}
+            SignalEvent::PresetQuery {
+                device_id: _,
+                device_tag: _,
+                channel_id: _,
+            } => {}
+            SignalEvent::PresetSet {
+                device_id: _,
+                device_tag: _,
+                channel_id: _,
+                preset_name: _,
+            } => {}
+            SignalEvent::PresetGoto {
+                device_id: _,
+                device_tag: _,
+                channel_id: _,
+                preset_index: _,
+            } => {}
+            SignalEvent::PresetRemove {
+                device_id: _,
+                device_tag: _,
+                channel_id: _,
+                preset_index: _,
+            } => {}
             _ => {}
         }
         Ok(())
@@ -522,8 +717,13 @@ impl DeviceService {
 
         let is_continuous = matches!(
             command,
-            PtzCommand::Up | PtzCommand::Down | PtzCommand::Left | PtzCommand::Right
-                | PtzCommand::ZoomIn | PtzCommand::ZoomOut | PtzCommand::ContinuousMove { .. }
+            PtzCommand::Up
+                | PtzCommand::Down
+                | PtzCommand::Left
+                | PtzCommand::Right
+                | PtzCommand::ZoomIn
+                | PtzCommand::ZoomOut
+                | PtzCommand::ContinuousMove { .. }
         );
 
         if is_continuous {
@@ -553,7 +753,10 @@ impl DeviceService {
 
         match target_protocol {
             Protocol::Onvif => {
-                if let Err(e) = Self::dispatch_onvif_ptz(infra, media, stream_service, &device, command, speed).await {
+                if let Err(e) =
+                    Self::dispatch_onvif_ptz(infra, media, stream_service, &device, command, speed)
+                        .await
+                {
                     tracing::error!("[PTZ] ONVIF failed: device={} err={}", device_id, e);
                 }
             }
@@ -563,7 +766,11 @@ impl DeviceService {
                 }
             }
             _ => {
-                tracing::warn!("[PTZ] Unsupported protocol {:?} for device {}", device.protocol, device_id);
+                tracing::warn!(
+                    "[PTZ] Unsupported protocol {:?} for device {}",
+                    device.protocol,
+                    device_id
+                );
             }
         }
     }
@@ -579,7 +786,10 @@ impl DeviceService {
         let channel_id = match &device.device_tag {
             Some(tag) => tag.clone(),
             None => {
-                return Err(AppError::BadRequest(format!("ONVIF 设备 {} 缺少 device_tag", device.id)));
+                return Err(AppError::BadRequest(format!(
+                    "ONVIF 设备 {} 缺少 device_tag",
+                    device.id
+                )));
             }
         };
 
@@ -592,7 +802,9 @@ impl DeviceService {
             Some(a) => a,
             None => {
                 tracing::error!("[PTZ] No adapter factory registered for ONVIF");
-                return Err(AppError::Internal("ONVIF adapter factory not registered".to_string()));
+                return Err(AppError::Internal(
+                    "ONVIF adapter factory not registered".to_string(),
+                ));
             }
         };
 
@@ -611,7 +823,10 @@ impl DeviceService {
         let channel_id = match &device.device_tag {
             Some(tag) => tag.clone(),
             None => {
-                return Err(AppError::BadRequest(format!("Device {} has no device_tag", device.id)));
+                return Err(AppError::BadRequest(format!(
+                    "Device {} has no device_tag",
+                    device.id
+                )));
             }
         };
 
@@ -625,7 +840,9 @@ impl DeviceService {
             .ok_or_else(|| AppError::DeviceOffline(format!("设备 {} 已离线", channel_id)))?;
 
         let mut inner = adapter_arc.lock().await;
-        (&mut *inner).ptz_control(&channel_id, command, *speed).await?;
+        (&mut *inner)
+            .ptz_control(&channel_id, command, *speed)
+            .await?;
         Ok(None)
     }
 
@@ -635,7 +852,11 @@ impl DeviceService {
         command: PtzCommand,
         speed: Option<u8>,
     ) -> Result<PtzControlResult> {
-        let device = self.infra.db.get_device_by_id(device_id).await?
+        let device = self
+            .infra
+            .db
+            .get_device_by_id(device_id)
+            .await?
             .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_id)))?;
 
         let target_protocol = if let Some(ref parent_tag) = device.parent_device_tag {
@@ -654,7 +875,15 @@ impl DeviceService {
 
         match target_protocol {
             Protocol::Onvif => {
-                let preset_token = Self::dispatch_onvif_ptz(&self.infra, &self.media, &self.stream_service, &device, &command, &speed).await?;
+                let preset_token = Self::dispatch_onvif_ptz(
+                    &self.infra,
+                    &self.media,
+                    &self.stream_service,
+                    &device,
+                    &command,
+                    &speed,
+                )
+                .await?;
                 Ok(PtzControlResult {
                     success: true,
                     message: "PTZ command sent".to_string(),
@@ -663,10 +892,16 @@ impl DeviceService {
             }
             Protocol::Gb28181 => {
                 let channel_id = device.device_tag.clone().unwrap_or_default();
-                let adapter_key = device.parent_device_tag.clone().unwrap_or(channel_id.clone());
+                let adapter_key = device
+                    .parent_device_tag
+                    .clone()
+                    .unwrap_or(channel_id.clone());
 
                 if adapter_manager::get_adapter(&adapter_key).is_none() {
-                    return Err(AppError::DeviceOffline(format!("设备 {} 已离线", channel_id)));
+                    return Err(AppError::DeviceOffline(format!(
+                        "设备 {} 已离线",
+                        channel_id
+                    )));
                 }
 
                 Self::dispatch_gb28181_ptz(&self.infra, &device, &command, &speed).await?;
@@ -676,14 +911,19 @@ impl DeviceService {
                     preset_token: None,
                 })
             }
-            _ => {
-                Err(AppError::BadRequest(format!("Unsupported PTZ protocol: {:?}", device.protocol)))
-            }
+            _ => Err(AppError::BadRequest(format!(
+                "Unsupported PTZ protocol: {:?}",
+                device.protocol
+            ))),
         }
     }
 
     pub async fn get_ptz_status(&self, device_id: i64) -> Result<PtzStatus> {
-        let device = self.infra.db.get_device_by_id(device_id).await?
+        let device = self
+            .infra
+            .db
+            .get_device_by_id(device_id)
+            .await?
             .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_id)))?;
 
         let target_protocol = if let Some(ref parent_tag) = device.parent_device_tag {
@@ -703,18 +943,26 @@ impl DeviceService {
         match target_protocol {
             Protocol::Onvif => {
                 let parent = if let Some(ref parent_tag) = device.parent_device_tag {
-                    self.infra.db.get_device_by_device_tag(parent_tag)
-                        .ok_or_else(|| AppError::NotFound(format!("Parent device {} not found", parent_tag)))?
+                    self.infra
+                        .db
+                        .get_device_by_device_tag(parent_tag)
+                        .ok_or_else(|| {
+                            AppError::NotFound(format!("Parent device {} not found", parent_tag))
+                        })?
                 } else {
                     device.clone()
                 };
 
-                let x_addr = parent.extended.as_ref()
+                let x_addr = parent
+                    .extended
+                    .as_ref()
                     .and_then(|e| e.get("x_addr"))
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| AppError::NotFound("No ONVIF x_addr for device".to_string()))?;
 
-                let profile_token = device.extended.as_ref()
+                let profile_token = device
+                    .extended
+                    .as_ref()
                     .and_then(|e| e.get("onvif_token"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("Profile_1")
@@ -724,9 +972,13 @@ impl DeviceService {
                     x_addr.to_string(),
                     parent.device_username.clone(),
                     parent.device_password.clone(),
-                ).into_client();
+                )
+                .into_client();
 
-                let status = ptz_client.with_profile(profile_token).get_status().await
+                let status = ptz_client
+                    .with_profile(profile_token)
+                    .get_status()
+                    .await
                     .map_err(|e| AppError::Internal(format!("GetStatus failed: {}", e)))?;
                 return Ok(status);
             }
@@ -739,7 +991,10 @@ impl DeviceService {
                 });
             }
             _ => {
-                return Err(AppError::BadRequest(format!("PTZ status not supported for {:?}", target_protocol)));
+                return Err(AppError::BadRequest(format!(
+                    "PTZ status not supported for {:?}",
+                    target_protocol
+                )));
             }
         }
     }
@@ -787,13 +1042,15 @@ impl DeviceService {
             _ => format!("onvif_{}", uuid.replace("-", "")),
         };
 
-        let parent_name = name
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                manufacturer.map(|m| {
-                    model.map(|md| format!("{} {}", m, md)).unwrap_or_else(|| m.to_string())
-                }).unwrap_or_else(|| "ONVIF Device".to_string())
-            });
+        let parent_name = name.map(|s| s.to_string()).unwrap_or_else(|| {
+            manufacturer
+                .map(|m| {
+                    model
+                        .map(|md| format!("{} {}", m, md))
+                        .unwrap_or_else(|| m.to_string())
+                })
+                .unwrap_or_else(|| "ONVIF Device".to_string())
+        });
 
         let mut parent = Device::new(parent_name.clone(), Protocol::Onvif);
         parent.host = host.clone();
@@ -816,19 +1073,29 @@ impl DeviceService {
             },
         }));
 
-        if self.infra.db.get_device_by_device_tag(&device_tag).is_some() {
+        if self
+            .infra
+            .db
+            .get_device_by_device_tag(&device_tag)
+            .is_some()
+        {
             return Err(AppError::BadRequest(format!(
-                "ONVIF device with URN '{}' already exists", device_tag
+                "ONVIF device with URN '{}' already exists",
+                device_tag
             )));
         }
 
         self.infra.db.create_device(&parent).await?;
 
-        let pull_urls: Vec<PullUrl> = streams.iter().enumerate().map(|(i, s)| PullUrl {
-            protocol: StreamProtocol::Rtsp,
-            url: s.rtsp_url.clone(),
-            priority: i as u8 + 1,
-        }).collect();
+        let pull_urls: Vec<PullUrl> = streams
+            .iter()
+            .enumerate()
+            .map(|(i, s)| PullUrl {
+                protocol: StreamProtocol::Rtsp,
+                url: s.rtsp_url.clone(),
+                priority: i as u8 + 1,
+            })
+            .collect();
         parent.pull_urls = pull_urls;
         self.infra.db.update_device(&parent).await?;
 
@@ -843,13 +1110,18 @@ impl DeviceService {
 
         for (_i, stream) in streams.iter().enumerate() {
             let stream_key = Uuid::new_v4().to_string();
-            let mut channel = Channel::new(device_tag.clone(), stream.token.clone(), stream.name.clone());
+            let mut channel = Channel::new(
+                device_tag.clone(),
+                stream.token.clone(),
+                stream.name.clone(),
+            );
 
-            let rtsp_url_with_auth = if let (Some(u), Some(p)) = (&parent.device_username, &parent.device_password) {
-                Self::embed_rtsp_auth(&stream.rtsp_url, u, p)
-            } else {
-                stream.rtsp_url.clone()
-            };
+            let rtsp_url_with_auth =
+                if let (Some(u), Some(p)) = (&parent.device_username, &parent.device_password) {
+                    Self::embed_rtsp_auth(&stream.rtsp_url, u, p)
+                } else {
+                    stream.rtsp_url.clone()
+                };
 
             channel.extended = Some(serde_json::json!({
                 "onvif_token": stream.token,
@@ -887,7 +1159,10 @@ impl DeviceService {
             None => return Ok(()),
         };
 
-        if !matches!(device.protocol, Protocol::Rtsp | Protocol::Rtmp | Protocol::Onvif) {
+        if !matches!(
+            device.protocol,
+            Protocol::Rtsp | Protocol::Rtmp | Protocol::Onvif
+        ) {
             return Ok(());
         }
 
@@ -900,11 +1175,8 @@ impl DeviceService {
             channel.status = device.status;
             self.infra.db.update_channel(&channel).await?;
         } else {
-            let mut channel = Channel::new(
-                device_tag.clone(),
-                channel_tag.clone(),
-                device.name.clone(),
-            );
+            let mut channel =
+                Channel::new(device_tag.clone(), channel_tag.clone(), device.name.clone());
             channel.ip_address = Some(device.host.clone());
             channel.port = device.port;
             self.infra.db.create_channel(&channel).await?;
@@ -912,19 +1184,25 @@ impl DeviceService {
 
         if !device.pull_urls.is_empty() {
             let app = device.app.clone().unwrap_or_else(|| "live".to_string());
-            let server_tag = device.media_server_tag.clone().unwrap_or_else(|| "default".to_string());
+            let server_tag = device
+                .media_server_tag
+                .clone()
+                .unwrap_or_else(|| "default".to_string());
             let cache_key = format!("{}/{}", device_tag, channel_tag);
-            let existing_in_cache = self.infra.db.streams_cache()
+            let existing_in_cache = self
+                .infra
+                .db
+                .streams_cache()
                 .iter()
                 .find(|r| r.key() == &cache_key)
                 .map(|r| r.value().clone());
 
             if existing_in_cache.is_none() {
                 let streams = self.infra.db.list_streams().await;
-                let stream_exists = streams.iter().any(|s|
-                    s.device_tag.as_deref() == Some(device_tag) &&
-                    s.channel_tag.as_deref() == Some(channel_tag)
-                );
+                let stream_exists = streams.iter().any(|s| {
+                    s.device_tag.as_deref() == Some(device_tag)
+                        && s.channel_tag.as_deref() == Some(channel_tag)
+                });
                 if !stream_exists {
                     let token = uuid::Uuid::new_v4().to_string();
                     let mut stream = crate::domain::Stream::new(
@@ -938,12 +1216,15 @@ impl DeviceService {
                     if let Err(e) = self.infra.db.create_stream(&stream).await {
                         tracing::warn!("[DeviceService] create_stream failed: {}", e);
                     } else {
-
-                        let _ = self.infra.event_bus.publish(SignalEvent::StreamCreated {
-                            device_id: device.id,
-                            device_tag: device_tag.to_string(),
-                            channel_tag: channel_tag.to_string(),
-                        }).await;
+                        let _ = self
+                            .infra
+                            .event_bus
+                            .publish(SignalEvent::StreamCreated {
+                                device_id: device.id,
+                                device_tag: device_tag.to_string(),
+                                channel_tag: channel_tag.to_string(),
+                            })
+                            .await;
                     }
                 }
             }
@@ -954,19 +1235,29 @@ impl DeviceService {
 
     pub async fn create_device(&self, req: CreateDeviceRequest) -> Result<Device> {
         if req.name.trim().is_empty() {
-            return Err(AppError::BadRequest("Device name cannot be empty".to_string()));
+            return Err(AppError::BadRequest(
+                "Device name cannot be empty".to_string(),
+            ));
         }
         if req.name.len() > 255 {
-            return Err(AppError::BadRequest("Device name cannot exceed 255 characters".to_string()));
+            return Err(AppError::BadRequest(
+                "Device name cannot exceed 255 characters".to_string(),
+            ));
         }
 
         let device_tag = if let Some(ref tag) = req.device_tag {
             let tag_lower = tag.to_lowercase();
             if self.infra.db.get_device_by_device_tag(&tag_lower).is_some() {
-                return Err(AppError::BadRequest(format!("device_tag '{}' already exists", tag)));
+                return Err(AppError::BadRequest(format!(
+                    "device_tag '{}' already exists",
+                    tag
+                )));
             }
             tag_lower
-        } else if matches!(req.protocol, Protocol::Rtsp | Protocol::Rtmp | Protocol::Onvif) {
+        } else if matches!(
+            req.protocol,
+            Protocol::Rtsp | Protocol::Rtmp | Protocol::Onvif
+        ) {
             Self::generate_device_tag(&req.protocol, req.port.unwrap_or(0))
         } else {
             return Err(AppError::BadRequest("device_tag is required".to_string()));
@@ -987,7 +1278,10 @@ impl DeviceService {
         device.region_code = req.region_code.clone();
         device.is_public = req.is_public.unwrap_or(false);
 
-        let mut extended = req.extended.clone().unwrap_or(serde_json::Value::Object(Default::default()));
+        let mut extended = req
+            .extended
+            .clone()
+            .unwrap_or(serde_json::Value::Object(Default::default()));
         if let Some(rtsp_url) = req.rtsp_url {
             extended.as_object_mut().map(|obj| {
                 obj.insert("rtsp_full_url".to_string(), serde_json::json!(rtsp_url));
@@ -1007,50 +1301,104 @@ impl DeviceService {
     }
 
     pub async fn update_device(&self, id: i64, req: UpdateDeviceRequest) -> Result<Device> {
-        let mut device = self.infra.db.get_device_by_id(id).await?
+        let mut device = self
+            .infra
+            .db
+            .get_device_by_id(id)
+            .await?
             .ok_or_else(|| AppError::NotFound(format!("Device id {} not found", id)))?;
 
-        if let Some(name) = req.name { device.name = name; }
-        if let Some(host) = req.host { device.host = host; }
-        if let Some(port) = req.port { device.port = port; }
-        if let Some(protocol) = req.protocol { device.protocol = protocol; }
-        if let Some(v) = req.device_username { device.device_username = Some(v); }
-        if let Some(v) = req.device_password { device.device_password = Some(v); }
-        if let Some(v) = req.push_urls { device.push_urls = v; }
-        if let Some(v) = req.pull_urls { device.pull_urls = v; }
-        if let Some(v) = req.playback_username { device.playback_username = Some(v); }
-        if let Some(v) = req.playback_password { device.playback_password = Some(v); }
-        if let Some(v) = req.media_server_tag { device.media_server_tag = Some(v); }
-        if let Some(v) = req.app { device.app = Some(v); }
+        if let Some(name) = req.name {
+            device.name = name;
+        }
+        if let Some(host) = req.host {
+            device.host = host;
+        }
+        if let Some(port) = req.port {
+            device.port = port;
+        }
+        if let Some(protocol) = req.protocol {
+            device.protocol = protocol;
+        }
+        if let Some(v) = req.device_username {
+            device.device_username = Some(v);
+        }
+        if let Some(v) = req.device_password {
+            device.device_password = Some(v);
+        }
+        if let Some(v) = req.push_urls {
+            device.push_urls = v;
+        }
+        if let Some(v) = req.pull_urls {
+            device.pull_urls = v;
+        }
+        if let Some(v) = req.playback_username {
+            device.playback_username = Some(v);
+        }
+        if let Some(v) = req.playback_password {
+            device.playback_password = Some(v);
+        }
+        if let Some(v) = req.media_server_tag {
+            device.media_server_tag = Some(v);
+        }
+        if let Some(v) = req.app {
+            device.app = Some(v);
+        }
         if let Some(ref new_device_tag) = req.device_tag {
             if let Some(ref old_device_tag) = device.device_tag {
                 if old_device_tag != new_device_tag {
                     if let Some(mgr) = crate::media::get_media_session_manager() {
-                        if mgr.remove(old_device_tag).is_some() {
-                        }
+                        if mgr.remove(old_device_tag).is_some() {}
                     }
 
-                    let streams = self.stream_service.get_streams_by_device(old_device_tag).await;
-                    let active_streams: Vec<_> = streams.iter()
-                        .filter(|s| matches!(s.state, StreamState::Starting | StreamState::Recovering | StreamState::Active))
+                    let streams = self
+                        .stream_service
+                        .get_streams_by_device(old_device_tag)
+                        .await;
+                    let active_streams: Vec<_> = streams
+                        .iter()
+                        .filter(|s| {
+                            matches!(
+                                s.state,
+                                StreamState::Starting
+                                    | StreamState::Recovering
+                                    | StreamState::Active
+                            )
+                        })
                         .collect();
                     if !active_streams.is_empty() {
-                        return Err(AppError::BadRequest(
-                            format!("无法更改设备标识：流正在活跃。请先停止流。活跃的流：{:?}",
-                                active_streams.iter().map(|s| format!("{}/{}", s.device_tag.as_ref().unwrap_or(&String::new()), s.channel_tag.as_ref().unwrap_or(&String::new()))).collect::<Vec<_>>())
-                        ));
+                        return Err(AppError::BadRequest(format!(
+                            "无法更改设备标识：流正在活跃。请先停止流。活跃的流：{:?}",
+                            active_streams
+                                .iter()
+                                .map(|s| format!(
+                                    "{}/{}",
+                                    s.device_tag.as_ref().unwrap_or(&String::new()),
+                                    s.channel_tag.as_ref().unwrap_or(&String::new())
+                                ))
+                                .collect::<Vec<_>>()
+                        )));
                     }
 
-                    let stream_updates: Vec<(Stream, String)> = streams.iter()
+                    let stream_updates: Vec<(Stream, String)> = streams
+                        .iter()
                         .map(|s| {
-                            let old_key = format!("{}/{}", old_device_tag, s.channel_tag.as_ref().unwrap_or(&String::new()));
+                            let old_key = format!(
+                                "{}/{}",
+                                old_device_tag,
+                                s.channel_tag.as_ref().unwrap_or(&String::new())
+                            );
                             let mut updated = s.clone();
                             updated.device_tag = Some(new_device_tag.clone());
                             (updated, old_key)
                         })
                         .collect();
 
-                    let child_device_updates: Vec<(Device, String)> = self.infra.db.devices_cache().iter()
+                    let child_device_updates: Vec<(Device, String)> = self
+                        .infra
+                        .db
+                        .devices_cache()
+                        .iter()
                         .filter(|d| d.parent_device_tag.as_ref() == Some(old_device_tag))
                         .map(|d| {
                             let mut updated = d.clone();
@@ -1059,7 +1407,11 @@ impl DeviceService {
                         })
                         .collect();
 
-                    let channel_updates: Vec<(Channel, String, String)> = self.infra.db.channels_cache().iter()
+                    let channel_updates: Vec<(Channel, String, String)> = self
+                        .infra
+                        .db
+                        .channels_cache()
+                        .iter()
                         .filter(|c| c.key().starts_with(&format!("{}/", old_device_tag)))
                         .map(|c| {
                             let mut updated = c.value().clone();
@@ -1069,13 +1421,21 @@ impl DeviceService {
                         })
                         .collect();
 
-                    let session_ids: Vec<i64> = self.infra.db.sessions_cache().iter()
+                    let session_ids: Vec<i64> = self
+                        .infra
+                        .db
+                        .sessions_cache()
+                        .iter()
                         .filter(|s| s.device_tag.as_ref() == Some(old_device_tag))
                         .map(|s| s.id)
                         .collect();
 
                     for (stream, old_key) in stream_updates {
-                        let new_key = format!("{}/{}", new_device_tag, stream.channel_tag.as_ref().unwrap_or(&String::new()));
+                        let new_key = format!(
+                            "{}/{}",
+                            new_device_tag,
+                            stream.channel_tag.as_ref().unwrap_or(&String::new())
+                        );
                         if let Err(e) = self.infra.db.update_stream(&stream).await {
                             tracing::warn!("[DeviceService] Failed to update stream: {}", e);
                         }
@@ -1085,7 +1445,11 @@ impl DeviceService {
 
                     for (child, child_tag) in child_device_updates {
                         if let Err(e) = self.infra.db.update_device(&child).await {
-                            tracing::warn!("[DeviceService] Failed to update child device {}: {}", child_tag, e);
+                            tracing::warn!(
+                                "[DeviceService] Failed to update child device {}: {}",
+                                child_tag,
+                                e
+                            );
                         }
                         if let Some(mut d) = self.infra.db.devices_cache().get_mut(&child_tag) {
                             d.parent_device_tag = Some(new_device_tag.clone());
@@ -1109,16 +1473,32 @@ impl DeviceService {
             }
             device.device_tag = Some(new_device_tag.clone());
         }
-        if let Some(v) = req.parent_device_tag { device.parent_device_tag = Some(v); }
-        if let Some(v) = req.region_code { device.region_code = Some(v); }
-        if let Some(v) = req.group_id { device.group_id = Some(v); }
-        if let Some(v) = req.is_public { device.is_public = v; }
+        if let Some(v) = req.parent_device_tag {
+            device.parent_device_tag = Some(v);
+        }
+        if let Some(v) = req.region_code {
+            device.region_code = Some(v);
+        }
+        if let Some(v) = req.group_id {
+            device.group_id = Some(v);
+        }
+        if let Some(v) = req.is_public {
+            device.is_public = v;
+        }
 
-        let status_changed_to_maintaining = req.status.map(|s| s == DeviceStatus::Maintaining).unwrap_or(false);
-        if let Some(v) = req.status { device.status = v; }
+        let status_changed_to_maintaining = req
+            .status
+            .map(|s| s == DeviceStatus::Maintaining)
+            .unwrap_or(false);
+        if let Some(v) = req.status {
+            device.status = v;
+        }
 
         if let Some(req_extended) = req.extended {
-            let mut existing = device.extended.clone().unwrap_or(serde_json::Value::Object(Default::default()));
+            let mut existing = device
+                .extended
+                .clone()
+                .unwrap_or(serde_json::Value::Object(Default::default()));
             if let Some(existing_obj) = existing.as_object_mut() {
                 if let Some(req_obj) = req_extended.as_object() {
                     for (k, v) in req_obj {
@@ -1130,14 +1510,19 @@ impl DeviceService {
 
             if let Some(obj) = existing.as_object() {
                 if let Some(stream_config_val) = obj.get("stream_config") {
-                    if let Ok(sc) = serde_json::from_value::<StreamConfig>(stream_config_val.clone()) {
+                    if let Ok(sc) =
+                        serde_json::from_value::<StreamConfig>(stream_config_val.clone())
+                    {
                         device.stream_config = Some(sc);
                     }
                 }
             }
         }
         if let Some(rtsp_url) = req.rtsp_url {
-            let mut existing = device.extended.clone().unwrap_or(serde_json::Value::Object(Default::default()));
+            let mut existing = device
+                .extended
+                .clone()
+                .unwrap_or(serde_json::Value::Object(Default::default()));
             if let Some(obj) = existing.as_object_mut() {
                 obj.insert("rtsp_full_url".to_string(), serde_json::json!(rtsp_url));
             }
@@ -1146,9 +1531,16 @@ impl DeviceService {
 
         self.infra.db.update_device(&device).await?;
 
-        if matches!(device.protocol, Protocol::Rtsp | Protocol::Rtmp | Protocol::Onvif) {
+        if matches!(
+            device.protocol,
+            Protocol::Rtsp | Protocol::Rtmp | Protocol::Onvif
+        ) {
             if let Err(e) = self.upsert_channel_and_stream(&device).await {
-                tracing::warn!("[DeviceService] Failed to upsert channel/stream for device {}: {}", device.id, e);
+                tracing::warn!(
+                    "[DeviceService] Failed to upsert channel/stream for device {}: {}",
+                    device.id,
+                    e
+                );
             }
         }
 
@@ -1159,28 +1551,50 @@ impl DeviceService {
                     if &channel.channel_tag == device_tag {
                         continue;
                     }
-                    if let Some(pull_url) = device.pull_urls.iter().find(|p| {
-                        p.url.contains(&channel.channel_tag)
-                    }) {
-                        let rtsp_url_with_auth = if let (Some(u), Some(p)) = (&device.device_username, &device.device_password) {
+                    if let Some(pull_url) = device
+                        .pull_urls
+                        .iter()
+                        .find(|p| p.url.contains(&channel.channel_tag))
+                    {
+                        let rtsp_url_with_auth = if let (Some(u), Some(p)) =
+                            (&device.device_username, &device.device_password)
+                        {
                             Self::embed_rtsp_auth(&pull_url.url, u, p)
                         } else {
                             pull_url.url.clone()
                         };
                         if let Some(ext) = channel.channel_extended.as_mut() {
                             if let Some(obj) = ext.as_object_mut() {
-                                obj.insert("rtsp_url".to_string(), serde_json::json!(rtsp_url_with_auth));
+                                obj.insert(
+                                    "rtsp_url".to_string(),
+                                    serde_json::json!(rtsp_url_with_auth),
+                                );
                             }
                         }
                         if let Err(e) = self.infra.db.update_channel(&channel).await {
-                            tracing::warn!("[DeviceService] Failed to update ONVIF channel {}: {}", channel.channel_tag, e);
+                            tracing::warn!(
+                                "[DeviceService] Failed to update ONVIF channel {}: {}",
+                                channel.channel_tag,
+                                e
+                            );
                         }
 
-                        let stream_key = crate::common::device_utils::format_stream_key(device_tag, &channel.channel_tag);
-                        let streams = self.stream_service.get_streams_by_channel(device_tag, &channel.channel_tag).await;
+                        let stream_key = crate::common::device_utils::format_stream_key(
+                            device_tag,
+                            &channel.channel_tag,
+                        );
+                        let streams = self
+                            .stream_service
+                            .get_streams_by_channel(device_tag, &channel.channel_tag)
+                            .await;
                         for stream in streams {
-                            if matches!(stream.state, crate::domain::StreamState::Active | crate::domain::StreamState::Starting | crate::domain::StreamState::Recovering) {
-                                  match self.stream_service.restart_stream(&stream_key, &rtsp_url_with_auth).await {
+                            if matches!(
+                                stream.state,
+                                crate::domain::StreamState::Active
+                                    | crate::domain::StreamState::Starting
+                                    | crate::domain::StreamState::Recovering
+                            ) {
+                                match self.stream_service.restart_stream(&stream_key, &rtsp_url_with_auth).await {
                                       Ok(_) => {},
                                       Err(e) => tracing::warn!("[DeviceService] Failed to restart stream for channel {}: {}", channel.channel_tag, e),
                                   }
@@ -1194,7 +1608,11 @@ impl DeviceService {
         if status_changed_to_maintaining {
             if let Some(ref device_tag) = device.device_tag {
                 if let Err(e) = self.stream_service.stop_streams_by_device(device_tag).await {
-                    tracing::warn!("[DeviceService] Failed to stop streams for device {} in maintenance: {}", device_tag, e);
+                    tracing::warn!(
+                        "[DeviceService] Failed to stop streams for device {} in maintenance: {}",
+                        device_tag,
+                        e
+                    );
                 }
             }
         }
@@ -1202,13 +1620,26 @@ impl DeviceService {
         Ok(device)
     }
 
-    pub async fn update_device_by_tag(&self, device_tag: &str, req: UpdateDeviceRequest) -> Result<Device> {
-        let device = self.infra.db.get_device_by_device_tag(device_tag)
-            .ok_or_else(|| AppError::NotFound(format!("Device with tag '{}' not found", device_tag)))?;
+    pub async fn update_device_by_tag(
+        &self,
+        device_tag: &str,
+        req: UpdateDeviceRequest,
+    ) -> Result<Device> {
+        let device = self
+            .infra
+            .db
+            .get_device_by_device_tag(device_tag)
+            .ok_or_else(|| {
+                AppError::NotFound(format!("Device with tag '{}' not found", device_tag))
+            })?;
         self.update_device(device.id, req).await
     }
 
-    pub async fn sync_device_status_from_stream(&self, device_id: i64, stream_state: StreamState) -> Result<()> {
+    pub async fn sync_device_status_from_stream(
+        &self,
+        device_id: i64,
+        stream_state: StreamState,
+    ) -> Result<()> {
         let mut device = match self.infra.db.get_device_by_id(device_id).await? {
             Some(d) => d,
             None => return Ok(()),
@@ -1219,9 +1650,13 @@ impl DeviceService {
         }
 
         let new_status = match stream_state {
-            StreamState::Active | StreamState::Starting | StreamState::Recovering => DeviceStatus::Online,
+            StreamState::Active | StreamState::Starting | StreamState::Recovering => {
+                DeviceStatus::Online
+            }
             StreamState::Error => DeviceStatus::Error,
-            StreamState::Idle | StreamState::Stopping | StreamState::Stopped => DeviceStatus::Offline,
+            StreamState::Idle | StreamState::Stopping | StreamState::Stopped => {
+                DeviceStatus::Offline
+            }
         };
 
         if device.status != new_status {
@@ -1233,7 +1668,10 @@ impl DeviceService {
     }
 
     pub async fn delete_device(&self, device_tag: &str) -> Result<()> {
-        let device = self.infra.db.get_device_by_device_tag(device_tag)
+        let device = self
+            .infra
+            .db
+            .get_device_by_device_tag(device_tag)
             .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_tag)))?;
 
         if let Some(ref parent_tag) = device.device_tag {
@@ -1262,25 +1700,75 @@ impl DeviceService {
     }
 
     pub async fn list_online_devices(&self) -> Vec<Device> {
-        self.infra.db.list_devices().await
+        self.infra
+            .db
+            .list_devices()
+            .await
             .into_iter()
             .filter(|d| d.status == DeviceStatus::Online)
             .collect()
     }
 
     pub async fn list_public_devices(&self) -> Vec<Device> {
-        self.infra.db.list_devices().await
+        self.infra
+            .db
+            .list_devices()
+            .await
             .into_iter()
             .filter(|d| d.is_public)
             .collect()
     }
 
-    pub async fn list_devices_paginated(&self, limit: usize, offset: usize, search: Option<&str>, region_code: Option<&str>, protocol: Option<&str>, status: Option<&str>, device_type: Option<&str>, group_id: Option<i64>) -> anyhow::Result<Vec<Device>> {
-        self.infra.db.list_devices_paginated(limit, offset, search, region_code, protocol, status, device_type, group_id).await
+    pub async fn list_devices_paginated(
+        &self,
+        limit: usize,
+        offset: usize,
+        search: Option<&str>,
+        region_code: Option<&str>,
+        protocol: Option<&str>,
+        status: Option<&str>,
+        device_type: Option<&str>,
+        group_id: Option<i64>,
+        unassigned_region: Option<bool>,
+    ) -> anyhow::Result<Vec<Device>> {
+        self.infra
+            .db
+            .list_devices_paginated(
+                limit,
+                offset,
+                search,
+                region_code,
+                protocol,
+                status,
+                device_type,
+                group_id,
+                unassigned_region,
+            )
+            .await
     }
 
-    pub async fn count_devices_filtered(&self, search: Option<&str>, region_code: Option<&str>, protocol: Option<&str>, status: Option<&str>, device_type: Option<&str>, group_id: Option<i64>) -> anyhow::Result<usize> {
-        self.infra.db.count_devices_filtered(search, region_code, protocol, status, device_type, group_id).await
+    pub async fn count_devices_filtered(
+        &self,
+        search: Option<&str>,
+        region_code: Option<&str>,
+        protocol: Option<&str>,
+        status: Option<&str>,
+        device_type: Option<&str>,
+        group_id: Option<i64>,
+        unassigned_region: Option<bool>,
+    ) -> anyhow::Result<usize> {
+        self.infra
+            .db
+            .count_devices_filtered(
+                search,
+                region_code,
+                protocol,
+                status,
+                device_type,
+                group_id,
+                unassigned_region,
+            )
+            .await
     }
 
     pub async fn count_devices(&self) -> usize {
@@ -1294,8 +1782,14 @@ impl DeviceService {
     pub fn get_stats(&self) -> serde_json::Value {
         let cache = self.infra.db.devices_cache();
         let total = cache.len();
-        let online = cache.iter().filter(|d| d.status == DeviceStatus::Online).count();
-        let public = cache.iter().filter(|d| d.is_public && d.status == DeviceStatus::Online).count();
+        let online = cache
+            .iter()
+            .filter(|d| d.status == DeviceStatus::Online)
+            .count();
+        let public = cache
+            .iter()
+            .filter(|d| d.is_public && d.status == DeviceStatus::Online)
+            .count();
 
         serde_json::json!({
             "total": total,
@@ -1325,6 +1819,14 @@ impl DeviceService {
         self.infra.db.get_group_tree().await
     }
 
+    /// 构建设备分组树（分组 → 设备 → 通道）。
+    pub async fn get_device_tree(
+        &self,
+        search: Option<&str>,
+    ) -> Result<crate::domain::device_tree::DeviceTreeResponse> {
+        self.infra.db.build_device_tree(search).await
+    }
+
     pub async fn assign_device_group(&self, device_id: i64, group_id: Option<i64>) -> Result<()> {
         self.infra.db.update_device_group(device_id, group_id).await
     }
@@ -1341,32 +1843,68 @@ impl DeviceService {
         self.infra.db.get_region_tree().await
     }
 
+    pub fn count_unassigned_region_devices(&self) -> u32 {
+        self.infra.db.count_unassigned_region_devices()
+    }
+
     pub async fn log_ptz_control(
-        &self, user_id: Option<Uuid>, device_id: i64, command: &str,
-        speed: u8, result: bool, error_message: Option<String>, call_id: Option<String>,
+        &self,
+        user_id: Option<Uuid>,
+        device_id: i64,
+        command: &str,
+        speed: u8,
+        result: bool,
+        error_message: Option<String>,
+        call_id: Option<String>,
     ) -> Result<()> {
-        self.infra.db.log_ptz_control(
-            user_id.map(|u| u.to_string()), device_id, command,
-            speed as f64, result, error_message, call_id,
-        ).await
+        self.infra
+            .db
+            .log_ptz_control(
+                user_id.map(|u| u.to_string()),
+                device_id,
+                command,
+                speed as f64,
+                result,
+                error_message,
+                call_id,
+            )
+            .await
     }
 
     pub async fn log_ptz_result(
-        &self, device_id: i64, call_id: Option<&str>,
-        sip_code: Option<u16>, status: &str, message: Option<String>,
+        &self,
+        device_id: i64,
+        call_id: Option<&str>,
+        sip_code: Option<u16>,
+        status: &str,
+        message: Option<String>,
     ) -> Result<()> {
-        self.infra.db.log_ptz_result(device_id, call_id, sip_code, status, message).await
+        self.infra
+            .db
+            .log_ptz_result(device_id, call_id, sip_code, status, message)
+            .await
     }
 
     pub fn broadcast_ptz_result(
-        &self, device_id: i64, call_id: &str, command: &str,
-        status: &str, sip_code: Option<u16>, message: Option<&str>,
+        &self,
+        device_id: i64,
+        call_id: &str,
+        command: &str,
+        status: &str,
+        sip_code: Option<u16>,
+        message: Option<&str>,
     ) {
-        self.infra.ws_broadcaster.ptz_result(device_id, call_id, command, status, sip_code, message);
+        self.infra
+            .ws_broadcaster
+            .ptz_result(device_id, call_id, command, status, sip_code, message);
     }
 
     pub async fn list_ptz_presets(&self, device_id: i64) -> Result<Vec<PtzPreset>> {
-        let device = self.infra.db.get_device_by_id(device_id).await?
+        let device = self
+            .infra
+            .db
+            .get_device_by_id(device_id)
+            .await?
             .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_id)))?;
 
         let mut presets = self.infra.db.list_ptz_presets(device_id).await?;
@@ -1393,11 +1931,15 @@ impl DeviceService {
             };
 
             if let Some(parent) = parent {
-                if let Some(x_addr) = parent.extended.as_ref()
+                if let Some(x_addr) = parent
+                    .extended
+                    .as_ref()
                     .and_then(|e| e.get("x_addr"))
                     .and_then(|v| v.as_str())
                 {
-                    let profile_token = device.extended.as_ref()
+                    let profile_token = device
+                        .extended
+                        .as_ref()
                         .and_then(|e| e.get("onvif_token"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("Profile_1")
@@ -1407,16 +1949,22 @@ impl DeviceService {
                         x_addr.to_string(),
                         parent.device_username.clone(),
                         parent.device_password.clone(),
-                    ).into_client();
+                    )
+                    .into_client();
 
-                    if let Ok(camera_presets) = ptz_client.with_profile(profile_token).get_presets().await {
-                        let db_tokens: std::collections::HashSet<_> = presets.iter()
-                            .map(|p| p.token.clone())
-                            .collect();
+                    if let Ok(camera_presets) =
+                        ptz_client.with_profile(profile_token).get_presets().await
+                    {
+                        let db_tokens: std::collections::HashSet<_> =
+                            presets.iter().map(|p| p.token.clone()).collect();
 
                         for (token, name) in camera_presets {
                             if !db_tokens.contains(&token) {
-                                presets.push(PtzPreset::new(device_id, name.unwrap_or_else(|| format!("Preset {}", token)), token.clone()));
+                                presets.push(PtzPreset::new(
+                                    device_id,
+                                    name.unwrap_or_else(|| format!("Preset {}", token)),
+                                    token.clone(),
+                                ));
                             }
                         }
                     }
@@ -1428,7 +1976,11 @@ impl DeviceService {
     }
 
     pub async fn create_ptz_preset(&self, device_id: i64, name: &str) -> Result<PtzPreset> {
-        let device = self.infra.db.get_device_by_id(device_id).await?
+        let device = self
+            .infra
+            .db
+            .get_device_by_id(device_id)
+            .await?
             .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_id)))?;
 
         let target_protocol = if let Some(ref parent_tag) = device.parent_device_tag {
@@ -1453,11 +2005,15 @@ impl DeviceService {
             };
 
             if let Some(parent) = parent {
-                if let Some(x_addr) = parent.extended.as_ref()
+                if let Some(x_addr) = parent
+                    .extended
+                    .as_ref()
                     .and_then(|e| e.get("x_addr"))
                     .and_then(|v| v.as_str())
                 {
-                    let profile_token = device.extended.as_ref()
+                    let profile_token = device
+                        .extended
+                        .as_ref()
                         .and_then(|e| e.get("onvif_token"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("Profile_1")
@@ -1467,9 +2023,13 @@ impl DeviceService {
                         x_addr.to_string(),
                         parent.device_username.clone(),
                         parent.device_password.clone(),
-                    ).into_client();
+                    )
+                    .into_client();
 
-                    ptz_client.with_profile(profile_token).set_preset("", Some(name)).await
+                    ptz_client
+                        .with_profile(profile_token)
+                        .set_preset("", Some(name))
+                        .await
                         .map_err(|e| AppError::Internal(format!("SetPreset failed: {}", e)))?
                 } else {
                     uuid::Uuid::new_v4().to_string()
@@ -1485,9 +2045,7 @@ impl DeviceService {
                 .collect();
             let index = (1u8..=255)
                 .find(|index| !used.contains(index))
-                .ok_or_else(|| {
-                    AppError::BadRequest("No free GB28181 preset slots".to_string())
-                })?;
+                .ok_or_else(|| AppError::BadRequest("No free GB28181 preset slots".to_string()))?;
 
             let command = PtzCommand::SetPreset {
                 preset_name: Some(name.to_string()),
@@ -1499,16 +2057,37 @@ impl DeviceService {
             uuid::Uuid::new_v4().to_string()
         };
 
-        let preset = self.infra.db.create_ptz_preset_with_token(device_id, name, &token).await?;
+        let preset = self
+            .infra
+            .db
+            .create_ptz_preset_with_token(device_id, name, &token)
+            .await?;
         Ok(preset)
     }
 
-    pub async fn create_ptz_preset_with_token(&self, device_id: i64, name: &str, token: &str) -> Result<PtzPreset> {
-        self.infra.db.create_ptz_preset_with_token(device_id, name, token).await
+    pub async fn create_ptz_preset_with_token(
+        &self,
+        device_id: i64,
+        name: &str,
+        token: &str,
+    ) -> Result<PtzPreset> {
+        self.infra
+            .db
+            .create_ptz_preset_with_token(device_id, name, token)
+            .await
     }
 
-    pub async fn rename_ptz_preset(&self, device_id: i64, token: &str, new_name: &str) -> Result<PtzPreset> {
-        let device = self.infra.db.get_device_by_id(device_id).await?
+    pub async fn rename_ptz_preset(
+        &self,
+        device_id: i64,
+        token: &str,
+        new_name: &str,
+    ) -> Result<PtzPreset> {
+        let device = self
+            .infra
+            .db
+            .get_device_by_id(device_id)
+            .await?
             .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_id)))?;
 
         let target_protocol = if let Some(ref parent_tag) = device.parent_device_tag {
@@ -1533,11 +2112,15 @@ impl DeviceService {
             };
 
             if let Some(parent) = parent {
-                if let Some(x_addr) = parent.extended.as_ref()
+                if let Some(x_addr) = parent
+                    .extended
+                    .as_ref()
                     .and_then(|e| e.get("x_addr"))
                     .and_then(|v| v.as_str())
                 {
-                    let profile_token = device.extended.as_ref()
+                    let profile_token = device
+                        .extended
+                        .as_ref()
                         .and_then(|e| e.get("onvif_token"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("Profile_1")
@@ -1547,23 +2130,37 @@ impl DeviceService {
                         x_addr.to_string(),
                         parent.device_username.clone(),
                         parent.device_password.clone(),
-                    ).into_client();
+                    )
+                    .into_client();
 
-                    ptz_client.with_profile(profile_token).set_preset(token, Some(new_name)).await
-                        .map_err(|e| AppError::Internal(format!("SetPreset rename failed: {}", e)))?;
+                    ptz_client
+                        .with_profile(profile_token)
+                        .set_preset(token, Some(new_name))
+                        .await
+                        .map_err(|e| {
+                            AppError::Internal(format!("SetPreset rename failed: {}", e))
+                        })?;
                 }
             }
         }
 
-        self.infra.db.update_ptz_preset(device_id, token, new_name).await?;
+        self.infra
+            .db
+            .update_ptz_preset(device_id, token, new_name)
+            .await?;
         let presets = self.list_ptz_presets(device_id).await?;
-        presets.into_iter()
+        presets
+            .into_iter()
             .find(|p| p.token == token)
             .ok_or_else(|| AppError::Internal("Preset not found after rename".to_string()))
     }
 
     pub async fn delete_ptz_preset(&self, device_id: i64, token: &str) -> Result<()> {
-        let device = self.infra.db.get_device_by_id(device_id).await?
+        let device = self
+            .infra
+            .db
+            .get_device_by_id(device_id)
+            .await?
             .ok_or_else(|| AppError::NotFound(format!("Device {} not found", device_id)))?;
 
         let target_protocol = if let Some(ref parent_tag) = device.parent_device_tag {
@@ -1588,11 +2185,15 @@ impl DeviceService {
             };
 
             if let Some(parent) = parent {
-                if let Some(x_addr) = parent.extended.as_ref()
+                if let Some(x_addr) = parent
+                    .extended
+                    .as_ref()
                     .and_then(|e| e.get("x_addr"))
                     .and_then(|v| v.as_str())
                 {
-                    let profile_token = device.extended.as_ref()
+                    let profile_token = device
+                        .extended
+                        .as_ref()
                         .and_then(|e| e.get("onvif_token"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("Profile_1")
@@ -1602,10 +2203,18 @@ impl DeviceService {
                         x_addr.to_string(),
                         parent.device_username.clone(),
                         parent.device_password.clone(),
-                    ).into_client();
+                    )
+                    .into_client();
 
-                    if let Err(e) = ptz_client.with_profile(profile_token).remove_preset(token).await {
-                        tracing::warn!("[PTZ] RemovePreset failed (continuing to delete from DB): {}", e);
+                    if let Err(e) = ptz_client
+                        .with_profile(profile_token)
+                        .remove_preset(token)
+                        .await
+                    {
+                        tracing::warn!(
+                            "[PTZ] RemovePreset failed (continuing to delete from DB): {}",
+                            e
+                        );
                     }
                 }
             }
@@ -1643,7 +2252,10 @@ impl DeviceLookup for DeviceService {
     }
 
     async fn find_by_protocol_and_host(&self, protocol: &Protocol, host: &str) -> Option<Device> {
-        self.infra.db.get_device_by_protocol_and_host(protocol, host).await
+        self.infra
+            .db
+            .get_device_by_protocol_and_host(protocol, host)
+            .await
     }
 
     async fn get_device(&self, id: i64) -> Result<Option<Device>> {
@@ -1678,27 +2290,55 @@ impl DeviceLookup for DeviceService {
     }
 
     async fn log_ptz_control(
-        &self, user_id: Option<Uuid>, device_id: i64, command: &str,
-        speed: u8, result: bool, error_message: Option<String>, call_id: Option<String>,
+        &self,
+        user_id: Option<Uuid>,
+        device_id: i64,
+        command: &str,
+        speed: u8,
+        result: bool,
+        error_message: Option<String>,
+        call_id: Option<String>,
     ) -> Result<()> {
-        self.infra.db.log_ptz_control(
-            user_id.map(|u| u.to_string()), device_id, command,
-            speed as f64, result, error_message, call_id,
-        ).await
+        self.infra
+            .db
+            .log_ptz_control(
+                user_id.map(|u| u.to_string()),
+                device_id,
+                command,
+                speed as f64,
+                result,
+                error_message,
+                call_id,
+            )
+            .await
     }
 
     async fn log_ptz_result(
-        &self, device_id: i64, call_id: Option<&str>,
-        sip_code: Option<u16>, status: &str, message: Option<String>,
+        &self,
+        device_id: i64,
+        call_id: Option<&str>,
+        sip_code: Option<u16>,
+        status: &str,
+        message: Option<String>,
     ) -> Result<()> {
-        self.infra.db.log_ptz_result(device_id, call_id, sip_code, status, message).await
+        self.infra
+            .db
+            .log_ptz_result(device_id, call_id, sip_code, status, message)
+            .await
     }
 
     fn broadcast_ptz_result(
-        &self, device_id: i64, call_id: &str, command: &str,
-        status: &str, sip_code: Option<u16>, message: Option<&str>,
+        &self,
+        device_id: i64,
+        call_id: &str,
+        command: &str,
+        status: &str,
+        sip_code: Option<u16>,
+        message: Option<&str>,
     ) {
-        self.infra.ws_broadcaster.ptz_result(device_id, call_id, command, status, sip_code, message);
+        self.infra
+            .ws_broadcaster
+            .ptz_result(device_id, call_id, command, status, sip_code, message);
     }
 
     fn get_stats(&self) -> serde_json::Value {

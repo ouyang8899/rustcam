@@ -1,82 +1,89 @@
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <h1 class="page-title">录像文件</h1>
-      <div class="page-toolbar">
-        <el-button :icon="Refresh" :loading="loading" @click="fetchFiles">刷新</el-button>
-      </div>
-    </div>
-    <div class="page-body" v-loading="loading" element-loading-text="加载中...">
-      <DataCard>
-        <template #header>
-          <span class="data-card__title">录像文件列表</span>
-          <div class="data-card__toolbar">
-            <el-select v-model="filters.device_tag" clearable placeholder="选择设备" style="width: 150px" @change="onDeviceChange">
-              <el-option v-for="d in deviceOptions" :key="d.device_tag" :value="d.device_tag" :label="d.name || d.device_tag" />
-            </el-select>
-            <el-select v-model="filters.channel_tag" clearable placeholder="选择通道" style="width: 120px" :disabled="!filters.device_tag" @change="onFilterChange">
-              <el-option v-for="ch in channelOptions" :key="ch.channel_tag" :value="ch.channel_tag" :label="`通道 ${ch.channel_tag}`" />
-            </el-select>
-            <el-date-picker
-              v-model="filters.dateRange"
-              type="datetimerange"
-              range-separator="至"
-              start-placeholder="开始时间"
-              end-placeholder="结束时间"
-              value-format="YYYY-MM-DD HH:mm:ss"
-              style="width: 340px"
-              @change="onFilterChange"
-            />
-            <el-select v-model="filters.segment_type" clearable placeholder="全部类型" style="width: 130px" @change="onFilterChange">
-              <el-option value="normal" label="普通录制" />
-              <el-option value="alarm" label="报警触发" />
-              <el-option value="prebuffer" label="预录段" />
-            </el-select>
-          </div>
-        </template>
-        <el-skeleton animated :loading="loading" :rows="5">
-          <el-table :data="files" style="margin-top: 0" @row-dblclick="onRowDoubleClick">
-            <el-table-column label="文件名" prop="filename" min-width="200" show-overflow-tooltip>
-              <template #default="{ row }">
-                <span class="filename-cell">{{ row.filename || row.file_path?.split('/').pop() || row.id }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="类型" width="100">
-              <template #default="{ row }">
-                <el-tag :type="segmentTypeTagType(row.segment_type)" size="small">{{ segmentTypeLabel(row.segment_type) }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="开始时间" width="160">
-              <template #default="{ row }"><span>{{ formatDateTime(row.start_time) }}</span></template>
-            </el-table-column>
-            <el-table-column label="结束时间" width="160">
-              <template #default="{ row }"><span>{{ formatDateTime(row.end_time) }}</span></template>
-            </el-table-column>
-            <el-table-column label="时长" width="90">
-              <template #default="{ row }"><span>{{ formatDuration(row.duration_secs) }}</span></template>
-            </el-table-column>
-            <el-table-column label="大小" width="100">
-              <template #default="{ row }"><span>{{ formatSize(row.file_size) }}</span></template>
-            </el-table-column>
-            <el-table-column label="媒体服务器" prop="server_tag" width="120" show-overflow-tooltip />
-            <el-table-column label="操作" width="100">
-              <template #default="{ row }">
-                <el-button size="small" type="primary" plain @click="playFile(row)">播放</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-          <div v-if="hasMore" style="text-align: center; padding: 16px 0">
-            <el-button :loading="loadingMore" @click="loadMore">加载更多</el-button>
-          </div>
-          <div v-else-if="files.length > 0" style="text-align: center; padding: 16px 0; color: #999">
-            已加载全部 {{ files.length }} 条记录
-          </div>
-        </el-skeleton>
-        <el-empty v-if="!loading && files.length === 0" description="暂无录像文件" />
-      </DataCard>
-    </div>
+  <PageView title="录像文件">
+    <template #toolbar>
+      <el-button :icon="Refresh" :loading="loading" @click="fetchFiles">刷新</el-button>
+    </template>
 
-    <el-dialog v-model="showPlaybackDialog" title="录像回放" width="900px" destroy-on-close>
+    <FilterBar>
+      <template #left>
+        <el-select v-model="filters.device_tag" clearable placeholder="选择设备" style="width: 150px" @change="onDeviceChange">
+          <el-option v-for="d in deviceOptions" :key="d.device_tag" :value="d.device_tag" :label="d.name || d.device_tag" />
+        </el-select>
+        <el-select v-model="filters.channel_tag" clearable placeholder="选择通道" style="width: 120px" :disabled="!filters.device_tag" @change="onFilterChange">
+          <el-option v-for="ch in channelOptions" :key="ch.channel_tag" :value="ch.channel_tag" :label="`通道 ${ch.channel_tag}`" />
+        </el-select>
+        <el-date-picker
+          v-model="filters.dateRange"
+          type="datetimerange"
+          range-separator="至"
+          start-placeholder="开始时间"
+          end-placeholder="结束时间"
+          value-format="YYYY-MM-DD HH:mm:ss"
+          style="width: 340px"
+          @change="onFilterChange"
+        />
+        <el-select v-model="filters.segment_type" clearable placeholder="全部类型" style="width: 130px" @change="onFilterChange">
+          <el-option value="normal" label="普通录制" />
+          <el-option value="alarm" label="报警触发" />
+          <el-option value="prebuffer" label="预录段" />
+        </el-select>
+      </template>
+    </FilterBar>
+
+    <DataCard>
+      <el-table
+        v-loading="loading"
+        element-loading-text="加载中..."
+        :data="files"
+        border
+        stripe
+        size="small"
+        @row-dblclick="onRowDoubleClick"
+      >
+        <el-table-column label="文件名" prop="filename" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="filename-cell">{{ row.filename || row.file_path?.split('/').pop() || row.id }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="类型" width="100">
+          <template #default="{ row }">
+            <el-tag :type="segmentTypeTagType(row.segment_type)" size="small">{{ segmentTypeLabel(row.segment_type) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="开始时间" width="160">
+          <template #default="{ row }"><span>{{ formatDateTime(row.start_time) }}</span></template>
+        </el-table-column>
+        <el-table-column label="结束时间" width="160">
+          <template #default="{ row }"><span>{{ formatDateTime(row.end_time) }}</span></template>
+        </el-table-column>
+        <el-table-column label="时长" width="90">
+          <template #default="{ row }"><span>{{ formatDuration(row.duration_secs) }}</span></template>
+        </el-table-column>
+        <el-table-column label="大小" width="100">
+          <template #default="{ row }"><span>{{ formatSize(row.file_size) }}</span></template>
+        </el-table-column>
+        <el-table-column label="媒体服务器" prop="server_tag" width="120" show-overflow-tooltip />
+        <el-table-column label="操作" width="100">
+          <template #default="{ row }">
+            <el-button size="small" type="primary" plain @click="playFile(row)">播放</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <EmptyState v-if="!loading && files.length === 0" title="暂无录像文件" />
+    </DataCard>
+
+    <template #footer>
+      <PaginationBar
+        :total="filesTotal"
+        :page="currentPage"
+        v-model:page-size="pageSize"
+        show-sizes
+        :page-sizes="[20, 50, 100, 200]"
+        @update:page="onPageChange"
+      />
+    </template>
+
+    <AppDialog v-model="showPlaybackDialog" title="录像回放" size="lg">
       <VideoPlayer
         ref="videoPlayerRef"
         :src="currentPlayUrl"
@@ -101,29 +108,30 @@
         <el-slider v-model="seekPosition" :min="0" :max="duration" @change="onSeek" />
         <span>{{ formatDuration(duration) }}</span>
       </div>
-    </el-dialog>
-  </div>
+    </AppDialog>
+  </PageView>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, shallowRef } from 'vue'
-import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import VideoPlayer from '../components/VideoPlayer.vue'
 import { useRecordingStore } from '../stores/recordingStore'
-import { useToast } from '../composables/useToast'
 import { request } from '../utils/request'
 import DataCard from '../components/common/DataCard.vue'
+import PageView from '../components/common/PageView.vue'
+import FilterBar from '../components/common/FilterBar.vue'
+import EmptyState from '../components/common/EmptyState.vue'
+import AppDialog from '../components/common/AppDialog.vue'
+import PaginationBar from '../components/common/PaginationBar.vue'
 
 const recStore = useRecordingStore()
-const toast = useToast()
 
 const files = computed(() => recStore.recordingFiles)
 const loading = computed(() => recStore.filesLoading)
 const filesTotal = computed(() => recStore.filesTotal)
-const filesPage = computed(() => recStore.filesPage)
-const filesLimit = computed(() => recStore.filesLimit)
-const hasMore = computed(() => files.value.length < filesTotal.value)
+const currentPage = ref(1)
+const pageSize = ref(50)
 
 const deviceOptions = shallowRef([])
 const channelOptions = ref([])
@@ -139,7 +147,6 @@ const showPlaybackDialog = ref(false)
 const currentPlayUrl = ref('')
 const playbackFiles = ref([])
 const currentFileIndex = ref(0)
-const loadingMore = ref(false)
 const videoPlayerRef = ref(null)
 const currentTime = ref(0)
 const duration = ref(0)
@@ -185,33 +192,23 @@ async function onDeviceChange(deviceTag) {
   onFilterChange()
 }
 
-async function fetchFiles(resetPage = true) {
-  if (resetPage) {
-    await recStore.fetchRecordingFiles({
-      ...getFilterParams(),
-      page: 1,
-      limit: 50,
-    })
-  } else {
-    await recStore.fetchRecordingFiles({
-      ...getFilterParams(),
-      page: recStore.filesPage,
-      limit: recStore.filesLimit,
-    })
-  }
+async function fetchFiles() {
+  await recStore.fetchRecordingFiles({
+    ...getFilterParams(),
+    page: currentPage.value,
+    limit: pageSize.value,
+  })
 }
 
-async function loadMore() {
-  loadingMore.value = true
-  try {
-    await recStore.fetchRecordingFiles({
-      ...getFilterParams(),
-      page: recStore.filesPage + 1,
-      limit: recStore.filesLimit,
-    })
-  } finally {
-    loadingMore.value = false
-  }
+function onPageChange(page) {
+  currentPage.value = page
+  fetchFiles()
+}
+
+function onPageSizeChange(size) {
+  pageSize.value = size
+  currentPage.value = 1
+  fetchFiles()
 }
 
 function getFilterParams() {
@@ -223,7 +220,6 @@ function getFilterParams() {
     params.channel_tag = filters.value.channel_tag
   }
   if (filters.value.dateRange && filters.value.dateRange.length === 2) {
-    // 后端按 RFC3339 解析时间，日期选择器给的是 'YYYY-MM-DD HH:mm:ss'
     params.start_time = toApiTime(filters.value.dateRange[0])
     params.end_time = toApiTime(filters.value.dateRange[1])
   }
@@ -233,7 +229,6 @@ function getFilterParams() {
   return params
 }
 
-/** 'YYYY-MM-DD HH:mm:ss'（本地时间）-> ISO8601 UTC（RFC3339） */
 function toApiTime(value) {
   if (!value) return value
   const normalized = String(value).replace(' ', 'T')
@@ -243,6 +238,7 @@ function toApiTime(value) {
 }
 
 function onFilterChange() {
+  currentPage.value = 1
   fetchFiles()
 }
 

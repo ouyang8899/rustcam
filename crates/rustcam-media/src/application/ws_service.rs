@@ -1,8 +1,8 @@
-use std::sync::Arc;
-use std::time::Duration;
 use crate::application::ws_broadcaster::WsBroadcaster;
 use crate::application::{DeviceService, SessionService};
 use crate::infrastructure::cluster::ClusterManager;
+use std::sync::Arc;
+use std::time::Duration;
 
 pub struct WsService {
     broadcaster: Arc<WsBroadcaster>,
@@ -18,7 +18,12 @@ impl WsService {
         session_service: Arc<SessionService>,
         cluster_manager: Arc<ClusterManager>,
     ) -> Self {
-        Self { broadcaster, device_service, session_service, cluster_manager }
+        Self {
+            broadcaster,
+            device_service,
+            session_service,
+            cluster_manager,
+        }
     }
 
     pub fn start(self: Arc<Self>) {
@@ -40,6 +45,5 @@ impl WsService {
                 broadcaster.broadcast("stats_update", stats);
             }
         });
-
     }
 }

@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::domain::device::PlayLinks;
 use crate::config::MediaServerConfig;
+use crate::domain::device::PlayLinks;
 
 pub fn format_rtsp_auth(auth: Option<(&str, &str)>) -> String {
     match auth {
@@ -44,7 +44,7 @@ pub fn extract_host_and_port(url: &str) -> (String, Option<u16>) {
     if is_ipv4 {
         if let Some(idx) = host_port.rfind(':') {
             let host = &host_port[..idx];
-            let port_str = &host_port[idx+1..];
+            let port_str = &host_port[idx + 1..];
             let port = port_str.parse::<u16>().ok();
             return (host.to_string(), port);
         }
@@ -52,7 +52,7 @@ pub fn extract_host_and_port(url: &str) -> (String, Option<u16>) {
 
     if let Some(idx) = host_port.find(':') {
         let host = &host_port[..idx];
-        let port_str = &host_port[idx+1..];
+        let port_str = &host_port[idx + 1..];
         let port = port_str.parse::<u16>().ok();
         return (host.to_string(), port);
     }
@@ -84,10 +84,10 @@ pub struct SessionDetail {
     pub alive_seconds: u64,
 }
 
-pub mod zlmediakit;
+mod client;
 pub mod srs;
 pub mod xiu;
-mod client;
+pub mod zlmediakit;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerStatus {
@@ -105,8 +105,11 @@ pub struct ServerStatus {
 
 impl fmt::Display for ServerStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} [{}] - sessions: {}, CPU: {:.1}%, Mem: {:.1}%",
-               self.name, self.server_type, self.session_count, self.cpu_usage, self.memory_usage)
+        write!(
+            f,
+            "{} [{}] - sessions: {}, CPU: {:.1}%, Mem: {:.1}%",
+            self.name, self.server_type, self.session_count, self.cpu_usage, self.memory_usage
+        )
     }
 }
 
@@ -139,7 +142,9 @@ pub enum Protocol {
 }
 
 impl Default for Protocol {
-    fn default() -> Self { Protocol::Hls }
+    fn default() -> Self {
+        Protocol::Hls
+    }
 }
 
 #[async_trait]
@@ -152,13 +157,24 @@ pub trait MediaServerAdapter: Send + Sync {
     fn http_base_url(&self) -> String;
     async fn is_online(&self) -> bool;
     async fn get_status(&self) -> anyhow::Result<ServerStatus>;
-    async fn add_stream_proxy(&self, app: &str, stream_key: &str, rtsp_url: &str) -> anyhow::Result<StreamInfo>;
+    async fn add_stream_proxy(
+        &self,
+        app: &str,
+        stream_key: &str,
+        rtsp_url: &str,
+    ) -> anyhow::Result<StreamInfo>;
     async fn remove_stream_proxy(&self, app: &str, stream_key: &str) -> anyhow::Result<()>;
-    async fn get_play_url(&self, app: &str, stream_key: &str, protocol: Protocol) -> anyhow::Result<String>;
+    async fn get_play_url(
+        &self,
+        app: &str,
+        stream_key: &str,
+        protocol: Protocol,
+    ) -> anyhow::Result<String>;
     async fn get_session_count(&self) -> anyhow::Result<u32>;
     async fn get_sessions(&self) -> anyhow::Result<Vec<serde_json::Value>>;
     async fn is_stream_online(&self, app: &str, stream_key: &str) -> anyhow::Result<bool>;
-    async fn ptz_control(&self, stream_key: &str, command: &str, channel: u8) -> anyhow::Result<()>;
+    async fn ptz_control(&self, stream_key: &str, command: &str, channel: u8)
+        -> anyhow::Result<()>;
 
     async fn start_recording(
         &self,
@@ -169,12 +185,26 @@ pub trait MediaServerAdapter: Send + Sync {
         max_duration_secs: Option<u32>,
         pre_record_secs: Option<u32>,
     ) -> anyhow::Result<RecordingInfo>;
-    async fn stop_recording(&self, app: &str, stream_key: &str, format: &str) -> anyhow::Result<()>;
+    async fn stop_recording(&self, app: &str, stream_key: &str, format: &str)
+        -> anyhow::Result<()>;
     async fn is_recording(&self, stream_key: &str, format: &str) -> anyhow::Result<bool>;
-    async fn list_recordings(&self, app: &str, stream_key: &str) -> anyhow::Result<Vec<RecordingFile>>;
-    async fn open_rtp_server(&self, stream_id: &str, port: u16, transport: RtpTransport) -> anyhow::Result<(u16, String)>;
+    async fn list_recordings(
+        &self,
+        app: &str,
+        stream_key: &str,
+    ) -> anyhow::Result<Vec<RecordingFile>>;
+    async fn open_rtp_server(
+        &self,
+        stream_id: &str,
+        port: u16,
+        transport: RtpTransport,
+    ) -> anyhow::Result<(u16, String)>;
     async fn close_rtp_server(&self, stream_id: &str) -> anyhow::Result<()>;
-    async fn get_media_info(&self, app: &str, stream_key: &str) -> anyhow::Result<Option<serde_json::Value>>;
+    async fn get_media_info(
+        &self,
+        app: &str,
+        stream_key: &str,
+    ) -> anyhow::Result<Option<serde_json::Value>>;
     async fn build_play_links(
         &self,
         app: &str,

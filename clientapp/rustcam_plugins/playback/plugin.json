@@ -9,5 +9,5 @@
   "workspace": true,
   "sidePanel": false,
   "shortcut": "Ctrl+5",
-  "icon": ":/icons/playback.svg"
+  "icon": "icons/icon.svg"
 }

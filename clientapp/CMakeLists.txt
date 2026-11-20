@@ -200,6 +200,30 @@ if(TARGET Qt5::Core)
     endif()
 endif()
 
+set(QT_SVG_IMAGE_FILES "")
+set(QT_SVG_ICON_FILES "")
+if(TARGET Qt5::Core)
+    get_target_property(_qt_core_location Qt5::Core LOCATION)
+    if(_qt_core_location)
+        get_filename_component(_qt_bin_dir "${_qt_core_location}" DIRECTORY)
+        get_filename_component(_qt_root "${_qt_bin_dir}" DIRECTORY)
+        foreach(_svg_image
+                "${_qt_root}/plugins/imageformats/qsvg.dll"
+                "${_qt_root}/plugins/imageformats/qsvgd.dll")
+            if(EXISTS "${_svg_image}")
+                list(APPEND QT_SVG_IMAGE_FILES "${_svg_image}")
+            endif()
+        endforeach()
+        foreach(_svg_icon
+                "${_qt_root}/plugins/iconengines/qsvgicon.dll"
+                "${_qt_root}/plugins/iconengines/qsvgicond.dll")
+            if(EXISTS "${_svg_icon}")
+                list(APPEND QT_SVG_ICON_FILES "${_svg_icon}")
+            endif()
+        endforeach()
+    endif()
+endif()
+
 add_custom_target(runtime_files ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory
         $<TARGET_FILE_DIR:rustcam-client>/locales
@@ -228,6 +252,26 @@ if(QT_PLATFORM_FILES)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${QT_PLATFORM_FILES}
             $<TARGET_FILE_DIR:rustcam-client>/platforms/
+    )
+endif()
+
+if(QT_SVG_IMAGE_FILES)
+    add_custom_command(TARGET runtime_files POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            $<TARGET_FILE_DIR:rustcam-client>/imageformats
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${QT_SVG_IMAGE_FILES}
+            $<TARGET_FILE_DIR:rustcam-client>/imageformats/
+    )
+endif()
+
+if(QT_SVG_ICON_FILES)
+    add_custom_command(TARGET runtime_files POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            $<TARGET_FILE_DIR:rustcam-client>/iconengines
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${QT_SVG_ICON_FILES}
+            $<TARGET_FILE_DIR:rustcam-client>/iconengines/
     )
 endif()
 

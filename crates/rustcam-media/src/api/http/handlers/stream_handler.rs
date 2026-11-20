@@ -1,15 +1,15 @@
-use std::sync::Arc;
+use crate::adapter::media_server::StreamInfo;
+use crate::api::http::handlers::device_handler::{PaginatedResponse, StreamWithMediaServer};
+use crate::api::response::ApiResponse;
+use crate::api::state::FullState;
+use crate::domain::Stream;
+use crate::error::AppError;
 use axum::{
-    extract::{Path, State, Query},
+    extract::{Path, Query, State},
     Json,
 };
 use serde::Deserialize;
-use crate::api::response::ApiResponse;
-use crate::api::http::handlers::device_handler::{PaginatedResponse, StreamWithMediaServer};
-use crate::error::AppError;
-use crate::domain::Stream;
-use crate::adapter::media_server::StreamInfo;
-use crate::api::state::FullState;
+use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
 pub struct PaginationQuery {
@@ -20,10 +20,18 @@ pub struct PaginationQuery {
 }
 
 impl PaginationQuery {
-    pub fn limit(&self) -> usize { self.limit.unwrap_or(50).min(500) }
-    pub fn offset(&self) -> usize { self.offset.unwrap_or(0) }
-    pub fn search(&self) -> Option<&str> { self.search.as_deref() }
-    pub fn state(&self) -> Option<&str> { self.state.as_deref() }
+    pub fn limit(&self) -> usize {
+        self.limit.unwrap_or(50).min(500)
+    }
+    pub fn offset(&self) -> usize {
+        self.offset.unwrap_or(0)
+    }
+    pub fn search(&self) -> Option<&str> {
+        self.search.as_deref()
+    }
+    pub fn state(&self) -> Option<&str> {
+        self.state.as_deref()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -32,7 +40,9 @@ pub struct DeviceStreamsQuery {
 }
 
 impl DeviceStreamsQuery {
-    pub fn device_id(&self) -> Option<i64> { self.device_id }
+    pub fn device_id(&self) -> Option<i64> {
+        self.device_id
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -53,13 +63,20 @@ pub async fn list_streams_handler(
     Query(q): Query<PaginationQuery>,
 ) -> Result<Json<ApiResponse<PaginatedResponse<StreamWithMediaServer>>>, AppError> {
     let registry = &state.app.registry;
-    let streams = registry.stream_service.list_streams_paginated(
-        q.search(), q.state(), q.limit(), q.offset()
-    ).await;
-    let total = registry.stream_service.count_streams(q.search(), q.state()).await;
+    let streams = registry
+        .stream_service
+        .list_streams_paginated(q.search(), q.state(), q.limit(), q.offset())
+        .await;
+    let total = registry
+        .stream_service
+        .count_streams(q.search(), q.state())
+        .await;
 
     Ok(Json(ApiResponse::success(PaginatedResponse {
-        items: streams.into_iter().map(|s| StreamWithMediaServer::from_stream(s, registry)).collect(),
+        items: streams
+            .into_iter()
+            .map(|s| StreamWithMediaServer::from_stream(s, registry))
+            .collect(),
         total,
         limit: q.limit(),
         offset: q.offset(),
@@ -71,7 +88,10 @@ pub async fn list_streams_by_device_handler(
     Path(device_tag): Path<String>,
 ) -> Result<Json<ApiResponse<Vec<Stream>>>, AppError> {
     let registry = &state.app.registry;
-    let streams = registry.stream_service.get_streams_by_device(&device_tag).await;
+    let streams = registry
+        .stream_service
+        .get_streams_by_device(&device_tag)
+        .await;
     Ok(Json(ApiResponse::success(streams)))
 }
 
@@ -79,7 +99,12 @@ pub async fn get_stream_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<Stream>>, AppError> {
-    let stream = state.app.registry.stream_service.get_stream(id).await?
+    let stream = state
+        .app
+        .registry
+        .stream_service
+        .get_stream(id)
+        .await?
         .ok_or_else(|| AppError::NotFound(format!("Stream {} not found", id)))?;
     Ok(Json(ApiResponse::success(stream)))
 }
@@ -90,7 +115,14 @@ pub async fn start_stream_handler(
 ) -> Result<Json<ApiResponse<StreamInfo>>, AppError> {
     let registry = &state.app.registry;
     let channel_tag = req.channel_tag.as_deref().unwrap_or(&req.device_tag);
-    let stream_info = registry.stream_service.start_pull_stream(&req.device_tag, channel_tag, &req.rtsp_url.unwrap_or_default()).await?;
+    let stream_info = registry
+        .stream_service
+        .start_pull_stream(
+            &req.device_tag,
+            channel_tag,
+            &req.rtsp_url.unwrap_or_default(),
+        )
+        .await?;
     Ok(Json(ApiResponse::success(stream_info)))
 }
 
@@ -98,10 +130,23 @@ pub async fn stop_stream_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
-    let stream = state.app.registry.stream_service.get_stream(id).await?
+    let stream = state
+        .app
+        .registry
+        .stream_service
+        .get_stream(id)
+        .await?
         .ok_or_else(|| AppError::NotFound(format!("Stream {} not found", id)))?;
-    let stream_key =  crate::common::device_utils::format_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
-    state.app.registry.stream_service.stop_stream(&stream.app, &stream_key).await?;
+    let stream_key = crate::common::device_utils::format_stream_key(
+        stream.device_tag.as_deref().unwrap_or(""),
+        stream.channel_tag.as_deref().unwrap_or(""),
+    );
+    state
+        .app
+        .registry
+        .stream_service
+        .stop_stream(&stream.app, &stream_key)
+        .await?;
     Ok(Json(ApiResponse::success(())))
 }
 
@@ -110,14 +155,22 @@ pub async fn restart_stream_handler(
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<StreamInfo>>, AppError> {
     let registry = &state.app.registry;
-    let stream = registry.stream_service.get_stream(id).await?
+    let stream = registry
+        .stream_service
+        .get_stream(id)
+        .await?
         .ok_or_else(|| AppError::NotFound(format!("Stream {} not found", id)))?;
 
     let device_tag = stream.device_tag.clone().unwrap_or_default();
-    let _device = registry.device_service.get_device_by_device_tag(&device_tag)?
+    let _device = registry
+        .device_service
+        .get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("Device with tag {} not found", device_tag)))?;
 
-    let stream_info = registry.stream_service.restart_stream_by_id(stream.id).await?;
+    let stream_info = registry
+        .stream_service
+        .restart_stream_by_id(stream.id)
+        .await?;
     Ok(Json(ApiResponse::success(stream_info)))
 }
 
@@ -126,10 +179,23 @@ pub async fn get_stream_play_url(
     Path(id): Path<i64>,
     Query(query): Query<StreamPlayQuery>,
 ) -> Result<Json<ApiResponse<String>>, AppError> {
-    let stream = state.app.registry.stream_service.get_stream(id).await?
+    let stream = state
+        .app
+        .registry
+        .stream_service
+        .get_stream(id)
+        .await?
         .ok_or_else(|| AppError::NotFound(format!("Stream {} not found", id)))?;
-    let stream_key =  crate::common::device_utils::format_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
-    let url = state.app.registry.stream_service.get_play_url(&stream_key, query.protocol).await?;
+    let stream_key = crate::common::device_utils::format_stream_key(
+        stream.device_tag.as_deref().unwrap_or(""),
+        stream.channel_tag.as_deref().unwrap_or(""),
+    );
+    let url = state
+        .app
+        .registry
+        .stream_service
+        .get_play_url(&stream_key, query.protocol)
+        .await?;
     Ok(Json(ApiResponse::success(url)))
 }
 
@@ -138,15 +204,30 @@ pub async fn get_stream_play_links_handler(
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<crate::domain::device::PlayLinks>>, AppError> {
     let registry = &state.app.registry;
-    let stream = registry.stream_service.get_stream(id).await?
+    let stream = registry
+        .stream_service
+        .get_stream(id)
+        .await?
         .ok_or_else(|| AppError::NotFound(format!("Stream {} not found", id)))?;
     let device_tag = stream.device_tag.clone().unwrap_or_default();
-    let device = registry.device_service.get_device_by_device_tag(&device_tag)?
+    let device = registry
+        .device_service
+        .get_device_by_device_tag(&device_tag)?
         .ok_or_else(|| AppError::NotFound(format!("Device with tag {} not found", device_tag)))?;
-    let stream_key =  crate::common::device_utils::format_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
-    let play_links = registry.play_service.build_play_links_with_server(
-        &device, &stream.token, &stream_key, Some(&stream.media_server_tag), None,
-    ).await;
+    let stream_key = crate::common::device_utils::format_stream_key(
+        stream.device_tag.as_deref().unwrap_or(""),
+        stream.channel_tag.as_deref().unwrap_or(""),
+    );
+    let play_links = registry
+        .play_service
+        .build_play_links_with_server(
+            &device,
+            &stream.token,
+            &stream_key,
+            Some(&stream.media_server_tag),
+            None,
+        )
+        .await;
     Ok(Json(ApiResponse::success(play_links)))
 }
 
@@ -154,10 +235,23 @@ pub async fn is_stream_online_handler(
     State(state): State<Arc<FullState>>,
     Path(id): Path<i64>,
 ) -> Result<Json<ApiResponse<bool>>, AppError> {
-    let stream = state.app.registry.stream_service.get_stream(id).await?
+    let stream = state
+        .app
+        .registry
+        .stream_service
+        .get_stream(id)
+        .await?
         .ok_or_else(|| AppError::NotFound(format!("Stream {} not found", id)))?;
-    let stream_key =  crate::common::device_utils::format_stream_key(stream.device_tag.as_deref().unwrap_or(""), stream.channel_tag.as_deref().unwrap_or(""));
-    let online = state.app.registry.media.cluster
-        .is_stream_online(&stream.app, &stream_key, &stream.media_server_tag).await;
+    let stream_key = crate::common::device_utils::format_stream_key(
+        stream.device_tag.as_deref().unwrap_or(""),
+        stream.channel_tag.as_deref().unwrap_or(""),
+    );
+    let online = state
+        .app
+        .registry
+        .media
+        .cluster
+        .is_stream_online(&stream.app, &stream_key, &stream.media_server_tag)
+        .await;
     Ok(Json(ApiResponse::success(online)))
 }

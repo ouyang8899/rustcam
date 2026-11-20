@@ -1,20 +1,20 @@
+use dashmap::DashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use dashmap::DashMap;
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::SessionType;
-use crate::protocol::gb28181::Gb28181Adapter;
 use crate::protocol::adapter::SignalAdapter;
 use crate::protocol::adapter_manager;
+use crate::protocol::gb28181::Gb28181Adapter;
 
-use crate::protocol::event::SignalEvent;
-use crate::protocol::traits::ProtocolDeps;
 use crate::infrastructure::event_bus::EventBus;
 use crate::monitoring::Metrics;
+use crate::protocol::event::SignalEvent;
+use crate::protocol::traits::ProtocolDeps;
 
 #[derive(Clone)]
 pub struct SipUdpServerConfig {
@@ -76,7 +76,6 @@ impl SipUdpServer {
     }
 
     pub async fn run(&self) -> anyhow::Result<()> {
-
         let cleanup_handle = self.start_cleanup_task();
         self.join_handles.lock().await.push(cleanup_handle);
 
@@ -173,7 +172,6 @@ impl SipUdpServer {
     }
 
     async fn shutdown(&self) {
-
         self.shutdown_token.cancel();
 
         let keys: Vec<String> = self.adapters.iter().map(|e| e.key().clone()).collect();
@@ -188,13 +186,9 @@ impl SipUdpServer {
         for handle in handles.drain(..) {
             let _ = handle.await;
         }
-
     }
 
-    async fn get_or_create_adapter(
-        &self,
-        addr_key: &str,
-    ) -> anyhow::Result<Arc<UdpAdapterEntry>> {
+    async fn get_or_create_adapter(&self, addr_key: &str) -> anyhow::Result<Arc<UdpAdapterEntry>> {
         if let Some(entry) = self.adapters.get(addr_key) {
             return Ok(entry.value().clone());
         }
@@ -209,9 +203,9 @@ impl SipUdpServer {
             }),
         ));
 
-        let addr: SocketAddr = addr_key.parse().map_err(|e| {
-            anyhow::anyhow!("Invalid address {}: {}", addr_key, e)
-        })?;
+        let addr: SocketAddr = addr_key
+            .parse()
+            .map_err(|e| anyhow::anyhow!("Invalid address {}: {}", addr_key, e))?;
         let _ = adapter.set_udp_peer(addr).await;
         let _ = adapter.on_connected(addr).await;
 

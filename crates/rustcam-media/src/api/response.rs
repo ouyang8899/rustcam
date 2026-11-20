@@ -8,7 +8,6 @@ pub struct ApiResponse<T: Serialize> {
 }
 
 impl<T: Serialize> ApiResponse<T> {
-
     pub fn success(data: T) -> Self {
         Self {
             code: 200,

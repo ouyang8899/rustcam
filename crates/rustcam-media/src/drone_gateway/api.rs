@@ -9,8 +9,8 @@ use crate::api::response::ApiResponse;
 use crate::auth::casbin::CasbinManager;
 use crate::drone_gateway::auth::{ws_scope, DroneUser};
 use crate::drone_gateway::client::{
-    AdapterDto, AlertDto, AuditDto, CommandDto, CommandRequest, ControlDto, DroneApi, DroneApiError,
-    DroneDto, FenceDto, RouteDto, TelemetryDto,
+    AdapterDto, AlertDto, AuditDto, CommandDto, CommandRequest, ControlDto, DroneApi,
+    DroneApiError, DroneDto, FenceDto, RouteDto, TelemetryDto,
 };
 use crate::drone_gateway::ticket::TicketStore;
 use crate::error::AppError;
@@ -64,7 +64,10 @@ where
         .route("/api/v1/drone/devices", get(list_drones))
         .route("/api/v1/drone/devices/{drone_tag}", get(get_drone))
         // 机载链路实体（adapter）：配置登记与启停（软删除）。
-        .route("/api/v1/drone/adapters", get(list_adapters).post(create_adapter))
+        .route(
+            "/api/v1/drone/adapters",
+            get(list_adapters).post(create_adapter),
+        )
         .route(
             "/api/v1/drone/adapters/{adapter_id}",
             get(get_adapter).put(update_adapter).delete(disable_adapter),
@@ -280,7 +283,9 @@ async fn add_drone_camera(
     }
 
     if db.get_device_by_device_tag(&camera_tag).is_none() {
-        return Err(AppError::NotFound(format!("摄像头设备 {camera_tag} 不存在")));
+        return Err(AppError::NotFound(format!(
+            "摄像头设备 {camera_tag} 不存在"
+        )));
     }
 
     db.add_drone_camera(&drone_tag, &camera_tag).await?;

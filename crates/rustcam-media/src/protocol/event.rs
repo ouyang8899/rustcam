@@ -314,7 +314,6 @@ pub enum SignalEvent {
     },
 }
 impl SignalEvent {
-
     pub fn event_type(&self) -> String {
         match self {
             SignalEvent::DeviceRegister { .. } => "device_register".to_string(),
@@ -490,17 +489,33 @@ pub enum PtzCommand {
     IrisIn,
     IrisOut,
     Stop,
-    ContinuousMove { pan: f64, tilt: f64, zoom: f64 },
-    AbsoluteMove { pan: f64, tilt: f64, zoom: f64 },
-    RelativeMove { pan: f64, tilt: f64, zoom: f64 },
-    GotoPreset { preset_token: String },
+    ContinuousMove {
+        pan: f64,
+        tilt: f64,
+        zoom: f64,
+    },
+    AbsoluteMove {
+        pan: f64,
+        tilt: f64,
+        zoom: f64,
+    },
+    RelativeMove {
+        pan: f64,
+        tilt: f64,
+        zoom: f64,
+    },
+    GotoPreset {
+        preset_token: String,
+    },
     SetPreset {
         #[serde(default)]
         preset_name: Option<String>,
         #[serde(default)]
         preset_index: Option<u8>,
     },
-    RemovePreset { preset_token: String },
+    RemovePreset {
+        preset_token: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

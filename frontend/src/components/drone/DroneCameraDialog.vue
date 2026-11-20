@@ -1,10 +1,9 @@
 <!-- @ts-check -->
 <template>
-  <el-dialog
+  <AppDialog
     :model-value="modelValue"
     title="选择摄像头"
-    width="880px"
-    destroy-on-close
+    size="lg"
     @update:model-value="$emit('update:modelValue', $event)"
     @open="onOpen"
   >
@@ -29,10 +28,9 @@
               <el-button size="small" @click="openAddChannel(row)">添加通道</el-button>
               <el-button size="small" text @click="reloadChannels(row)">刷新</el-button>
             </div>
-            <el-empty
+            <EmptyState
               v-if="!(channelsByDevice[row.device_tag] || []).length"
-              description="暂无通道"
-              :image-size="48"
+              title="暂无通道"
             />
             <el-tag
               v-for="ch in channelsByDevice[row.device_tag] || []"
@@ -66,15 +64,12 @@
       </el-table-column>
     </el-table>
 
-    <div class="pager">
-      <el-pagination
-        v-model:current-page="page"
-        :page-size="pageSize"
-        :total="total"
-        layout="prev, pager, next, total"
-        @current-change="loadDevices"
-      />
-    </div>
+    <PaginationBar
+      :total="total"
+      :page="page"
+      :page-size="pageSize"
+      @update:page="loadDevices"
+    />
 
     <template #footer>
       <el-button @click="$emit('update:modelValue', false)">取消</el-button>
@@ -88,15 +83,20 @@
       :channel-tag="''"
       @saved="onChannelSaved"
     />
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <script setup>
 import { ref } from 'vue'
-import { ElMessage } from 'element-plus'
 import { getDevices } from '../../api/devices'
 import { getDeviceChannels } from '../../api/channels'
 import ChannelEditDialog from '../channel/ChannelEditDialog.vue'
+import AppDialog from '../common/AppDialog.vue'
+import PaginationBar from '../common/PaginationBar.vue'
+import EmptyState from '../common/EmptyState.vue'
+import { useToast } from '../../composables/useToast'
+
+const toast = useToast()
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -173,7 +173,7 @@ async function onChannelSaved() {
     ...channelsByDevice.value,
     [tag]: list || [],
   }
-  ElMessage.success('通道已创建')
+  toast.success('通道已创建')
 }
 
 function onOpen() {
@@ -219,10 +219,5 @@ function confirm() {
   display: flex;
   align-items: center;
   gap: 4px;
-}
-.pager {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 12px;
 }
 </style>

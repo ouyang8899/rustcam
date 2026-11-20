@@ -1,14 +1,14 @@
-use std::sync::Arc;
-use std::collections::HashMap;
-use tokio::sync::RwLock;
-use tokio::time::{interval, Duration};
-use chrono::{DateTime, Utc};
-use crate::context::InfraContext;
 use crate::application::recording_policy_service::RecordingPolicyService;
 use crate::application::recording_service::RecordingService;
-use crate::domain::recording_policy::{PolicyType, RecordingPolicy};
+use crate::context::InfraContext;
 use crate::domain::recording::{CreateRecordingRequest, Recording, RecordingState, RecordingType};
+use crate::domain::recording_policy::{PolicyType, RecordingPolicy};
 use crate::protocol::event::SignalEvent;
+use chrono::{DateTime, Utc};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tokio::time::{interval, Duration};
 
 struct AlarmRecordingState {
     pub recording_id: i64,
@@ -76,30 +76,36 @@ impl RecordingSchedulerService {
         }
     }
 
-  pub async fn start(self: Arc<Self>) {
-      let (tx, _rx) = tokio::sync::watch::channel(());
-      *self.shutdown_tx.write().await = Some(tx);
+    pub async fn start(self: Arc<Self>) {
+        let (tx, _rx) = tokio::sync::watch::channel(());
+        *self.shutdown_tx.write().await = Some(tx);
 
-      // 开机回收僵尸录制任务：否则残留的 starting/recording 记录会让本流
-      // 的定时录制被静默跳过
-      let self_clone = self.clone();
-      tokio::spawn(async move {
-          if let Err(e) = self_clone.recording_service.recover_stale_recordings().await {
-              tracing::error!("[RecordingScheduler] Stale recording recovery failed: {}", e);
-          }
-      });
+        // 开机回收僵尸录制任务：否则残留的 starting/recording 记录会让本流
+        // 的定时录制被静默跳过
+        let self_clone = self.clone();
+        tokio::spawn(async move {
+            if let Err(e) = self_clone
+                .recording_service
+                .recover_stale_recordings()
+                .await
+            {
+                tracing::error!(
+                    "[RecordingScheduler] Stale recording recovery failed: {}",
+                    e
+                );
+            }
+        });
 
-      let self_clone = self.clone();
-      tokio::spawn(async move {
-          self_clone.run_scheduler().await;
-      });
+        let self_clone = self.clone();
+        tokio::spawn(async move {
+            self_clone.run_scheduler().await;
+        });
 
-      let self_clone = self.clone();
-      tokio::spawn(async move {
-          self_clone.run_event_listener().await;
-      });
-
-  }
+        let self_clone = self.clone();
+        tokio::spawn(async move {
+            self_clone.run_event_listener().await;
+        });
+    }
 
     async fn run_scheduler(self: Arc<Self>) {
         let mut ticker = interval(Duration::from_secs(self.check_interval_secs));
@@ -160,12 +166,25 @@ impl RecordingSchedulerService {
 
     async fn handle_event(&self, event: &SignalEvent) -> anyhow::Result<()> {
         match event {
-            SignalEvent::AlarmRaised { alarm_id, device_tag, channel_tag, alarm_type, .. } => {
+            SignalEvent::AlarmRaised {
+                alarm_id,
+                device_tag,
+                channel_tag,
+                alarm_type,
+                ..
+            } => {
                 let device_tag = device_tag.as_deref().filter(|s| !s.is_empty());
-                self.handle_alarm_event(*alarm_id, device_tag, channel_tag.as_deref(), alarm_type).await?;
+                self.handle_alarm_event(*alarm_id, device_tag, channel_tag.as_deref(), alarm_type)
+                    .await?;
             }
-            SignalEvent::AlarmRecovered { device_tag, channel_tag, alarm_type, .. } => {
-                self.handle_alarm_recovered(device_tag, channel_tag.as_deref(), alarm_type).await?;
+            SignalEvent::AlarmRecovered {
+                device_tag,
+                channel_tag,
+                alarm_type,
+                ..
+            } => {
+                self.handle_alarm_recovered(device_tag, channel_tag.as_deref(), alarm_type)
+                    .await?;
             }
             SignalEvent::StreamStart { stream_key, .. } => {
                 // 流就绪了：立刻尝试启动这个流上“等待中”的录像任务
@@ -210,7 +229,10 @@ impl RecordingSchedulerService {
         channel_tag: Option<&str>,
         alarm_type: &str,
     ) -> anyhow::Result<()> {
-        let policies = self.policy_service.find_alarm_triggered_policies(alarm_type).await?;
+        let policies = self
+            .policy_service
+            .find_alarm_triggered_policies(alarm_type)
+            .await?;
         let now = Utc::now();
 
         for policy in policies {
@@ -230,12 +252,17 @@ impl RecordingSchedulerService {
                 }
             }
 
-            if !self.policy_service.should_start_alarm_recording(&policy, alarm_type) {
+            if !self
+                .policy_service
+                .should_start_alarm_recording(&policy, alarm_type)
+            {
                 continue;
             }
 
-            let stream_key =
-                crate::common::device_utils::format_stream_key(&policy.device_tag, &policy.channel_tag);
+            let stream_key = crate::common::device_utils::format_stream_key(
+                &policy.device_tag,
+                &policy.channel_tag,
+            );
             let session_key = alarm_session_key(&stream_key, alarm_type);
 
             // 持续报警只刷新会话时间，不重复创建录像任务；
@@ -247,7 +274,8 @@ impl RecordingSchedulerService {
                     state.latest_alarm_id = alarm_id;
                     tracing::debug!(
                         "[RecordingScheduler] Alarm session refreshed: {} (alarm {})",
-                        session_key, alarm_id
+                        session_key,
+                        alarm_id
                     );
                     continue;
                 }
@@ -259,7 +287,8 @@ impl RecordingSchedulerService {
             {
                 tracing::error!(
                     "[RecordingScheduler] Failed to start alarm recording for policy {}: {}",
-                    policy.id, e
+                    policy.id,
+                    e
                 );
             }
         }
@@ -290,7 +319,8 @@ impl RecordingSchedulerService {
             if let Err(e) = self.end_alarm_session(&key).await {
                 tracing::warn!(
                     "[RecordingScheduler] Stop alarm session failed: session={} err={}",
-                    key, e
+                    key,
+                    e
                 );
             }
         }
@@ -320,11 +350,10 @@ impl RecordingSchedulerService {
             alarm_id: Some(alarm_id),
         };
 
-        let recording = self.recording_service.create_recording(
-            req,
-            policy.channel_tag.clone(),
-            media_server.clone(),
-        ).await;
+        let recording = self
+            .recording_service
+            .create_recording(req, policy.channel_tag.clone(), media_server.clone())
+            .await;
 
         let recording = match self.recording_service.start_recording(recording.id).await {
             Ok(recording) => recording,
@@ -332,7 +361,11 @@ impl RecordingSchedulerService {
                 // 流还没就绪等情况已经在 start_recording 里转成 pending，
                 // 这里不再直接丢弃报警录像，而是挂起等待流就绪。
                 let pending = self
-                    .pending_recording_for(&policy.device_tag, &policy.channel_tag, RecordingType::Alarm)
+                    .pending_recording_for(
+                        &policy.device_tag,
+                        &policy.channel_tag,
+                        RecordingType::Alarm,
+                    )
                     .await;
                 match pending {
                     Some(pending) if pending.is_pending() => pending,
@@ -361,7 +394,10 @@ impl RecordingSchedulerService {
 
         tracing::info!(
             "[RecordingScheduler] Alarm session started: {} (recording {}, recovery {}s, post {}s)",
-            session_key, recording.id, policy.alarm_recovery_secs, policy.post_record_secs
+            session_key,
+            recording.id,
+            policy.alarm_recovery_secs,
+            policy.post_record_secs
         );
 
         Ok(())
@@ -369,7 +405,11 @@ impl RecordingSchedulerService {
 
     /// 结束报警会话：停止该会话的录像；`post_record_secs` 作为结束后的尾留时长。
     async fn end_alarm_session(&self, session_key: &str) -> anyhow::Result<()> {
-        let state = self.active_alarm_recordings.write().await.remove(session_key);
+        let state = self
+            .active_alarm_recordings
+            .write()
+            .await
+            .remove(session_key);
         let Some(state) = state else {
             return Ok(());
         };
@@ -383,7 +423,9 @@ impl RecordingSchedulerService {
 
         tracing::info!(
             "[RecordingScheduler] Alarm session ended: {} (recording {}, tail {}s)",
-            session_key, recording_id, post_secs
+            session_key,
+            recording_id,
+            post_secs
         );
 
         if post_secs > 0 {
@@ -393,7 +435,8 @@ impl RecordingSchedulerService {
                 if let Err(e) = recording_service.stop_recording(recording_id).await {
                     tracing::warn!(
                         "[RecordingScheduler] Alarm tail stop failed: recording={} err={}",
-                        recording_id, e
+                        recording_id,
+                        e
                     );
                 }
             });
@@ -408,9 +451,14 @@ impl RecordingSchedulerService {
         let policies = self.policy_service.list_policies().await?;
         let now = Utc::now();
 
-        for policy in policies.iter().filter(|p| p.policy_type == PolicyType::Timed && p.enabled) {
-
-            let stream_key = crate::common::device_utils::format_stream_key(&policy.device_tag, &policy.channel_tag);
+        for policy in policies
+            .iter()
+            .filter(|p| p.policy_type == PolicyType::Timed && p.enabled)
+        {
+            let stream_key = crate::common::device_utils::format_stream_key(
+                &policy.device_tag,
+                &policy.channel_tag,
+            );
 
             let within_window = self.policy_service.is_within_time_window(policy, now);
 
@@ -422,7 +470,8 @@ impl RecordingSchedulerService {
                 .await
                 .map(|list| {
                     list.iter().any(|r| {
-                        r.recording_type == RecordingType::Timed && r.state != RecordingState::Pending
+                        r.recording_type == RecordingType::Timed
+                            && r.state != RecordingState::Pending
                     })
                 })
                 .unwrap_or(false);
@@ -438,7 +487,11 @@ impl RecordingSchedulerService {
 
                 // 已经有一个“等待设备/流就绪”的任务：复用它，不要每次都新建一行
                 if let Some(pending) = self
-                    .pending_recording_for(&policy.device_tag, &policy.channel_tag, RecordingType::Timed)
+                    .pending_recording_for(
+                        &policy.device_tag,
+                        &policy.channel_tag,
+                        RecordingType::Timed,
+                    )
                     .await
                 {
                     self.try_start_pending(&pending).await;
@@ -448,15 +501,19 @@ impl RecordingSchedulerService {
                 if let Err(e) = self.start_timed_recording(policy, &stream_key).await {
                     tracing::error!(
                         "[RecordingScheduler] Failed to start timed recording: policy_id={} err={}",
-                        policy.id, e
+                        policy.id,
+                        e
                     );
                 }
             } else {
-                if let Err(_e) = self.stop_timed_recording(&stream_key).await {
-                }
+                if let Err(_e) = self.stop_timed_recording(&stream_key).await {}
                 // 窗口结束：放弃还在等待的任务，避免它被流就绪事件误触发
                 if let Some(pending) = self
-                    .pending_recording_for(&policy.device_tag, &policy.channel_tag, RecordingType::Timed)
+                    .pending_recording_for(
+                        &policy.device_tag,
+                        &policy.channel_tag,
+                        RecordingType::Timed,
+                    )
                     .await
                 {
                     self.abandon_pending_recording(&pending).await;
@@ -484,7 +541,9 @@ impl RecordingSchedulerService {
 
     /// 流是否已经在媒体服务器上就绪（代理存在，可以开始录像）
     async fn is_stream_ready(&self, server_tag: &str, app: &str, stream_key: &str) -> bool {
-        self.cluster.is_stream_online(app, stream_key, server_tag).await
+        self.cluster
+            .is_stream_online(app, stream_key, server_tag)
+            .await
     }
 
     /// 尝试启动一个“等待中”的录像任务。
@@ -516,7 +575,8 @@ impl RecordingSchedulerService {
         if !self.is_stream_ready(&server_tag, &app, &stream_key).await {
             tracing::debug!(
                 "[RecordingScheduler] Recording {} still waiting for the stream {}",
-                pending.id, stream_key
+                pending.id,
+                stream_key
             );
             return;
         }
@@ -525,13 +585,15 @@ impl RecordingSchedulerService {
             Ok(recording) => {
                 tracing::info!(
                     "[RecordingScheduler] Pending recording {} started on {}",
-                    recording.id, stream_key
+                    recording.id,
+                    stream_key
                 );
             }
             Err(e) => {
                 tracing::debug!(
                     "[RecordingScheduler] Pending recording {} could not be started yet: {}",
-                    pending.id, e
+                    pending.id,
+                    e
                 );
             }
         }
@@ -571,11 +633,10 @@ impl RecordingSchedulerService {
             alarm_id: None,
         };
 
-        let recording = self.recording_service.create_recording(
-            req,
-            policy.channel_tag.clone(),
-            media_server.clone(),
-        ).await;
+        let recording = self
+            .recording_service
+            .create_recording(req, policy.channel_tag.clone(), media_server.clone())
+            .await;
 
         self.recording_service.start_recording(recording.id).await?;
 
@@ -604,24 +665,33 @@ impl RecordingSchedulerService {
             alarm_id: None,
         };
 
-        let mut recording = self.recording_service.create_recording(
-            req,
-            policy.channel_tag.clone(),
-            media_server.to_string(),
-        ).await;
+        let mut recording = self
+            .recording_service
+            .create_recording(req, policy.channel_tag.clone(), media_server.to_string())
+            .await;
 
         recording.state = RecordingState::Pending;
         recording.error_message = Some(reason.to_string());
         recording.retry_count = 0;
         recording.next_retry_at = Some(Utc::now());
 
-        if let Err(e) = self.infra.db.update_recording_start_result(&recording).await {
-            tracing::error!("[RecordingScheduler] Failed to persist pending recording: {}", e);
+        if let Err(e) = self
+            .infra
+            .db
+            .update_recording_start_result(&recording)
+            .await
+        {
+            tracing::error!(
+                "[RecordingScheduler] Failed to persist pending recording: {}",
+                e
+            );
         }
 
         tracing::info!(
             "[RecordingScheduler] Recording task {} for {} is waiting for the device/stream: {}",
-            recording.id, stream_key, reason
+            recording.id,
+            stream_key,
+            reason
         );
         Ok(recording)
     }
@@ -631,8 +701,16 @@ impl RecordingSchedulerService {
         let mut recording = pending.clone();
         recording.set_error("等待期间录像窗口已结束，任务已放弃".to_string());
         recording.next_retry_at = None;
-        if let Err(e) = self.infra.db.update_recording_start_result(&recording).await {
-            tracing::error!("[RecordingScheduler] Failed to abandon pending recording: {}", e);
+        if let Err(e) = self
+            .infra
+            .db
+            .update_recording_start_result(&recording)
+            .await
+        {
+            tracing::error!(
+                "[RecordingScheduler] Failed to abandon pending recording: {}",
+                e
+            );
         }
         tracing::info!(
             "[RecordingScheduler] Pending recording {} abandoned (window ended)",
@@ -646,7 +724,11 @@ impl RecordingSchedulerService {
         device_tag: &str,
         channel_tag: &str,
     ) -> Option<RecordingPolicy> {
-        let policies = self.policy_service.find_policies_by_device(device_tag).await.ok()?;
+        let policies = self
+            .policy_service
+            .find_policies_by_device(device_tag)
+            .await
+            .ok()?;
         let now = Utc::now();
         policies.into_iter().find(|p| {
             p.policy_type == PolicyType::Timed
@@ -658,7 +740,11 @@ impl RecordingSchedulerService {
 
     /// 只结束定时录像任务，报警录像任务不受影响
     async fn stop_timed_recording(&self, stream_key: &str) -> anyhow::Result<()> {
-        for recording in self.recording_service.get_active_recordings_by_stream_key(stream_key).await? {
+        for recording in self
+            .recording_service
+            .get_active_recordings_by_stream_key(stream_key)
+            .await?
+        {
             if recording.recording_type == RecordingType::Timed {
                 self.recording_service.stop_recording(recording.id).await?;
             }
@@ -666,13 +752,23 @@ impl RecordingSchedulerService {
         Ok(())
     }
 
-    async fn get_media_server_for_stream(&self, stream_key: &str) -> anyhow::Result<(String, String)> {
+    async fn get_media_server_for_stream(
+        &self,
+        stream_key: &str,
+    ) -> anyhow::Result<(String, String)> {
         let parts: Vec<&str> = stream_key.split('/').collect();
         let device_tag = parts.first().unwrap_or(&stream_key);
         let channel_id = parts.get(1).unwrap_or(&"0");
 
-        if let Some(stream) = self.infra.db.streams_cache().iter()
-            .find(|s| s.device_tag.as_deref() == Some(device_tag) && s.channel_tag.as_deref() == Some(channel_id))
+        if let Some(stream) = self
+            .infra
+            .db
+            .streams_cache()
+            .iter()
+            .find(|s| {
+                s.device_tag.as_deref() == Some(device_tag)
+                    && s.channel_tag.as_deref() == Some(channel_id)
+            })
             .map(|s| s.value().clone())
         {
             let app = stream.app.clone();
@@ -708,7 +804,8 @@ impl RecordingSchedulerService {
             if let Err(e) = self.end_alarm_session(&key).await {
                 tracing::warn!(
                     "[RecordingScheduler] Alarm session timeout stop failed: session={} err={}",
-                    key, e
+                    key,
+                    e
                 );
             }
         }
@@ -726,7 +823,10 @@ impl RecordingSchedulerService {
             if let Some(handle) = state.stop_timer_handle {
                 handle.abort();
             }
-            let _ = self.recording_service.stop_recording(state.recording_id).await;
+            let _ = self
+                .recording_service
+                .stop_recording(state.recording_id)
+                .await;
         }
     }
 }

@@ -1,8 +1,6 @@
 // @ts-check
 import { request } from '../utils/request'
 
-// 无人机档案
-// options.silent = true 时失败不弹提示，由调用方自行处理（概览页的可选数据源）。
 export async function getDrones(options = {}) {
   const res = await request.get('/drone/drones', options)
   return res.data.data
@@ -28,7 +26,6 @@ export async function deleteDrone(deviceId) {
   return res.data.data
 }
 
-// 摄像头关联
 export async function getDroneCameras(droneTag) {
   const res = await request.get(`/drone/drones/${encodeURIComponent(droneTag)}/cameras`)
   return res.data.data
@@ -49,7 +46,6 @@ export async function removeDroneCamera(droneTag, cameraDeviceTag) {
   return res.data.data
 }
 
-// 航线
 export async function getRoutes(deviceId = '', options = {}) {
   const res = await request.get('/drone/routes', { params: { drone_tag: deviceId }, ...options })
   return res.data.data
@@ -79,7 +75,6 @@ export async function executeRoute(id, deviceId = '', lateralOffsetM = 0) {
   return res.data.data
 }
 
-// 围栏
 export async function getFences(options = {}) {
   const res = await request.get('/drone/fences', options)
   return res.data.data
@@ -100,13 +95,11 @@ export async function deleteFence(id) {
   return res.data.data
 }
 
-// 指令
 export async function sendCommand(deviceId, payload) {
   try {
     const res = await request.post(`/drone/${encodeURIComponent(deviceId)}/command`, payload)
     return res.data.data
   } catch (err) {
-    // 后端对参数越界/围栏拒绝/无控制权分别返回 400/403，消息要透出给操作员
     const error = new Error(
       err?.response?.data?.message || err?.message || '指令下发失败'
     )
@@ -120,7 +113,6 @@ export async function getCommand(cmdId) {
   return res.data.data
 }
 
-// 告警 / 审计
 export async function getAlerts(deviceId = '', limit = 100) {
   const res = await request.get('/drone/alerts', { params: { drone_tag: deviceId, limit } })
   return res.data.data
@@ -131,10 +123,7 @@ export async function getAudits(deviceId = '', limit = 200) {
   return res.data.data
 }
 
-// 轨迹回放
 //
-// 返回指定时间窗内的遥测样本（服务端按 ts_ms 升序、超过 limit 时等步长降采样）。
-// start_ms / end_ms 传 0 表示该侧不设限。
 export async function getReplay(deviceId, startMs = 0, endMs = 0, limit = 5000) {
   const res = await request.get('/drone/replay', {
     params: {
@@ -147,10 +136,7 @@ export async function getReplay(deviceId, startMs = 0, endMs = 0, limit = 5000) 
   return res.data.data
 }
 
-// 控制权
 //
-// 后端用真实 HTTP 状态码表达失败（409 冲突 / 403 越权 / 503 服务不可用），
-// 这里把错误信息整理出来交给调用方展示。
 function errorMessage(err, fallback) {
   return err?.response?.data?.message || err?.message || fallback
 }
@@ -165,7 +151,6 @@ export async function acquireControl(deviceId, controlType = 'flight', priority 
     })
     return res.data.data
   } catch (err) {
-    // 409：控制权已被他人持有
     return {
       granted: false,
       held: false,
@@ -217,7 +202,6 @@ export async function renewControl(deviceId, controlType = 'flight', leaseSecond
     })
     return res.data.data
   } catch (err) {
-    // 续约失败通常意味着控制权已被抢占或租约已过期
     return {
       granted: false,
       held: false,
@@ -231,7 +215,6 @@ export async function getControl(deviceId, controlType = 'flight') {
   return res.data.data
 }
 
-// WebSocket 一次性票据
 export async function getWsTicket() {
   const res = await request.post('/drone/ws-ticket')
   return res.data.data.ticket

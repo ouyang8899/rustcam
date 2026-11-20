@@ -75,3 +75,18 @@ logs/
 
 # 本地 git 辅助脚本
 /squash-unpushed.bat
+/clientapp/pro
+
+# pro 版构建目录（本地验证产物）
+/clientapp/build-pro/
+/.trash
+/.tmp-build
+/.ruff_cache
+/appclient
+/.superpowers
+/timescaledb
+/testenv
+/*.ps1
+/*.txt
+/clientapp/build-relwithdebug
+/clientapp/build-vs2019-pro

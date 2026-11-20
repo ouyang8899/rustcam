@@ -22,25 +22,27 @@ import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { Loading } from '@element-plus/icons-vue'
 import { droneTagFromEntityId } from '../../utils/droneVideo.js'
 import { fenceColors } from '../../utils/fenceStyle'
+import { pickTilingScheme, protocolFlipsY, selectLayers, supportsStandardGrid } from '../../utils/mapTiles'
+import { useSettingsStore } from '../../stores/settingsStore'
+import { useToast } from '../../composables/useToast'
 
-/** 机模地址：默认使用 public/models/drone.glb，可用 VITE_DRONE_MODEL 覆盖。 */
+const toast = useToast()
+
+const settingsStore = useSettingsStore()
+
 const DRONE_MODEL_URI = import.meta.env.VITE_DRONE_MODEL || '/models/drone.glb'
 
 const props = defineProps({
   drones: { type: Array, default: () => [] },
   selectedId: { type: String, default: '' },
   route: { type: Array, default: () => [] },
-  /** 航线变化时自动把相机适配到航线 + 当前无人机（实时飞行页使用） */
   autoFitRoute: { type: Boolean, default: false },
-  /** @type {Array<any>} 回放轨迹点 {lat, lon, alt?}：只画折线与起终点，不标航点序号 */
   track: { type: Array, default: () => [] },
   fences: { type: Array, default: () => [] },
   draftPoints: { type: Array, default: () => [] },
   draftCircle: { type: Object, default: null },
   drawMode: { type: String, default: 'none' },
-  /** @type {'no_fly' | 'allowed'} 正在绘制的围栏规则，决定草稿颜色 */
   draftRule: { type: String, default: 'no_fly' },
-  /** 正在主动绘制：只有此时才跟随鼠标预览并允许右键结束。 */
   drawingActive: { type: Boolean, default: false },
   center: { type: Object, default: () => ({ lon: 121.4737, lat: 31.2304, alt: 1800000 }) },
 })
@@ -64,7 +66,6 @@ function setEntity(entity) {
   return entity
 }
 
-/** 屏幕坐标 → 经纬度；点在球体之外时返回 null。 */
 function pickLngLat(position) {
   const v = viewer.value
   if (!v) return null
@@ -95,7 +96,6 @@ function scheduleDraft() {
   })
 }
 
-/** 绘制时屏蔽浏览器右键菜单，右键用于结束绘制。 */
 function onCanvasContextMenu(e) {
   if (props.drawMode === 'polygon' || props.drawMode === 'circle') e.preventDefault()
 }
@@ -116,34 +116,89 @@ function initViewer() {
     terrainProvider: new Cesium.EllipsoidTerrainProvider(),
     requestRenderMode: false,
   })
-  // 隐藏 Cesium 徽标与数据署名栏（右下角 logo / Data attribution）
   const creditContainer = v.cesiumWidget?.creditContainer
   if (creditContainer) creditContainer.style.display = 'none'
-  // 离线底图：Cesium 自带 NaturalEarthII，测试/内网环境不依赖外部瓦片服务。
-  // 需要在线高清底图时设置 VITE_CESIUM_ONLINE=true。
-  const base = (window.CESIUM_BASE_URL || '/cesium/').replace(/\/?$/, '/')
   const customTms = import.meta.env.VITE_CESIUM_TMS
-  if (customTms) {
-    // 内网/私有化部署：指向 GeoServer / 本地瓦片服务
+  const layers = selectLayers(settingsStore.browserLayers, '3d')
+  let added = false
+
+  for (const layer of layers) {
+    const scheme = pickTilingScheme(layer.srs)
+    if (!scheme) {
+      console.warn('[CesiumGlobe] 3D 图层投影不受支持，已跳过:', layer.name || layer.url, layer.srs)
+      toast.warning(
+        `3D 图层「${layer.name || layer.url}」的投影 ${layer.srs} 不被浏览器 3D 支持（仅 EPSG:3857 / 4326 / 4490），已跳过`,
+      )
+      continue
+    }
+    if (!supportsStandardGrid(layer)) {
+      const bingKey = String(layer.bing_key || '').trim()
+      if (!bingKey) {
+        console.warn('[CesiumGlobe] 3D 图层缺少 Bing Key，已跳过:', layer.name || layer.url, layer.protocol)
+        toast.warning(
+          `3D 图层「${layer.name || layer.url}」使用 ${layer.protocol} 协议，需要配置 Bing Maps API Key 才能在 3D 中显示，已跳过`,
+        )
+        continue
+      }
+      const mapStyle = String(layer.imagery_set || 'Aerial').toLowerCase() === 'road'
+        ? Cesium.BingMapsStyle.ROAD
+        : Cesium.BingMapsStyle.AERIAL
+      Cesium.BingMapsImageryProvider
+        .fromUrl('https://dev.virtualearth.net', { key: bingKey, mapStyle })
+        .then((provider) => {
+          v.imageryLayers.addImageryProvider(provider)
+        })
+        .catch((err) => {
+          console.error('[CesiumGlobe] Bing 影像加载失败:', err)
+          toast.error(`3D 图层「${layer.name || layer.url}」的 Bing 影像加载失败：${err?.message || err}`)
+        })
+      added = true
+      break
+    }
+    const tilingScheme = scheme === 'webmercator'
+      ? new Cesium.WebMercatorTilingScheme()
+      : new Cesium.GeographicTilingScheme()
+    let url = String(layer.url || '')
+    if (protocolFlipsY(layer.protocol)) {
+      url = url.replace(/\{-y\}/g, '{reverseY}').replace(/\{y\}/g, '{reverseY}')
+    } else {
+      url = url.replace(/\{-y\}/g, '{y}')
+    }
     v.imageryLayers.addImageryProvider(
       new Cesium.UrlTemplateImageryProvider({
-        url: customTms.replace(/\{-y\}/g, '{reverseY}'),
-        maximumLevel: 20,
+        url,
+        tilingScheme,
+        minimumLevel: Math.max(0, Number(layer.min_zoom) || 0),
+        maximumLevel: Math.max(0, Number(layer.max_zoom) || 19),
       })
     )
-  } else if (import.meta.env.VITE_CESIUM_ONLINE === 'true') {
-    v.imageryLayers.addImageryProvider(
-      new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' })
-    )
-  } else {
-    v.imageryLayers.addImageryProvider(
-      new Cesium.UrlTemplateImageryProvider({
-        url: `${base}Assets/Textures/NaturalEarthII/{z}/{x}/{reverseY}.jpg`,
-        tilingScheme: new Cesium.GeographicTilingScheme(),
-        maximumLevel: 2,
-        credit: 'Natural Earth II',
-      })
-    )
+    added = true
+    break
+  }
+
+  if (!added) {
+    const base = (window.CESIUM_BASE_URL || '/cesium/').replace(/\/?$/, '/')
+    if (customTms) {
+      v.imageryLayers.addImageryProvider(
+        new Cesium.UrlTemplateImageryProvider({
+          url: customTms.replace(/\{-y\}/g, '{reverseY}'),
+          maximumLevel: 20,
+        })
+      )
+    } else if (import.meta.env.VITE_CESIUM_ONLINE === 'true') {
+      v.imageryLayers.addImageryProvider(
+        new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' })
+      )
+    } else {
+      v.imageryLayers.addImageryProvider(
+        new Cesium.UrlTemplateImageryProvider({
+          url: `${base}Assets/Textures/NaturalEarthII/{z}/{x}/{reverseY}.jpg`,
+          tilingScheme: new Cesium.GeographicTilingScheme(),
+          maximumLevel: 2,
+          credit: 'Natural Earth II',
+        })
+      )
+    }
   }
   v.scene.globe.baseColor = Cesium.Color.fromCssColorString('#0b1b2b')
   v.scene.globe.depthTestAgainstTerrain = false
@@ -239,7 +294,6 @@ function syncDrones() {
       entity.position = position
       if (entity.label) entity.label.text = d.name || d.drone_tag
     }
-    // 姿态：遥测里的 yaw/pitch/roll 均为弧度，直接交给 HeadingPitchRoll（规则 §10.6）。
     const heading = t.yaw !== undefined ? Number(t.yaw) : 0
     const pitch = t.pitch !== undefined ? Number(t.pitch) : 0
     const roll = t.roll !== undefined ? Number(t.roll) : 0
@@ -315,9 +369,6 @@ function syncRoute() {
   })
 }
 
-/**
- * 回放轨迹：整条折线 + 起终点标记，不逐点标注序号。
- */
 function syncTrack() {
   const v = viewer.value
   if (!v) return
@@ -614,7 +665,6 @@ function flyTo(lon, lat, alt = 600000) {
   })
 }
 
-/** 把相机适配到航线与当前无人机，保证“意图航线”一眼可见。 */
 function fitRoute() {
   if (!viewer.value || props.route.length === 0) return
   const points = props.route.map((p) => ({ lon: Number(p.lon), lat: Number(p.lat) }))
@@ -671,7 +721,10 @@ watch(() => props.selectedId, (id) => {
   if (t && t.lat && t.lon) flyTo(t.lon, t.lat, 600000)
 })
 
-onMounted(initViewer)
+onMounted(async () => {
+  await settingsStore.loadMapSettings()
+  initViewer()
+})
 onBeforeUnmount(() => {
   if (clickHandler) clickHandler.destroy()
   if (moveHandler) moveHandler.destroy()
@@ -703,7 +756,6 @@ defineExpose({ flyTo, viewer, fitRoute })
 .cesium-globe.is-drawing :deep(canvas) {
   cursor: crosshair !important;
 }
-/* 隐藏 Cesium logo 与数据署名 */
 .cesium-globe :deep(.cesium-widget-credits),
 .cesium-globe :deep(.cesium-credit-logoContainer),
 .cesium-globe :deep(.cesium-credit-textContainer) {

@@ -1,11 +1,11 @@
+use crate::application::media_server_service::MediaServerService;
+use crate::domain::device::{Device, PlayLinks};
+use crate::domain::traits::{CacheStore, CacheStoreExt};
+use crate::error::Result;
+use crate::infrastructure::cluster::ClusterManager;
+use crate::infrastructure::RedisStore;
 use std::sync::Arc;
 use uuid::Uuid;
-use crate::domain::device::{Device, PlayLinks};
-use crate::infrastructure::RedisStore;
-use crate::application::media_server_service::MediaServerService;
-use crate::domain::traits::{CacheStore, CacheStoreExt};
-use crate::infrastructure::cluster::ClusterManager;
-use crate::error::{ Result };
 
 pub struct PlayService {
     redis: Arc<RedisStore>,
@@ -50,7 +50,9 @@ impl PlayService {
 
         let device_sessions_key = format!("device_sessions:{}", device_id);
         self.redis.sadd(&device_sessions_key, &token).await?;
-        self.redis.expire(&device_sessions_key, self.token_ttl_secs as u64).await?;
+        self.redis
+            .expire(&device_sessions_key, self.token_ttl_secs as u64)
+            .await?;
 
         Ok(token)
     }
@@ -87,7 +89,14 @@ impl PlayService {
         token: &str,
         stream_id: &str,
     ) -> PlayLinks {
-        self.build_play_links_with_server(device, token, stream_id, device.media_server_tag.as_deref(), None).await
+        self.build_play_links_with_server(
+            device,
+            token,
+            stream_id,
+            device.media_server_tag.as_deref(),
+            None,
+        )
+        .await
     }
 
     pub async fn build_play_links_with_server(
@@ -100,7 +109,9 @@ impl PlayService {
     ) -> PlayLinks {
         let expires_at = chrono::Utc::now().timestamp() + self.token_ttl_secs;
 
-        let server_tag = media_server_name.or(device.media_server_tag.as_deref()).unwrap_or("default");
+        let server_tag = media_server_name
+            .or(device.media_server_tag.as_deref())
+            .unwrap_or("default");
 
         let rtsp_auth = match (
             device.playback_username.as_deref(),
@@ -110,20 +121,39 @@ impl PlayService {
             _ => None,
         };
 
-        let app = app.or(device.app.as_deref().filter(|s| !s.is_empty())).unwrap_or("live").to_string();
+        let app = app
+            .or(device.app.as_deref().filter(|s| !s.is_empty()))
+            .unwrap_or("live")
+            .to_string();
 
         if let Some(adapter) = self.cluster.get_server(server_tag) {
-            match adapter.build_play_links(&app, stream_id, token, expires_at, rtsp_auth).await {
+            match adapter
+                .build_play_links(&app, stream_id, token, expires_at, rtsp_auth)
+                .await
+            {
                 Ok(links) => return links,
-                Err(e) => tracing::warn!("[PlayService] build_play_links failed for {}: {}", server_tag, e),
+                Err(e) => tracing::warn!(
+                    "[PlayService] build_play_links failed for {}: {}",
+                    server_tag,
+                    e
+                ),
             }
         }
 
-        tracing::warn!("[PlayService] Media server {} not found, using fallback", server_tag);
+        tracing::warn!(
+            "[PlayService] Media server {} not found, using fallback",
+            server_tag
+        );
 
-        let ports = self.media_server_service
+        let ports = self
+            .media_server_service
             .get(server_tag)
-            .or_else(|| self.media_server_service.get_enabled_servers().first().cloned())
+            .or_else(|| {
+                self.media_server_service
+                    .get_enabled_servers()
+                    .first()
+                    .cloned()
+            })
             .map(|s| s.protocol_ports)
             .unwrap_or_default();
 

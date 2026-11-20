@@ -217,7 +217,6 @@ pub struct ClusterConfig {
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct RecoveryConfig {
-
     pub check_interval_secs: u64,
 
     pub base_backoff_secs: u64,
@@ -458,9 +457,9 @@ impl Default for AppConfig {
             onvif: OnvifConfig::default(),
             rtsp_auth: RtspAuthConfig::default(),
             signaling_server: SignalingServerConfig::default(),
-        jwt: JwtConfig::default(),
-        auth: AuthConfig::default(),
-        log: LogConfig::default(),
+            jwt: JwtConfig::default(),
+            auth: AuthConfig::default(),
+            log: LogConfig::default(),
             recovery: RecoveryConfig::default(),
             rtsp_server: TcpRtpServerConfig::default(),
             drone: DroneClientConfig::default(),

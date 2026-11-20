@@ -241,7 +241,6 @@ const { wsConnected, connect, disconnect } = useWsConnection()
 
 const collapsed = ref(false)
 const isAdmin = computed(() => auth.isAdmin)
-/** 管理区对管理员和超级用户开放（超级用户自动拥有全部权限）。 */
 const canManage = computed(() => auth.isAdmin || !!auth.currentUser?.is_super)
 const currentRoute = computed(() => route.path)
 const unprocessedAlarms = ref(0)

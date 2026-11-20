@@ -126,7 +126,10 @@ pub fn validate_tour_scheme(
     let mut seen_items = std::collections::HashSet::new();
     for lock in &req.locked_set {
         if !layout_item_ids.iter().any(|id| id == &lock.layout_item_id) {
-            return Err(format!("锁定引用了不存在的布局窗口 {}", lock.layout_item_id));
+            return Err(format!(
+                "锁定引用了不存在的布局窗口 {}",
+                lock.layout_item_id
+            ));
         }
         if !seen_items.insert(lock.layout_item_id.clone()) {
             return Err("同一布局窗口不能重复锁定".into());
@@ -173,7 +176,9 @@ mod tests {
         }
     }
 
-    fn ids() -> Vec<String> { vec!["cell-0".into(), "cell-1".into()] }
+    fn ids() -> Vec<String> {
+        vec!["cell-0".into(), "cell-1".into()]
+    }
 
     #[test]
     fn accepts_valid_scheme() {
@@ -184,23 +189,42 @@ mod tests {
     fn rejects_too_many_locks() {
         let mut req = base();
         req.locked_set = vec![
-            LockedSlot { layout_item_id: "cell-0".into(), device_tag: "dev".into(), channel_tag: "c1".into() },
-            LockedSlot { layout_item_id: "cell-1".into(), device_tag: "dev".into(), channel_tag: "c2".into() },
+            LockedSlot {
+                layout_item_id: "cell-0".into(),
+                device_tag: "dev".into(),
+                channel_tag: "c1".into(),
+            },
+            LockedSlot {
+                layout_item_id: "cell-1".into(),
+                device_tag: "dev".into(),
+                channel_tag: "c2".into(),
+            },
         ];
-        assert_eq!(validate_tour_scheme(&req, 1, &ids()), Err("锁定数量超过布局窗口数".into()));
+        assert_eq!(
+            validate_tour_scheme(&req, 1, &ids()),
+            Err("锁定数量超过布局窗口数".into())
+        );
     }
 
     #[test]
     fn rejects_lock_for_unknown_layout_item() {
         let mut req = base();
-        req.locked_set = vec![LockedSlot { layout_item_id: "nope".into(), device_tag: "dev".into(), channel_tag: "c1".into() }];
+        req.locked_set = vec![LockedSlot {
+            layout_item_id: "nope".into(),
+            device_tag: "dev".into(),
+            channel_tag: "c1".into(),
+        }];
         assert!(validate_tour_scheme(&req, 2, &ids()).is_err());
     }
 
     #[test]
     fn rejects_lock_for_missing_channel() {
         let mut req = base();
-        req.locked_set = vec![LockedSlot { layout_item_id: "cell-0".into(), device_tag: "dev".into(), channel_tag: "c9".into() }];
+        req.locked_set = vec![LockedSlot {
+            layout_item_id: "cell-0".into(),
+            device_tag: "dev".into(),
+            channel_tag: "c9".into(),
+        }];
         assert!(validate_tour_scheme(&req, 2, &ids()).is_err());
     }
 

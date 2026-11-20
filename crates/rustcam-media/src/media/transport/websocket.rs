@@ -1,13 +1,13 @@
-use std::sync::Arc;
-use std::future::Future;
+use crate::media::errors::{MediaError, Result};
+use crate::media::node::{DataType, MediaNode};
 use async_trait::async_trait;
-use bytes::{ BytesMut };
-use tokio::sync::{broadcast, mpsc, Mutex};
+use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use bytes::BytesMut;
 use futures_util::SinkExt;
 use std::collections::HashMap;
-use crate::media::errors::{MediaError, Result};
-use crate::media::node::{ DataType, MediaNode };
-use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use std::future::Future;
+use std::sync::Arc;
+use tokio::sync::{broadcast, mpsc, Mutex};
 
 pub struct WebSocketMediaTransport {
     receiver: Arc<Mutex<mpsc::Receiver<BytesMut>>>,
@@ -108,8 +108,7 @@ impl WebSocketMediaNodeTransport {
         on_text: impl Fn(String) + Send + Sync + 'static,
         shutdown_tx: Option<mpsc::Sender<()>>,
         close_rx: Option<mpsc::Receiver<u16>>,
-    )
-    where
+    ) where
         R: Future<Output = ()> + Send + 'static,
     {
         use futures_util::StreamExt;
@@ -206,7 +205,11 @@ impl WebSocketMediaNodeTransport {
         });
     }
 
-    pub fn run_text_only(self: Arc<Self>, socket: WebSocket, on_text: impl Fn(String) + Send + Sync + 'static) {
+    pub fn run_text_only(
+        self: Arc<Self>,
+        socket: WebSocket,
+        on_text: impl Fn(String) + Send + Sync + 'static,
+    ) {
         use futures_util::StreamExt;
         tokio::spawn(async move {
             let (mut ws_sender, mut ws_receiver) = socket.split();
@@ -251,7 +254,9 @@ impl crate::media::node::MediaTransport for WebSocketMediaNodeTransport {
     }
 
     async fn recv(&self) -> Result<HashMap<DataType, BytesMut>> {
-        Err(MediaError::TransportRecv("WebSocketMediaNodeTransport does not support recv".into()))
+        Err(MediaError::TransportRecv(
+            "WebSocketMediaNodeTransport does not support recv".into(),
+        ))
     }
 
     async fn close(&self) -> Result<()> {

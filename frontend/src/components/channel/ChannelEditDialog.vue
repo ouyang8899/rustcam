@@ -1,9 +1,8 @@
 <template>
-  <el-dialog
+  <AppDialog
     :model-value="modelValue"
     :title="dialogTitle"
-    width="720px"
-    destroy-on-close
+    size="lg"
     @update:model-value="$emit('update:modelValue', $event)"
     @open="onOpen"
   >
@@ -83,15 +82,19 @@
         <div class="picker-tip">点击地图设置坐标，关闭抽屉后数值仍可手动微调。</div>
       </div>
     </el-drawer>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <script setup>
 import { ref, reactive, computed, nextTick, watch } from 'vue'
 import { Map as MapLibreMap, Marker } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { ElMessage } from 'element-plus'
+import AppDialog from '../common/AppDialog.vue'
+import { useToast } from '../../composables/useToast'
+
+const toast = useToast()
 import { useSettingsStore } from '../../stores/settingsStore'
+import { buildRasterSource, selectLayers, viewZoomRange } from '../../utils/mapTiles'
 import { updateChannel, createChannel, getChannel } from '../../api/channels'
 
 const props = defineProps({
@@ -144,14 +147,13 @@ async function onOpen() {
   if (props.mode === 'edit' && props.channelTag) {
     try {
       const channel = await getChannel(props.deviceTag, props.channelTag)
-      // 接口数据只在本地已有对象缺字段时才覆盖，避免空值把列表里的名称冲掉
       resetForm({
         ...props.channel,
         ...channel,
         name: channel?.name || props.channel?.name || '',
       })
     } catch (e) {
-      ElMessage.error('加载通道信息失败: ' + (e?.message || e))
+      toast.error('加载通道信息失败: ' + (e?.message || e))
     }
   }
 }
@@ -173,27 +175,39 @@ function applyPosition(lng, lat) {
 const DEFAULT_TMS_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 
-function clampZoom(value, fallback) {
-  const n = Number(value)
-  if (!Number.isFinite(n)) return fallback
-  return Math.min(24, Math.max(0, Math.round(n)))
-}
-
 async function initPickerMap() {
   await nextTick()
   if (!pickerContainer.value || map) return
 
   await settingsStore.loadMapSettings()
 
-  const configured = (settingsStore.browserTmsUrl || '')
-    .split('\n')
-    .map((u) => u.trim())
-    .filter((u) => u && u.includes('{x}') && u.includes('{z}'))
-  const tiles = configured.length > 0 ? configured : [DEFAULT_TMS_URL]
+  const layers = selectLayers(settingsStore.browserLayers, '2d')
+  let source = null
+  let chosen = null
+  for (const layer of layers) {
+    const candidate = buildRasterSource(layer)
+    if (candidate) {
+      source = candidate
+      chosen = layer
+      break
+    }
+    console.warn('[ChannelEditDialog] 底图图层在该端不可用，已跳过:', layer.name || layer.url, layer.srs)
+    toast.warning(
+      `底图图层「${layer.name || layer.url}」的投影 ${layer.srs} 不被浏览器 2D 支持（仅 EPSG:3857），已跳过`,
+    )
+  }
 
-  // 与 DeviceMap.vue 保持一致：配置里写 {-y} 就按 TMS 处理，其余按标准 XYZ
-  const hasNegY = tiles.some((u) => u.includes('{-y}'))
-  const normalized = tiles.map((u) => (hasNegY ? u.replace(/\{-y\}/g, '{y}') : u))
+  const { minZoom, maxZoom } = viewZoomRange(chosen)
+  if (!source) {
+    source = {
+      type: 'raster',
+      tiles: [DEFAULT_TMS_URL],
+      tileSize: 256,
+      minzoom: minZoom,
+      maxzoom: maxZoom,
+      scheme: 'xyz',
+    }
+  }
 
   const center =
     form.longitude !== null && form.latitude !== null
@@ -204,8 +218,9 @@ async function initPickerMap() {
     container: pickerContainer.value,
     center,
     zoom: 11,
+    minZoom,
+    maxZoom,
     zoomControl: true,
-    // 内联空样式：避免 MapLibre 去请求默认在线样式
     style: {
       version: 8,
       sources: {},
@@ -216,14 +231,7 @@ async function initPickerMap() {
   })
 
   map.on('load', () => {
-    map.addSource('raster-tiles', {
-      type: 'raster',
-      tiles: normalized,
-      tileSize: 256,
-      minzoom: clampZoom(settingsStore.browserMinZoom, 0),
-      maxzoom: clampZoom(settingsStore.browserMaxZoom, 19),
-      scheme: hasNegY ? 'tms' : 'xyz',
-    })
+    map.addSource('raster-tiles', source)
     map.addLayer({
       id: 'raster-tiles-layer',
       type: 'raster',
@@ -261,8 +269,6 @@ function destroyPickerMap() {
   }
 }
 
-// 直接 watch ref 本身，而不是 watch(() => pickerVisible.value)，
-// 后者拿到的 getter 返回值不是响应式源，watcher 永远不会触发。
 watch(pickerVisible, async (visible) => {
   if (visible) {
     await initPickerMap()
@@ -275,7 +281,7 @@ async function submit() {
   const deviceTag = form.device_tag.trim()
   const channelTag = form.channel_tag.trim()
   if (props.mode === 'create' && (!deviceTag || !channelTag)) {
-    ElMessage.error('新建通道需要指定设备标识与通道标识')
+    toast.error('新建通道需要指定设备标识与通道标识')
     return
   }
 
@@ -302,11 +308,11 @@ async function submit() {
       channel = await updateChannel(props.deviceTag, props.channelTag, payload)
     }
 
-    ElMessage.success('保存成功')
+    toast.success('保存成功')
     emit('saved', channel)
     emit('update:modelValue', false)
   } catch (e) {
-    ElMessage.error('保存失败: ' + (e?.message || e))
+    toast.error('保存失败: ' + (e?.message || e))
   } finally {
     saving.value = false
   }
@@ -321,7 +327,7 @@ async function submit() {
 .picker-map {
   height: calc(100vh - 180px);
   min-height: 360px;
-  border-radius: 4px;
+  border-radius: 0;
   overflow: hidden;
 }
 .picker-tip {

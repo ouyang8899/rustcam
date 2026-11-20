@@ -1,10 +1,10 @@
-use std::sync::Arc;
-use tokio::sync::broadcast;
-use crate::config::AppConfig;
-use crate::infrastructure::{DbRepository, RedisStore, EventBus};
 use crate::application::ws_broadcaster::WsBroadcaster;
+use crate::config::AppConfig;
+use crate::infrastructure::{DbRepository, EventBus, RedisStore};
 use crate::monitoring::Metrics;
 use crate::protocol::event::SignalEvent;
+use std::sync::Arc;
+use tokio::sync::broadcast;
 
 #[derive(Clone)]
 pub struct InfraContext {
@@ -18,7 +18,6 @@ pub struct InfraContext {
 
 impl InfraContext {
     pub async fn new(config: AppConfig) -> anyhow::Result<Self> {
-
         let db = Arc::new(
             DbRepository::new_with_pool(
                 &config.database.url,
@@ -26,13 +25,16 @@ impl InfraContext {
                 config.database.max_connections as u64,
             )
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to initialize database: {}", e))?
+            .map_err(|e| anyhow::anyhow!("Failed to initialize database: {}", e))?,
         );
 
         let redis = match RedisStore::new(&config.redis.url).await {
             Ok(r) => Arc::new(r),
             Err(e) => {
-                tracing::warn!("[InfraContext] Redis connection failed (will retry later): {}", e);
+                tracing::warn!(
+                    "[InfraContext] Redis connection failed (will retry later): {}",
+                    e
+                );
                 Arc::new(RedisStore::new_placeholder(&config.redis.url))
             }
         };
@@ -53,11 +55,13 @@ impl InfraContext {
     }
 
     pub async fn from_parts(db: Arc<DbRepository>, config: Arc<AppConfig>) -> anyhow::Result<Self> {
-
         let redis = match RedisStore::new(&config.redis.url).await {
             Ok(r) => Arc::new(r),
             Err(e) => {
-                tracing::warn!("[InfraContext] Redis connection failed (will retry later): {}", e);
+                tracing::warn!(
+                    "[InfraContext] Redis connection failed (will retry later): {}",
+                    e
+                );
                 Arc::new(RedisStore::new_placeholder(&config.redis.url))
             }
         };
@@ -135,14 +139,17 @@ impl InfraContextBuilder {
     pub fn build(self) -> InfraContext {
         InfraContext {
             db: self.db.unwrap_or_else(|| {
-                let db_url = std::env::var("TEST_DATABASE_URL")
-                    .unwrap_or_else(|_| "postgres://postgres:test@localhost:5434/rustcam_test".to_string());
+                let db_url = std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
+                    "postgres://postgres:test@localhost:5434/rustcam_test".to_string()
+                });
 
                 let rt = tokio::runtime::Runtime::new().expect("Failed to create test runtime");
                 rt.block_on(async {
-                    DbRepository::new(&db_url, false).await.expect("Failed to create test DbRepository")
+                    DbRepository::new(&db_url, false)
+                        .await
+                        .expect("Failed to create test DbRepository")
                 })
-                    .into()
+                .into()
             }),
             redis: self.redis.unwrap_or_else(|| {
                 let redis_url = std::env::var("TEST_REDIS_URL")
@@ -150,14 +157,20 @@ impl InfraContextBuilder {
 
                 let rt = tokio::runtime::Runtime::new().expect("Failed to create test runtime");
                 rt.block_on(async {
-                    RedisStore::new(&redis_url).await.expect("Failed to create test RedisStore")
+                    RedisStore::new(&redis_url)
+                        .await
+                        .expect("Failed to create test RedisStore")
                 })
-                    .into()
+                .into()
             }),
             event_bus: self.event_bus.unwrap_or_else(|| Arc::new(EventBus::new())),
             metrics: self.metrics.unwrap_or_else(|| Arc::new(Metrics::new())),
-            ws_broadcaster: self.ws_broadcaster.unwrap_or_else(|| Arc::new(WsBroadcaster::new())),
-            config: self.config.unwrap_or_else(|| Arc::new(AppConfig::default())),
+            ws_broadcaster: self
+                .ws_broadcaster
+                .unwrap_or_else(|| Arc::new(WsBroadcaster::new())),
+            config: self
+                .config
+                .unwrap_or_else(|| Arc::new(AppConfig::default())),
         }
     }
 }

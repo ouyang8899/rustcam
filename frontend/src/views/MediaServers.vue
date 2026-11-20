@@ -1,87 +1,82 @@
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <h1 class="page-title">媒体服务器管理</h1>
-      <div class="page-toolbar">
-        <el-button type="default" :loading="refreshingAll" @click="refreshAll">
-          <el-icon><Refresh /></el-icon> 刷新全部
-        </el-button>
-        <el-button type="primary" @click="openAddModal">
-          <el-icon><Plus /></el-icon> 添加服务器
-        </el-button>
-      </div>
-    </div>
-    <div class="page-body">
-      <el-empty v-if="servers.length === 0 && !loading" description="暂无媒体服务器，点击上方按钮添加" />
+  <PageView title="媒体服务器管理">
+    <template #toolbar>
+      <el-button type="default" :loading="refreshingAll" @click="refreshAll">
+        <el-icon><Refresh /></el-icon> 刷新全部
+      </el-button>
+      <el-button type="primary" @click="openAddModal">
+        <el-icon><Plus /></el-icon> 添加服务器
+      </el-button>
+    </template>
 
-      <div v-else class="server-grid">
-        <div v-for="server in servers" :key="server.server_tag" class="server-card" :class="{ selected: selectedServer?.server_tag === server.server_tag }" @click="selectServer(server)">
-          <div class="server-card__header">
-            <StatusDot :status="server.online ? 'online' : 'offline'" />
-            <span>媒体服务器</span>
-            
+    <EmptyState v-if="servers.length === 0 && !loading" title="暂无媒体服务器，点击上方按钮添加" />
 
-            <el-tag size="small" :type="server.online ? 'success' : 'info'">
-              {{ server.online ? '在线' : '离线' }}
-            </el-tag>
-            <div class="server-card__actions">
-              <el-button text size="small" @click.stop="checkStatus(server)" :loading="checkingStatus.has(server.server_tag)" title="检测">
-                <el-icon><Refresh /></el-icon>
-              </el-button>
-              <el-button text size="small" :type="server.enabled ? 'danger' : 'success'" @click.stop="toggleServer(server)" :title="server.enabled ? '禁用' : '启用'">
-                {{ server.enabled ? '禁用' : '启用' }}
-              </el-button>
-              <el-button text size="small" @click.stop="openEditModal(server)" title="编辑">
-                <el-icon><Edit /></el-icon>
-              </el-button>
-              <el-button text size="small" type="danger" @click.stop="confirmDelete(server)" title="删除">
-                <el-icon><Delete /></el-icon>
-              </el-button>
-            </div>
+    <div v-else class="server-grid">
+      <div v-for="server in servers" :key="server.server_tag" class="server-card" :class="{ selected: selectedServer?.server_tag === server.server_tag }" @click="selectServer(server)">
+        <div class="server-card__header">
+          <StatusDot :status="server.online ? 'online' : 'offline'" />
+          <span>媒体服务器</span>
+
+          <el-tag size="small" :type="server.online ? 'success' : 'info'">
+            {{ server.online ? '在线' : '离线' }}
+          </el-tag>
+          <div class="server-card__actions">
+            <el-button text size="small" @click.stop="checkStatus(server)" :loading="checkingStatus.has(server.server_tag)" title="检测">
+              <el-icon><Refresh /></el-icon>
+            </el-button>
+            <el-button text size="small" :type="server.enabled ? 'danger' : 'success'" @click.stop="toggleServer(server)" :title="server.enabled ? '禁用' : '启用'">
+              {{ server.enabled ? '禁用' : '启用' }}
+            </el-button>
+            <el-button text size="small" @click.stop="openEditModal(server)" title="编辑">
+              <el-icon><Edit /></el-icon>
+            </el-button>
+            <el-button text size="small" type="danger" @click.stop="confirmDelete(server)" title="删除">
+              <el-icon><Delete /></el-icon>
+            </el-button>
           </div>
-          <div class="server-card__body">
-            <div class="metric-row">
-              <span class="metric-row__label">名称</span>
-              <span class="metric-row__value">{{ server.name }}</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-row__label">Tag</span>
-              <span class="metric-row__value">{{ server.server_tag }}</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-row__label">类型</span>
-              <span class="metric-row__value">{{ server.server_type?.toUpperCase() }}</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-row__label">会话</span>
-              <span class="metric-row__value">{{ server.session_count || 0 }}</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-row__label">权重</span>
-              <span class="metric-row__value">{{ server.weight }}</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-row__label">CPU</span>
-              <el-progress :percentage="Math.round(server.cpu_usage || 0)" :color="cpuColor(server.cpu_usage)" size="small" style="width: 120px" />
-            </div>
-            <div class="metric-row">
-              <span class="metric-row__label">内存</span>
-              <el-progress :percentage="Math.round((server.memory_usage || 0) / 10)" :color="cpuColor(server.memory_usage / 10)" size="small" style="width: 120px" />
-            </div>
-            <div class="metric-row">
-              <span class="metric-row__label">带宽入</span>
-              <span class="metric-row__value">{{ formatBandwidth(server.bandwidth_in) }}</span>
-            </div>
-            <div class="metric-row">
-              <span class="metric-row__label">带宽出</span>
-              <span class="metric-row__value">{{ formatBandwidth(server.bandwidth_out) }}</span>
-            </div>
+        </div>
+        <div class="server-card__body">
+          <div class="metric-row">
+            <span class="metric-row__label">名称</span>
+            <span class="metric-row__value">{{ server.name }}</span>
+          </div>
+          <div class="metric-row">
+            <span class="metric-row__label">Tag</span>
+            <span class="metric-row__value">{{ server.server_tag }}</span>
+          </div>
+          <div class="metric-row">
+            <span class="metric-row__label">类型</span>
+            <span class="metric-row__value">{{ server.server_type?.toUpperCase() }}</span>
+          </div>
+          <div class="metric-row">
+            <span class="metric-row__label">会话</span>
+            <span class="metric-row__value">{{ server.session_count || 0 }}</span>
+          </div>
+          <div class="metric-row">
+            <span class="metric-row__label">权重</span>
+            <span class="metric-row__value">{{ server.weight }}</span>
+          </div>
+          <div class="metric-row">
+            <span class="metric-row__label">CPU</span>
+            <el-progress :percentage="Math.round(server.cpu_usage || 0)" :color="cpuColor(server.cpu_usage)" size="small" style="width: 120px" />
+          </div>
+          <div class="metric-row">
+            <span class="metric-row__label">内存</span>
+            <el-progress :percentage="Math.round((server.memory_usage || 0) / 10)" :color="cpuColor(server.memory_usage / 10)" size="small" style="width: 120px" />
+          </div>
+          <div class="metric-row">
+            <span class="metric-row__label">带宽入</span>
+            <span class="metric-row__value">{{ formatBandwidth(server.bandwidth_in) }}</span>
+          </div>
+          <div class="metric-row">
+            <span class="metric-row__label">带宽出</span>
+            <span class="metric-row__value">{{ formatBandwidth(server.bandwidth_out) }}</span>
           </div>
         </div>
       </div>
     </div>
 
-    <el-dialog v-model="showModal" :title="isEdit ? '编辑服务器' : '添加服务器'" width="640px" draggable>
+    <AppDialog v-model="showModal" :title="isEdit ? '编辑服务器' : '添加服务器'" size="md" draggable>
       <el-form :model="form" label-width="100px">
         <el-form-item label="服务器名称" required>
           <el-input v-model="form.name" placeholder="例如: ZLM-Beijing-01" />
@@ -106,7 +101,7 @@
           <div style="margin-top: 4px; font-size: 12px; color: var(--el-text-color-secondary);">字母组合，用于唯一标识服务器</div>
         </el-form-item>
         <el-form-item label="协议端口">
-          <el-table :data="portRows" size="small" border style="width: 100%;">
+          <el-table :data="portRows" border stripe size="small" style="width: 100%;">
             <el-table-column prop="label" label="协议" width="100" />
             <el-table-column label="端口" min-width="200">
               <template #default="{ row }">
@@ -144,16 +139,22 @@
           {{ isEdit ? '保存修改' : '确认添加' }}
         </el-button>
       </template>
-    </el-dialog>
-  </div>
+    </AppDialog>
+  </PageView>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useMediaServerStore } from '../stores/mediaServerStore'
 import { Refresh, Plus, Edit, Delete, Close } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
+import { useToast } from '../composables/useToast'
 import StatusDot from '../components/common/StatusDot.vue'
+import PageView from '../components/common/PageView.vue'
+import EmptyState from '../components/common/EmptyState.vue'
+import AppDialog from '../components/common/AppDialog.vue'
+
+const toast = useToast()
 
 const store = useMediaServerStore()
 const servers = computed(() => store.servers)
@@ -259,7 +260,7 @@ function closeModal() { showModal.value = false }
 
 async function submitForm() {
   if (!form.value.server_tag.trim()) {
-    ElMessage.error('服务器标签不能为空')
+    toast.error('服务器标签不能为空')
     return
   }
   submitting.value = true
@@ -282,7 +283,7 @@ async function submitForm() {
     closeModal()
   } catch (e) {
     console.error(e)
-    ElMessage.error(e.message || '操作失败')
+    toast.error(e.message || '操作失败')
   } finally {
     submitting.value = false
   }
@@ -304,7 +305,7 @@ async function confirmDelete(server) {
       { type: 'warning' }
     )
   } catch {
-    return // 用户取消
+    return
   }
   try {
     await store.deleteServer(server.server_tag)
@@ -328,12 +329,11 @@ onUnmounted(() => { if (refreshInterval) clearInterval(refreshInterval) })
   border: 1px solid var(--border);
   border-radius: var(--radius-base);
   overflow: hidden;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s;
   cursor: pointer;
 }
 .server-card:hover {
   border-color: var(--border-accent);
-  box-shadow: var(--shadow-accent);
 }
 .server-card.selected {
   border-color: var(--color-accent);
@@ -350,7 +350,7 @@ onUnmounted(() => { if (refreshInterval) clearInterval(refreshInterval) })
 .server-name {
   flex: 1;
   font-weight: var(--weight-semibold);
-  font-size: var(--text-base);
+  font-size: var(--text-md);
   color: var(--text-primary);
   min-width: 0;
   overflow: hidden;

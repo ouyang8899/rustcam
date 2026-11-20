@@ -1,10 +1,10 @@
-use std::sync::Arc;
 use dashmap::DashMap;
+use std::sync::Arc;
 
 use crate::config::MediaServerConfig;
 use crate::domain::server::{Server, ServerProtocolPorts, ServerType};
-use crate::infrastructure::DbRepository;
 use crate::infrastructure::cluster::ClusterManager;
+use crate::infrastructure::DbRepository;
 
 #[derive(Debug, Clone)]
 pub struct ManagedServer {
@@ -90,7 +90,6 @@ impl ManagedServer {
 }
 
 pub struct MediaServerService {
-
     servers: Arc<DashMap<String, ManagedServer>>,
 
     repo: Arc<DbRepository>,
@@ -101,7 +100,6 @@ pub struct MediaServerService {
 }
 
 impl MediaServerService {
-
     pub fn new(
         repo: Arc<DbRepository>,
         cluster: Arc<ClusterManager>,
@@ -113,7 +111,10 @@ impl MediaServerService {
         let _db_count = repo.servers_cache().len();
 
         let db_servers: Vec<_> = {
-            repo.servers_cache().iter().map(|r| r.value().clone()).collect()
+            repo.servers_cache()
+                .iter()
+                .map(|r| r.value().clone())
+                .collect()
         };
 
         for db_server in db_servers {
@@ -123,15 +124,16 @@ impl MediaServerService {
                 db_server.server_tag.clone()
             };
 
-            let server_type = ServerType::from_str(&db_server.server_type)
-                .unwrap_or(ServerType::Zlmediakit);
+            let server_type =
+                ServerType::from_str(&db_server.server_type).unwrap_or(ServerType::Zlmediakit);
 
             let mut protocol_ports: ServerProtocolPorts =
                 serde_json::from_value(db_server.protocol_ports.clone()).unwrap_or_default();
             if protocol_ports.is_empty() {
-                if let Some(cfg) = config_servers.iter().find(|c| {
-                    c.server_tag == db_server.server_tag || c.name == db_server.name
-                }) {
+                if let Some(cfg) = config_servers
+                    .iter()
+                    .find(|c| c.server_tag == db_server.server_tag || c.name == db_server.name)
+                {
                     protocol_ports = cfg.protocol_ports.clone();
                 }
             }
@@ -147,9 +149,10 @@ impl MediaServerService {
                 server_tag: tag,
                 protocol_ports,
                 created_at: chrono::DateTime::from_timestamp(
-                    db_server.created_at.unix_timestamp(), 0,
+                    db_server.created_at.unix_timestamp(),
+                    0,
                 )
-                    .unwrap_or_else(chrono::Utc::now),
+                .unwrap_or_else(chrono::Utc::now),
             };
 
             servers.insert(ms.server_tag.clone(), ms.clone());
@@ -159,7 +162,12 @@ impl MediaServerService {
             }
         }
 
-        Self { servers, repo, cluster, config_servers }
+        Self {
+            servers,
+            repo,
+            cluster,
+            config_servers,
+        }
     }
 
     pub fn list(&self) -> Vec<ManagedServer> {
@@ -192,7 +200,13 @@ impl MediaServerService {
         protocol_ports: ServerProtocolPorts,
     ) -> ManagedServer {
         let mut ms = ManagedServer::new(
-            name, url, api_key, server_type, weight, server_tag, protocol_ports,
+            name,
+            url,
+            api_key,
+            server_type,
+            weight,
+            server_tag,
+            protocol_ports,
         );
 
         let domain = ms.to_domain();
@@ -201,10 +215,7 @@ impl MediaServerService {
                 ms.id = id;
             }
             Err(e) => {
-                tracing::warn!(
-                    "[MediaServerService] Failed to persist server to DB: {}",
-                    e
-                );
+                tracing::warn!("[MediaServerService] Failed to persist server to DB: {}", e);
             }
         }
 
@@ -231,23 +242,39 @@ impl MediaServerService {
         protocol_ports: Option<ServerProtocolPorts>,
     ) -> Option<ManagedServer> {
         if let Some(mut entry) = self.servers.get_mut(tag) {
-
             let old_tag = entry.server_tag.clone();
-            if let Some(v) = name { entry.name = v; }
-            if let Some(v) = url { entry.url = v; }
-            if let Some(v) = api_key { entry.api_key = v; }
-            if let Some(v) = server_type { entry.server_type = v; }
-            if let Some(v) = weight { entry.weight = v; }
-            if let Some(v) = enabled { entry.enabled = v; }
-            if let Some(v) = server_tag { entry.server_tag = v; }
-            if let Some(v) = protocol_ports { entry.protocol_ports = v; }
+            if let Some(v) = name {
+                entry.name = v;
+            }
+            if let Some(v) = url {
+                entry.url = v;
+            }
+            if let Some(v) = api_key {
+                entry.api_key = v;
+            }
+            if let Some(v) = server_type {
+                entry.server_type = v;
+            }
+            if let Some(v) = weight {
+                entry.weight = v;
+            }
+            if let Some(v) = enabled {
+                entry.enabled = v;
+            }
+            if let Some(v) = server_tag {
+                entry.server_tag = v;
+            }
+            if let Some(v) = protocol_ports {
+                entry.protocol_ports = v;
+            }
 
             let updated = entry.value().clone();
             drop(entry);
 
             if updated.server_tag != old_tag {
                 self.servers.remove(&old_tag);
-                self.servers.insert(updated.server_tag.clone(), updated.clone());
+                self.servers
+                    .insert(updated.server_tag.clone(), updated.clone());
             }
 
             let domain = updated.to_domain();
@@ -266,13 +293,15 @@ impl MediaServerService {
             return Some(updated);
         }
 
-        tracing::warn!("[MediaServerService] Server not found for update: tag={}", tag);
+        tracing::warn!(
+            "[MediaServerService] Server not found for update: tag={}",
+            tag
+        );
         None
     }
 
     pub async fn delete(&self, tag: &str) -> bool {
         if let Some((_, ms)) = self.servers.remove(tag) {
-
             self.cluster.unregister_server(tag);
 
             if let Err(e) = self.repo.delete_server(ms.id).await {
@@ -284,7 +313,10 @@ impl MediaServerService {
             return true;
         }
 
-        tracing::warn!("[MediaServerService] Server not found for delete: tag={}", tag);
+        tracing::warn!(
+            "[MediaServerService] Server not found for delete: tag={}",
+            tag
+        );
         false
     }
 
@@ -330,13 +362,13 @@ impl MediaServerService {
     pub fn get_stats(&self) -> serde_json::Value {
         let total = self.servers.len();
         let enabled = self.servers.iter().filter(|r| r.enabled).count();
-        let types: std::collections::HashMap<String, usize> = self
-            .servers
-            .iter()
-            .fold(std::collections::HashMap::new(), |mut acc, r| {
-                *acc.entry(r.server_type.to_string()).or_insert(0) += 1;
-                acc
-            });
+        let types: std::collections::HashMap<String, usize> =
+            self.servers
+                .iter()
+                .fold(std::collections::HashMap::new(), |mut acc, r| {
+                    *acc.entry(r.server_type.to_string()).or_insert(0) += 1;
+                    acc
+                });
 
         serde_json::json!({
             "total": total,
@@ -353,12 +385,9 @@ mod tests {
     use std::sync::Arc;
 
     fn create_test_repo() -> Arc<DbRepository> {
-
         unimplemented!("Use test database for integration tests")
     }
 
     #[tokio::test]
-    async fn test_create_and_get_server() {
-
-    }
+    async fn test_create_and_get_server() {}
 }

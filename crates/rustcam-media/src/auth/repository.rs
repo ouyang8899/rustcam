@@ -135,7 +135,8 @@ impl UserRepository for InMemoryAuthRepository {
     }
 
     async fn find_by_username(&self, username: &str) -> Result<Option<User>> {
-        Ok(self.username_index
+        Ok(self
+            .username_index
             .get(username)
             .and_then(|id| self.users.get(&id).map(|u| u.clone())))
     }
@@ -175,7 +176,8 @@ impl UserRepository for InMemoryAuthRepository {
     }
 
     async fn get_user_roles(&self, user_id: Uuid) -> Result<Vec<String>> {
-        let role_ids = self.user_roles
+        let role_ids = self
+            .user_roles
             .get(&user_id)
             .map(|r| r.clone())
             .unwrap_or_default();
@@ -209,7 +211,11 @@ impl RoleRepository for InMemoryAuthRepository {
     }
 
     async fn find_by_name(&self, name: &str) -> Result<Option<Role>> {
-        Ok(self.roles.iter().find(|r| r.name == name).map(|r| r.clone()))
+        Ok(self
+            .roles
+            .iter()
+            .find(|r| r.name == name)
+            .map(|r| r.clone()))
     }
 
     async fn create(&self, role: &Role) -> Result<()> {
@@ -237,7 +243,8 @@ impl RoleRepository for InMemoryAuthRepository {
     }
 
     async fn get_role_permissions(&self, role_id: Uuid) -> Result<Vec<String>> {
-        let perm_ids = self.role_permissions
+        let perm_ids = self
+            .role_permissions
             .get(&role_id)
             .map(|p| p.clone())
             .unwrap_or_default();
@@ -251,7 +258,8 @@ impl RoleRepository for InMemoryAuthRepository {
     }
 
     async fn set_role_permissions(&self, role_id: Uuid, permission_ids: &[Uuid]) -> Result<()> {
-        self.role_permissions.insert(role_id, permission_ids.to_vec());
+        self.role_permissions
+            .insert(role_id, permission_ids.to_vec());
         Ok(())
     }
 
@@ -313,7 +321,11 @@ impl PermissionRepository for InMemoryAuthRepository {
     }
 
     async fn find_by_name(&self, name: &str) -> Result<Option<Permission>> {
-        Ok(self.permissions.iter().find(|p| p.name == name).map(|p| p.clone()))
+        Ok(self
+            .permissions
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.clone()))
     }
 
     async fn create(&self, permission: &Permission) -> Result<()> {

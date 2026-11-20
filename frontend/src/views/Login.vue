@@ -75,7 +75,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { useToast } from '../composables/useToast'
 import { User, Lock, Sunny, Moon } from '@element-plus/icons-vue'
 import { useThemeStore } from '../stores/themeStore'
 
@@ -84,13 +84,14 @@ import { useAuthStore } from '../stores/authStore'
 
 const router = useRouter()
 const auth = useAuthStore()
+const toast = useToast()
 
 const form = ref({ username: 'admin', password: '' })
 const loading = ref(false)
 
 async function handleLogin() {
   if (!form.value.username || !form.value.password) {
-    ElMessage.warning('请输入用户名和密码')
+    toast.warning('请输入用户名和密码')
     return
   }
   loading.value = true
@@ -98,7 +99,7 @@ async function handleLogin() {
     await auth.login(form.value.username, form.value.password)
     router.push('/')
   } catch (e) {
-    ElMessage.error(e.message || '登录失败')
+    toast.error(e.message || '登录失败')
   } finally {
     loading.value = false
   }

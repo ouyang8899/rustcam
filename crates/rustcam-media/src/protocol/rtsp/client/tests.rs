@@ -2,14 +2,14 @@
 mod tests {
     use std::sync::Arc;
     use std::time::Duration;
-    use tokio::sync::{ RwLock };
+    use tokio::sync::RwLock;
 
     use crate::protocol::rtsp::client::auth::AuthCredentials;
-    use crate::protocol::rtsp::client::types::{MediaDirection, RtpTransportMode};
     use crate::protocol::rtsp::client::client::RtspClient;
     use crate::protocol::rtsp::client::state::RtspState;
-    use crate::protocol::rtsp::common::RtspError;
+    use crate::protocol::rtsp::client::types::{MediaDirection, RtpTransportMode};
     use crate::protocol::rtsp::common::RtcpReportType;
+    use crate::protocol::rtsp::common::RtspError;
 
     struct TestCallback {
         rtp_count: Arc<RwLock<usize>>,
@@ -26,8 +26,7 @@ mod tests {
     }
 
     impl crate::protocol::rtsp::client::client::RtspClientCallback for TestCallback {
-        fn on_state_change(&self, _state: &RtspState) {
-        }
+        fn on_state_change(&self, _state: &RtspState) {}
 
         fn on_rtp_packet(&self, _track_id: &str, data: &[u8], _ssrc: u32) {
             let _len = data.len();
@@ -42,11 +41,9 @@ mod tests {
         ) {
         }
 
-        fn on_error(&self, _error: &RtspError) {
-        }
+        fn on_error(&self, _error: &RtspError) {}
 
-        fn on_teardown_complete(&self) {
-        }
+        fn on_teardown_complete(&self) {}
     }
 
     #[tokio::test]
@@ -77,8 +74,7 @@ mod tests {
             .expect("start_rtsp_receive failed");
 
         match client.options().await {
-            Ok(_resp) => {
-            }
+            Ok(_resp) => {}
             Err(e) => {
                 panic!("OPTIONS failed: {:?}", e);
             }
@@ -86,8 +82,7 @@ mod tests {
 
         let tracks = match client.describe().await {
             Ok(tracks) => {
-                for _track in &tracks {
-                }
+                for _track in &tracks {}
                 tracks
             }
             Err(_e) => {
@@ -100,16 +95,17 @@ mod tests {
         }
 
         for track in &tracks {
-            match client.setup(&track.track_id, MediaDirection::RecvOnly).await {
+            match client
+                .setup(&track.track_id, MediaDirection::RecvOnly)
+                .await
+            {
                 Ok(_) => {}
-                Err(_e) => {
-                }
+                Err(_e) => {}
             }
         }
 
         match client.play().await {
-            Ok(_) => {
-            }
+            Ok(_) => {}
             Err(e) => {
                 panic!("PLAY failed: {:?}", e);
             }
@@ -128,7 +124,6 @@ mod tests {
             Ok(_) => {}
             Err(_e) => {}
         }
-
     }
 
     #[tokio::test]
@@ -159,8 +154,7 @@ mod tests {
             .expect("start_rtsp_receive failed");
 
         match client.options().await {
-            Ok(_resp) => {
-            }
+            Ok(_resp) => {}
             Err(e) => {
                 panic!("OPTIONS failed: {:?}", e);
             }
@@ -169,39 +163,32 @@ mod tests {
         let _tracks = match client.describe_with_backchannel().await {
             Ok(tracks) => {
                 for track in &tracks {
-                    if let Some(ref _ctrl) = track.control_url {
-                    }
+                    if let Some(ref _ctrl) = track.control_url {}
                 }
                 tracks
             }
             Err(e) => {
-                if matches!(e, RtspError::BackchannelNotSupported) {
-                }
+                if matches!(e, RtspError::BackchannelNotSupported) {}
                 return;
             }
         };
 
         match client.get_backchannel_track().await {
-            Some(_track) => {
-            }
-            None => {
-            }
+            Some(_track) => {}
+            None => {}
         }
 
         match client.teardown().await {
             Ok(_) => {}
             Err(_e) => {}
         }
-
     }
 
     #[tokio::test]
     async fn test_rtsp_url_parsing() {
         let url = "rtsp://192.168.1.211:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1";
 
-        let rest = url
-            .strip_prefix("rtsp://")
-            .unwrap();
+        let rest = url.strip_prefix("rtsp://").unwrap();
 
         let rest_without_auth = if let Some(at) = rest.find('@') {
             &rest[at + 1..]

@@ -66,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let state = DroneState::new(cfg).with_redis(redis).with_db(db);
+    let state: DroneState = DroneState::new(cfg).with_redis(redis).with_db(db);
 
     // 归档队列：遥测与告警落 PostgreSQL（遥测走 TimescaleDB 超表）。
     // ingest 侧只投递不等待，写库由后台 worker 批量完成。

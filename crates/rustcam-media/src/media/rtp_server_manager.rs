@@ -1,4 +1,3 @@
-
 use crate::media::errors::{MediaError, Result};
 use crate::media::node::RtpPacketCallback;
 use crate::media::rtp_server::{RtpPortRange, TcpRtpServer, UDPRtpServer};
@@ -44,7 +43,7 @@ pub struct RtpServerManager {
 
 impl RtpServerManager {
     pub fn new(port_range: RtpPortRange, bind_addr: String, timeout_secs: u64) -> Self {
-        let start = (port_range.start/2) *2;
+        let start = (port_range.start / 2) * 2;
         Self {
             port_range,
             bind_addr,
@@ -215,7 +214,8 @@ impl RtpServerManager {
                 ));
             };
 
-            let server = match UDPRtpServer::new(&self.bind_addr, rtp_port, &self.port_range).await {
+            let server = match UDPRtpServer::new(&self.bind_addr, rtp_port, &self.port_range).await
+            {
                 Ok(server) => Arc::new(server),
                 Err(e) => {
                     tracing::warn!(
@@ -365,8 +365,7 @@ impl RtpServerManager {
     pub async fn release(&self, port: u16, protocol: TransportType) {
         let key = PortKey(port, protocol);
 
-        if let Some(_info) = self.ports.get(&key) {
-        }
+        if let Some(_info) = self.ports.get(&key) {}
         self.ports.remove(&key);
 
         match protocol {
@@ -444,16 +443,12 @@ impl RtpServerManager {
         let timeout = Duration::from_secs(self.timeout_secs);
         let now = Instant::now();
 
-        let snapshot: Vec<(u16, TransportType)> = self
-            .ports
-            .iter()
-            .map(|e| (e.key().0, e.key().1))
-            .collect();
+        let snapshot: Vec<(u16, TransportType)> =
+            self.ports.iter().map(|e| (e.key().0, e.key().1)).collect();
 
         let mut to_release = Vec::new();
 
         for (port, proto) in snapshot {
-
             let session = match proto {
                 TransportType::Udp => {
                     let server = { self.udp_servers.get(&port).map(|s| s.value().clone()) };
@@ -482,11 +477,7 @@ impl RtpServerManager {
         }
 
         for (port, proto) in to_release {
-            tracing::warn!(
-                "[RtpServerManager] Timeout cleanup {} ({:?})",
-                port,
-                proto
-            );
+            tracing::warn!("[RtpServerManager] Timeout cleanup {} ({:?})", port, proto);
             self.release(port, proto).await;
         }
     }
@@ -514,9 +505,9 @@ pub fn init_rtp_server_manager(
         timeout_secs,
     ));
 
-    RTP_SERVER_MANAGER
-        .set(manager.clone())
-        .map_err(|_| MediaError::Transport("RtpServerManager 初始化失败（已被其他线程初始化）".into()))?;
+    RTP_SERVER_MANAGER.set(manager.clone()).map_err(|_| {
+        MediaError::Transport("RtpServerManager 初始化失败（已被其他线程初始化）".into())
+    })?;
 
     let manager_for_task = manager.clone();
     tokio::spawn(async move {

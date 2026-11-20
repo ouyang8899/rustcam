@@ -1,4 +1,3 @@
-
 pub struct G711;
 
 impl G711 {
@@ -165,25 +164,30 @@ mod tests {
             let d = G711::ulaw_decode(e);
             let orig_abs = s.unsigned_abs() as i32;
 
-            let tol = if orig_abs == 0 { 32 } else { (orig_abs * 7 / 10).max(4096) };
+            let tol = if orig_abs == 0 {
+                32
+            } else {
+                (orig_abs * 7 / 10).max(4096)
+            };
             assert!(
                 (s as i32 - d as i32).abs() <= tol,
                 "μ-law: s={} e=0x{:02X} d={} tol={}",
-                s, e, d, tol
+                s,
+                e,
+                d,
+                tol
             );
         }
     }
 
     #[test]
     fn test_alaw_encode_decode() {
-
         assert_eq!(G711::alaw_encode(1000) & 0x80, 0x80);
         assert_eq!(G711::alaw_encode(-1000) & 0x80, 0x00);
     }
 
     #[test]
     fn test_ulaw_encode_decode() {
-
         assert_eq!(G711::ulaw_encode(0) & 0x80, 0x80);
         assert_eq!(G711::ulaw_encode(-1000) & 0x80, 0x00);
         assert_eq!(G711::ulaw_encode(1000) & 0x80, 0x80);
@@ -191,7 +195,6 @@ mod tests {
 
     #[test]
     fn test_ulaw_standard_vectors() {
-
         assert_eq!(G711::ulaw_encode(0), 0xFF);
         assert_eq!(G711::ulaw_encode(i16::MAX), 0x80);
         assert_eq!(G711::ulaw_encode(i16::MIN), 0x00);

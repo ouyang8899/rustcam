@@ -1,0 +1,47 @@
+// ============================================================
+//  RustCam-Media — Utility Layer
+//  .mono / .muted / .empty-state / .fixed-toast / .status-dot
+// ============================================================
+
+.u-flex { display: flex; }
+.u-inline-flex { display: inline-flex; }
+.u-center { align-items: center; justify-content: center; }
+.u-between { align-items: center; justify-content: space-between; }
+.u-grow { flex: 1; min-width: 0; }
+.u-column { flex-direction: column; }
+.u-wrap { flex-wrap: wrap; }
+
+@for $i from 1 through 8 {
+  .u-gap-#{$i} { gap: var(--space-#{$i}); }
+  .u-mt-#{$i} { margin-top: var(--space-#{$i}); }
+  .u-mb-#{$i} { margin-bottom: var(--space-#{$i}); }
+}
+
+.u-mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.u-muted { color: var(--text-muted); }
+
+.u-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.u-nowrap { white-space: nowrap; }
+
+.stream-key {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.muted {
+  color: var(--text-muted);
+}

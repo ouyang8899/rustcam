@@ -152,7 +152,7 @@ QWidget* MapPlugin::createWorkspace(QWidget* parent)
                 });
         mapLayout->addWidget(m_mapView);
         connect(m_mapView, &CefBrowserWidget::mapReady, this, &MapPlugin::onMapReady);
-        m_mapView->initialize(121.4737, 31.2304, 11, m_tmsUrl, m_minZoom, m_maxZoom);
+        m_mapView->initialize(121.4737, 31.2304, 11, m_layersJson);
     }
 
     connect(zoomInBtn, &QToolButton::clicked, this, [this]() {
@@ -480,18 +480,11 @@ void MapPlugin::onTilesUrlReceived(EventDataPtr data)
         return;
     }
 
-    m_tmsUrl = data->m_payload.value("tms_url").toString();
-    if (data->m_payload.contains("min_zoom")) {
-        m_minZoom = data->m_payload.value("min_zoom").toInt();
+    m_layersJson = data->m_payload.value("client_layers").toString();
+    if (m_layersJson.trimmed().isEmpty()) {
+        m_layersJson = QStringLiteral("[]");
     }
-    if (data->m_payload.contains("max_zoom")) {
-        m_maxZoom = data->m_payload.value("max_zoom").toInt();
-    }
-    if (m_minZoom > m_maxZoom) {
-        m_minZoom = 0;
-        m_maxZoom = 19;
-    }
-    LOG_INFO("MapPlugin", QString("Tile url received: %1 (zoom %2-%3)").arg(m_tmsUrl).arg(m_minZoom).arg(m_maxZoom));
+    LOG_INFO("MapPlugin", QString("Tile layers received: %1").arg(m_layersJson));
     applyTilesUrl();
 }
 
@@ -503,8 +496,7 @@ void MapPlugin::applyTilesUrl()
         return;
     }
     // 只切换底图，不改变当前视野。
-    m_mapView->setTilesUrl(m_tmsUrl);
-    m_mapView->setZoomLimits(m_minZoom, m_maxZoom);
+    m_mapView->setTilesUrl(m_layersJson);
 }
 
 }
