@@ -1,9 +1,10 @@
-﻿#pragma once
+#pragma once
 
 #include "TourScheme.h"
 #include "TourTypes.h"
 
 #include <QElapsedTimer>
+#include <QHash>
 #include <QObject>
 #include <QSet>
 #include <QStringList>
@@ -59,6 +60,8 @@ public:
     void prevBatch();
     /// 重试某个窗口当前的通道。
     void retrySlot(const QString& layoutItemId);
+    void lockSlot(const QString& layoutItemId, const TourChannelRef& channel);
+    void unlockSlot(const QString& layoutItemId);
     /// 全屏时暂停换批与补位，退出全屏后恢复。
     void setFullscreenPaused(bool paused);
 
@@ -75,6 +78,7 @@ public:
     int cycle() const { return m_cycle; }
     int availableSlots() const { return m_s; }
     int queueSize() const { return m_n; }
+    QHash<QString, TourChannelRef> runtimeLocks() const { return m_runtimeLocks; }
     /// 当前批次中该通道所在的窗口；不在当前批次时返回空串。
     QString layoutItemIdForChannel(const TourChannelRef& channel) const;
 
@@ -108,11 +112,13 @@ private:
     int slotIndexOf(const QString& layoutItemId) const;
     bool inRunWindow() const;
     bool windowExpired() const;
+    QVector<TourChannelRef> orderedChannels() const;
 
     TourScheme m_scheme;
     TourSnapshot m_snapshot;
     QStringList m_lockedItems;
     QStringList m_unlockedItems;
+    QHash<QString, TourChannelRef> m_runtimeLocks;
 
     int m_n = 0;   ///< 参与轮询的通道数
     int m_s = 0;   ///< 可用窗口数

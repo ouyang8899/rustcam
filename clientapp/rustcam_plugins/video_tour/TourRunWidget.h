@@ -50,21 +50,19 @@ private slots:
     void onCountdown(int dwellRemainMs, int batchTimeoutMs);
     void onPageAtEnd();
     void onCellRetryRequested(const QString& layoutItemId);
+    void onCellLockToggled(const QString& layoutItemId);
 
 private:
     void startScheme(const TourScheme& scheme);
     void updateButtons();
-    /// 方案树里是否有选中项。
     bool hasSelectedScheme() const;
-    /// 轮询任务是否正在进行或暂停。
     bool isTaskActive() const;
     void showLockedChannels(const TourScheme& scheme, const TourSnapshot& snapshot);
-    /// 锁定窗口不受调度器管理，播放事件需自行回写状态。
     void updateLockedChannelState(const QString& layoutItemId, quint64 generation,
                                   TourChannelState state, const QString& reason);
-    /// 按当前选中方案（或默认布局）重建视频网格。
+    void applyLockState(const QString& layoutItemId, bool locked, const TourChannelRef& channel);
+    void updateSlotsLabel();
     void refreshGrid();
-    /// 按布局 id 取布局；找不到返回 nullptr。
     const PlayerLayout* layoutById(int layoutId) const;
 
     TourApi* m_api = nullptr;
@@ -94,6 +92,7 @@ private:
     QPushButton* m_nextButton = nullptr;
 
     TourScheme m_currentScheme;
+    bool m_lockSaving = false;
 };
 
 } // namespace rustcam

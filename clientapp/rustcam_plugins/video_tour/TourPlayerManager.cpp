@@ -75,6 +75,9 @@ void TourPlayerManager::setLayout(const PlayerLayout& layout)
         connect(cell, &TourPlayer::audioToggled, this, [this, item](bool enabled) {
             setAudio(item.id, enabled);
         });
+        connect(cell, &TourPlayer::lockToggled, this, [this, item](const QString&) {
+            emit lockToggled(item.id);
+        });
         connect(cell, &TourPlayer::firstFrame, this, [this, item](quint64 generation) {
             emit firstFrame(item.id, generation);
         });
@@ -145,6 +148,21 @@ void TourPlayerManager::setSlotState(const QString& layoutItemId, TourChannelSta
     TourPlayer* cell = m_cells.value(layoutItemId, nullptr);
     if (cell) {
         cell->setSlotState(state, reason);
+    }
+}
+
+void TourPlayerManager::setLocked(const QString& layoutItemId, bool locked)
+{
+    TourPlayer* cell = m_cells.value(layoutItemId, nullptr);
+    if (cell) {
+        cell->setLocked(locked);
+    }
+}
+
+void TourPlayerManager::clearLockedStates()
+{
+    for (auto it = m_cells.constBegin(); it != m_cells.constEnd(); ++it) {
+        it.value()->setLocked(false);
     }
 }
 

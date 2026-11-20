@@ -20,7 +20,7 @@ class VideoPlayer;
 ///  - 不接受设备拖放、不允许拖动换位（通道分配由调度器独占）；
 ///  - 角标显示轮询状态（待轮询/请求中/首帧加载/播放中/失败/已跳过/已锁定/补位中）；
 ///  - 播放回调带 generation，过期回调直接丢弃；
-///  - 画面停滞由看门狗判定，交给调度器补位。
+///  - 画面停滞由看门狗判定，交给调度器补位；
 class TourPlayer : public QWidget {
     Q_OBJECT
 public:
@@ -30,6 +30,7 @@ public:
     QString layoutItemId() const { return m_layoutItemId; }
     /// 当前生效的 generation；0 表示常驻锁定窗口（不受调度器管理）。
     quint64 generation() const { return m_generation; }
+    TourChannelRef currentChannel() const { return m_currentChannel; }
 
     /// 播放一路通道；generation 用于丢弃过期回调。
     void play(const TourChannelRef& channel, quint64 generation);
@@ -37,6 +38,7 @@ public:
     void release();
     /// 设置窗口角标状态与说明。
     void setSlotState(TourChannelState state, const QString& reason = QString());
+    void setLocked(bool locked);
 
     VideoPlayer* video() const { return m_video; }
     QString title() const;
@@ -53,17 +55,27 @@ signals:
     void retryRequested();
     void fullscreenToggled(bool fullscreen);
     void audioToggled(bool enabled);
+    void lockToggled(const QString& layoutItemId);
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private slots:
     void onRetryClicked();
     void onFullscreenClicked();
     void onAudioToggled(bool checked);
+    void onLockClicked();
 
 private:
     void onPlayUrlReady(quint64 generation, quint64 requestSeq, bool success,
                         const QString& url, const QString& error);
     void updateStatusText();
     void updateAudioIcon();
+    void updateLockButton();
+    void setHovered(bool hovered);
+    void updateLockVisibility();
+    bool cursorOverLockButton() const;
 
     TourApi* m_api = nullptr;
     QString m_layoutItemId;
@@ -75,13 +87,18 @@ private:
 
     TourChannelState m_state = TourChannelState::Pending;
     QString m_reason;
+    TourChannelRef m_currentChannel;
+    bool m_locked = false;
+    bool m_hovered = false;
 
     VideoPlayer* m_video = nullptr;
+    QWidget* m_bar = nullptr;
     QLabel* m_titleLabel = nullptr;
     QLabel* m_statusLabel = nullptr;
     QToolButton* m_fullscreenButton = nullptr;
     QToolButton* m_audioButton = nullptr;
     QToolButton* m_retryButton = nullptr;
+    QToolButton* m_lockButton = nullptr;
 };
 
 } // namespace rustcam

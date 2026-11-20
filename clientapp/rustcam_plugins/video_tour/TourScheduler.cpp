@@ -1,4 +1,4 @@
-﻿#include "TourScheduler.h"
+#include "TourScheduler.h"
 
 #include <QDateTime>
 #include <QTime>
@@ -7,6 +7,7 @@
 
 #include "TourAuditLog.h"
 #include "TourBatchPlanner.h"
+#include "TourLockOps.h"
 
 namespace rustcam {
 
@@ -516,8 +517,132 @@ void TourScheduler::retrySlot(const QString& layoutItemId)
     TourAuditLog::log(QStringLiteral("channel_retry"));
 }
 
-void TourScheduler::setFullscreenPaused(bool paused)
+void TourScheduler::lockSlot(const QString& layoutItemId, const TourChannelRef& channel)
 {
+    if (m_state != TourTaskState::Running && m_state != TourTaskState::Paused) {
+        return;
+    }
+
+    QVector<TourLockOps::Slot> batchSlots;
+    batchSlots.reserve(m_batch.assignments.size());
+    for (const SlotAssignment& assignment : m_batch.assignments) {
+        batchSlots.append(TourLockOps::Slot{assignment.layoutItemId, assignment.channel});
+    }
+
+    const auto result = TourLockOps::lock(layoutItemId, channel, m_snapshot.activeQueue,
+                                           m_unlockedItems, m_lockedItems, batchSlots);
+    if (!result.valid) {
+        return;
+    }
+
+    if (result.removedIndex >= 0 && result.removedIndex < m_cursor) {
+        --m_cursor;
+    }
+    m_snapshot.activeQueue = result.queue;
+    m_unlockedItems = result.unlockedItems;
+    m_lockedItems = result.lockedItems;
+    m_runtimeLocks.insert(layoutItemId, channel);
+
+    for (int i = 0; i < m_batch.assignments.size() && i < result.batch.size(); ++i) {
+        m_batch.assignments[i].channel = result.batch.at(i).channel;
+    }
+
+    m_n = m_snapshot.activeQueue.size();
+    m_s = m_unlockedItems.size();
+    if (m_cursor >= m_snapshot.activeQueue.size()) {
+        m_cursor = qMax(0, m_snapshot.activeQueue.size() - 1);
+    }
+    m_covered.remove(channel.key());
+
+    if (!result.backfillItemId.isEmpty()) {
+        backfillSlot(result.backfillItemId);
+    }
+
+    if (m_s <= 0) {
+        m_tick.stop();
+        setState(TourTaskState::NoSlot);
+        TourAuditLog::log(QStringLiteral("slot_lock_all"));
+        return;
+    }
+
+    QJsonObject detail;
+    detail.insert(QStringLiteral("slot"), layoutItemId);
+    detail.insert(QStringLiteral("channel"), channel.key());
+    TourAuditLog::log(QStringLiteral("slot_lock"), detail);
+}
+
+void TourScheduler::unlockSlot(const QString& layoutItemId)
+{
+    if (m_state != TourTaskState::Running && m_state != TourTaskState::Paused
+        && m_state != TourTaskState::NoSlot) {
+        return;
+    }
+
+    const TourChannelRef channel = m_runtimeLocks.value(layoutItemId);
+    QVector<TourLockOps::Slot> batchSlots;
+    batchSlots.reserve(m_batch.assignments.size());
+    for (const SlotAssignment& assignment : m_batch.assignments) {
+        batchSlots.append(TourLockOps::Slot{assignment.layoutItemId, assignment.channel});
+    }
+
+    const auto result = TourLockOps::unlock(layoutItemId, channel, m_snapshot.activeQueue,
+                                            m_unlockedItems, m_lockedItems, batchSlots,
+                                            orderedChannels());
+    if (!result.valid) {
+        return;
+    }
+
+    if (result.insertedIndex >= 0 && result.insertedIndex <= m_cursor) {
+        ++m_cursor;
+    }
+    m_snapshot.activeQueue = result.queue;
+    m_unlockedItems = result.unlockedItems;
+    m_lockedItems = result.lockedItems;
+    m_runtimeLocks.remove(layoutItemId);
+
+    for (int i = 0; i < m_batch.assignments.size() && i < result.batch.size(); ++i) {
+        m_batch.assignments[i].channel = result.batch.at(i).channel;
+    }
+
+    m_n = m_snapshot.activeQueue.size();
+    m_s = m_unlockedItems.size();
+    if (m_cursor >= m_snapshot.activeQueue.size()) {
+        m_cursor = qMax(0, m_snapshot.activeQueue.size() - 1);
+    }
+
+    const bool wasNoSlot = (m_state == TourTaskState::NoSlot);
+    if (wasNoSlot && m_s > 0) {
+        setState(TourTaskState::Running);
+        m_tick.start();
+        if (m_batch.finished || m_batch.assignments.isEmpty()) {
+            beginBatch();
+        }
+    }
+
+    if (m_state == TourTaskState::Running) {
+        backfillSlot(layoutItemId);
+    }
+
+    QJsonObject detail;
+    detail.insert(QStringLiteral("slot"), layoutItemId);
+    detail.insert(QStringLiteral("channel"), channel.key());
+    TourAuditLog::log(QStringLiteral("slot_unlock"), detail);
+}
+
+QVector<TourChannelRef> TourScheduler::orderedChannels() const
+{
+    QVector<TourChannel> sorted = m_scheme.channels;
+    std::stable_sort(sorted.begin(), sorted.end(),
+                     [](const TourChannel& a, const TourChannel& b) { return a.sort < b.sort; });
+    QVector<TourChannelRef> refs;
+    refs.reserve(sorted.size());
+    for (const TourChannel& channel : sorted) {
+        refs.append(channel.ref());
+    }
+    return refs;
+}
+
+void TourScheduler::setFullscreenPaused(bool paused){
     if (paused) {
         if (m_state == TourTaskState::Running) {
             pause();

@@ -154,7 +154,7 @@ void TourSchemeListPanel::onEditScheme()
     }
     const TourScheme edited = dialog.scheme();
     const int expectedVersion = scheme.version;
-    m_api->updateScheme(edited, expectedVersion, [this](bool success, const QString& error) {
+    m_api->updateScheme(edited, expectedVersion, [this](bool success, const TourScheme&, const QString& error) {
         if (!success) {
             emit notify(tr("保存方案失败：%1").arg(error), true);
             refresh();

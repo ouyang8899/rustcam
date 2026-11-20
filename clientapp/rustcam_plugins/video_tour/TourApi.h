@@ -33,7 +33,7 @@ public:
     void getScheme(qint64 id, SchemeCb cb);
     void createScheme(const TourScheme& scheme, SchemeCb cb);
     /// 保存方案；expectedVersion 不匹配时服务端返回 409。
-    void updateScheme(const TourScheme& scheme, int expectedVersion, VoidCb cb);
+    void updateScheme(const TourScheme& scheme, int expectedVersion, SchemeCb cb);
     void deleteScheme(qint64 id, VoidCb cb);
     /// 取可播放地址：rtsp_media → hls → flv。
     void fetchPlayUrl(const TourChannelRef& channel, UrlCb cb);

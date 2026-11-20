@@ -4,6 +4,7 @@ set(PLUGIN_SOURCES
     VideoTourPlugin.cpp
     TourScheme.cpp
     TourBatchPlanner.cpp
+    TourLockOps.cpp
     TourApi.cpp
     TourPlayer.cpp
     TourPlayerManager.cpp
@@ -23,6 +24,7 @@ set(PLUGIN_HEADERS
     TourTypes.h
     TourScheme.h
     TourBatchPlanner.h
+    TourLockOps.h
     TourApi.h
     TourPlayer.h
     TourPlayerManager.h
@@ -103,6 +105,7 @@ if(Qt5Test_FOUND)
         tests/TourSchedulerTest.cpp
         TourScheduler.cpp
         TourBatchPlanner.cpp
+        TourLockOps.cpp
         TourScheme.cpp
         TourAuditLog.cpp
     )
@@ -113,6 +116,17 @@ if(Qt5Test_FOUND)
     )
     target_link_libraries(video_tour_scheduler_test PRIVATE Qt5::Core Qt5::Test)
     add_test(NAME video_tour_scheduler_test COMMAND video_tour_scheduler_test)
+
+    add_executable(video_tour_lock_test
+        tests/TourLockOpsTest.cpp
+        TourLockOps.cpp
+    )
+    target_include_directories(video_tour_lock_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}
+    )
+    target_link_libraries(video_tour_lock_test PRIVATE Qt5::Core Qt5::Test)
+    add_test(NAME video_tour_lock_test COMMAND video_tour_lock_test)
 endif()
 
 add_custom_command(TARGET ${PLUGIN_ID} POST_BUILD

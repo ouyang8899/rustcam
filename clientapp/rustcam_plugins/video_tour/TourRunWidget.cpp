@@ -13,6 +13,7 @@
 #include "TourAuditLog.h"
 #include "TourChannelModel.h"
 #include "TourChannelStatusPanel.h"
+#include "TourPlayer.h"
 #include "TourPlayerManager.h"
 #include "TourScheduler.h"
 #include "TourSchemeListPanel.h"
@@ -121,6 +122,7 @@ TourRunWidget::TourRunWidget(TourApi* api, QWidget* parent)
     connect(m_players, &TourPlayerManager::fullscreenChanged, this,
             [this](const QString&, bool fullscreen) { m_scheduler->setFullscreenPaused(fullscreen); });
     connect(m_players, &TourPlayerManager::retryRequested, this, &TourRunWidget::onCellRetryRequested);
+    connect(m_players, &TourPlayerManager::lockToggled, this, &TourRunWidget::onCellLockToggled);
 
     // 锁定窗口（generation 0）不经过调度器，状态由这里自行回写。
     connect(m_players, &TourPlayerManager::firstFrame, this,
@@ -187,6 +189,7 @@ void TourRunWidget::stopTask()
     }
     if (m_players) {
         m_players->releaseAll();
+        m_players->clearLockedStates();
     }
     m_lockedChannels.clear();
     delete m_guard;
@@ -309,7 +312,7 @@ void TourRunWidget::startScheme(const TourScheme& scheme)
         m_scheduler->start(scheme, snapshot, QStringList());
 
         m_schemeLabel->setText(tr("方案 %1").arg(scheme.name));
-        m_slotsLabel->setText(tr("可用槽位 %1").arg(snapshot.layoutW - snapshot.lockedSet.size()));
+        updateSlotsLabel();
 
         QJsonObject detail;
         detail.insert(QStringLiteral("scheme"), scheme.id);
@@ -330,8 +333,107 @@ void TourRunWidget::showLockedChannels(const TourScheme& scheme, const TourSnaps
         // generation 0 表示该窗口不受调度器管理（常驻锁定）。
         m_players->play(slot.layoutItemId, ref, 0);
         m_players->setSlotState(slot.layoutItemId, TourChannelState::Locked, tr("常驻锁定"));
+        m_players->setLocked(slot.layoutItemId, true);
         m_model->setState(ref, TourChannelState::Locked, tr("常驻锁定"));
     }
+}
+
+void TourRunWidget::onCellLockToggled(const QString& layoutItemId)
+{
+    if (!m_api || !m_players || !m_scheduler) {
+        return;
+    }
+    if (m_currentScheme.id == 0) {
+        emit notify(tr("请先选择并开始轮询方案"), true);
+        return;
+    }
+    if (m_lockSaving) {
+        emit notify(tr("正在保存锁定状态，请稍候"), true);
+        return;
+    }
+    TourPlayer* cell = m_players->playerFor(layoutItemId);
+    if (!cell) {
+        return;
+    }
+
+    const bool wasLocked = m_lockedChannels.contains(layoutItemId);
+    TourChannelRef ref = wasLocked ? m_lockedChannels.value(layoutItemId) : cell->currentChannel();
+    if (!wasLocked && ref.isEmpty()) {
+        emit notify(tr("该窗口当前没有画面，无法锁定"), true);
+        return;
+    }
+
+    TourScheme next = m_currentScheme;
+    if (wasLocked) {
+        for (int i = 0; i < next.lockedSet.size(); ++i) {
+            if (next.lockedSet.at(i).layoutItemId == layoutItemId) {
+                next.lockedSet.remove(i);
+                break;
+            }
+        }
+    } else {
+        LockedSlot slot;
+        slot.layoutItemId = layoutItemId;
+        slot.deviceTag = ref.deviceTag;
+        slot.channelTag = ref.channelTag;
+        next.lockedSet.append(slot);
+    }
+
+    applyLockState(layoutItemId, !wasLocked, ref);
+    m_lockSaving = true;
+
+    m_api->updateScheme(next, m_currentScheme.version,
+                        [this, layoutItemId, wasLocked, ref](bool success, const TourScheme& updated,
+                                                             const QString& error) {
+        m_lockSaving = false;
+        if (!success) {
+            applyLockState(layoutItemId, wasLocked, ref);
+            emit notify(tr("保存轮询方案失败：%1").arg(error), true);
+            if (m_listPanel) {
+                m_listPanel->refresh();
+            }
+            return;
+        }
+        m_currentScheme = updated;
+        if (m_listPanel) {
+            m_listPanel->refresh();
+        }
+        updateSlotsLabel();
+        emit notify(wasLocked ? tr("已解除锁定，窗口恢复轮换") : tr("已锁定窗口，不再参与轮换"), false);
+    });
+}
+
+void TourRunWidget::applyLockState(const QString& layoutItemId, bool locked,
+                                   const TourChannelRef& channel)
+{
+    if (locked) {
+        m_lockedChannels.insert(layoutItemId, channel);
+        m_scheduler->lockSlot(layoutItemId, channel);
+        m_players->play(layoutItemId, channel, 0);
+        m_players->setSlotState(layoutItemId, TourChannelState::Locked, tr("常驻锁定"));
+        m_players->setLocked(layoutItemId, true);
+        if (m_model) {
+            m_model->setState(channel, TourChannelState::Locked, tr("常驻锁定"));
+        }
+    } else {
+        m_lockedChannels.remove(layoutItemId);
+        m_players->releaseSlot(layoutItemId);
+        m_scheduler->unlockSlot(layoutItemId);
+        m_players->setLocked(layoutItemId, false);
+        if (m_model && !channel.isEmpty()) {
+            m_model->setState(channel, TourChannelState::Pending, QString());
+        }
+    }
+    updateSlotsLabel();
+}
+
+void TourRunWidget::updateSlotsLabel()
+{
+    if (!m_slotsLabel) {
+        return;
+    }
+    const int available = m_scheduler ? m_scheduler->availableSlots() : 0;
+    m_slotsLabel->setText(tr("可用槽位 %1").arg(available));
 }
 
 void TourRunWidget::updateLockedChannelState(const QString& layoutItemId, quint64 generation,

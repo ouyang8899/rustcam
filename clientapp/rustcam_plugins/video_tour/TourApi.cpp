@@ -135,7 +135,7 @@ void TourApi::createScheme(const TourScheme& scheme, SchemeCb cb)
         });
 }
 
-void TourApi::updateScheme(const TourScheme& scheme, int expectedVersion, VoidCb cb)
+void TourApi::updateScheme(const TourScheme& scheme, int expectedVersion, SchemeCb cb)
 {
     QJsonObject body = TourSchemeCodec::toJson(scheme);
     body.insert(QStringLiteral("expectedVersion"), expectedVersion);
@@ -151,8 +151,12 @@ void TourApi::updateScheme(const TourScheme& scheme, int expectedVersion, VoidCb
                 });
         },
         [cb](bool success, const QJsonObject& response, const QString& error) {
+            TourScheme updated;
+            if (success) {
+                TourSchemeCodec::fromJson(dataOf(response), &updated);
+            }
             if (cb) {
-                cb(success, success ? QString() : error);
+                cb(success, updated, success ? QString() : error);
             }
         });
 }

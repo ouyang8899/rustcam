@@ -36,6 +36,8 @@ public:
 
     /// 设置窗口角标状态（由调度器状态驱动）。
     void setSlotState(const QString& layoutItemId, TourChannelState state, const QString& reason = QString());
+    void setLocked(const QString& layoutItemId, bool locked);
+    void clearLockedStates();
 
     /// 同一时刻只让一个窗口出声。
     void setAudio(const QString& layoutItemId, bool enabled);
@@ -51,6 +53,7 @@ signals:
     void stalled(const QString& layoutItemId, quint64 generation);
     void fullscreenChanged(const QString& layoutItemId, bool fullscreen);
     void retryRequested(const QString& layoutItemId);
+    void lockToggled(const QString& layoutItemId);
 
 private slots:
     void onWatchdog();

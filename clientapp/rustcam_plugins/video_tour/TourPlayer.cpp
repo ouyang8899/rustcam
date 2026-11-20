@@ -1,10 +1,12 @@
 #include "TourPlayer.h"
 
+#include <QCursor>
 #include <QEvent>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPointer>
+#include <QResizeEvent>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -17,6 +19,9 @@ namespace {
 
 /// 连续多少个看门狗周期帧数不增长即判定停滞（约 3 秒）。
 constexpr int kStalledTicks = 6;
+
+constexpr int kLockButtonSize = 22;
+constexpr int kLockButtonMargin = 4;
 
 /// 轮询窗口用的画面控件：屏蔽实时播放器专有的交互。
 ///
@@ -64,10 +69,13 @@ TourPlayer::TourPlayer(TourApi* api, const QString& layoutItemId, QWidget* paren
 
     m_video = new TourVideoSurface(this);
     m_video->installEventFilter(m_video);
+    m_video->installEventFilter(this);
     layout->addWidget(m_video, 1);
 
     QWidget* bar = new QWidget(this);
     bar->setObjectName(QStringLiteral("TourCellBar"));
+    bar->installEventFilter(this);
+    m_bar = bar;
     QHBoxLayout* barLayout = new QHBoxLayout(bar);
     barLayout->setContentsMargins(4, 2, 4, 2);
     barLayout->setSpacing(4);
@@ -101,13 +109,30 @@ TourPlayer::TourPlayer(TourApi* api, const QString& layoutItemId, QWidget* paren
 
     layout->addWidget(bar, 0);
 
+    m_lockButton = new QToolButton(this);
+    m_lockButton->setObjectName(QStringLiteral("TourLockButton"));
+    m_lockButton->setFixedSize(kLockButtonSize, kLockButtonSize);
+    m_lockButton->setAutoRaise(true);
+    m_lockButton->setCursor(Qt::PointingHandCursor);
+    m_lockButton->setFocusPolicy(Qt::NoFocus);
+    m_lockButton->setStyleSheet(QStringLiteral(
+        "QToolButton { background-color: rgba(0, 0, 0, 140); border: 1px solid rgba(255, 255, 255, 60);"
+        " border-radius: %1px; }"
+        "QToolButton:hover { background-color: rgba(0, 0, 0, 190); }"
+        "QToolButton:disabled { background-color: rgba(0, 0, 0, 90); }")
+                                       .arg(kLockButtonSize / 2));
+    m_lockButton->installEventFilter(this);
+    m_lockButton->hide();
+
     // 轮询默认静音：同一时刻只允许一个窗口出声，由调度器侧切换。
     m_video->setAudioEnabled(false);
     updateAudioIcon();
+    updateLockButton();
 
     connect(m_fullscreenButton, &QToolButton::clicked, this, &TourPlayer::onFullscreenClicked);
     connect(m_audioButton, &QToolButton::toggled, this, &TourPlayer::onAudioToggled);
     connect(m_retryButton, &QToolButton::clicked, this, &TourPlayer::onRetryClicked);
+    connect(m_lockButton, &QToolButton::clicked, this, &TourPlayer::onLockClicked);
 
     connect(m_video, &VideoPlayer::started, this, [this]() {
         m_playing = true;
@@ -140,6 +165,8 @@ void TourPlayer::play(const TourChannelRef& channel, quint64 generation)
     m_playing = false;
     m_stalledTicks = 0;
     m_lastFrames = -1;
+    m_currentChannel = channel;
+    updateLockButton();
 
     const QString label = channel.deviceTag + QLatin1Char('/') + channel.channelTag;
     m_titleLabel->setText(label);
@@ -192,10 +219,12 @@ void TourPlayer::release()
     m_playing = false;
     m_stalledTicks = 0;
     m_lastFrames = -1;
+    m_currentChannel = TourChannelRef();
     m_titleLabel->clear();
     m_state = TourChannelState::Pending;
     m_reason.clear();
     updateStatusText();
+    updateLockButton();
 }
 
 void TourPlayer::setSlotState(TourChannelState state, const QString& reason)
@@ -255,6 +284,93 @@ void TourPlayer::onAudioToggled(bool checked)
     m_video->setAudioEnabled(checked);
     updateAudioIcon();
     emit audioToggled(checked);
+}
+
+void TourPlayer::onLockClicked()
+{
+    emit lockToggled(m_layoutItemId);
+}
+
+void TourPlayer::setLocked(bool locked)
+{
+    if (m_locked == locked) {
+        return;
+    }
+    m_locked = locked;
+    updateLockButton();
+}
+
+void TourPlayer::updateLockButton()
+{
+    if (!m_lockButton) {
+        return;
+    }
+    m_lockButton->setText(m_locked ? QStringLiteral("🔒") : QStringLiteral("🔓"));
+    m_lockButton->setToolTip(m_locked ? QStringLiteral("解除锁定（恢复轮换）")
+                                      : QStringLiteral("锁定此窗口（固定当前通道）"));
+    const bool hasPicture = !m_currentChannel.isEmpty();
+    m_lockButton->setEnabled(hasPicture);
+    if (m_locked) {
+        m_lockButton->setEnabled(true);
+    }
+    updateLockVisibility();
+}
+
+void TourPlayer::setHovered(bool hovered)
+{
+    if (m_hovered == hovered) {
+        return;
+    }
+    m_hovered = hovered;
+    updateLockVisibility();
+}
+
+void TourPlayer::updateLockVisibility()
+{
+    if (!m_lockButton) {
+        return;
+    }
+    m_lockButton->setVisible(m_hovered);
+    if (m_hovered) {
+        m_lockButton->raise();
+    }
+}
+
+bool TourPlayer::cursorOverLockButton() const
+{
+    if (!m_lockButton) {
+        return false;
+    }
+    const QPoint local = m_lockButton->mapFromGlobal(QCursor::pos());
+    return m_lockButton->rect().contains(local);
+}
+
+bool TourPlayer::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched == m_video || watched == m_lockButton || watched == m_bar) {
+        switch (event->type()) {
+        case QEvent::Enter:
+            setHovered(true);
+            break;
+        case QEvent::Leave:
+            if (!cursorOverLockButton() && !rect().contains(mapFromGlobal(QCursor::pos()))) {
+                setHovered(false);
+            }
+            break;
+        default:
+            break;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void TourPlayer::resizeEvent(QResizeEvent* event)
+{
+    QWidget::resizeEvent(event);
+    if (m_lockButton) {
+        m_lockButton->move(width() - m_lockButton->width() - kLockButtonMargin, kLockButtonMargin);
+        m_lockButton->raise();
+    }
 }
 
 void TourPlayer::setAudioEnabled(bool enabled)
