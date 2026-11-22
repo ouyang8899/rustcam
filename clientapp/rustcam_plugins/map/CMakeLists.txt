@@ -2,18 +2,12 @@ set(PLUGIN_ID "map")
 
 set(PLUGIN_SOURCES
     MapPlugin.cpp
-    CefRuntime.cpp
-    MapCefApp.cpp
-    MapBrowserClient.cpp
     CefBrowserWidget.cpp
     MapSidePanel.cpp
 )
 
 set(PLUGIN_HEADERS
     MapPlugin.h
-    CefRuntime.h
-    MapCefApp.h
-    MapBrowserClient.h
     CefBrowserWidget.h
     MapSidePanel.h
 )
@@ -41,8 +35,6 @@ target_link_libraries(${PLUGIN_ID} PUBLIC
     interfaces
     common
     rustcam-core
-    cef
-    libcef_dll_wrapper
     Qt5::Core
     Qt5::Widgets
     Qt5::Concurrent

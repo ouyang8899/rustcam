@@ -89,7 +89,7 @@ include(${CMAKE_SOURCE_DIR}/cmake/CEF.cmake)
 enable_testing()
 # 测试目录可能�?.gitignore 排除（本地存在但不在版本库里），
 # 只在目录确实存在时才加入构建，保证干净的检出也�?configure�?
-foreach(_test_dir cef_smoke bridge_protocol_test map_page_test timeline_test plugin_order_test tour_layout_picker_test server_api_post_test ws_client_test audio_talk_client_test live_video_channel_test)
+foreach(_test_dir cef_smoke bridge_protocol_test map_page_test timeline_test plugin_order_test tour_layout_picker_test server_api_post_test ws_client_test audio_talk_client_test live_video_channel_test browser_protocol_test browser_window_host_test cef_embed_spike)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/${_test_dir}/CMakeLists.txt")
         add_subdirectory(tests/${_test_dir})
     else()
@@ -102,6 +102,15 @@ add_subdirectory(core)
 add_subdirectory(interfaces)
 add_subdirectory(resources)
 add_subdirectory(rustcam_plugins)
+
+# CEF 宿主进程：独立可执行文件，自带 CEF 运行时文件。
+# clientapp 进程不再加载 libcef.dll。
+add_subdirectory(browser)
+
+# CefBrowserWidget 回归测试依赖 core/common/browser/map，放在这些目标定义之后。
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/map_browser_widget_test/CMakeLists.txt")
+    add_subdirectory(tests/map_browser_widget_test)
+endif()
 
 if(BUILD_PRO)
     add_subdirectory(pro)
@@ -142,26 +151,10 @@ endif()
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/bin/rustcam_plugins)
 
 # --- runtime deployment ------------------------------------------------------
-# Everything the executable needs at run time: CEF, third party libraries and
+# Everything the executable needs at run time: third party libraries and
 # the Qt runtime. Without these the build output cannot be started.
-set(CEF_RUNTIME_BIN_FILES
-    ${CEF_BIN_DIR}/libcef.dll
-    ${CEF_BIN_DIR}/chrome_elf.dll
-    ${CEF_BIN_DIR}/v8_context_snapshot.bin
-    ${CEF_BIN_DIR}/vk_swiftshader.dll
-    ${CEF_BIN_DIR}/vk_swiftshader_icd.json
-    ${CEF_BIN_DIR}/vulkan-1.dll
-    ${CEF_BIN_DIR}/d3dcompiler_47.dll
-    ${CEF_BIN_DIR}/dxcompiler.dll
-)
-
-set(CEF_RUNTIME_RES_FILES
-    ${CEF_RES_DIR}/icudtl.dat
-    ${CEF_RES_DIR}/chrome_100_percent.pak
-    ${CEF_RES_DIR}/chrome_200_percent.pak
-    ${CEF_RES_DIR}/resources.pak
-)
-
+#
+# CEF 的运行时文件清单在 cmake/CEF.cmake 里定义（浏览器进程单独部署）。
 set(THIRD_PARTY_RUNTIME_FILES
     ${THIRD_PARTY_DIR}/bin/libcurl.dll
     ${THIRD_PARTY_DIR}/bin/libcrypto-3-x64.dll
@@ -225,24 +218,13 @@ if(TARGET Qt5::Core)
 endif()
 
 add_custom_target(runtime_files ALL
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        $<TARGET_FILE_DIR:rustcam-client>/locales
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CEF_RUNTIME_BIN_FILES} ${CEF_RUNTIME_RES_FILES}
-        $<TARGET_FILE_DIR:rustcam-client>
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CEF_RES_DIR}/locales/en-US.pak
-        $<TARGET_FILE_DIR:rustcam-client>/locales/
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CEF_RES_DIR}/locales/zh-CN.pak
-        $<TARGET_FILE_DIR:rustcam-client>/locales/
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${THIRD_PARTY_RUNTIME_FILES}
         $<TARGET_FILE_DIR:rustcam-client>
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${QT_RUNTIME_FILES}
         $<TARGET_FILE_DIR:rustcam-client>
-    COMMENT "Deploying runtime files (CEF, third party, Qt)"
+    COMMENT "Deploying runtime files (third party, Qt) for rustcam-client"
 )
 
 if(QT_PLATFORM_FILES)

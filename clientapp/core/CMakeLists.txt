@@ -1,6 +1,8 @@
 set(CORE_LIB_SOURCES
     App.cpp
     MainWindow.cpp
+    BrowserHost.cpp
+    BrowserIpcClient.cpp
     SystemUsageMonitor.cpp
     WebSocketClient.cpp
     AudioTalkClient.cpp
@@ -59,9 +61,31 @@ else()
 endif()
 set(CORE_LIB_HEADERS ${CORE_LIB_HEADERS} platform/SystemUsageProbe.h)
 
+# 浏览器窗口宿主策略：按平台挑实现（Win32 / X11 / 降级）。
+# 源码必须在 add_library 之前选定；X11 的链接库在 add_library 之后补。
+if(WIN32)
+    set(CORE_LIB_SOURCES ${CORE_LIB_SOURCES} platform/BrowserWindowHostWin.cpp)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(X11)
+    if(X11_FOUND)
+        set(CORE_LIB_SOURCES ${CORE_LIB_SOURCES} platform/BrowserWindowHostX11.cpp)
+        set(RUSTCAM_NEEDS_X11 TRUE)
+    else()
+        message(STATUS "X11 not found; browser window host falls back to overlay mode")
+        set(CORE_LIB_SOURCES ${CORE_LIB_SOURCES} platform/BrowserWindowHostFallback.cpp)
+        set(RUSTCAM_BROWSER_HOST_FALLBACK TRUE)
+    endif()
+else()
+    set(CORE_LIB_SOURCES ${CORE_LIB_SOURCES} platform/BrowserWindowHostFallback.cpp)
+    set(RUSTCAM_BROWSER_HOST_FALLBACK TRUE)
+endif()
+set(CORE_LIB_HEADERS ${CORE_LIB_HEADERS} platform/BrowserWindowHost.h)
+
 set(CORE_LIB_HEADERS
     App.h
     MainWindow.h
+    BrowserHost.h
+    BrowserIpcClient.h
     SystemUsageMonitor.h
     WebSocketClient.h
     AudioTalkClient.h
@@ -132,6 +156,17 @@ target_link_libraries(rustcam-core PUBLIC
     common
     interfaces
 )
+
+# X11 实现需要额外的链接库与头文件路径。
+if(RUSTCAM_NEEDS_X11)
+    target_link_libraries(rustcam-core PRIVATE ${X11_LIBRARIES})
+    target_include_directories(rustcam-core PRIVATE ${X11_INCLUDE_DIR})
+endif()
+
+# 降级实现只在被选中时才提供符号，保证工厂函数全局唯一。
+if(RUSTCAM_BROWSER_HOST_FALLBACK)
+    target_compile_definitions(rustcam-core PRIVATE RUSTCAM_BROWSER_HOST_FALLBACK)
+endif()
 
 if(Qt5_FOUND)
     target_link_libraries(rustcam-core PUBLIC
@@ -230,8 +265,6 @@ target_link_libraries(rustcam-client PRIVATE
     rustcam-core
     ${CURL_LIBRARY}
     bridge_player
-    cef
-    libcef_dll_wrapper
 )
 
 set_target_properties(rustcam-client PROPERTIES

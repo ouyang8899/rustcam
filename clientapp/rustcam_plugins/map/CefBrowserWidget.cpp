@@ -1,22 +1,15 @@
 #include "CefBrowserWidget.h"
-#include "CefRuntime.h"
-#include "MapBrowserClient.h"
+
+#include "core/BrowserHost.h"
+#include "core/platform/BrowserWindowHost.h"
 #include "common/CefBridgeProtocol.h"
 #include "common/Logger.h"
 
-#include "include/cef_browser.h"
-#include "include/cef_frame.h"
-#include "include/base/cef_bind.h"
-#include "include/base/cef_callback.h"
-#include "include/cef_task.h"
-#include "include/wrapper/cef_closure_task.h"
-
 #include <QJsonObject>
+#include <QHideEvent>
 #include <QResizeEvent>
 #include <QShowEvent>
-#include <QTimer>
-
-#include <windows.h>
+#include <QUuid>
 
 namespace rustcam {
 
@@ -33,29 +26,6 @@ QString jsonEscape(const QString& value)
     return escaped;
 }
 
-// CEF creates its child window with a class whose name can be either
-// "Chrome_WidgetWin_0" or "Chrome_WidgetWin_1" depending on the CEF version.
-// Match the prefix instead of a fixed name, otherwise the browser window is
-// never found and stays at its initial (tiny) size.
-HWND findCefChildWindow(HWND parent)
-{
-    struct Search {
-        HWND result = nullptr;
-    } search;
-
-    EnumChildWindows(parent, [](HWND child, LPARAM param) -> BOOL {
-        wchar_t className[64] = {};
-        if (GetClassNameW(child, className, 64) > 0 &&
-            wcsncmp(className, L"Chrome_WidgetWin_", 17) == 0) {
-            reinterpret_cast<Search*>(param)->result = child;
-            return FALSE;
-        }
-        return TRUE;
-    }, reinterpret_cast<LPARAM>(&search));
-
-    return search.result;
-}
-
 } // namespace
 
 CefBrowserWidget::CefBrowserWidget(QWidget* parent)
@@ -63,20 +33,26 @@ CefBrowserWidget::CefBrowserWidget(QWidget* parent)
 {
     setAttribute(Qt::WA_NativeWindow);
     setMinimumSize(200, 150);
+
+    BrowserHost* host = BrowserHost::instance();
+    connect(host, &BrowserHost::sessionCreated,
+            this, &CefBrowserWidget::onSessionCreated);
+    connect(host, &BrowserHost::sessionReady,
+            this, &CefBrowserWidget::onSessionReady);
+    connect(host, &BrowserHost::sessionEvent,
+            this, &CefBrowserWidget::onSessionEvent);
+    connect(host, &BrowserHost::sessionFailed,
+            this, &CefBrowserWidget::onSessionFailed);
 }
 
 CefBrowserWidget::~CefBrowserWidget()
 {
-    if (m_client) {
-        m_client->setWidget(nullptr);
-        if (CefRuntime::instance().isInitialized()) {
-            m_client->closeBrowser();
-        }
-        CefRuntime::instance().removeClient(m_client.get());
-        // The browser keeps its own reference to the client, so releasing ours
-        // here is safe even while the browser is still closing.
-        m_client = nullptr;
+    if (!m_sessionId.isEmpty()) {
+        detachRemoteWindow();
+        BrowserHost::instance()->closeSession(m_sessionId);
+        m_sessionId.clear();
     }
+    m_remoteHandle = 0;
 }
 
 void CefBrowserWidget::setPageUrl(const QString& url)
@@ -89,6 +65,27 @@ void CefBrowserWidget::showEvent(QShowEvent* event)
     QWidget::showEvent(event);
     if (!m_browserCreated) {
         createBrowser();
+        return;
+    }
+    // 切走再切回地图页时，hideEvent() 已把远端窗口隐藏；这里必须重新应用
+    // 几何并显示，否则页面仍在运行（mapReady/瓦片正常）但屏幕上是空白。
+    applyRemoteBounds();
+}
+
+void CefBrowserWidget::hideEvent(QHideEvent* event)
+{
+    QWidget::hideEvent(event);
+    if (!m_remoteHandle) {
+        return;
+    }
+    if (m_overlayMode) {
+        BrowserHost::instance()->setSessionVisible(m_sessionId, false);
+        return;
+    }
+    BrowserWindowHost* wh = createBrowserWindowHost();
+    if (wh) {
+        wh->setVisible(static_cast<WId>(m_remoteHandle), false);
+        delete wh;
     }
 }
 
@@ -97,125 +94,129 @@ void CefBrowserWidget::createBrowser()
     if (m_browserCreated || m_pageUrl.isEmpty()) {
         return;
     }
-    if (!CefRuntime::instance().initialize()) {
-        emit loadFailed(QStringLiteral("CEF runtime unavailable"));
-        return;
-    }
 
-    const HWND parentHwnd = reinterpret_cast<HWND>(winId());
-    if (!parentHwnd) {
+    BrowserWindowHost* wh = createBrowserWindowHost();
+    m_overlayMode = (wh == nullptr) || !wh->supportsEmbedding();
+    delete wh;
+
+    const WId hostHandle = winId();
+    if (!m_overlayMode && !hostHandle) {
         emit loadFailed(QStringLiteral("no native window handle"));
         return;
     }
 
-    m_client = new MapBrowserClient(this);
-    CefRuntime::instance().addClient(m_client.get());
+    m_sessionId = QStringLiteral("map-%1")
+                       .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+
+    BrowserHost::SessionRequest request;
+    request.sessionId = m_sessionId;
+    request.url = m_pageUrl;
+    request.hostHandle = m_overlayMode ? 0 : hostHandle;
+    request.mode = m_overlayMode ? QStringLiteral("overlay")
+                                  : QStringLiteral("embedded");
+
+    if (!BrowserHost::instance()->createSession(request)) {
+        emit loadFailed(QStringLiteral("browser session unavailable"));
+        m_sessionId.clear();
+        return;
+    }
     m_browserCreated = true;
+}
 
-    // Capture everything by value: the task runs on the CEF UI thread and may
-    // outlive this widget.
-    CefRefPtr<MapBrowserClient> client = m_client;
-    const std::string url = m_pageUrl.toStdString();
+void CefBrowserWidget::onSessionCreated(const QString& sessionId, quint64 handle)
+{
+    if (sessionId != m_sessionId) {
+        return;
+    }
+    // 同一 session id 的会话被重建（browser 进程崩溃重启）：复位页面状态。
+    m_remoteHandle = handle;
+    m_pageLoaded = false;
+    m_mapReady = false;
+    m_initSent = false;
+    applyRemoteBounds();
+}
 
-    CefPostTask(TID_UI, base::BindOnce(
-        [](CefRefPtr<MapBrowserClient> client, HWND parentHwnd, std::string url) {
-            if (!client) {
-                return;
-            }
-            CefWindowInfo windowInfo;
-            RECT rect;
-            GetClientRect(parentHwnd, &rect);
-            windowInfo.SetAsChild(parentHwnd,
-                                  CefRect(0, 0, rect.right - rect.left, rect.bottom - rect.top));
+void CefBrowserWidget::onSessionReady(const QString& sessionId)
+{
+    if (sessionId != m_sessionId) {
+        return;
+    }
+    handleLoadEnd();
+}
 
-            CefBrowserSettings browserSettings;
+void CefBrowserWidget::onSessionEvent(const QString& sessionId, const QString& payload)
+{
+    if (sessionId != m_sessionId) {
+        return;
+    }
+    handleBridgeMessage(payload);
+}
 
-            const bool created = CefBrowserHost::CreateBrowser(
-                windowInfo, client, CefString(url), browserSettings, nullptr, nullptr);
-            if (!created) {
-                LOG_ERROR("CefBrowserWidget", "CreateBrowser failed");
-            }
-        },
-        client, parentHwnd, url));
+void CefBrowserWidget::onSessionFailed(const QString& sessionId, const QString& error)
+{
+    if (sessionId != m_sessionId) {
+        return;
+    }
+    emit loadFailed(error);
 }
 
 void CefBrowserWidget::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
-    syncBrowserGeometry();
+    applyRemoteBounds();
 }
 
-void CefBrowserWidget::syncBrowserGeometry()
+void CefBrowserWidget::applyRemoteBounds()
 {
-    if (!m_client) {
-        return;
-    }
-    const HWND parentHwnd = reinterpret_cast<HWND>(winId());
-    if (!parentHwnd) {
+    if (!m_remoteHandle) {
         return;
     }
 
-    HWND browserHwnd = static_cast<HWND>(m_browserWindow);
-    if (!browserHwnd || !IsWindow(browserHwnd)) {
-        // The browser window is created on the CEF UI thread; look it up as a
-        // child of our native window.
-        browserHwnd = findCefChildWindow(parentHwnd);
-        if (!browserHwnd) {
-            // Creation may still be in flight; retry shortly.
-            QTimer::singleShot(100, this, [this]() { syncBrowserGeometry(); });
-            return;
-        }
-        m_browserWindow = browserHwnd;
+    if (m_overlayMode) {
+        // overlay 模式：把控件的屏幕矩形下发给 browser 进程，
+        // 由它移动自己的顶层窗口。
+        // mapToGlobal 只接受点，取左上角再拼上尺寸。
+        const QPoint topLeft = mapToGlobal(QPoint(0, 0));
+        BrowserHost::instance()->setSessionBounds(m_sessionId,
+                                                   topLeft.x(), topLeft.y(),
+                                                   width(), height());
+        BrowserHost::instance()->setSessionVisible(m_sessionId, isVisible());
+        return;
     }
 
-    RECT rect;
-    GetClientRect(parentHwnd, &rect);
-    const int width = rect.right - rect.left;
-    const int height = rect.bottom - rect.top;
-    ::SetWindowPos(browserHwnd, nullptr, 0, 0, width, height,
-                   SWP_NOZORDER | SWP_NOACTIVATE);
-
-    CefRefPtr<MapBrowserClient> client = m_client;
-    CefPostTask(TID_UI, base::BindOnce(
-        [](CefRefPtr<MapBrowserClient> client) {
-            if (client && client->browser()) {
-                client->browser()->GetHost()->WasResized();
-            }
-        },
-        client));
-
-    if (m_mapReady) {
-        executeJavaScript(QStringLiteral("if (typeof resize === 'function') resize();"));
+    BrowserWindowHost* wh = createBrowserWindowHost();
+    if (!wh) {
+        return;
     }
+    const WId remote = static_cast<WId>(m_remoteHandle);
+    if (wh->isValid(remote)) {
+        wh->setBounds(remote, rect());
+        wh->setVisible(remote, isVisible());
+    }
+    delete wh;
+}
+
+void CefBrowserWidget::detachRemoteWindow()
+{
+    if (!m_remoteHandle || m_overlayMode) {
+        m_remoteHandle = 0;
+        return;
+    }
+    BrowserWindowHost* wh = createBrowserWindowHost();
+    if (wh) {
+        wh->detach(static_cast<WId>(m_remoteHandle));
+        delete wh;
+    }
+    m_remoteHandle = 0;
 }
 
 void CefBrowserWidget::executeJavaScript(const QString& script)
 {
-    if (!m_pageLoaded || !m_client) {
+    if (!m_pageLoaded || m_sessionId.isEmpty()) {
         m_pendingScripts.append(qMakePair(QString(), script));
         return;
     }
-
-    CefRefPtr<MapBrowserClient> client = m_client;
-    CefPostTask(TID_UI, base::BindOnce(
-        [](CefRefPtr<MapBrowserClient> client, std::string script) {
-            if (!client) {
-                LOG_WARNING("CefBrowserWidget", "Script dropped: client is gone");
-                return;
-            }
-            CefRefPtr<CefBrowser> browser = client->browser();
-            if (!browser) {
-                LOG_WARNING("CefBrowserWidget", "Script dropped: browser is null");
-                return;
-            }
-            CefRefPtr<CefFrame> frame = browser->GetMainFrame();
-            if (!frame) {
-                LOG_WARNING("CefBrowserWidget", "Script dropped: main frame is null");
-                return;
-            }
-            frame->ExecuteJavaScript(script, frame->GetURL().ToString(), 0);
-        },
-        client, script.toStdString()));
+    BrowserHost::instance()->executeJavaScript(m_sessionId, script);
 }
 
 void CefBrowserWidget::flushPendingScripts()
@@ -233,11 +234,14 @@ void CefBrowserWidget::flushPendingScripts()
 void CefBrowserWidget::handleLoadEnd()
 {
     m_pageLoaded = true;
-    // The page may have been loaded after the last Qt resize event, so make
-    // sure the native browser window matches the widget before running scripts.
-    syncBrowserGeometry();
+    applyRemoteBounds();
+    // 页面每次加载都要重新下发 initMap：browser 进程崩溃重启后会话重建，
+    // 新页面没有收到过初始化指令（spec §7.1）。
+    if (!m_initScript.isEmpty() && !m_initSent) {
+        m_initSent = true;
+        BrowserHost::instance()->executeJavaScript(m_sessionId, m_initScript);
+    }
     flushPendingScripts();
-    QTimer::singleShot(300, this, [this]() { syncBrowserGeometry(); });
 }
 
 void CefBrowserWidget::handleBridgeMessage(const QString& payload)
@@ -265,9 +269,13 @@ void CefBrowserWidget::handleBridgeMessage(const QString& payload)
 void CefBrowserWidget::initialize(double lon, double lat, int zoom, const QString& layersJson)
 {
     // jsonEscape 已转义 \ " ' 与换行，所以 JSON 串放进单引号里是安全的 JS 字符串字面量。
-    const QString script = QStringLiteral("initMap(%1, %2, %3, '%4')")
+    m_initScript = QStringLiteral("initMap(%1, %2, %3, '%4')")
         .arg(lon).arg(lat).arg(zoom).arg(jsonEscape(layersJson));
-    executeJavaScript(script);
+    if (m_pageLoaded && !m_initSent) {
+        m_initSent = true;
+        BrowserHost::instance()->executeJavaScript(m_sessionId, m_initScript);
+    }
+    // 页面还没加载完时，由 handleLoadEnd() 在 OnLoadEnd 之后下发。
 }
 
 void CefBrowserWidget::setTilesUrl(const QString& layersJson)

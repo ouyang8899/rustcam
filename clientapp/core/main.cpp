@@ -7,14 +7,11 @@
 
 #include <curl/curl.h>
 
-#include "include/cef_app.h"
 #include "App.h"
 #include "Logger.h"
 #include "ThemeStyle.h"
 #include "bridge_player/include/core/app_logger.h"
 #include "bridge_player/include/core/global_context.h"
-#include "common/CefBridgeProtocol.h"
-#include "common/CefRenderBridge.h"
 
 #if defined(Q_OS_WIN)
     #include <windows.h>
@@ -25,19 +22,6 @@
 using rustcam::App;
 
 namespace {
-
-// CefApp used for CEF subprocesses (renderer / gpu / utility).
-class RustCamSubprocessApp : public CefApp, public rustcam::cefbridge::RenderProcessBridge {
-public:
-    CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override
-    {
-        return this;
-    }
-
-private:
-    // Include the default reference counting implementation.
-    IMPLEMENT_REFCOUNTING(RustCamSubprocessApp);
-};
 
 } // namespace
 
@@ -84,17 +68,8 @@ static void forceConsole() {
 #endif
 int main(int argc, char* argv[])
 {
-    // CEF subprocess dispatch. This must be the very first thing in main() so
-    // that renderer/gpu/utility processes exit before QApplication is
-    // constructed and before any plugin is loaded.
-    {
-        CefMainArgs cefArgs(GetModuleHandle(nullptr));
-        CefRefPtr<CefApp> cefApp(new RustCamSubprocessApp());
-        const int cefCode = CefExecuteProcess(cefArgs, cefApp.get(), nullptr);
-        if (cefCode >= 0) {
-            return cefCode;
-        }
-    }
+    // CEF 已拆分为独立进程 rustcam-browser（见 clientapp/browser/）。
+    // 本进程不再加载 libcef.dll，也不做 CEF 子进程分发。
 
 #if defined(Q_OS_WIN)
     forceConsole();

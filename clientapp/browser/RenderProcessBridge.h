@@ -6,18 +6,15 @@
 
 #include "common/CefBridgeProtocol.h"
 
-// Render-process side of the C++ <-> JS bridge.
+// 渲染进程侧的 C++ <-> JS 桥。
 //
-// The renderer process is entered through CefExecuteProcess() before any
-// plugin is loaded, so this half of the bridge lives in the host executable.
-// The browser-process half lives in the map plugin.
-//
-// This header is intentionally header-only so that it can be reused by the
-// host executable and by tests without introducing a link dependency.
+// 渲染进程是 rustcam-browser.exe 自己 spawn 的（--type=renderer），
+// 因此这一半必须住在 rustcam-browser 进程内，不能留在 clientapp。
+// 载荷格式与 clientapp/common/CefBridgeProtocol.h 完全一致。
 namespace rustcam {
 namespace cefbridge {
 
-// Native function exposed to the page as window.rustcamNative(json).
+/// 暴露给页面的原生函数 window.rustcamNative(json)。
 class NativeBridgeHandler : public CefV8Handler {
 public:
     explicit NativeBridgeHandler(CefRefPtr<CefFrame> frame)
@@ -50,7 +47,7 @@ private:
     CefRefPtr<CefFrame> m_frame;
 };
 
-// Injects window.rustcamNative() into every V8 context of the renderer.
+/// 向每个 V8 context 注入 window.rustcamNative()。
 class RenderProcessBridge : public CefRenderProcessHandler {
 public:
     void OnContextCreated(CefRefPtr<CefBrowser> /*browser*/,

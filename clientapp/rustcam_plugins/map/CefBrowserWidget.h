@@ -1,7 +1,5 @@
 #pragma once
 
-#include "include/cef_browser.h"
-
 #include <QList>
 #include <QPair>
 #include <QString>
@@ -9,18 +7,18 @@
 
 namespace rustcam {
 
-class MapBrowserClient;
-
-// Qt widget that hosts a CEF browser as a native child window.
-//
-// The browser lives on the CEF UI thread (multi_threaded_message_loop = true),
-// therefore every CEF call issued from the Qt thread is posted with
-// CefPostTask(TID_UI, ...) and every CEF callback is bounced back to the Qt
-// thread with QMetaObject::invokeMethod(..., Qt::QueuedConnection).
-//
-// Two readiness flags are tracked:
-//   m_pageLoaded - the page finished loading, so ExecuteJavaScript() works.
-//   m_mapReady   - the page reported mapReady through the native bridge.
+/// 承载 rustcam-browser 进程中的 CEF browser 的 Qt 控件。
+///
+/// 浏览器窗口由 rustcam-browser 进程创建（CEF 拥有其生命周期），
+/// 本控件通过跨进程 parent 把它挂进自己的原生窗口，并负责：
+///   - 几何同步（SetWindowPos，跨进程）
+///   - 显隐（ShowWindow，跨进程）
+///   - 脚本下发（经 BrowserHost 走 IPC）
+///   - 事件接收（经 BrowserHost 走 IPC）
+///
+/// 所有权边界（spec §5.1）：本控件**绝不**销毁远端窗口、**绝不**建立父子
+/// 关系、**绝不**修改远端窗口样式；唯一允许的结构性操作是拆解时的
+/// SetParent(remote, nullptr)。
 class CefBrowserWidget : public QWidget {
     Q_OBJECT
 public:
@@ -57,20 +55,29 @@ signals:
 protected:
     void showEvent(QShowEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+    void hideEvent(QHideEvent* event) override;
 
 private:
     void createBrowser();
     void executeJavaScript(const QString& script);
     void flushPendingScripts();
-    void syncBrowserGeometry();
+    void applyRemoteBounds();
+    void detachRemoteWindow();
+    void onSessionCreated(const QString& sessionId, quint64 handle);
+    void onSessionReady(const QString& sessionId);
+    void onSessionEvent(const QString& sessionId, const QString& payload);
+    void onSessionFailed(const QString& sessionId, const QString& error);
 
-    CefRefPtr<MapBrowserClient> m_client;
     QString m_pageUrl;
+    QString m_sessionId;
     QList<QPair<QString, QString>> m_pendingScripts;
-    void* m_browserWindow = nullptr; // HWND of the CEF child window
+    quint64 m_remoteHandle = 0;   // 远端 CEF 窗口的原生句柄
     bool m_browserCreated = false;
     bool m_pageLoaded = false;
     bool m_mapReady = false;
+    bool m_overlayMode = false;  // true = overlay 降级模式
+    QString m_initScript;         // initMap 脚本；页面每次加载都要重新下发
+    bool m_initSent = false;      // 本次页面加载是否已下发过 initMap
 };
 
 } // namespace rustcam

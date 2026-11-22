@@ -1,6 +1,5 @@
 ﻿#include "MapPlugin.h"
 #include "CefBrowserWidget.h"
-#include "CefRuntime.h"
 #include "core/EventBus.h"
 #include "core/ServerApi.h"
 #include "core/VideoPlayer.h"
@@ -61,11 +60,6 @@ bool MapPlugin::initialize(EventBus* bus, QObject* cfg)
 {
     Q_UNUSED(cfg)
 
-    if (!CefRuntime::instance().initialize()) {
-        LOG_ERROR("MapPlugin", "Failed to initialize CEF runtime");
-        return false;
-    }
-
     // The tile url is served by the backend and arrives after login; the
     // plugin only subscribes here and applies it once it is known.
     if (bus) {
@@ -85,7 +79,6 @@ void MapPlugin::shutdown()
         EventBus::instance()->unsubscribe(m_tilesToken);
         m_tilesToken.clear();
     }
-    CefRuntime::instance().shutdown();
 }
 
 QWidget* MapPlugin::createWorkspace(QWidget* parent)
@@ -305,13 +298,14 @@ void MapPlugin::loadDeviceMarkers()
 
 void MapPlugin::onMapReady()
 {
-    if (m_mapReady || !m_mapView) {
+    if (!m_mapView) {
         return;
     }
     m_mapReady = true;
 
-    // The map page is fully initialized now; push the markers that were
-    // collected while the page was still loading.
+    // 全量重推：browser 进程崩溃重启后会话重建，页面会再次发 mapReady，
+    // 此时必须把缓存的 marker 再推一遍（spec §7.1）。
+    // addMarker 语义是 upsert，重复推送是安全的。
     for (auto it = m_markers.constBegin(); it != m_markers.constEnd(); ++it) {
         const MapMarkerData& marker = it.value();
         m_mapView->addMarker(marker.id, marker.lon, marker.lat,
