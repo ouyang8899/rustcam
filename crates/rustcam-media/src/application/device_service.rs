@@ -753,9 +753,16 @@ impl DeviceService {
 
         match target_protocol {
             Protocol::Onvif => {
-                if let Err(e) =
-                    Self::dispatch_onvif_ptz(infra, media, stream_service, &device, command, speed)
-                        .await
+                if let Err(e) = Self::dispatch_onvif_ptz(
+                    infra,
+                    media,
+                    stream_service,
+                    &device,
+                    command,
+                    speed,
+                    None,
+                )
+                .await
                 {
                     tracing::error!("[PTZ] ONVIF failed: device={} err={}", device_id, e);
                 }
@@ -776,12 +783,13 @@ impl DeviceService {
     }
 
     async fn dispatch_onvif_ptz(
-        _infra: &InfraContext,
+        infra: &InfraContext,
         _media: &MediaContext,
         _stream_service: &Arc<StreamService>,
         device: &Device,
         command: &PtzCommand,
         speed: &Option<u8>,
+        channel_tag: Option<&str>,
     ) -> Result<Option<String>> {
         let channel_id = match &device.device_tag {
             Some(tag) => tag.clone(),
@@ -791,6 +799,20 @@ impl DeviceService {
                     device.id
                 )));
             }
+        };
+
+        let profile_token = match channel_tag {
+            Some(tag) => match infra.db.get_channel(&channel_id, tag).await {
+                Ok(Some(channel)) => channel
+                    .extended
+                    .as_ref()
+                    .and_then(|e| e.get("onvif_token"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+                    .or_else(|| Some(tag.to_string())),
+                _ => Some(tag.to_string()),
+            },
+            None => None,
         };
 
         let parent_tag = match &device.parent_device_tag {
@@ -809,7 +831,9 @@ impl DeviceService {
         };
 
         let mut guard = adapter.lock().await;
-        guard.ptz_control(&channel_id, command, *speed).await?;
+        guard
+            .ptz_control(&channel_id, command, *speed, profile_token.as_deref())
+            .await?;
 
         Ok(None)
     }
@@ -841,7 +865,7 @@ impl DeviceService {
 
         let mut inner = adapter_arc.lock().await;
         (&mut *inner)
-            .ptz_control(&channel_id, command, *speed)
+            .ptz_control(&channel_id, command, *speed, None)
             .await?;
         Ok(None)
     }
@@ -851,6 +875,7 @@ impl DeviceService {
         device_id: i64,
         command: PtzCommand,
         speed: Option<u8>,
+        channel_tag: Option<&str>,
     ) -> Result<PtzControlResult> {
         let device = self
             .infra
@@ -882,6 +907,7 @@ impl DeviceService {
                     &device,
                     &command,
                     &speed,
+                    channel_tag,
                 )
                 .await?;
                 Ok(PtzControlResult {
@@ -916,6 +942,29 @@ impl DeviceService {
                 device.protocol
             ))),
         }
+    }
+
+    fn onvif_ptz_client(
+        parent: &Device,
+        profile_token: &str,
+    ) -> Option<crate::protocol::onvif::OnvifPtzClient> {
+        let ptz_url = parent
+            .extended
+            .as_ref()
+            .and_then(|e| e.get("capabilities"))
+            .and_then(|c| c.get("ptz"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())?;
+        Some(
+            crate::protocol::onvif::OnvifPtzService::new(
+                ptz_url.to_string(),
+                parent.device_username.clone(),
+                parent.device_password.clone(),
+            )
+            .into_client()
+            .with_profile(profile_token.to_string()),
+        )
     }
 
     pub async fn get_ptz_status(&self, device_id: i64) -> Result<PtzStatus> {
@@ -953,13 +1002,6 @@ impl DeviceService {
                     device.clone()
                 };
 
-                let x_addr = parent
-                    .extended
-                    .as_ref()
-                    .and_then(|e| e.get("x_addr"))
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| AppError::NotFound("No ONVIF x_addr for device".to_string()))?;
-
                 let profile_token = device
                     .extended
                     .as_ref()
@@ -968,15 +1010,15 @@ impl DeviceService {
                     .unwrap_or("Profile_1")
                     .to_string();
 
-                let ptz_client = crate::protocol::onvif::OnvifPtzService::new(
-                    x_addr.to_string(),
-                    parent.device_username.clone(),
-                    parent.device_password.clone(),
-                )
-                .into_client();
+                let mut ptz_client = Self::onvif_ptz_client(&parent, &profile_token).ok_or_else(
+                    || {
+                        AppError::NotFound(
+                            "ONVIF 设备未记录 PTZ 服务地址，请重新探测设备能力".to_string(),
+                        )
+                    },
+                )?;
 
                 let status = ptz_client
-                    .with_profile(profile_token)
                     .get_status()
                     .await
                     .map_err(|e| AppError::Internal(format!("GetStatus failed: {}", e)))?;
@@ -1931,30 +1973,17 @@ impl DeviceService {
             };
 
             if let Some(parent) = parent {
-                if let Some(x_addr) = parent
+                let profile_token = device
                     .extended
                     .as_ref()
-                    .and_then(|e| e.get("x_addr"))
+                    .and_then(|e| e.get("onvif_token"))
                     .and_then(|v| v.as_str())
-                {
-                    let profile_token = device
-                        .extended
-                        .as_ref()
-                        .and_then(|e| e.get("onvif_token"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("Profile_1")
-                        .to_string();
+                    .unwrap_or("Profile_1")
+                    .to_string();
 
-                    let ptz_client = crate::protocol::onvif::OnvifPtzService::new(
-                        x_addr.to_string(),
-                        parent.device_username.clone(),
-                        parent.device_password.clone(),
-                    )
-                    .into_client();
+                if let Some(mut ptz_client) = Self::onvif_ptz_client(&parent, &profile_token) {
 
-                    if let Ok(camera_presets) =
-                        ptz_client.with_profile(profile_token).get_presets().await
-                    {
+                    if let Ok(camera_presets) = ptz_client.get_presets().await {
                         let db_tokens: std::collections::HashSet<_> =
                             presets.iter().map(|p| p.token.clone()).collect();
 
@@ -2005,29 +2034,17 @@ impl DeviceService {
             };
 
             if let Some(parent) = parent {
-                if let Some(x_addr) = parent
+                let profile_token = device
                     .extended
                     .as_ref()
-                    .and_then(|e| e.get("x_addr"))
+                    .and_then(|e| e.get("onvif_token"))
                     .and_then(|v| v.as_str())
-                {
-                    let profile_token = device
-                        .extended
-                        .as_ref()
-                        .and_then(|e| e.get("onvif_token"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("Profile_1")
-                        .to_string();
+                    .unwrap_or("Profile_1")
+                    .to_string();
 
-                    let ptz_client = crate::protocol::onvif::OnvifPtzService::new(
-                        x_addr.to_string(),
-                        parent.device_username.clone(),
-                        parent.device_password.clone(),
-                    )
-                    .into_client();
+                if let Some(mut ptz_client) = Self::onvif_ptz_client(&parent, &profile_token) {
 
                     ptz_client
-                        .with_profile(profile_token)
                         .set_preset("", Some(name))
                         .await
                         .map_err(|e| AppError::Internal(format!("SetPreset failed: {}", e)))?
@@ -2112,29 +2129,17 @@ impl DeviceService {
             };
 
             if let Some(parent) = parent {
-                if let Some(x_addr) = parent
+                let profile_token = device
                     .extended
                     .as_ref()
-                    .and_then(|e| e.get("x_addr"))
+                    .and_then(|e| e.get("onvif_token"))
                     .and_then(|v| v.as_str())
-                {
-                    let profile_token = device
-                        .extended
-                        .as_ref()
-                        .and_then(|e| e.get("onvif_token"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("Profile_1")
-                        .to_string();
+                    .unwrap_or("Profile_1")
+                    .to_string();
 
-                    let ptz_client = crate::protocol::onvif::OnvifPtzService::new(
-                        x_addr.to_string(),
-                        parent.device_username.clone(),
-                        parent.device_password.clone(),
-                    )
-                    .into_client();
+                if let Some(mut ptz_client) = Self::onvif_ptz_client(&parent, &profile_token) {
 
                     ptz_client
-                        .with_profile(profile_token)
                         .set_preset(token, Some(new_name))
                         .await
                         .map_err(|e| {
@@ -2185,32 +2190,17 @@ impl DeviceService {
             };
 
             if let Some(parent) = parent {
-                if let Some(x_addr) = parent
+                let profile_token = device
                     .extended
                     .as_ref()
-                    .and_then(|e| e.get("x_addr"))
+                    .and_then(|e| e.get("onvif_token"))
                     .and_then(|v| v.as_str())
-                {
-                    let profile_token = device
-                        .extended
-                        .as_ref()
-                        .and_then(|e| e.get("onvif_token"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("Profile_1")
-                        .to_string();
+                    .unwrap_or("Profile_1")
+                    .to_string();
 
-                    let ptz_client = crate::protocol::onvif::OnvifPtzService::new(
-                        x_addr.to_string(),
-                        parent.device_username.clone(),
-                        parent.device_password.clone(),
-                    )
-                    .into_client();
+                if let Some(mut ptz_client) = Self::onvif_ptz_client(&parent, &profile_token) {
 
-                    if let Err(e) = ptz_client
-                        .with_profile(profile_token)
-                        .remove_preset(token)
-                        .await
-                    {
+                    if let Err(e) = ptz_client.remove_preset(token).await {
                         tracing::warn!(
                             "[PTZ] RemovePreset failed (continuing to delete from DB): {}",
                             e

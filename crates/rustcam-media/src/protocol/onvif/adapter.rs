@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::tcp::OwnedWriteHalf;
 
+use crate::domain::Device;
 use crate::domain::SessionType;
 use crate::error::{AppError, Result};
 use crate::media::transport::OnvifBackchannelTransport;
@@ -18,6 +19,7 @@ use crate::protocol::event::{
     ProtocolType, PtzCommand, SignalEvent, TalkResponseStatus, TransportType,
 };
 use crate::protocol::onvif::auth::UsernameToken;
+use crate::protocol::onvif::device_client::OnvifDeviceClient;
 use crate::protocol::onvif::events::PullPointServer;
 use crate::protocol::onvif::ptz_client::OnvifPtzClient;
 use crate::protocol::traits::ProtocolDeps;
@@ -69,6 +71,8 @@ pub struct OnvifAdapter {
     rtsp_host: Option<String>,
     rtsp_port: Option<u16>,
     write: Option<std::sync::Arc<tokio::sync::RwLock<OwnedWriteHalf>>>,
+    ptz_client: Option<OnvifPtzClient>,
+    ptz_endpoint: Option<String>,
     deps: ProtocolDeps,
 }
 
@@ -98,6 +102,8 @@ impl OnvifAdapter {
             rtsp_host: Some(deps.config.server.host.clone()),
             rtsp_port: Some(rtsp_port),
             write: None,
+            ptz_client: None,
+            ptz_endpoint: None,
             deps,
         }
     }
@@ -503,6 +509,71 @@ impl OnvifAdapter {
         24
     }
 
+    async fn resolve_ptz_endpoint(&self, parent: &Device) -> Result<String> {
+        let stored = parent
+            .extended
+            .as_ref()
+            .and_then(|e| e.get("capabilities"))
+            .and_then(|c| c.get("ptz"))
+            .and_then(|u| u.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+        if let Some(url) = stored {
+            return Ok(url);
+        }
+
+        let tag = parent.device_tag.clone().unwrap_or_default();
+        let x_addr = Self::device_service_url(parent).ok_or_else(|| {
+            AppError::NotFound(format!(
+                "ONVIF 设备 {} 既无 capabilities.ptz 也无 x_addr，无法定位 PTZ 服务地址",
+                tag
+            ))
+        })?;
+
+        let username = parent.device_username.clone().unwrap_or_default();
+        let password = parent.device_password.clone().unwrap_or_default();
+        let mut client = OnvifDeviceClient::new(&x_addr).with_credentials(&username, &password);
+        let caps = client
+            .get_capabilities_with_fallback()
+            .await
+            .map_err(|e| AppError::Internal(format!("ONVIF GetCapabilities 失败: {}", e)))?;
+        caps.ptz
+            .ok_or_else(|| AppError::NotFound(format!("ONVIF 设备 {} 未声明 PTZ 服务", tag)))
+    }
+
+    /// Device service URL used to probe capabilities when the device record has none.
+    ///
+    /// Older device rows keep the ONVIF URL in `host` instead of `extended.x_addr`.
+    pub fn device_service_url(parent: &Device) -> Option<String> {
+        let from_extended = parent
+            .extended
+            .as_ref()
+            .and_then(|e| e.get("x_addr"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+        if let Some(url) = from_extended {
+            return Some(url);
+        }
+
+        let host = parent.host.trim();
+        if host.is_empty() {
+            return None;
+        }
+        if host.starts_with("http://") || host.starts_with("https://") {
+            return Some(host.to_string());
+        }
+
+        let port = parent.port;
+        if port == 0 || port == 80 {
+            Some(format!("http://{}/onvif/device_service", host))
+        } else {
+            Some(format!("http://{}:{}/onvif/device_service", host, port))
+        }
+    }
+
     async fn send_raw(&self, data: &[u8]) -> Result<()> {
         if let Some(ref write_arc) = self.write {
             let mut write = write_arc.write().await;
@@ -819,12 +890,15 @@ impl SignalAdapter for OnvifAdapter {
         channel_id: &str,
         command: &PtzCommand,
         speed: Option<u8>,
+        profile_token: Option<&str>,
     ) -> Result<()> {
         let device = match self.deps.device_lookup.find_by_tag(channel_id).await {
             Some(d) => d,
             None => {
-                tracing::warn!("[ONVIF] PTZ device not found: {}", channel_id);
-                return Ok(());
+                return Err(AppError::NotFound(format!(
+                    "ONVIF PTZ device not found: {}",
+                    channel_id
+                )))
             }
         };
 
@@ -836,99 +910,90 @@ impl SignalAdapter for OnvifAdapter {
         let parent = match self.deps.device_lookup.find_by_tag(&parent_tag).await {
             Some(p) => p,
             None => {
-                tracing::warn!("[ONVIF] PTZ parent device not found: {}", parent_tag);
-                return Ok(());
+                return Err(AppError::NotFound(format!(
+                    "ONVIF PTZ parent device not found: {}",
+                    parent_tag
+                )))
             }
         };
 
-        let ptz_url = match &parent.extended {
-            Some(ext) => ext
-                .get("capabilities")
-                .and_then(|c| c.get("ptz"))
-                .and_then(|u| u.as_str())
-                .and_then(|s| {
-                    if s.is_empty() {
-                        None
-                    } else {
-                        Some(s.to_string())
-                    }
-                }),
-            None => None,
-        };
+        let ptz_url = self.resolve_ptz_endpoint(&parent).await?;
 
-        let ptz_url = match ptz_url {
-            Some(url) => url,
-            None => {
-                tracing::warn!("[ONVIF] No PTZ URL found for device {}", parent_tag);
-                return Ok(());
-            }
-        };
-
-        let profile_token = match &parent.extended {
-            Some(ext) => ext
-                .get("onvif_token")
+        let profile_token = match profile_token {
+            Some(t) => t.to_string(),
+            None => parent
+                .extended
+                .as_ref()
+                .and_then(|e| e.get("onvif_token"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("Profile_1")
                 .to_string(),
-            None => "Profile_1".to_string(),
         };
 
-        let client = OnvifPtzClient::new(
-            ptz_url,
-            parent.device_username.clone(),
-            parent.device_password.clone(),
-        )
-        .with_profile(profile_token);
+        if self.ptz_endpoint.as_deref() != Some(ptz_url.as_str()) {
+            self.ptz_client = Some(OnvifPtzClient::new(
+                ptz_url.clone(),
+                parent.device_username.clone(),
+                parent.device_password.clone(),
+            ));
+            self.ptz_endpoint = Some(ptz_url);
+        }
+
+        let client = self
+            .ptz_client
+            .as_mut()
+            .ok_or_else(|| AppError::Internal("ONVIF PTZ client 未初始化".to_string()))?;
+        client.set_profile(profile_token);
 
         match command {
             PtzCommand::ContinuousMove { pan, tilt, zoom } => {
                 if pan.abs() < 0.01 && tilt.abs() < 0.01 && zoom.abs() < 0.01 {
-                    let _ = client.stop().await;
+                    client.stop().await?;
                 } else {
-                    let _ = client.continuous_move(*pan, *tilt, *zoom).await;
+                    client.continuous_move(*pan, *tilt, *zoom).await?;
                 }
             }
             PtzCommand::Up => {
                 let s = speed.map(|v| v as f64 / 100.0).unwrap_or(0.5);
-                let _ = client.continuous_move(0.0, s, 0.0).await;
+                client.continuous_move(0.0, s, 0.0).await?;
             }
             PtzCommand::Down => {
                 let s = speed.map(|v| v as f64 / 100.0).unwrap_or(0.5);
-                let _ = client.continuous_move(0.0, -s, 0.0).await;
+                client.continuous_move(0.0, -s, 0.0).await?;
             }
             PtzCommand::Left => {
                 let s = speed.map(|v| v as f64 / 100.0).unwrap_or(0.5);
-                let _ = client.continuous_move(-s, 0.0, 0.0).await;
+                client.continuous_move(-s, 0.0, 0.0).await?;
             }
             PtzCommand::Right => {
                 let s = speed.map(|v| v as f64 / 100.0).unwrap_or(0.5);
-                let _ = client.continuous_move(s, 0.0, 0.0).await;
+                client.continuous_move(s, 0.0, 0.0).await?;
             }
             PtzCommand::ZoomIn => {
                 let s = speed.map(|v| v as f64 / 100.0).unwrap_or(0.5);
-                let _ = client.continuous_move(0.0, 0.0, s).await;
+                client.continuous_move(0.0, 0.0, s).await?;
             }
             PtzCommand::ZoomOut => {
                 let s = speed.map(|v| v as f64 / 100.0).unwrap_or(0.5);
-                let _ = client.continuous_move(0.0, 0.0, -s).await;
+                client.continuous_move(0.0, 0.0, -s).await?;
             }
             PtzCommand::Stop => {
-                let _ = client.stop().await;
+                client.stop().await?;
             }
             PtzCommand::GotoPreset { preset_token } => {
-                let _ = client.goto_preset(preset_token).await;
+                client.goto_preset(preset_token).await?;
             }
             PtzCommand::SetPreset { preset_name, .. } => {
-                let _ = client
+                client
                     .set_preset("", preset_name.as_deref())
                     .await
-                    .map_err(|e| tracing::warn!("[ONVIF] SetPreset failed: {}", e));
+                    .map_err(|e| AppError::Internal(format!("ONVIF SetPreset failed: {}", e)))?;
             }
             PtzCommand::RemovePreset { preset_token } => {
-                let _ = client
+                client
                     .remove_preset(preset_token)
                     .await
-                    .map_err(|e| tracing::warn!("[ONVIF] RemovePreset failed: {}", e));
+                    .map_err(|e| AppError::Internal(format!("ONVIF RemovePreset failed: {}", e)))?;
             }
             _ => {}
         }
@@ -1062,5 +1127,98 @@ impl SignalAdapter for OnvifAdapter {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::device::Protocol;
+
+    fn onvif_device_with(extended: serde_json::Value) -> Device {
+        let mut device = Device::new("cam".to_string(), Protocol::Onvif);
+        device.device_tag = Some("onvif_test".to_string());
+        device.extended = Some(extended);
+        device
+    }
+
+    #[tokio::test]
+    async fn ptz_endpoint_prefers_stored_capability_url() {
+        let adapter = OnvifAdapter::new(ProtocolDeps::for_test());
+        let device = onvif_device_with(serde_json::json!({
+            "x_addr": "http://cam.local/onvif/device_service",
+            "capabilities": { "ptz": "http://cam.local/onvif/ptz_service" }
+        }));
+        let url = adapter
+            .resolve_ptz_endpoint(&device)
+            .await
+            .expect("stored capability url should be used");
+        assert_eq!(url, "http://cam.local/onvif/ptz_service");
+    }
+
+    #[tokio::test]
+    async fn ptz_endpoint_fails_without_capability_and_without_x_addr() {
+        let adapter = OnvifAdapter::new(ProtocolDeps::for_test());
+        let device = onvif_device_with(serde_json::json!({}));
+        let err = adapter
+            .resolve_ptz_endpoint(&device)
+            .await
+            .expect_err("missing capability and x_addr must fail");
+        assert!(err.to_string().contains("x_addr"));
+    }
+
+    #[tokio::test]
+    async fn ptz_endpoint_ignores_blank_capability_url() {
+        let adapter = OnvifAdapter::new(ProtocolDeps::for_test());
+        let device = onvif_device_with(serde_json::json!({
+            "x_addr": "http://cam.local/onvif/device_service",
+            "capabilities": { "ptz": "   " }
+        }));
+        let err = adapter
+            .resolve_ptz_endpoint(&device)
+            .await
+            .expect_err("blank capability url must not be used");
+        assert!(!err.to_string().contains("cam.local/onvif/ptz_service"));
+    }
+
+    #[test]
+    fn device_service_url_prefers_extended_x_addr() {
+        let mut device = onvif_device_with(serde_json::json!({
+            "x_addr": "http://cam.local/onvif/device_service"
+        }));
+        device.host = "http://other.local/onvif/device_service".to_string();
+        assert_eq!(
+            OnvifAdapter::device_service_url(&device).as_deref(),
+            Some("http://cam.local/onvif/device_service")
+        );
+    }
+
+    #[test]
+    fn device_service_url_falls_back_to_host_column() {
+        let mut device = onvif_device_with(serde_json::json!({}));
+        device.host = "http://192.168.1.211/onvif/device_service".to_string();
+        device.port = 0;
+        assert_eq!(
+            OnvifAdapter::device_service_url(&device).as_deref(),
+            Some("http://192.168.1.211/onvif/device_service")
+        );
+    }
+
+    #[test]
+    fn device_service_url_builds_from_host_and_port() {
+        let mut device = onvif_device_with(serde_json::json!({}));
+        device.host = "192.168.1.211".to_string();
+        device.port = 8000;
+        assert_eq!(
+            OnvifAdapter::device_service_url(&device).as_deref(),
+            Some("http://192.168.1.211:8000/onvif/device_service")
+        );
+    }
+
+    #[test]
+    fn device_service_url_is_none_without_any_hint() {
+        let mut device = onvif_device_with(serde_json::json!({}));
+        device.host = String::new();
+        assert_eq!(OnvifAdapter::device_service_url(&device), None);
     }
 }

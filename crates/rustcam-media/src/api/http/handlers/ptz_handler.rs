@@ -87,7 +87,7 @@ pub async fn ptz_control_handler(
     let device_service = &state.app.registry.device_service;
 
     match device_service
-        .handle_ptz_control(id, command.clone(), req.speed)
+        .handle_ptz_control(id, command.clone(), req.speed, None)
         .await
     {
         Ok(result) => Ok(Json(ApiResponse::success(result))),
@@ -188,7 +188,7 @@ pub async fn channel_ptz_control_handler(
         .app
         .registry
         .device_service
-        .handle_ptz_control(device.id, command.clone(), req.speed)
+        .handle_ptz_control(device.id, command.clone(), req.speed, Some(&channel_tag))
         .await
     {
         Ok(result) => Ok(Json(ApiResponse::success(result))),

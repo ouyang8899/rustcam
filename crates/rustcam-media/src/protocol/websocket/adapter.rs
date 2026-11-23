@@ -438,6 +438,7 @@ impl SignalAdapter for WebSocketAdapter {
         _channel_id: &str,
         _command: &crate::protocol::event::PtzCommand,
         _speed: Option<u8>,
+        _profile_token: Option<&str>,
     ) -> Result<()> {
         Ok(())
     }

@@ -28,6 +28,21 @@ pub fn local_name(name: &str) -> &str {
     }
 }
 
+pub fn xml_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 pub fn extract_action(soap_body: &[u8]) -> Option<String> {
     let xml_str = String::from_utf8_lossy(soap_body).into_owned();
     let doc = Document::parse(&xml_str).ok()?;

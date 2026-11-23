@@ -4758,6 +4758,7 @@ impl SignalAdapter for Gb28181Adapter {
         channel_id: &str,
         command: &crate::protocol::event::PtzCommand,
         speed: Option<u8>,
+        _profile_token: Option<&str>,
     ) -> Result<()> {
         let device = self
             .deps

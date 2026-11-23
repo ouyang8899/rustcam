@@ -1080,6 +1080,7 @@ impl SignalAdapter for RtspServerAdapter {
         _channel_id: &str,
         _command: &PtzCommand,
         _speed: Option<u8>,
+        _profile_token: Option<&str>,
     ) -> Result<()> {
         Ok(())
     }

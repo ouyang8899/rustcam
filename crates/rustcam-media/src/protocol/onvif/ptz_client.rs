@@ -1,30 +1,21 @@
-use crate::protocol::onvif::auth::UsernameToken;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
+use crate::protocol::onvif::soap_client::OnvifSoapClient;
+
+const PTZ_WSDL: &str = "http://www.onvif.org/ver20/ptz/wsdl";
+
 pub struct OnvifPtzClient {
-    ptz_url: String,
-
-    username: Option<String>,
-
-    password: Option<String>,
+    soap: OnvifSoapClient,
 
     profile_token: String,
-
-    http_client: reqwest::Client,
 }
 
 impl OnvifPtzClient {
     pub fn new(ptz_url: String, username: Option<String>, password: Option<String>) -> Self {
         Self {
-            ptz_url,
-            username,
-            password,
+            soap: OnvifSoapClient::new(ptz_url, username, password),
             profile_token: "Profile_1".to_string(),
-            http_client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(10))
-                .build()
-                .expect("ONVIF HTTP client build failed"),
         }
     }
 
@@ -46,21 +37,20 @@ impl OnvifPtzClient {
         self
     }
 
-    pub async fn continuous_move(&self, pan: f64, tilt: f64, zoom: f64) -> anyhow::Result<()> {
-        let body = format!(
-            r#"<ContinuousMove xmlns="http://www.onvif.org/ver20/ptz/wsdl">
-<ProfileToken>{}</ProfileToken>
-<Velocity>
-<PanTilt x="{}" y="{}" xmlns="http://www.onvif.org/ver10/schema"/>
-<Zoom x="{}" xmlns="http://www.onvif.org/ver10/schema"/>
-</Velocity>
-</ContinuousMove>"#,
-            self.profile_token, pan, tilt, zoom
-        );
-        self.send_ptz_request(&body).await
+    pub fn set_profile(&mut self, profile_token: String) {
+        self.profile_token = profile_token;
     }
 
-    pub async fn stop(&self) -> anyhow::Result<()> {
+    pub fn profile_token(&self) -> &str {
+        &self.profile_token
+    }
+
+    pub async fn continuous_move(&mut self, pan: f64, tilt: f64, zoom: f64) -> anyhow::Result<()> {
+        let body = self.continuous_move_body(pan, tilt, zoom);
+        self.send_action("ContinuousMove", &body).await.map(|_| ())
+    }
+
+    pub async fn stop(&mut self) -> anyhow::Result<()> {
         let body = format!(
             r#"<Stop xmlns="http://www.onvif.org/ver20/ptz/wsdl">
 <ProfileToken>{}</ProfileToken>
@@ -69,10 +59,10 @@ impl OnvifPtzClient {
 </Stop>"#,
             self.profile_token
         );
-        self.send_ptz_request(&body).await
+        self.send_action("Stop", &body).await.map(|_| ())
     }
 
-    pub async fn goto_preset(&self, preset_token: &str) -> anyhow::Result<()> {
+    pub async fn goto_preset(&mut self, preset_token: &str) -> anyhow::Result<()> {
         let body = format!(
             r#"<GotoPreset xmlns="http://www.onvif.org/ver20/ptz/wsdl">
 <ProfileToken>{}</ProfileToken>
@@ -80,11 +70,11 @@ impl OnvifPtzClient {
 </GotoPreset>"#,
             self.profile_token, preset_token
         );
-        self.send_ptz_request(&body).await
+        self.send_action("GotoPreset", &body).await.map(|_| ())
     }
 
     pub async fn set_preset(
-        &self,
+        &mut self,
         preset_token: &str,
         preset_name: Option<&str>,
     ) -> anyhow::Result<String> {
@@ -99,12 +89,12 @@ impl OnvifPtzClient {
 </SetPreset>"#,
             self.profile_token, preset_token, name_xml
         );
-        let resp = self.send_ptz_request_raw(&body).await?;
+        let resp = self.send_action("SetPreset", &body).await?;
         self.parse_preset_token(&resp)
             .ok_or_else(|| anyhow::anyhow!("No preset token in response"))
     }
 
-    pub async fn remove_preset(&self, preset_token: &str) -> anyhow::Result<()> {
+    pub async fn remove_preset(&mut self, preset_token: &str) -> anyhow::Result<()> {
         let body = format!(
             r#"<RemovePreset xmlns="http://www.onvif.org/ver20/ptz/wsdl">
 <ProfileToken>{}</ProfileToken>
@@ -112,10 +102,10 @@ impl OnvifPtzClient {
 </RemovePreset>"#,
             self.profile_token, preset_token
         );
-        self.send_ptz_request(&body).await
+        self.send_action("RemovePreset", &body).await.map(|_| ())
     }
 
-    pub async fn absolute_move(&self, pan: f64, tilt: f64, zoom: f64) -> anyhow::Result<()> {
+    pub async fn absolute_move(&mut self, pan: f64, tilt: f64, zoom: f64) -> anyhow::Result<()> {
         let body = format!(
             r#"<AbsoluteMove xmlns="http://www.onvif.org/ver20/ptz/wsdl">
 <ProfileToken>{}</ProfileToken>
@@ -126,10 +116,10 @@ impl OnvifPtzClient {
 </AbsoluteMove>"#,
             self.profile_token, pan, tilt, zoom
         );
-        self.send_ptz_request(&body).await
+        self.send_action("AbsoluteMove", &body).await.map(|_| ())
     }
 
-    pub async fn relative_move(&self, pan: f64, tilt: f64, zoom: f64) -> anyhow::Result<()> {
+    pub async fn relative_move(&mut self, pan: f64, tilt: f64, zoom: f64) -> anyhow::Result<()> {
         let body = format!(
             r#"<RelativeMove xmlns="http://www.onvif.org/ver20/ptz/wsdl">
 <ProfileToken>{}</ProfileToken>
@@ -140,88 +130,47 @@ impl OnvifPtzClient {
 </RelativeMove>"#,
             self.profile_token, pan, tilt, zoom
         );
-        self.send_ptz_request(&body).await
+        self.send_action("RelativeMove", &body).await.map(|_| ())
     }
 
-    pub async fn get_status(&self) -> anyhow::Result<crate::domain::ptz::PtzStatus> {
+    pub async fn get_status(&mut self) -> anyhow::Result<crate::domain::ptz::PtzStatus> {
         let body = format!(
             r#"<GetStatus xmlns="http://www.onvif.org/ver20/ptz/wsdl">
 <ProfileToken>{}</ProfileToken>
 </GetStatus>"#,
             self.profile_token
         );
-        let resp = self.send_ptz_request_raw(&body).await?;
+        let resp = self.send_action("GetStatus", &body).await?;
         self.parse_ptz_status(&resp)
     }
 
-    pub async fn get_presets(&self) -> anyhow::Result<Vec<(String, Option<String>)>> {
+    pub async fn get_presets(&mut self) -> anyhow::Result<Vec<(String, Option<String>)>> {
         let body = format!(
             r#"<GetPresets xmlns="http://www.onvif.org/ver20/ptz/wsdl">
 <ProfileToken>{}</ProfileToken>
 </GetPresets>"#,
             self.profile_token
         );
-        let resp = self.send_ptz_request_raw(&body).await?;
+        let resp = self.send_action("GetPresets", &body).await?;
         Ok(self.parse_presets(&resp))
     }
 
-    fn build_ws_username_token_envelope(&self, body: &str) -> String {
-        let wsse_block = if let (Some(u), Some(p)) = (&self.username, &self.password) {
-            let (nonce, created, digest) = UsernameToken::build_digest(u, p);
-            format!(
-                r#"<wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" SOAP-ENV:mustUnderstand="1">
-  <wsse:UsernameToken>
-    <wsse:Username>{}</wsse:Username>
-    <wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">{}</wsse:Password>
-    <wsse:Nonce EncodingType="Base64Binary">{}</wsse:Nonce>
-    <wsse:Created xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">{}</wsse:Created>
-  </wsse:UsernameToken>
-</wsse:Security>"#,
-                u, digest, nonce, created
-            )
-        } else {
-            String::new()
-        };
-
+    fn continuous_move_body(&self, pan: f64, tilt: f64, zoom: f64) -> String {
         format!(
-            r#"<?xml version="1.0" encoding="UTF-8"?>
-<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
-<s:Header>{}</s:Header>
-<s:Body>{}</s:Body>
-</s:Envelope>"#,
-            wsse_block, body
+            r#"<ContinuousMove xmlns="http://www.onvif.org/ver20/ptz/wsdl">
+<ProfileToken>{}</ProfileToken>
+<Velocity>
+<PanTilt x="{}" y="{}" xmlns="http://www.onvif.org/ver10/schema"/>
+<Zoom x="{}" xmlns="http://www.onvif.org/ver10/schema"/>
+</Velocity>
+</ContinuousMove>"#,
+            self.profile_token, pan, tilt, zoom
         )
     }
 
-    async fn send_ptz_request(&self, body: &str) -> anyhow::Result<()> {
-        let envelope = self.build_ws_username_token_envelope(body);
-        self.send_request(&self.ptz_url, &envelope).await
-    }
-
-    async fn send_ptz_request_raw(&self, body: &str) -> anyhow::Result<String> {
-        let envelope = self.build_ws_username_token_envelope(body);
-        self.send_request_raw(&self.ptz_url, &envelope).await
-    }
-
-    async fn send_request(&self, url: &str, envelope: &str) -> anyhow::Result<()> {
-        self.send_request_raw(url, envelope).await?;
-        Ok(())
-    }
-
-    async fn send_request_raw(&self, url: &str, envelope: &str) -> anyhow::Result<String> {
-        let resp = self
-            .http_client
-            .post(url)
-            .header("Content-Type", "application/soap+xml; charset=utf-8")
-            .body(envelope.to_string())
-            .send()
-            .await?;
-
-        if !resp.status().is_success() {
-            anyhow::bail!("ONVIF request failed: {} (status={})", url, resp.status());
-        }
-
-        Ok(resp.text().await?)
+    async fn send_action(&mut self, action: &str, body: &str) -> anyhow::Result<String> {
+        let full_action = format!("{}/{}", PTZ_WSDL, action);
+        self.soap.post(Some(&full_action), body).await
     }
 
     fn parse_ptz_status(&self, body: &str) -> anyhow::Result<crate::domain::ptz::PtzStatus> {
@@ -357,5 +306,32 @@ impl OnvifPtzClient {
             }
         }
         results
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn profile_token_defaults_to_profile_1() {
+        let client = OnvifPtzClient::new("http://cam.local/onvif/ptz_service".into(), None, None);
+        assert_eq!(client.profile_token(), "Profile_1");
+    }
+
+    #[test]
+    fn with_profile_overrides_token() {
+        let client = OnvifPtzClient::new("http://cam.local/onvif/ptz_service".into(), None, None)
+            .with_profile("mainStream".into());
+        assert_eq!(client.profile_token(), "mainStream");
+    }
+
+    #[test]
+    fn continuous_move_body_carries_profile_token() {
+        let client = OnvifPtzClient::new("http://cam.local/onvif/ptz_service".into(), None, None)
+            .with_profile("mainStream".into());
+        let body = client.continuous_move_body(0.1, 0.2, 0.3);
+        assert!(body.contains("<ProfileToken>mainStream</ProfileToken>"));
+        assert!(body.contains("xmlns=\"http://www.onvif.org/ver20/ptz/wsdl\""));
     }
 }

@@ -233,7 +233,7 @@
           <el-divider content-position="left">PTZ 支持</el-divider>
           <el-tag type="warning" style="margin-right: 8px">支持云台控制</el-tag>
         </template>
-        <template v-if="capabilities.audio">
+        <template v-if="capabilities.has_audio">
           <el-divider content-position="left">音频支持</el-divider>
           <el-tag type="info" style="margin-right: 8px">支持音频</el-tag>
         </template>
@@ -291,6 +291,7 @@ const localForm = reactive({
   playback_username: '',
   playback_password: '',
   is_public: false,
+  extended: {},
 })
 
 const gbRegionCascader = ref([])
@@ -302,7 +303,8 @@ const authPassword = ref('')
 const onvifStreams = ref([])
 const onvifSelectedStreams = ref([])
 const manualRtspUrl = ref('')
-const capabilities = ref({ ptz: false, audio: false })
+const capabilities = ref({ media: null, ptz: null, events: null, imaging: null, has_audio: false })
+const onvifXAddr = ref('')
 const fetchingProfiles = ref(false)
 const hasFetchedProfiles = ref(false)
 const submitting = ref(false)
@@ -322,7 +324,7 @@ function closeDiscoverDialog() {
   selectedDevice.value = null
   onvifStreams.value = []
   onvifSelectedStreams.value = []
-  capabilities.value = { ptz: false, audio: false }
+  capabilities.value = { media: null, ptz: null, events: null, imaging: null, has_audio: false }
   authUsername.value = ''
   authPassword.value = ''
   manualRtspUrl.value = ''
@@ -335,7 +337,7 @@ async function onBroadcastDiscover() {
   selectedDevice.value = null
   onvifStreams.value = []
   onvifSelectedStreams.value = []
-  capabilities.value = { ptz: false, audio: false }
+  capabilities.value = { media: null, ptz: null, events: null, imaging: null, has_audio: false }
   showDiscoverDialog.value = true
   try {
     const res = await request.post('/onvif/discover', {})
@@ -358,7 +360,7 @@ async function onFetchProfiles() {
   fetchingProfiles.value = true
   onvifStreams.value = []
   onvifSelectedStreams.value = []
-  capabilities.value = { ptz: false, audio: false }
+  capabilities.value = { media: null, ptz: null, events: null, imaging: null, has_audio: false }
   hasFetchedProfiles.value = true
   try {
     const capsRes = await request.post('/onvif/capabilities', {
@@ -383,6 +385,7 @@ async function onFetchProfiles() {
     onvifStreams.value = profiles.map((p, i) => {
       const stream = streams.find(s => s.token === p.token) || streams[i] || {}
       return {
+        token: p.token,
         name: p.name || `通道${i + 1}`,
         width: p.width || stream.width || 0,
         height: p.height || stream.height || 0,
@@ -397,9 +400,13 @@ async function onFetchProfiles() {
       toast.warning('未发现 RTSP 链接，请检查用户名和密码')
     }
     capabilities.value = {
-      ptz: !!(capsData?.capabilities?.ptz),
-      audio: capsData?.capabilities?.has_audio || false,
+      media: capsData?.capabilities?.media || null,
+      ptz: capsData?.capabilities?.ptz || null,
+      events: capsData?.capabilities?.events || null,
+      imaging: capsData?.capabilities?.imaging || null,
+      has_audio: capsData?.capabilities?.has_audio || false,
     }
+    onvifXAddr.value = address
   } catch (e) {
     toast.error('获取能力失败: ' + (e?.message || e))
   } finally {
@@ -423,7 +430,19 @@ async function onConfirmDevice() {
     localForm.protocol = 'Onvif'
     localForm.device_username = authUsername.value || ''
     localForm.device_password = authPassword.value || ''
-    
+    const profileTokens = onvifSelectedStreams.value.map(s => s.token).filter(Boolean)
+    localForm.extended = {
+      x_addr: onvifXAddr.value || address,
+      capabilities: {
+        media: capabilities.value.media,
+        ptz: capabilities.value.ptz,
+        events: capabilities.value.events,
+        imaging: capabilities.value.imaging,
+      },
+      profile_token: profileTokens,
+      onvif_token: profileTokens[0] || null,
+    }
+
     if (onvifSelectedStreams.value.length > 0) {
       localForm.pull_urls = onvifSelectedStreams.value.map((s, i) => ({ protocol: 'rtsp', url: s.rtsp_url, priority: i + 1 }))
       toast.success(`设备已选择 ${onvifSelectedStreams.value.length} 个通道`)

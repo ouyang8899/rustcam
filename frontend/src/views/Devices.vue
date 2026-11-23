@@ -858,13 +858,18 @@ async function submitDevice() {
     }))
     const res = await request.post('/onvif/devices', {
       urn: null,
-      x_addr: data.host,
+      x_addr: data.extended?.x_addr || data.host,
       name: data.name,
       manufacturer: null,
       model: null,
       username: data.device_username,
       password: data.device_password,
-      capabilities: { media: null, ptz: null, events: null, imaging: null },
+      capabilities: {
+        media: data.extended?.capabilities?.media ?? null,
+        ptz: data.extended?.capabilities?.ptz ?? null,
+        events: data.extended?.capabilities?.events ?? null,
+        imaging: data.extended?.capabilities?.imaging ?? null,
+      },
       types: [],
       scopes: [],
       streams,

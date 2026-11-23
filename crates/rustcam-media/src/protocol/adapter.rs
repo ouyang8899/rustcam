@@ -73,6 +73,7 @@ pub trait SignalAdapter: Send + Sync {
         channel_id: &str,
         command: &crate::protocol::event::PtzCommand,
         speed: Option<u8>,
+        profile_token: Option<&str>,
     ) -> Result<()>;
 
     async fn cleanup_expired_subscriptions(&self) -> usize {

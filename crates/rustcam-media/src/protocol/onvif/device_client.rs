@@ -1,14 +1,8 @@
-use crate::protocol::onvif::auth::UsernameToken;
 use crate::protocol::onvif::soap::extract_element_text;
-use std::time::Duration;
+use crate::protocol::onvif::soap_client::OnvifSoapClient;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum AuthMethod {
-    Anonymous,
-    HttpDigest,
-    WsSecurityDigest,
-    WsSecurityText,
-}
+const DEVICE_WSDL: &str = "http://www.onvif.org/ver10/device/wsdl";
+const MEDIA_WSDL: &str = "http://www.onvif.org/ver10/media/wsdl";
 
 #[derive(Debug, Clone, Default)]
 pub struct OnvifDeviceInfo {
@@ -51,312 +45,38 @@ pub struct OnvifServiceEndpoint {
 }
 
 pub struct OnvifDeviceClient {
-    x_addr: String,
-    username: Option<String>,
-    password: Option<String>,
-    auth_method: Option<AuthMethod>,
+    soap: OnvifSoapClient,
 }
 
 impl OnvifDeviceClient {
     pub fn new(x_addr: &str) -> Self {
         Self {
-            x_addr: x_addr.to_string(),
-            username: None,
-            password: None,
-            auth_method: None,
+            soap: OnvifSoapClient::new(x_addr, None, None),
         }
     }
 
     pub fn with_credentials(mut self, username: &str, password: &str) -> Self {
-        self.username = Some(username.to_string());
-        self.password = Some(password.to_string());
+        self.soap = self.soap.with_credentials(username, password);
         self
     }
 
-    fn build_soap_envelope_no_auth(&self, body: &str) -> String {
-        format!(
-            r#"<?xml version="1.0" encoding="UTF-8"?>
-<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
-<s:Body>{}</s:Body>
-</s:Envelope>"#,
-            body
-        )
+    pub fn with_soap_client(soap: OnvifSoapClient) -> Self {
+        Self { soap }
     }
 
-    fn build_soap_envelope(&self, body: &str) -> String {
-        if let (Some(u), Some(p)) = (&self.username, &self.password) {
-            let (nonce, created, digest) = UsernameToken::build_digest(u, p);
-            format!(
-                r#"<?xml version="1.0" encoding="UTF-8"?>
-<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
-<s:Header>
-  <wsse:Security s:mustUnderstand="true">
-    <wsse:UsernameToken>
-      <wsse:Username>{}</wsse:Username>
-      <wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">{}</wsse:Password>
-      <wsse:Nonce EncodingType="http://docs.oasis-open.org/wss/200401-wss-soap-message-security-1.0#Base64Binary">{}</wsse:Nonce>
-      <wsu:Created>{}</wsu:Created>
-    </wsse:UsernameToken>
-  </wsse:Security>
-</s:Header>
-<s:Body>{}</s:Body>
-</s:Envelope>"#,
-                u, digest, nonce, created, body
-            )
-        } else {
-            self.build_soap_envelope_no_auth(body)
-        }
-    }
-
-    fn build_soap_envelope_text(&self, body: &str) -> String {
-        if let (Some(u), Some(p)) = (&self.username, &self.password) {
-            format!(
-                r#"<?xml version="1.0" encoding="UTF-8"?>
-<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" xmlns:wsu="http://docs.oasis-open.org/wss/200401-wss-wssecurity-utility-1.0.xsd">
-<s:Header>
-  <wsse:Security s:mustUnderstand="true">
-    <wsse:UsernameToken>
-      <wsse:Username>{}</wsse:Username>
-      <wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText">{}</wsse:Password>
-    </wsse:UsernameToken>
-  </wsse:Security>
-</s:Header>
-<s:Body>{}</s:Body>
-</s:Envelope>"#,
-                u, p, body
-            )
-        } else {
-            self.build_soap_envelope_no_auth(body)
-        }
-    }
-
-    fn extract_digest_param(header: &str, param: &str) -> Option<String> {
-        let search = format!("{}=\"", param);
-        let start = header.find(&search)? + search.len();
-        let rest = &header[start..];
-        let end = rest.find('"').unwrap_or(rest.len());
-        Some(rest[..end].to_string())
-    }
-
-    fn build_http_digest_authorization(
-        &self,
-        method: &str,
-        uri: &str,
-        realm: &str,
-        nonce: &str,
-    ) -> String {
-        use base64::{engine::general_purpose::STANDARD, Engine};
-
-        let username = self.username.as_deref().unwrap_or("");
-        let password = self.password.as_deref().unwrap_or("");
-
-        let cnonce_bytes: [u8; 16] = rand::random();
-        let cnonce = STANDARD.encode(cnonce_bytes);
-
-        let ha1 = format!("{}:{}:{}", username, realm, password);
-        let ha2 = format!("{}:{}", method, uri);
-
-        let ha1_md5 = format!("{:x}", md5::compute(ha1.as_bytes()));
-        let ha2_md5 = format!("{:x}", md5::compute(ha2.as_bytes()));
-
-        let response = format!("{}:{}:00000001:{}:auth:{}", ha1_md5, nonce, cnonce, ha2_md5);
-        let response_md5 = format!("{:x}", md5::compute(response.as_bytes()));
-
-        let auth_header = format!(
-            r#"Digest username="{}", realm="{}", nonce="{}", uri="{}", qop=auth, nc=00000001, cnonce="{}", response="{}""#,
-            username, realm, nonce, uri, cnonce, response_md5
-        );
-
-        auth_header
-    }
-
-    async fn discover_auth(&mut self) -> anyhow::Result<AuthMethod> {
-        let body = r#"<GetDeviceInformation xmlns="http://www.onvif.org/ver10/device/wsdl"/>"#;
-        let envelope = self.build_soap_envelope_no_auth(body);
-
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        let resp = client
-            .post(&self.x_addr)
-            .header("Content-Type", "application/soap+xml; charset=utf-8")
-            .body(envelope)
-            .send()
-            .await?;
-
-        let status = resp.status();
-
-        if status == reqwest::StatusCode::OK {
-            return Ok(AuthMethod::Anonymous);
-        }
-
-        if status == reqwest::StatusCode::UNAUTHORIZED {
-            if let Some(www_auth) = resp.headers().get("www-authenticate") {
-                if let Ok(www_auth_str) = www_auth.to_str() {
-                    if www_auth_str.contains("Digest") {
-                        return Ok(AuthMethod::HttpDigest);
-                    }
-                }
-            }
-        }
-
-        if status == reqwest::StatusCode::BAD_REQUEST {
-            let body = resp.text().await?;
-            if body.contains("NotAuthorized") || body.contains("ter:NotAuthorized") {
-                return Ok(AuthMethod::WsSecurityDigest);
-            }
-        }
-
-        tracing::warn!(
-            "[ONVIF Auth] Unknown auth method, status={}, trying WS-Security",
-            status
-        );
-        Ok(AuthMethod::WsSecurityDigest)
-    }
-
-    async fn send_soap_internal(&mut self, body: &str) -> anyhow::Result<String> {
-        if self.auth_method.is_none() {
-            self.auth_method = Some(self.discover_auth().await?);
-        }
-
-        let mut current_auth_method = self
-            .auth_method
-            .clone()
-            .unwrap_or(AuthMethod::WsSecurityDigest);
-        let _retry_with_text = false;
-
-        loop {
-            match current_auth_method {
-                AuthMethod::Anonymous => {
-                    let client = reqwest::Client::builder()
-                        .timeout(Duration::from_secs(10))
-                        .build()?;
-                    let resp = client
-                        .post(&self.x_addr)
-                        .header("Content-Type", "application/soap+xml; charset=utf-8")
-                        .body(body.to_string())
-                        .send()
-                        .await?;
-                    return self.handle_response(resp).await;
-                }
-
-                AuthMethod::HttpDigest => {
-                    let envelope = self.build_soap_envelope_no_auth(body);
-
-                    let client = reqwest::Client::builder()
-                        .timeout(Duration::from_secs(10))
-                        .build()?;
-                    let resp = client
-                        .post(&self.x_addr)
-                        .header("Content-Type", "application/soap+xml; charset=utf-8")
-                        .body(envelope.clone())
-                        .send()
-                        .await?;
-                    let status = resp.status();
-
-                    if status == reqwest::StatusCode::UNAUTHORIZED {
-                        let headers = resp.headers().clone();
-                        let resp_text = resp.text().await?;
-                        if let Some(www_auth) = headers.get("www-authenticate") {
-                            if let Ok(www_auth_str) = www_auth.to_str() {
-                                let realm = Self::extract_digest_param(www_auth_str, "realm")
-                                    .unwrap_or_else(|| "IP Camera".to_string());
-                                let nonce = Self::extract_digest_param(www_auth_str, "nonce")
-                                    .unwrap_or_default();
-
-                                let uri = if let Some(path) = self.x_addr.split("://").nth(1) {
-                                    format!(
-                                        "/{}",
-                                        path.split('/').skip(1).collect::<Vec<_>>().join("/")
-                                    )
-                                } else {
-                                    "/onvif/device_service".to_string()
-                                };
-                                let auth_header = self
-                                    .build_http_digest_authorization("POST", &uri, &realm, &nonce);
-
-                                let client2 = reqwest::Client::builder()
-                                    .timeout(Duration::from_secs(10))
-                                    .build()?;
-                                let resp = client2
-                                    .post(&self.x_addr)
-                                    .header("Content-Type", "application/soap+xml; charset=utf-8")
-                                    .header("Authorization", &auth_header)
-                                    .body(envelope)
-                                    .send()
-                                    .await?;
-
-                                return self.handle_response(resp).await;
-                            }
-                        }
-                        return Err(anyhow::anyhow!("HTTP Digest auth failed: {}", resp_text));
-                    }
-
-                    return self.handle_response(resp).await;
-                }
-
-                AuthMethod::WsSecurityDigest => {
-                    let envelope = self.build_soap_envelope(body);
-
-                    let client = reqwest::Client::builder()
-                        .timeout(Duration::from_secs(10))
-                        .build()?;
-                    let resp = client
-                        .post(&self.x_addr)
-                        .header("Content-Type", "application/soap+xml; charset=utf-8")
-                        .body(envelope)
-                        .send()
-                        .await?;
-
-                    let status = resp.status();
-                    if status == reqwest::StatusCode::BAD_REQUEST {
-                        let _error_body = resp.text().await?;
-                        tracing::warn!(
-                            "[ONVIF Auth] WS-Security Digest failed (400), trying PasswordText"
-                        );
-                        current_auth_method = AuthMethod::WsSecurityText;
-                        continue;
-                    }
-                    return self.handle_response(resp).await;
-                }
-
-                AuthMethod::WsSecurityText => {
-                    let envelope = self.build_soap_envelope_text(body);
-
-                    let client = reqwest::Client::builder()
-                        .timeout(Duration::from_secs(10))
-                        .build()?;
-                    let resp = client
-                        .post(&self.x_addr)
-                        .header("Content-Type", "application/soap+xml; charset=utf-8")
-                        .body(envelope)
-                        .send()
-                        .await?;
-
-                    return self.handle_response(resp).await;
-                }
-            }
-        }
-    }
-
-    async fn handle_response(&self, resp: reqwest::Response) -> anyhow::Result<String> {
-        let status = resp.status();
-
-        if !status.is_success() {
-            let err_body = resp.text().await?;
-            let err = format!("HTTP {} from {}:\n{}", status, self.x_addr, err_body);
-            tracing::error!("[ONVIF SOAP] <<< ERROR: {}", err);
-            return Err(anyhow::anyhow!(err));
-        }
-
-        let response_text = resp.text().await?;
-        Ok(response_text)
+    async fn send_soap_internal(
+        &mut self,
+        action: &str,
+        body: &str,
+    ) -> anyhow::Result<String> {
+        self.soap.post(Some(action), body).await
     }
 
     pub async fn get_device_info(&mut self) -> anyhow::Result<OnvifDeviceInfo> {
         let body = r#"<GetDeviceInformation xmlns="http://www.onvif.org/ver10/device/wsdl"/>"#;
-        let xml = self.send_soap_internal(body).await?;
+        let xml = self
+            .send_soap_internal(&format!("{}/GetDeviceInformation", DEVICE_WSDL), body)
+            .await?;
 
         let result = OnvifDeviceInfo {
             manufacturer: extract_element_text(xml.as_bytes(), "Manufacturer"),
@@ -372,7 +92,9 @@ impl OnvifDeviceClient {
         &mut self,
     ) -> anyhow::Result<Vec<crate::protocol::onvif::types::AudioOutput>> {
         let body = r#"<GetAudioOutputs xmlns="http://www.onvif.org/ver10/media/wsdl"/>"#;
-        let xml = self.send_soap_internal(body).await?;
+        let xml = self
+            .send_soap_internal(&format!("{}/GetAudioOutputs", MEDIA_WSDL), body)
+            .await?;
 
         let bytes = xml.as_bytes();
         let mut reader = quick_xml::Reader::from_reader(bytes);
@@ -446,7 +168,9 @@ impl OnvifDeviceClient {
 
     pub async fn get_profiles(&mut self) -> anyhow::Result<Vec<OnvifProfile>> {
         let body = r#"<GetProfiles xmlns="http://www.onvif.org/ver10/media/wsdl"/>"#;
-        let xml = self.send_soap_internal(body).await?;
+        let xml = self
+            .send_soap_internal(&format!("{}/GetProfiles", MEDIA_WSDL), body)
+            .await?;
 
         let bytes = xml.as_bytes();
         let mut reader = quick_xml::Reader::from_reader(bytes);
@@ -552,7 +276,6 @@ impl OnvifDeviceClient {
             }
         }
 
-        for _p in &profiles {}
         Ok(profiles)
     }
 
@@ -569,7 +292,9 @@ impl OnvifDeviceClient {
 </GetStreamUri>"#,
             profile_token
         );
-        let xml = self.send_soap_internal(&body).await?;
+        let xml = self
+            .send_soap_internal(&format!("{}/GetStreamUri", MEDIA_WSDL), &body)
+            .await?;
 
         let uri = extract_element_text(xml.as_bytes(), "Uri").unwrap_or_default();
 
@@ -592,7 +317,9 @@ impl OnvifDeviceClient {
 
     pub async fn get_capabilities(&mut self) -> anyhow::Result<OnvifCapabilities> {
         let body = r#"<GetCapabilities xmlns="http://www.onvif.org/ver10/device/wsdl"/>"#;
-        let xml = self.send_soap_internal(body).await?;
+        let xml = self
+            .send_soap_internal(&format!("{}/GetCapabilities", DEVICE_WSDL), body)
+            .await?;
 
         let caps = OnvifCapabilities {
             media: Self::extract_capability_url(&xml, "Media"),
@@ -606,7 +333,9 @@ impl OnvifDeviceClient {
 
     pub async fn get_services(&mut self) -> anyhow::Result<Vec<OnvifServiceEndpoint>> {
         let body = r#"<GetServices xmlns="http://www.onvif.org/ver10/device/wsdl"><IncludeCapability>false</IncludeCapability></GetServices>"#;
-        let xml = self.send_soap_internal(body).await?;
+        let xml = self
+            .send_soap_internal(&format!("{}/GetServices", DEVICE_WSDL), body)
+            .await?;
         let result = Self::parse_service_endpoints(&xml);
         Ok(result)
     }
@@ -776,5 +505,25 @@ impl OnvifDeviceClient {
             }
         }
         endpoints
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::onvif::soap_client::AuthMethod;
+
+    #[test]
+    fn device_client_keeps_endpoint_and_credentials() {
+        let client = OnvifDeviceClient::new("http://cam.local/onvif/device_service")
+            .with_credentials("admin", "secret");
+        assert_eq!(client.soap.endpoint(), "http://cam.local/onvif/device_service");
+        assert_eq!(client.soap.auth_method(), AuthMethod::WsSecurityDigest);
+    }
+
+    #[test]
+    fn anonymous_client_starts_without_credentials() {
+        let client = OnvifDeviceClient::new("http://cam.local/onvif/device_service");
+        assert_eq!(client.soap.auth_method(), AuthMethod::Anonymous);
     }
 }
