@@ -14,6 +14,8 @@
 #include <QTimer>
 #include <windows.h>
 
+#include <cstdio>
+
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
@@ -52,6 +54,13 @@ QString SessionManager::createSession(const QString& sessionId,
     session.parentHandle = hostHandle;
     m_sessions.insert(sessionId, session);
 
+    std::fprintf(stderr, "[SessionManager] createSession id=%s mode=%s hostHandle=%llu url=%s\n",
+                 sessionId.toUtf8().constData(),
+                 mode.toUtf8().constData(),
+                 static_cast<unsigned long long>(hostHandle),
+                 url.toUtf8().constData());
+    std::fflush(stderr);
+
     // browser 的创建必须在 CEF UI 线程。
     CefRefPtr<SessionClient> client = session.client;
     CefPostTask(TID_UI, base::BindOnce(
@@ -63,6 +72,10 @@ QString SessionManager::createSession(const QString& sessionId,
                 // 窗口消息仍送到创建它的线程（spec §5.2，spike S1 已验证）。
                 windowInfo.SetAsChild(fromPortableHandle(hostHandle),
                                       CefRect(0, 0, 800, 600));
+                // CEF 156 默认 Chrome runtime，它不会创建子窗口：SetAsChild
+                // 的 WS_CHILD/parent 会被忽略，浏览器变成屏幕上的顶级窗口。
+                // 子窗口必须显式用 Alloy style（cef_types_runtime.h）。
+                windowInfo.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
             } else {
                 // overlay 模式：顶级窗口（CEF 156 的 SetAsPopup 签名是
                 // (parent, windowName)，不再接受 bounds）。
@@ -71,6 +84,10 @@ QString SessionManager::createSession(const QString& sessionId,
             }
 
             CefBrowserSettings browserSettings;
+            std::fprintf(stderr, "[SessionManager] CreateBrowser mode=%s hostHandle=%llu\n",
+                         mode.toUtf8().constData(),
+                         static_cast<unsigned long long>(hostHandle));
+            std::fflush(stderr);
             CefBrowserHost::CreateBrowser(windowInfo, client,
                                          CefString(url.toStdString()),
                                          browserSettings, nullptr, nullptr);

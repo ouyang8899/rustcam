@@ -27,6 +27,9 @@ public:
 
     void setPageUrl(const QString& url);
 
+    /// 销毁当前会话并重新拉起浏览器（加载失败后的「重试」）。
+    void retry();
+
     void initialize(double lon, double lat, int zoom, const QString& layersJson = QString());
     void setTilesUrl(const QString& layersJson);
     void setCenter(double lon, double lat, int zoom = -1);
@@ -49,6 +52,10 @@ public:
 
 signals:
     void markerClicked(const QString& markerId);
+    /// 已向 BrowserHost 请求会话，浏览器/页面尚未就绪。
+    void loadStarted();
+    /// 页面 OnLoadEnd：DOM 与脚本已就绪，正在等 mapReady。
+    void pageLoaded();
     void mapReady();
     void loadFailed(const QString& error);
 

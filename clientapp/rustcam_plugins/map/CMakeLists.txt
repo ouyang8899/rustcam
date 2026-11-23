@@ -3,12 +3,14 @@ set(PLUGIN_ID "map")
 set(PLUGIN_SOURCES
     MapPlugin.cpp
     CefBrowserWidget.cpp
+    MapLoadingOverlay.cpp
     MapSidePanel.cpp
 )
 
 set(PLUGIN_HEADERS
     MapPlugin.h
     CefBrowserWidget.h
+    MapLoadingOverlay.h
     MapSidePanel.h
 )
 

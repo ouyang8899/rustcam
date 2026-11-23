@@ -1,5 +1,6 @@
 ﻿#include "MapPlugin.h"
 #include "CefBrowserWidget.h"
+#include "MapLoadingOverlay.h"
 #include "core/EventBus.h"
 #include "core/ServerApi.h"
 #include "core/VideoPlayer.h"
@@ -145,6 +146,40 @@ QWidget* MapPlugin::createWorkspace(QWidget* parent)
                 });
         mapLayout->addWidget(m_mapView);
         connect(m_mapView, &CefBrowserWidget::mapReady, this, &MapPlugin::onMapReady);
+
+        // 遮罩必须创建在 m_mapView 之后，作为 mapContainer 的兄弟窗口压在
+        // 远端 CEF 原生窗口之上。
+        m_mapLoading = new MapLoadingOverlay(m_mapSidePanel->mapContainer());
+        auto showBusy = [this](const QString& text) {
+            if (m_mapLoading != nullptr) {
+                m_mapLoading->showBusy(text);
+            }
+        };
+        connect(m_mapView, &CefBrowserWidget::loadStarted, this, [showBusy]() {
+            showBusy(tr("正在启动地图浏览器…"));
+        });
+        connect(m_mapView, &CefBrowserWidget::pageLoaded, this, [showBusy]() {
+            showBusy(tr("正在加载地图数据…"));
+        });
+        connect(m_mapView, &CefBrowserWidget::mapReady, this, [this]() {
+            if (m_mapLoading != nullptr) {
+                m_mapLoading->hide();
+            }
+        });
+        connect(m_mapView, &CefBrowserWidget::loadFailed, this,
+                [this](const QString& error) {
+                    if (m_mapLoading != nullptr) {
+                        m_mapLoading->showError(error);
+                    }
+                });
+        connect(m_mapLoading, &MapLoadingOverlay::retryRequested, this, [this, showBusy]() {
+            showBusy(tr("正在重新加载地图…"));
+            if (m_mapView != nullptr) {
+                m_mapView->retry();
+            }
+        });
+        m_mapLoading->showBusy(tr("正在启动地图浏览器…"));
+
         m_mapView->initialize(121.4737, 31.2304, 11, m_layersJson);
     }
 

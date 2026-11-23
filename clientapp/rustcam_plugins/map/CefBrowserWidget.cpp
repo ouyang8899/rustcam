@@ -43,6 +43,11 @@ CefBrowserWidget::CefBrowserWidget(QWidget* parent)
             this, &CefBrowserWidget::onSessionEvent);
     connect(host, &BrowserHost::sessionFailed,
             this, &CefBrowserWidget::onSessionFailed);
+    connect(host, &BrowserHost::browserProcessCrashed, this, [this]() {
+        if (!m_sessionId.isEmpty() && !m_mapReady) {
+            emit loadFailed(tr("浏览器进程多次重启失败"));
+        }
+    });
 }
 
 CefBrowserWidget::~CefBrowserWidget()
@@ -58,6 +63,21 @@ CefBrowserWidget::~CefBrowserWidget()
 void CefBrowserWidget::setPageUrl(const QString& url)
 {
     m_pageUrl = url;
+}
+
+void CefBrowserWidget::retry()
+{
+    if (!m_sessionId.isEmpty()) {
+        detachRemoteWindow();
+        BrowserHost::instance()->closeSession(m_sessionId);
+        m_sessionId.clear();
+    }
+    m_remoteHandle = 0;
+    m_browserCreated = false;
+    m_pageLoaded = false;
+    m_mapReady = false;
+    m_initSent = false;
+    createBrowser();
 }
 
 void CefBrowserWidget::showEvent(QShowEvent* event)
@@ -100,6 +120,11 @@ void CefBrowserWidget::createBrowser()
     delete wh;
 
     const WId hostHandle = winId();
+    LOG_INFO("CefBrowserWidget",
+             QString("creating browser: url=%1 overlay=%2 hostHandle=%3")
+                 .arg(m_pageUrl)
+                 .arg(m_overlayMode ? QStringLiteral("true") : QStringLiteral("false"))
+                 .arg(static_cast<qulonglong>(hostHandle)));
     if (!m_overlayMode && !hostHandle) {
         emit loadFailed(QStringLiteral("no native window handle"));
         return;
@@ -107,6 +132,8 @@ void CefBrowserWidget::createBrowser()
 
     m_sessionId = QStringLiteral("map-%1")
                        .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+
+    emit loadStarted();
 
     BrowserHost::SessionRequest request;
     request.sessionId = m_sessionId;
@@ -133,6 +160,10 @@ void CefBrowserWidget::onSessionCreated(const QString& sessionId, quint64 handle
     m_pageLoaded = false;
     m_mapReady = false;
     m_initSent = false;
+    LOG_INFO("CefBrowserWidget", QString("session created, remote handle=%1 overlay=%2")
+                                    .arg(handle)
+                                    .arg(m_overlayMode ? QStringLiteral("true")
+                                                        : QStringLiteral("false")));
     applyRemoteBounds();
 }
 
@@ -141,6 +172,8 @@ void CefBrowserWidget::onSessionReady(const QString& sessionId)
     if (sessionId != m_sessionId) {
         return;
     }
+    LOG_INFO("CefBrowserWidget", "page load finished");
+    emit pageLoaded();
     handleLoadEnd();
 }
 
@@ -177,6 +210,10 @@ void CefBrowserWidget::applyRemoteBounds()
         // 由它移动自己的顶层窗口。
         // mapToGlobal 只接受点，取左上角再拼上尺寸。
         const QPoint topLeft = mapToGlobal(QPoint(0, 0));
+        LOG_INFO("CefBrowserWidget",
+                 QString("overlay bounds: x=%1 y=%2 w=%3 h=%4 visible=%5")
+                     .arg(topLeft.x()).arg(topLeft.y()).arg(width()).arg(height())
+                     .arg(isVisible() ? QStringLiteral("true") : QStringLiteral("false")));
         BrowserHost::instance()->setSessionBounds(m_sessionId,
                                                    topLeft.x(), topLeft.y(),
                                                    width(), height());
@@ -255,6 +292,7 @@ void CefBrowserWidget::handleBridgeMessage(const QString& payload)
     const QString type = message.value(QStringLiteral("type")).toString();
     if (type == QLatin1String(rustcam::cefbridge::event::kMapReady)) {
         m_mapReady = true;
+        LOG_INFO("CefBrowserWidget", "map ready");
         emit mapReady();
         return;
     }

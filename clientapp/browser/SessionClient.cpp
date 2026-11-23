@@ -6,6 +6,8 @@
 
 #include "common/CefBridgeProtocol.h"
 
+#include <cstdio>
+
 namespace rustcam {
 namespace browser {
 
@@ -18,6 +20,11 @@ SessionClient::SessionClient(SessionManager* manager, QString sessionId)
 void SessionClient::OnAfterCreated(CefRefPtr<CefBrowser> browser)
 {
     m_browser = browser;
+    std::fprintf(stderr, "[SessionClient] OnAfterCreated id=%s hwnd=%llu\n",
+                 m_sessionId.toUtf8().constData(),
+                 static_cast<unsigned long long>(
+                     toPortableHandle(browser->GetHost()->GetWindowHandle())));
+    std::fflush(stderr);
     if (m_manager) {
         m_manager->onSessionCreated(m_sessionId,
                                     toPortableHandle(browser->GetHost()->GetWindowHandle()));
@@ -36,6 +43,9 @@ void SessionClient::OnLoadEnd(CefRefPtr<CefBrowser> /*browser*/,
                               CefRefPtr<CefFrame> /*frame*/,
                               int /*httpStatusCode*/)
 {
+    std::fprintf(stderr, "[SessionClient] OnLoadEnd id=%s\n",
+                 m_sessionId.toUtf8().constData());
+    std::fflush(stderr);
     if (m_manager) {
         m_manager->onSessionReady(m_sessionId);
     }

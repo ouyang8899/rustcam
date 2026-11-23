@@ -15,6 +15,7 @@ class QDialog;
 namespace rustcam {
 
 class CefBrowserWidget;
+class MapLoadingOverlay;
 class VideoPlayer;
 
 struct MapMarkerData {
@@ -69,6 +70,8 @@ private:
     QWidget* m_workspace;
     MapSidePanel* m_mapSidePanel;
     CefBrowserWidget* m_mapView = nullptr;
+    /// 地图就绪前覆盖在地图区域上的加载/失败提示。
+    MapLoadingOverlay* m_mapLoading = nullptr;
     QMap<QString, MapMarkerData> m_markers;
     /// True once the map page reported that its MapLibre instance is ready.
     bool m_mapReady = false;

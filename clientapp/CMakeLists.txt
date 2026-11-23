@@ -112,6 +112,10 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/map_browser_widget_test/CMakeLists.
     add_subdirectory(tests/map_browser_widget_test)
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/map_loading_overlay_test/CMakeLists.txt")
+    add_subdirectory(tests/map_loading_overlay_test)
+endif()
+
 if(BUILD_PRO)
     add_subdirectory(pro)
 endif()

@@ -3,6 +3,7 @@
 #include "BrowserIpcClient.h"
 
 #include "common/BrowserIpcProtocol.h"
+#include "common/Logger.h"
 #include "platform/BrowserWindowHost.h"
 
 #include <QCoreApplication>
@@ -42,6 +43,7 @@ BrowserHost::BrowserHost(QObject* parent)
     connect(m_client, &BrowserIpcClient::connected, this, [this]() {
         m_handshakeOk = true;
         m_restartAttempt = 0;
+        LOG_INFO("BrowserHost", "browser process handshake ok");
         emit browserProcessStarted();
         // 握手完成后才能下发 session.create。
         sendPendingSessions();
@@ -49,6 +51,7 @@ BrowserHost::BrowserHost(QObject* parent)
     connect(m_client, &BrowserIpcClient::disconnected, this, [this]() {
         m_handshakeOk = false;
         m_sentRequests.clear();
+        LOG_WARNING("BrowserHost", "browser process disconnected");
         if (!m_stopping) {
             scheduleRestart();
         }
@@ -178,14 +181,33 @@ bool BrowserHost::startProcess()
                 }
             });
             connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-            this, [this](int, QProcess::ExitStatus) {
+            this, [this](int code, QProcess::ExitStatus) {
+                LOG_WARNING("BrowserHost",
+                            QString("browser process exited, code=%1").arg(code));
                 if (!m_stopping) {
                     scheduleRestart();
                 }
             });
 
+    // 子进程的 stdout/stderr 必须有人读：QProcess 用管道接收，不读的话
+    // 管道写满后子进程会阻塞在 write 上，整个浏览器就此卡死。
+    connect(m_process, &QProcess::readyReadStandardOutput, this, [this]() {
+        const QString text = QString::fromLocal8Bit(m_process->readAllStandardOutput());
+        for (const QString& line : text.split('\n', Qt::SkipEmptyParts)) {
+            LOG_INFO("BrowserHost", QString("browser stdout: %1").arg(line.trimmed()));
+        }
+    });
+    connect(m_process, &QProcess::readyReadStandardError, this, [this]() {
+        const QString text = QString::fromLocal8Bit(m_process->readAllStandardError());
+        for (const QString& line : text.split('\n', Qt::SkipEmptyParts)) {
+            LOG_WARNING("BrowserHost", QString("browser stderr: %1").arg(line.trimmed()));
+        }
+    });
+
+    LOG_INFO("BrowserHost", QString("starting browser process: %1").arg(exe));
     m_process->start(exe, QStringList() << QStringLiteral("--pipe") << pipeName());
     if (!m_process->waitForStarted(10000)) {
+        LOG_ERROR("BrowserHost", "browser process failed to start");
         return false;
     }
     // 握手是异步的：hello.ok 到达后由 connected() 触发 sendPendingSessions()。
@@ -225,6 +247,8 @@ void BrowserHost::sendCreateSession(const SessionRequest& request)
     message.insert(QStringLiteral("host"), host);
     message.insert(QStringLiteral("bounds"), bounds);
     message.insert(QStringLiteral("mode"), request.mode);
+    LOG_INFO("BrowserHost", QString("session.create sent: id=%1 mode=%2 url=%3")
+                                .arg(request.sessionId, request.mode, request.url));
     m_client->send(message);
 }
 
@@ -236,10 +260,13 @@ void BrowserHost::handleMessage(const QJsonObject& message)
     if (type == QLatin1String(msg::kSessionCreated)) {
         quint64 handle = 0;
         decodeHandle(message.value(QStringLiteral("hwnd")).toString(), &handle);
+        LOG_INFO("BrowserHost", QString("session.created: id=%1 hwnd=%2")
+                                    .arg(sessionId).arg(handle));
         emit sessionCreated(sessionId, handle);
         return;
     }
     if (type == QLatin1String(msg::kSessionReady)) {
+        LOG_INFO("BrowserHost", QString("session.ready: id=%1").arg(sessionId));
         emit sessionReady(sessionId);
         return;
     }
@@ -249,10 +276,14 @@ void BrowserHost::handleMessage(const QJsonObject& message)
         return;
     }
     if (type == QLatin1String(msg::kSessionClosed)) {
+        LOG_INFO("BrowserHost", QString("session.closed: id=%1").arg(sessionId));
         emit sessionClosed(sessionId);
         return;
     }
     if (type == QLatin1String(msg::kSessionFailed)) {
+        LOG_ERROR("BrowserHost", QString("session.failed: id=%1 error=%2")
+                                     .arg(sessionId,
+                                          message.value(QStringLiteral("error")).toString()));
         emit sessionFailed(sessionId,
                            message.value(QStringLiteral("error")).toString());
         return;
