@@ -52,8 +52,13 @@
                 <button class="dpad-btn dpad-up" @mousedown="ptzControl('up', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
                   <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4l-8 8h5v8h6v-8h5z"/></svg>
                 </button>
-                <button class="dpad-btn dpad-left" @mousedown="ptzControl('left', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
+                <!-- <button class="dpad-btn dpad-left" @mousedown="ptzControl('left', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
                   <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 12l8-8v5h8v6h-8V4z"/></svg>
+                </button> -->
+                <button class="dpad-btn dpad-left" @mousedown="ptzControl('left', 1)" @mouseup="ptzStop" @mouseleave="ptzStop">
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M4 12l8 8v-5h8v-6h-8V4z"/>
+                  </svg>
                 </button>
                 <button class="dpad-center" @click="ptzControl('stop', 1)">
                   <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
