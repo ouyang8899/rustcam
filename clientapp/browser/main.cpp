@@ -1,5 +1,6 @@
 #include "BrowserApp.h"
 #include "IpcServer.h"
+#include "InstanceProfile.h"
 #include "RenderProcessBridge.h"
 #include "SessionManager.h"
 
@@ -55,8 +56,12 @@ int main(int argc, char* argv[])
         "Logical name of the IPC channel to listen on", "name");
     const QCommandLineOption standaloneOption(QStringList() << "standalone",
         "Open <url> in a standalone top-level window", "url");
+    const QCommandLineOption cacheRootOption(QStringLiteral("cache-root"),
+        QStringLiteral("Directory holding this process's Chromium profile"),
+        QStringLiteral("path"));
     parser.addOption(pipeOption);
     parser.addOption(standaloneOption);
+    parser.addOption(cacheRootOption);
     parser.process(app);
 
 #ifdef Q_OS_WIN
@@ -67,7 +72,35 @@ int main(int argc, char* argv[])
 
     // --- CEF 初始化 ---
     const QString exeDir = QCoreApplication::applicationDirPath();
-    QDir().mkpath(exeDir + "/cache");
+
+    // 每个浏览器进程独享 profile 目录：CEF 120+ 会用 root_cache_path 做进程
+    // 单例锁，共用目录的第二个进程根本起不来（"Opening in existing browser
+    // session." → CefInitialize 失败），命令行还会被转发给已有实例当成 URL
+    // 打开。
+    rustcam::browser::instance_profile::prepare(parser.value(cacheRootOption));
+    const QString profileDir = rustcam::browser::instance_profile::profileDir();
+    const QString tempDir = rustcam::browser::instance_profile::tempDir();
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, []() {
+        rustcam::browser::instance_profile::cleanup();
+    });
+
+    // 运行期定期清扫：别的实例崩溃残留的 profile 有几十兆，不能一直堆着。
+    // 刚崩掉的实例还占着文件句柄，删不掉，所以间隔不能太长。
+    QTimer sweepTimer;
+    sweepTimer.setInterval(15000);
+    QObject::connect(&sweepTimer, &QTimer::timeout, []() {
+        rustcam::browser::instance_profile::sweepStale();
+    });
+    sweepTimer.start();
+
+    // Chromium resolves its temp dir from TMP/TEMP (TMPDIR on POSIX);
+    // these must be set before CefInitialize to take effect.
+#ifdef Q_OS_WIN
+    qputenv("TMP", tempDir.toLocal8Bit());
+    qputenv("TEMP", tempDir.toLocal8Bit());
+#else
+    qputenv("TMPDIR", tempDir.toLocal8Bit());
+#endif
 
     CefMainArgs mainArgs(GetModuleHandle(nullptr));
     CefSettings settings;
@@ -77,7 +110,7 @@ int main(int argc, char* argv[])
     settings.log_severity = LOGSEVERITY_WARNING;
     CefString(&settings.resources_dir_path) = exeDir.toStdString();
     CefString(&settings.locales_dir_path) = (exeDir + "/locales").toStdString();
-    CefString(&settings.root_cache_path) = (exeDir + "/cache").toStdString();
+    CefString(&settings.root_cache_path) = profileDir.toStdString();
     // browser_subprocess_path 留空：CEF 复用本 exe 作为子进程。
 
     CefRefPtr<CefApp> cefApp(new BrowserApp());

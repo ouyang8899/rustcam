@@ -27,6 +27,18 @@ public:
         }
     }
 
+    /// 已有实例在跑（共用 profile）时，CEF 默认会把本次启动参数转发给那个
+    /// 实例——参数里的 "--pipe rustcam-browser-<pid>" 会被当成 URL 打开，
+    /// 用户看到一个凭空出现的 Chromium 窗口。这里接管掉：转发没有意义，
+    /// 新进程本来也起不来。
+    bool OnAlreadyRunningAppRelaunch(CefRefPtr<CefCommandLine> command_line,
+                                     const CefString& current_directory) override
+    {
+        (void)command_line;
+        (void)current_directory;
+        return true;
+    }
+
 private:
     IMPLEMENT_REFCOUNTING(BrowserApp);
 };

@@ -4,6 +4,8 @@ add_executable(rustcam-browser
     BrowserApp.h
     IpcServer.cpp
     IpcServer.h
+    InstanceProfile.cpp
+    InstanceProfile.h
     OverlayWindow.cpp
     OverlayWindow.h
     RenderProcessBridge.h

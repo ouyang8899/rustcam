@@ -48,6 +48,16 @@ CefBrowserWidget::CefBrowserWidget(QWidget* parent)
             emit loadFailed(tr("浏览器进程多次重启失败"));
         }
     });
+    connect(host, &BrowserHost::browserProcessWaiting, this, [this](int elapsedMs) {
+        if (!m_sessionId.isEmpty() && !m_mapReady) {
+            emit browserWaiting(elapsedMs);
+        }
+    });
+    connect(host, &BrowserHost::browserProcessTimeout, this, [this]() {
+        if (!m_sessionId.isEmpty() && !m_mapReady) {
+            emit loadFailed(tr("浏览器进程启动超时"));
+        }
+    });
 }
 
 CefBrowserWidget::~CefBrowserWidget()

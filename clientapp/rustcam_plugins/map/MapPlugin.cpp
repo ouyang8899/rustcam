@@ -158,6 +158,11 @@ QWidget* MapPlugin::createWorkspace(QWidget* parent)
         connect(m_mapView, &CefBrowserWidget::loadStarted, this, [showBusy]() {
             showBusy(tr("正在启动地图浏览器…"));
         });
+        connect(m_mapView, &CefBrowserWidget::browserWaiting, this, [showBusy](int elapsedMs) {
+            // 浏览器进程冷启动可能要几十秒，这里报进度而不是报错。
+            showBusy(tr("正在等待地图浏览器启动…（已等待 %1 秒）")
+                         .arg(elapsedMs / 1000));
+        });
         connect(m_mapView, &CefBrowserWidget::pageLoaded, this, [showBusy]() {
             showBusy(tr("正在加载地图数据…"));
         });

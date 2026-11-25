@@ -23,6 +23,12 @@ const int kRestartBackoffMs[] = { 1000, 2000, 4000, 8000, 16000, 30000 };
 const int kRestartBackoffCount = 6;
 const int kMaxRestartAttempts = 5;
 
+/// 浏览器进程启动后多久还没握手就算超时（毫秒）。
+///
+/// 超时只用于给界面一个交代，进程不会被杀：浏览器可能只是这台机器上冷启动
+/// 慢，等它自己起来比杀掉重来快得多。
+const int kStartupTimeoutMs = 180000;
+
 } // namespace
 
 BrowserHost* BrowserHost::instance()
@@ -35,14 +41,19 @@ BrowserHost::BrowserHost(QObject* parent)
     : QObject(parent)
     , m_client(new BrowserIpcClient(this))
     , m_restartTimer(new QTimer(this))
+    , m_startupTimer(new QTimer(this))
 {
     m_restartTimer->setSingleShot(true);
+    m_startupTimer->setSingleShot(true);
+    m_startupTimer->setInterval(kStartupTimeoutMs);
 
     connect(m_client, &BrowserIpcClient::messageReceived,
             this, &BrowserHost::handleMessage);
     connect(m_client, &BrowserIpcClient::connected, this, [this]() {
         m_handshakeOk = true;
         m_restartAttempt = 0;
+        m_intentionalDisconnect = false;
+        m_startupTimer->stop();
         LOG_INFO("BrowserHost", "browser process handshake ok");
         emit browserProcessStarted();
         // 握手完成后才能下发 session.create。
@@ -51,12 +62,21 @@ BrowserHost::BrowserHost(QObject* parent)
     connect(m_client, &BrowserIpcClient::disconnected, this, [this]() {
         m_handshakeOk = false;
         m_sentRequests.clear();
-        LOG_WARNING("BrowserHost", "browser process disconnected");
-        if (!m_stopping) {
-            scheduleRestart();
+        if (m_stopping || m_intentionalDisconnect) {
+            // 主动断开（重启 / 退出）不算故障。
+            return;
         }
+        LOG_WARNING("BrowserHost", "browser process disconnected");
+        scheduleRestart("ipc-disconnected");
+    });
+    connect(m_client, &BrowserIpcClient::waitProgress, this, [this](int elapsedMs) {
+        emit browserProcessWaiting(elapsedMs);
     });
     connect(m_restartTimer, &QTimer::timeout, this, &BrowserHost::restartNow);
+    connect(m_startupTimer, &QTimer::timeout, this, [this]() {
+        LOG_ERROR("BrowserHost", "browser process startup timed out");
+        emit browserProcessTimeout();
+    });
     connect(qApp, &QCoreApplication::aboutToQuit,
             this, &BrowserHost::shutdownBrowser);
 }
@@ -68,6 +88,10 @@ QString BrowserHost::pipeName() const
 
 QString BrowserHost::browserExecutablePath() const
 {
+    if (!m_executablePathOverride.isEmpty()) {
+        return m_executablePathOverride;
+    }
+
     const QString exeDir = QCoreApplication::applicationDirPath();
     const QString exeName = QStringLiteral("rustcam-browser.exe");
 
@@ -88,6 +112,16 @@ QString BrowserHost::browserExecutablePath() const
         }
     }
     return candidates.first();
+}
+
+void BrowserHost::setExecutablePathOverride(const QString& path)
+{
+    m_executablePathOverride = path;
+}
+
+void BrowserHost::setExtraArguments(const QStringList& args)
+{
+    m_extraArguments = args;
 }
 
 bool BrowserHost::createSession(const SessionRequest& request)
@@ -175,17 +209,19 @@ bool BrowserHost::startProcess()
     m_sentRequests.clear();
     m_process = new QProcess(this);
     connect(m_process, &QProcess::errorOccurred,
-            this, [this](QProcess::ProcessError) {
+            this, [this](QProcess::ProcessError error) {
+                LOG_WARNING("BrowserHost",
+                            QString("browser process error: %1").arg(static_cast<int>(error)));
                 if (!m_stopping) {
-                    scheduleRestart();
+                    scheduleRestart("process-error");
                 }
             });
-            connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+    connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, [this](int code, QProcess::ExitStatus) {
                 LOG_WARNING("BrowserHost",
                             QString("browser process exited, code=%1").arg(code));
                 if (!m_stopping) {
-                    scheduleRestart();
+                    scheduleRestart("process-exited");
                 }
             });
 
@@ -205,12 +241,14 @@ bool BrowserHost::startProcess()
     });
 
     LOG_INFO("BrowserHost", QString("starting browser process: %1").arg(exe));
-    m_process->start(exe, QStringList() << QStringLiteral("--pipe") << pipeName());
+    m_process->start(exe, browserArguments());
     if (!m_process->waitForStarted(10000)) {
         LOG_ERROR("BrowserHost", "browser process failed to start");
         return false;
     }
     // 握手是异步的：hello.ok 到达后由 connected() 触发 sendPendingSessions()。
+    // 浏览器进程初始化 CEF 可能要几十秒，这期间只等待，不重启。
+    m_startupTimer->start();
     m_client->connectToServer(pipeName());
     return true;
 }
@@ -290,9 +328,9 @@ void BrowserHost::handleMessage(const QJsonObject& message)
     }
 }
 
-void BrowserHost::scheduleRestart()
+void BrowserHost::scheduleRestart(const char* reason)
 {
-    if (m_restartTimer->isActive()) {
+    if (m_stopping || m_restartTimer->isActive()) {
         return;
     }
     if (m_restartAttempt >= kMaxRestartAttempts) {
@@ -302,6 +340,11 @@ void BrowserHost::scheduleRestart()
     }
     const int index = qMin(m_restartAttempt, kRestartBackoffCount - 1);
     ++m_restartAttempt;
+    QTextStream(stderr) << "rustcam-browser restart scheduled (" << reason
+                         << ") in " << kRestartBackoffMs[index] << "ms\n";
+    LOG_WARNING("BrowserHost",
+                QString("restarting browser process in %1ms (attempt %2)")
+                    .arg(kRestartBackoffMs[index]).arg(m_restartAttempt));
     m_restartTimer->start(kRestartBackoffMs[index]);
 }
 
@@ -310,38 +353,93 @@ void BrowserHost::restartNow()
     if (m_stopping) {
         return;
     }
-    if (m_process) {
-        // 先断开信号，避免 kill 触发的 finished 再次排一次重启。
-        m_process->disconnect(this);
-        m_process->kill();
-        m_process->deleteLater();
-        m_process = nullptr;
-    }
+    killProcess();
+    m_intentionalDisconnect = true;
     m_client->disconnectFromServer();
     m_sentRequests.clear();
 
     if (!startProcess()) {
-        scheduleRestart();
+        scheduleRestart("restart-failed");
         return;
     }
     // 会话在新连接握手完成后由 sendPendingSessions() 统一重建（spec §7.1）。
 }
 
+void BrowserHost::killProcess()
+{
+    if (!m_process) {
+        return;
+    }
+    // 先断开信号，避免 kill 触发的 finished 再次排一次重启。
+    m_process->disconnect(this);
+    const qint64 pid = m_process->processId();
+    if (m_process->state() != QProcess::NotRunning) {
+        m_process->kill();
+        // 必须等它真的死掉：两个浏览器进程同时持有 Chromium profile 时，
+        // 后启动的那个会因为单例锁起不来。
+        m_process->waitForFinished(5000);
+    }
+    m_process->deleteLater();
+    m_process = nullptr;
+    removeBrowserProfile(pid);
+}
+
+void BrowserHost::removeBrowserProfile(qint64 pid)
+{
+    // 浏览器进程是被 kill 掉的，它来不及删自己的 profile（几十兆）。
+    // 目录名就是浏览器进程的 pid，进程死了就能删。
+    if (pid <= 0) {
+        return;
+    }
+    const QString dir = QDir(browserCacheRoot())
+                            .absoluteFilePath(QStringLiteral("instances/%1").arg(pid));
+    if (!QFileInfo::exists(dir)) {
+        return;
+    }
+    if (QDir(dir).removeRecursively()) {
+        LOG_INFO("BrowserHost", QString("removed browser profile: %1").arg(dir));
+    }
+}
+
+QStringList BrowserHost::browserArguments() const
+{
+    QStringList args;
+    args << QStringLiteral("--pipe") << pipeName()
+         << QStringLiteral("--cache-root") << browserCacheRoot();
+    args += m_extraArguments;
+    return args;
+}
+
+QString BrowserHost::browserCacheRoot() const
+{
+    return QDir(QDir::currentPath()).absoluteFilePath(QStringLiteral("browser-cache"));
+}
+
 void BrowserHost::shutdownBrowser()
 {
     m_stopping = true;
-    if (!m_client->isConnected()) {
-        return;
+    m_startupTimer->stop();
+    if (m_client->isConnected()) {
+        QJsonObject message;
+        message.insert(QStringLiteral("type"), QString::fromLatin1(msg::kShutdown));
+        m_client->send(message);
+        m_client->disconnectFromServer();
     }
-    QJsonObject message;
-    message.insert(QStringLiteral("type"), QString::fromLatin1(msg::kShutdown));
-    m_client->send(message);
-    m_client->disconnectFromServer();
-    if (m_process && m_process->state() != QProcess::NotRunning) {
-        m_process->terminate();
-        if (!m_process->waitForFinished(3000)) {
-            m_process->kill();
+    // 无论如何都要收掉浏览器进程：它持有 Chromium profile 的进程单例锁，
+    // 残留的孤儿进程会让下一次启动直接失败。
+    if (m_process) {
+        m_process->disconnect(this);
+        const qint64 pid = m_process->processId();
+        if (m_process->state() != QProcess::NotRunning) {
+            m_process->terminate();
+            if (!m_process->waitForFinished(3000)) {
+                m_process->kill();
+                m_process->waitForFinished(2000);
+            }
         }
+        m_process->deleteLater();
+        m_process = nullptr;
+        removeBrowserProfile(pid);
     }
 }
 

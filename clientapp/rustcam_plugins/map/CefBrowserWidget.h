@@ -54,6 +54,8 @@ signals:
     void markerClicked(const QString& markerId);
     /// 已向 BrowserHost 请求会话，浏览器/页面尚未就绪。
     void loadStarted();
+    /// 浏览器进程仍在启动，已等待 elapsedMs 毫秒（不是错误）。
+    void browserWaiting(int elapsedMs);
     /// 页面 OnLoadEnd：DOM 与脚本已就绪，正在等 mapReady。
     void pageLoaded();
     void mapReady();

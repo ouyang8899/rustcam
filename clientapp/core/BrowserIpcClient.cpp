@@ -1,6 +1,7 @@
 #include "BrowserIpcClient.h"
 
 #include "common/BrowserIpcProtocol.h"
+#include "common/Logger.h"
 
 #include <QCoreApplication>
 #include <QLocalSocket>
@@ -9,12 +10,22 @@ namespace rustcam {
 
 using namespace rustcam::browseripc;
 
+namespace {
+
+/// 连接重试间隔（毫秒）。
+const int kConnectRetryIntervalMs = 100;
+
+/// waitProgress() 的上报间隔（毫秒）。
+const int kWaitReportIntervalMs = 1000;
+
+} // namespace
+
 BrowserIpcClient::BrowserIpcClient(QObject* parent)
     : QObject(parent)
     , m_socket(new QLocalSocket(this))
     , m_connectTimer(new QTimer(this))
 {
-    m_connectTimer->setInterval(100);
+    m_connectTimer->setInterval(kConnectRetryIntervalMs);
 
     connect(m_socket, &QLocalSocket::connected,
             this, &BrowserIpcClient::onSocketConnected);
@@ -28,12 +39,14 @@ BrowserIpcClient::~BrowserIpcClient()
     disconnectFromServer();
 }
 
-void BrowserIpcClient::connectToServer(const QString& pipeName, int timeoutMs)
+void BrowserIpcClient::connectToServer(const QString& pipeName)
 {
     m_pipeName = pipeName;
     m_handshakeDone = false;
     m_handshakeOk = false;
-    m_connectTimedOut = false;
+    m_waiting = true;
+    m_connectedOnce = false;
+    m_lastReportedWaitMs = 0;
     m_rxBuffer.clear();
 
     if (m_socket->state() != QLocalSocket::UnconnectedState) {
@@ -48,18 +61,19 @@ void BrowserIpcClient::connectToServer(const QString& pipeName, int timeoutMs)
 
 void BrowserIpcClient::onConnectRetry()
 {
-    if (m_connectTimedOut) {
+    if (!m_waiting) {
         return;
+    }
+    const int elapsed = static_cast<int>(m_connectDeadline.elapsed());
+    if (elapsed - m_lastReportedWaitMs >= kWaitReportIntervalMs) {
+        m_lastReportedWaitMs = elapsed;
+        LOG_INFO("BrowserIpcClient",
+                 QString("waiting for browser process, %1ms elapsed").arg(elapsed));
+        emit waitProgress(elapsed);
     }
     if (m_socket->state() != QLocalSocket::UnconnectedState) {
         // 连接尝试正在进行中，不要重复发起——中途 abort 会让服务端以为
         // 客户端已连上而把后续连接当成多余连接断掉。
-        return;
-    }
-    if (m_connectDeadline.isValid() && m_connectDeadline.elapsed() > 10000) {
-        m_connectTimedOut = true;
-        m_connectTimer->stop();
-        emit disconnected();
         return;
     }
     m_socket->connectToServer(m_pipeName);
@@ -82,6 +96,7 @@ void BrowserIpcClient::send(const QJsonObject& message)
 void BrowserIpcClient::disconnectFromServer()
 {
     m_connectTimer->stop();
+    m_waiting = false;
     if (m_socket->state() != QLocalSocket::UnconnectedState) {
         m_socket->disconnectFromServer();
     }
@@ -89,7 +104,8 @@ void BrowserIpcClient::disconnectFromServer()
 
 void BrowserIpcClient::onSocketConnected()
 {
-    m_connectTimer->stop();
+    m_connectedOnce = true;
+    // 重试定时器继续跑：管道连上不等于握手完成，hello.ok 之前都算「还在等」。
     QJsonObject hello;
     hello.insert(QStringLiteral("type"), QString::fromLatin1(msg::kHello));
     hello.insert(QStringLiteral("protocol"), kProtocolVersion);
@@ -137,6 +153,7 @@ void BrowserIpcClient::handleMessage(const QJsonObject& message)
     if (type == QLatin1String(msg::kHelloOk)) {
         m_handshakeDone = true;
         m_handshakeOk = message.value(QStringLiteral("protocol")).toInt() == kProtocolVersion;
+        m_waiting = false;
         emit connected();
         return;
     }
@@ -147,8 +164,15 @@ void BrowserIpcClient::handleMessage(const QJsonObject& message)
 void BrowserIpcClient::onDisconnected()
 {
     m_connectTimer->stop();
+    if (!m_connectedOnce) {
+        // 管道还不存在（浏览器进程还在初始化 CEF）：这是「还没连上」，
+        // 不是「连上又断了」，不算故障，继续等。
+        m_connectTimer->start();
+        return;
+    }
     m_handshakeDone = true;
     m_handshakeOk = false;
+    m_waiting = false;
     emit disconnected();
 }
 

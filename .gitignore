@@ -1,3 +1,6 @@
+# rustcam-browser runtime cache
+browser-cache/
+
 # Cargo/Rust
 debug/
 target/
